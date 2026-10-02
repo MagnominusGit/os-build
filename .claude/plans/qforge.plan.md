@@ -1,7 +1,7 @@
 # Plan: QForge
 
 **Complexity**: Large
-**Status**: Phase 0 done. Phase 1 built (release card passes the guard); not yet validated on hardware.
+**Status**: Phase 0 done. Phase 1 built, HW validation pending. Phase 2 in progress.
 
 ## Summary
 
@@ -77,21 +77,37 @@ Remaining:
 - Check OGUI's in-app update setting cannot still download a user-local build.
 - PowerStation deferred to Phase 2 (no Qualcomm backend; would contend with qforge-powerd).
 
-### Phase 2 — Handheld features in OGUI (High)
+### Phase 2 — Handheld features in OGUI (High) — in progress
 
-- Power/perf: adapter OGUI → `org.qforge.Power` (qforge-powerd) first; a Qualcomm PowerStation
-  backend upstream later.
-- **qforge-update login gate**: it still requires Steam's `loginusers.vdf`, so it always reports
-  "no update". Replace with a first-boot-setup-done marker written by the shell.
-- OS updates screen in OGUI driving `qforge-update` (RAUC); decide whether `qforge-select-branch`
-  stays (nothing calls it now).
-- Per-game performance: `qforge_perf.py` detects games via the Steam process tree — re-key on the
-  shell's launched process.
-- Brightness/volume, suspend, power menu (can replace the powerbuttond defaults), battery (UPower),
-  fan curve UI, first-boot Wi-Fi.
-- Remote-access switch in the shell; then make qforge-pairingd switch-driven again.
-- Clean remaining Steam wording in `qforge-update`, `qforge-powerd`, `automount.sh`,
-  `qforge-suspend`, `qforge-scheduler`.
+Decisions (2026-10-02, from reading OGUI v0.46.1 source in `_ref/OpenGamepadUI`):
+- **No OGUI plugin for now.** Only OGUI's built-in screens; QForge-only controls (fan curve,
+  scheduler, update channel) stay CLI/SSH (`qforge-scheduler`, `qforge-update`, powerd D-Bus).
+- **No per-game (per-ROM) layer.** The upstream tweaks layer (game-tweaks.json, qforge_perf, the
+  per-game `scheduler` override) existed for x86 titles under FEX/Proton; emulators carry their own
+  per-game settings (Phase 3). Profile, GPU clock, CPU scheduler, fan curve stay system-wide.
+- **Update gate = OGUI's own OOBE marker**: `settings.cfg [general] first_boot=false`.
+- **Perf UI = PowerStation shim (if kept).** OGUI's performance menu speaks only
+  `org.shadowblip.PowerStation` (no PPD/UPower profiles); a minimal CPU/GPU/Card/TDP tree in
+  qforge-powerd mapped onto eco/balanced/performance + GPU clock would light it up.
+
+Done (uncommitted):
+- qforge-update gates on the OGUI first-boot marker (was Steam's loginusers.vdf); Steam wording
+  gone; `channels` / `set-channel <name>` added. `qforge-select-branch` + its test removed.
+- Per-game layer removed: `qforge_perf.py`, `tests/test-perf.sh`, powerd's perf tick and
+  scheduler override (powerd keeps a 3s scheduler-reconcile tick).
+- Phase 1 card kept as `out/images/sdcard.p1.img`.
+
+Remaining OS-side (found in OGUI source):
+- `brightnessctl` is not in the image → OGUI brightness unsupported. Add it to PKGS + relock.
+- OGUI power menu / idle suspend run `systemctl suspend|poweroff|reboot` as `player` — confirm
+  logind/polkit allows it from the gamescope session (and that suspend routes to qforge-suspend).
+- OGUI self-updater: launch with `--skip-update-pack` (it would fetch the x86_64 update.zip).
+- PowerStation shim (above) — or accept a dead performance menu for now.
+- Clean remaining Steam wording in `automount.sh`, `qforge-suspend`, `qforge-scheduler`,
+  `power-ops.sh`, `qforge-session`.
+- `kernel/kernel.config` comment still names qforge_perf as CONFIG_PROC_CHILDREN's consumer; fix
+  with the next real kernel change (any edit there forces a ~25 min kernel rebuild).
+- qforge-pairingd stays always-on (no shell switch).
 
 ### Phase 3 — Emulators (High)
 

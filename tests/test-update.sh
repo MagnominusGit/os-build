@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Offline test for /usr/bin/qforge-update — the OTA client SteamUI drives.
+# Offline test for /usr/bin/qforge-update — the OTA client the shell drives.
 #
 #   tests/test-update.sh
 #
-# WHY THIS FILE EXISTS. The caller is the Steam client and the contract is not ours to choose: it
-# was read out of the baked steamui.so. Steam PARSES STDOUT. `check` printing the wrong thing is not
+# WHY THIS FILE EXISTS. The caller (the QForge shell plugin) PARSES STDOUT, under a contract
+# inherited from the steamos-update interface. `check` printing the wrong thing is not
 # a cosmetic bug — anything on stdout that is not a version string becomes "an update is available,
 # called <that>", and a stray traceback would offer the fleet an update named `Traceback`. Every
 # case below is really one assertion: does the shipped file honour a contract we do not control.
 #
-# The second reason is duplicate detection. Steam refuses to re-offer a version it already applied,
+# The second reason is duplicate detection. The caller refuses to re-offer a version it already applied,
 # so an identity that changes between two calls makes one update look like two, and an identity
 # that never changes makes a real update invisible. That rule is written TWICE — in shell in
 # ota/genbundle.sh and in Python here — and `identity-rules-agree` below is the only thing that
@@ -17,7 +17,7 @@
 #
 # HOW IT WORKS: the real, shipped rootfs/overlay/usr/bin/qforge-update is executed — not a copy, not a
 # sed-mangled variant. It exposes the environment seams documented in its own header
-# (QFORGE_RELEASE_FILE, QFORGE_OTA_CONFIG, QFORGE_OTA_USER_CONFIG, QFORGE_OTA_STAGE, QFORGE_STEAM_LOGINUSERS,
+# (QFORGE_RELEASE_FILE, QFORGE_OTA_CONFIG, QFORGE_OTA_USER_CONFIG, QFORGE_OTA_STAGE, QFORGE_SHELL_SETTINGS,
 # QFORGE_CURL, QFORGE_OTA_URL) and they exist for this file. curl is stubbed on disk so no test
 # touches the network. Nothing here needs rauc, a bus, a server or a device.
 #
@@ -39,7 +39,7 @@ W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
 
 # Loading qforge-update as a module writes a __pycache__ into rootfs/overlay/usr/bin, which the
-# assembler copies into the rootfs verbatim. Keep the bytecode in the sandbox. See test-perf.sh.
+# assembler copies into the rootfs verbatim. Keep the bytecode in the sandbox.
 export PYTHONPYCACHEPREFIX="$W/pycache"
 
 # --- the sandbox ---------------------------------------------------------------------------------
@@ -72,9 +72,10 @@ if [ -n "$dest" ]; then cp "$src" "$dest"; else cat "$src"; fi
 STUB
 chmod +x "$W/bin/curl"
 
-# Steam is logged in unless a case says otherwise: the login gate is tested explicitly, and every
-# other case would otherwise pass for the wrong reason.
-printf '"users"\n{\n"7656119"\n{\n"AccountName" "someone"\n}\n}\n' >"$W/loginusers.vdf"
+# First-boot setup is done unless a case says otherwise: the setup gate is tested explicitly, and
+# every other case would otherwise pass for the wrong reason. The shape is what OpenGamepadUI's
+# ConfigFile writes, including a [general.updates] section that must not be mistaken for [general].
+printf '[general]\n\nfirst_boot=false\n\n[general.updates]\n\nauto_update=false\n' >"$W/settings.cfg"
 
 release_file() { # <version> [build] [mode] -> path
   local f="$W/release-$1"
@@ -108,7 +109,7 @@ run() { # <arg...> -- with env assignments allowed before the first non-assignme
       QFORGE_OTA_URL="https://updates.example" \
       QFORGE_OTA_CONFIG="$W/nonexistent.conf" \
       QFORGE_OTA_STAGE="$W/stage" \
-      QFORGE_STEAM_LOGINUSERS="$W/loginusers.vdf" \
+      QFORGE_SHELL_SETTINGS="$W/settings.cfg" \
       "${envs[@]}" python3 "$CLIENT" "$@" 2>"$W/err")"
   RC=$?
   ERR="$(cat "$W/err")"
@@ -118,11 +119,11 @@ requests() { wc -l <"$W/requests.log" | tr -d ' '; }
 
 # =================================================================================================
 CASE="probe"
-# --supports-duplicate-detection is how Steam asks whether it may dedupe by the printed version.
+# --supports-duplicate-detection is how the caller asks whether it may dedupe by the printed version.
 # Exit 0 opts in. Getting this wrong silently disables the mechanism the rest of the file protects.
 run --supports-duplicate-detection
 [ "$RC" = 0 ] && ok "exits 0 (opts in to duplicate detection)" \
-              || bad "exit $RC, expected 0 — Steam would not dedupe"
+              || bad "exit $RC, expected 0 — the caller would not dedupe"
 
 # =================================================================================================
 CASE="no-update"
@@ -130,10 +131,10 @@ manifest stable '{"version":"1.0.0","bundle":"qforge-1.0.0.raucb","size":100}'
 run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=stable check
 [ "$RC" = 7 ] && ok "exit 7 when the server offers what we run" \
               || bad "exit $RC, expected 7"
-# "Prints nothing" is a separate assertion from the exit code, and the more important one: Steam
+# "Prints nothing" is a separate assertion from the exit code, and the more important one: the caller
 # reads stdout regardless of the status.
 [ -z "$OUT" ] && ok "stdout is empty" \
-              || bad "printed '$OUT' — Steam parses stdout as an available version"
+              || bad "printed '$OUT' — the caller parses stdout as an available version"
 
 # =================================================================================================
 CASE="update-available"
@@ -146,7 +147,7 @@ run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=stable check
 # =================================================================================================
 CASE="duplicate-detection"
 # The same check twice must print the SAME string. A version derived from anything time-varying
-# would make one update look like two, and Steam would re-offer it forever.
+# would make one update look like two, and the caller would re-offer it forever.
 #
 # IT READS $OUT FROM THE CASE ABOVE, so it has to stay adjacent to it — inserting a case between
 # the two silently changes what "the same check twice" compares (caught doing exactly that).
@@ -160,7 +161,7 @@ CASE="channel-precedence"
 # The channel has FOUR sources and the order between them is a product decision, not a detail.
 # USER_CONFIG_FILE is the only one a user can write on a release device — no sudo on the image,
 # pairingd hands out a `player` login and never root's — so without it the channel is whatever the
-# image says, forever, and SteamUI (which carries no environment of ours) can never be aimed
+# image says, forever, and the shell (which carries no environment of ours) can never be aimed
 # anywhere else. With it, /etc still wins: the one image that ships /etc/qforge/ota.conf is a dev
 # card, where the pin stops the card being offered a stable release that would downgrade it, and a
 # file in $HOME must not undo that quietly.
@@ -208,16 +209,33 @@ fi
 printf 'OTA_CHANNEL=userchan\n' >"$W/user-ota.conf"
 
 # =================================================================================================
-CASE="not-logged-in"
-# The OOBE gate. The stub this client replaced existed to keep the update screen from blocking
-# onboarding, and a multi-gigabyte download before the user reaches the library is the wrong first
-# impression. No login -> no update, and no request either.
+CASE="setup-not-done"
+# The OOBE gate. A multi-gigabyte download before the user reaches the library is the wrong first
+# impression. OpenGamepadUI's first-boot flow is what writes `[general] first_boot=false`; until it
+# has, every check is a silent 7 and makes no request at all.
+gate_case() { # <label> <settings file>
+  run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=stable \
+      QFORGE_SHELL_SETTINGS="$2" check
+  [ "$RC" = 7 ] && [ -z "$OUT" ] && [ "$(requests)" = 0 ] \
+    && ok "$1: exit 7, silent, no request" \
+    || bad "$1: exit $RC out='$OUT' requests=$(requests), expected a silent 7 with no fetch"
+}
+gate_case "no settings file" "$W/absent.cfg"
+printf '[general]\n\nfirst_boot=true\n' >"$W/fb-true.cfg"
+gate_case "first_boot=true" "$W/fb-true.cfg"
+printf '[general]\n\nlanguage="en"\n' >"$W/fb-missing.cfg"
+gate_case "first_boot key missing (OGUI shows the OOBE)" "$W/fb-missing.cfg"
+printf '[general]\n\nlanguage="en"\n\n[general.updates]\n\nfirst_boot=false\n' >"$W/fb-other.cfg"
+gate_case "first_boot=false in another section" "$W/fb-other.cfg"
+# And the other direction: the default fixture (setup done) does reach the server.
+manifest stable '{"version":"1.1.0","bundle":"qforge-1.1.0.raucb","size":100}'
+run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=stable check
+[ "$RC" = 0 ] && [ "$OUT" = "1.1.0" ] && ok "setup done: the check goes through" \
+                                      || bad "setup done but exit $RC out='$OUT'"
 run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=stable \
-    QFORGE_STEAM_LOGINUSERS="$W/absent.vdf" check
-[ "$RC" = 7 ] && [ -z "$OUT" ] && ok "exit 7, silent, before any login exists" \
-                              || bad "exit $RC out='$OUT', expected a silent 7"
-[ "$(requests)" = 0 ] && ok "made no request at all" \
-                      || bad "fetched $(requests) URL(s) before a login existed"
+    QFORGE_SHELL_SETTINGS="$W/fb-true.cfg" status
+printf '%s\n' "$OUT" | grep -q 'first boot not finished' \
+  && ok "status says why updates are deferred" || bad "status hides the gate: $OUT"
 
 # =================================================================================================
 CASE="unreachable-server"
@@ -300,7 +318,7 @@ spec = importlib.util.spec_from_loader("nvu", loader)
 nvu = importlib.util.module_from_spec(spec); loader.exec_module(nvu)
 
 seen = {}
-nvu.steam_logged_in = lambda: True
+nvu.setup_done = lambda: True
 nvu.config = lambda: ("https://updates.example.test", "stable")
 nvu.manifest = lambda base, ch: {
     "version": "9.9.9", "build": "20260101T000000Z", "git": "", "bundle": "qforge-9.9.9.raucb",
@@ -337,13 +355,12 @@ CASE="apply-refuses-a-reinstall"
 #
 # HW-OBSERVED 2026-08-18, and invisible to every other apply case here because they all offer a
 # version the device is not running. A card took 0.2.3 -> 0.2.4 correctly, then installed 0.2.4 A
-# SECOND TIME shortly after Valve published a Steam client update, ending with BOTH slots on 0.2.4.
+# SECOND TIME when only the shell had an update, ending with BOTH slots on 0.2.4.
 #
 # WHY IT HAPPENS: `check` compares the running version to the channel's, but `apply` did not — and
-# STEAM DECIDES WHEN TO APPLY. steamui.so's updater enum carries k_EUpdaterType_Aggregated next to
-# _Client and _OS, so a CLIENT update going available is enough to drive the OS updater's apply
-# with the OS already up to date. Nothing on the device calls this path: Steam is the only caller,
-# and it is not obliged to have asked first.
+# THE CALLER DECIDES WHEN TO APPLY. The shell this was first written for applied client and OS
+# updates as one aggregate, so a shell update alone drove the OS apply with the OS already up to
+# date. A caller is not obliged to have asked first.
 #
 # WHY IT MATTERS more than a wasted transfer: usr/lib/rauc/post-install.sh gives the target slot a
 # fresh per-slot /var and re-arms its boot conf. A redundant apply therefore overwrites the
@@ -352,12 +369,12 @@ CASE="apply-refuses-a-reinstall"
 #
 # Note that the request count cannot detect this: rauc streams the bundle, so a redundant install
 # makes exactly the same one curl request (the manifest) as a refused one. The exit code and stdout
-# are the discriminators, because they are also what Steam reads.
+# are the discriminators, because they are also what the caller reads.
 bundle_file uptodate qforge-9.9.9.raucb 4096
 manifest uptodate '{"version":"9.9.9","bundle":"qforge-9.9.9.raucb","size":4096}'
 rm -f "$W/stage/staged.json"
 run QFORGE_RELEASE_FILE="$(release_file 9.9.9)" QFORGE_OTA_CHANNEL=uptodate
-# EXIT_OK, not 7: the state Steam asked for already holds, and 7 is how this client reports a
+# EXIT_OK, not 7: the state the caller asked for already holds, and 7 is how this client reports a
 # FAILED update. Before the guard this returned 7 — the install was attempted and died on the
 # absent bus — so the exit code alone separates the two behaviours.
 [ "$RC" = 0 ] && ok "apply on an up-to-date device succeeds instead of failing" \
@@ -379,7 +396,7 @@ spec = importlib.util.spec_from_loader("nvu", loader)
 nvu = importlib.util.module_from_spec(spec); loader.exec_module(nvu)
 
 called = []
-nvu.steam_logged_in = lambda: True
+nvu.setup_done = lambda: True
 nvu.config = lambda: ("https://updates.example.test", "stable")
 nvu.device_identity = lambda: {
     "version": "9.9.9", "build": "20260101T000000Z", "git": "abc1234", "mode": "release",
@@ -421,7 +438,7 @@ CASE="argv-fails-closed-on-a-word-and-open-on-a-flag"
 # The two shapes have OPPOSITE right answers, and this case asserts both, because either one alone
 # is satisfiable by a parser that is wrong in the other direction:
 #
-#   a FLAG must still reach apply. Steam grows flags on this command line over time --
+#   a FLAG must still reach apply. Callers grow flags on this command line over time --
 #   --enable-duplicate-detection is itself one that arrived after the interface existed -- and a
 #   client that refused an unfamiliar one would stop applying updates FLEET-WIDE and silently, the
 #   day Valve shipped the next one.
@@ -429,7 +446,7 @@ CASE="argv-fails-closed-on-a-word-and-open-on-a-flag"
 #   a WORD must not. `chekc` is not a request to install over the other slot.
 #
 # The channel is the up-to-date one from the case above, deliberately: apply then answers 0 with a
-# bare `100%` while a refusal answers 7 with nothing, so the two paths are told apart by what Steam
+# bare `100%` while a refusal answers 7 with nothing, so the two paths are told apart by what the caller
 # would actually read, and neither needs a bus.
 for flag in --enable-duplicate-detection --a-flag-valve-has-not-shipped-yet; do
   rm -f "$W/stage/staged.json"
@@ -447,7 +464,7 @@ for word in chekc refresh ""; do
   # The assertion that outranks the exit code: this path is reachable from a caller that PARSES
   # STDOUT as a version, so a usage message there would offer the fleet an update called 'usage:'.
   [ -z "$OUT" ] && ok "'$word' says nothing on stdout" \
-                || bad "'$word' printed '$OUT' on stdout — Steam would read that as a version"
+                || bad "'$word' printed '$OUT' on stdout — the caller would read that as a version"
   [ "$(requests)" = 0 ] && ok "'$word' is refused before any request is made" \
                         || bad "'$word' reached the network before being refused"
 done
@@ -463,7 +480,7 @@ rm -f "$W/stage/staged.json"
 
 # =================================================================================================
 CASE="apply-progress"
-# Steam's bar reads stdout. Every line must be N%, forward-only. The install then fails here (no
+# The progress bar reads stdout. Every line must be N%, forward-only. The install then fails here (no
 # bus), which is expected and must still leave stdout clean.
 bundle_file ok qforge-9.9.9.raucb 4096
 manifest ok '{"version":"9.9.9","bundle":"qforge-9.9.9.raucb","size":4096}'
@@ -485,7 +502,7 @@ done <<<"$OUT"
 # here, not a regression. (It used to emit up to PROGRESS_DOWNLOAD_END from the client's own
 # download loop before ever reaching the bus, which is what made the old assertion meaningful.)
 # What still matters offline is that a failing install says NOTHING on stdout, because anything
-# there that is not N% is parsed by Steam as a version string.
+# there that is not N% is parsed by the caller as a version string.
 [ -z "$OUT" ] && ok "a failed install says nothing on stdout" \
               || ok "progress reached ${last}% and stayed clean"
 
@@ -525,7 +542,7 @@ CASE="staged-stamp-is-spent-by-the-reboot"
 # HW-CAUGHT 2026-08-03, and invisible to every case above because it only appears on the SECOND
 # check, after a real reboot. GetPrimary answers with a slot NAME ("rootfs.1"); the BootSlot
 # property answers with a BOOTNAME ("B"). Comparing the two is never equal, so "is an update still
-# pending?" was permanently true, the stamp was never cleared, and Steam showed restart-pending
+# pending?" was permanently true, the stamp was never cleared, and the shell showed restart-pending
 # forever -- a device took exactly one OTA and then stopped being offered anything.
 #
 # Driven through staged_identity()'s own installer seam rather than a live bus: what matters is
@@ -578,6 +595,37 @@ if [ -z "$staged_out" ]; then
 else
   while read -r line; do [ -n "$line" ] && bad "$line"; done <<<"$staged_out"
 fi
+
+# =================================================================================================
+CASE="channel-picker"
+# `channels` + `set-channel` replace the old Steam-shaped qforge-select-branch: the shell's picker
+# reads the list, writes the choice, and the next `check` follows it. The choice lands in the USER
+# file only, and is refused when /etc or the environment outranks it (a dev card's pin).
+PICK="$W/pick/ota.conf"
+run QFORGE_OTA_USER_CONFIG="$PICK" channels
+[ "$RC" = 0 ] && [ "$OUT" = "$(printf 'stable\nbeta')" ] \
+  && ok "lists stable and beta" || bad "channels: exit $RC, '$OUT'"
+run QFORGE_OTA_USER_CONFIG="$PICK" set-channel beta
+[ "$RC" = 0 ] && grep -qx 'OTA_CHANNEL=beta' "$PICK" \
+  && ok "set-channel writes the user file" || bad "set-channel: exit $RC, file: $(cat "$PICK" 2>&1)"
+run QFORGE_OTA_USER_CONFIG="$PICK" channel
+[ "$OUT" = "$(printf 'beta\t%s' "$PICK")" ] && ok "channel reports the new choice and its source" \
+                                           || bad "channel printed '$OUT'"
+[ "$(requests)" = 0 ] && ok "picking a channel fetched nothing" || bad "set-channel made $(requests) request(s)"
+run QFORGE_OTA_USER_CONFIG="$PICK" set-channel '../evil'
+[ "$RC" = 1 ] && grep -qx 'OTA_CHANNEL=beta' "$PICK" \
+  && ok "an invalid name is refused and the file is untouched" || bad "invalid name: exit $RC"
+printf 'OTA_CHANNEL=dev\n' >"$W/etc-dev.conf"
+run QFORGE_OTA_USER_CONFIG="$PICK" QFORGE_OTA_CONFIG="$W/etc-dev.conf" set-channel stable
+[ "$RC" = 1 ] && grep -qx 'OTA_CHANNEL=beta' "$PICK" \
+  && ok "a pinned channel refuses the write" || bad "pinned: exit $RC, file: $(cat "$PICK")"
+run QFORGE_OTA_USER_CONFIG="$PICK" QFORGE_OTA_CONFIG="$W/etc-dev.conf" channels
+[ "$OUT" = "$(printf 'stable\nbeta\ndev\npinned\t%s' "$W/etc-dev.conf")" ] \
+  && ok "channels lists the pinned off-picker channel and says it is pinned" \
+  || bad "pinned channels printed '$OUT'"
+run set-channel
+[ "$RC" = 1 ] && [ -z "$OUT" ] && ok "set-channel with no name is a refusal, not an install" \
+                              || bad "bare set-channel: exit $RC out='$OUT'"
 
 # =================================================================================================
 printf '\ntest-update.sh: %d passed, %d failed\n' "$PASS" "$FAIL"

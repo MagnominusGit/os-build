@@ -1,38 +1,39 @@
 #!/usr/bin/env python3
-# qforge-update — the OS update client SteamUI drives, over the RAUC A/B path.
+# qforge-update — the OS update client the shell drives, over the RAUC A/B path.
 #
-# THE CALLER IS THE STEAM CLIENT, and the contract is not ours to choose. It was read out of the
-# baked client (work/steam-seed/steamrtarm64/steamui.so), which builds these command lines:
+# THE CALLER IS THE QFORGE SHELL PLUGIN (OpenGamepadUI), and the command-line contract it speaks
+# was inherited unchanged from the steamos-update interface this client was first written for. It
+# is kept because it is small, already tested, and easy to drive from GDScript's OS.execute():
 #
-#     /usr/bin/steamos-polkit-helpers/steamos-update --supports-duplicate-detection
-#     /usr/bin/steamos-polkit-helpers/steamos-update check 2>&1
-#     /usr/bin/steamos-polkit-helpers/steamos-update [--enable-duplicate-detection]
+#     qforge-update --supports-duplicate-detection
+#     qforge-update check
+#     qforge-update [--enable-duplicate-detection]
 #
-#   probe  --supports-duplicate-detection -> exit 0 opts in to duplicate detection.
+#   probe  --supports-duplicate-detection -> exit 0.
 #   check  -> STDOUT IS PARSED AS THE AVAILABLE VERSION. exit 0 = an update is available,
-#             exit 7 = none. Steam refuses to re-offer a version it has already applied, so
-#             every exit-0 must print a STABLE per-build identity; printing something that
-#             changes between two calls makes one update look like two.
+#             exit 7 = none. Every exit-0 must print a STABLE per-build identity; printing
+#             something that changes between two calls makes one update look like two.
 #   apply  -> emit `N%` lines on STDOUT, forward-only. exit 0 = success. Everything else this
-#             program or its children have to say goes to STDERR, or Steam parses it as progress.
+#             program or its children have to say goes to STDERR, or the caller parses it as
+#             progress.
 #
-# Steam maps a check that reprints the ALREADY-STAGED version to "restart pending" rather than to
-# a fresh download, which is how the UI stops offering an update that is sitting on disk waiting
-# for a reboot. That is what staged_identity() below exists for.
+# A check that reprints the ALREADY-STAGED version means "restart pending" rather than a fresh
+# download, which is how the UI stops offering an update that is sitting on disk waiting for a
+# reboot. That is what staged_identity() below exists for.
 #
 # WHY THE WHOLE CLIENT IS ONE FILE. The alternative shape — a sourced shell lib plus two entry
 # points — is what a bootc-based system needs, because its work is a sequence of subprocesses. Ours
 # is a D-Bus conversation: InstallBundle is asynchronous, progress arrives as PropertiesChanged on
 # a (isi) tuple, and completion arrives as a signal carrying the result code. Driving that from
 # shell means a background reader on a FIFO and a second process to translate it; driving it from
-# Python is a main loop. python-gobject is already in PKGS and already how qforge-steamos-manager
-# and qforge-powerd talk to the bus.
+# Python is a main loop. python-gobject is already in PKGS and already how qforge-powerd talks to
+# the bus.
 #
 # PRIVILEGE: none required, deliberately. rauc's shipped bus policy
 # (de.pengutronix.rauc.conf: "This config allows anyone to control rauc") lets any local user call
 # the installer, and the SIGNATURE is the actual gate — the device installs a bundle only if it
-# chains to /etc/rauc/keyring.pem with check-purpose=codesign. So this runs as the Steam user with
-# no pkexec, no sudo, no polkit action of our own. HW-proven 2026-07-29: a full release-signed
+# chains to /etc/rauc/keyring.pem with check-purpose=codesign. So this runs as the session user
+# with no pkexec, no sudo, no polkit action of our own. HW-proven 2026-07-29: a full release-signed
 # install driven as `player` over SSH with no sudo on the box.
 #
 # THE MANIFEST IS NOT A TRUST BOUNDARY. latest.json says which bundle to fetch and nothing more. It
@@ -67,17 +68,15 @@ CONFIG_FILE = os.environ.get("QFORGE_OTA_CONFIG", "/etc/qforge/ota.conf")
 # THE ONE SEAM A USER CAN WRITE WITHOUT ROOT, and it exists because on a release device nothing
 # else is reachable. CONFIG_FILE is root-owned; a release image ships no sudo (there is no `sudo`
 # row in rootfs/manifest.lock), qforge-pairingd only ever appends to the SESSION user's
-# authorized_keys and never root's, and the OS Update Channel picker was dropped with PR #82. So
-# before this file the channel was fixed at DEFAULT_CHANNEL for anyone but us: a manual
-# `QFORGE_OTA_CHANNEL=beta qforge-update check` over SSH worked and told the user nothing
-# about what SteamUI would do, because SteamUI's own invocation carries no such environment and
-# kept checking stable. An override that survives exactly one command line is not a setting.
+# authorized_keys and never root's. The shell's updates screen writes OTA_CHANNEL here; a manual
+# `QFORGE_OTA_CHANNEL=beta qforge-update check` over SSH says nothing about what the shell will do,
+# because the shell's invocation carries no such environment. An override that survives exactly one
+# command line is not a setting.
 #
-# /home/player rather than $HOME. Nothing runs this as root today (no unit invokes it; SteamUI
-# reaches it through steamos-polkit-helpers/steamos-update, which is not a privilege boundary —
-# see PRIVILEGE in the header), but $HOME would silently become /root the day something does, and
+# /home/player rather than $HOME. Nothing runs this as root today (no unit invokes it; the shell
+# runs it as the session user — see PRIVILEGE in the header), but $HOME would silently become /root the day something does, and
 # then the file the user wrote would stop being read with no error anywhere. The device has
-# exactly one human user, uid 1000, pinned in sysusers.d; STAGE_DIR and LOGINUSERS above spell it
+# exactly one human user, uid 1000, pinned in sysusers.d; STAGE_DIR and SHELL_SETTINGS below spell it
 # out the same way for the same reason.
 #
 # /home is ONE partition shared by both slots, so a choice made here survives an OTA and a slot
@@ -88,8 +87,11 @@ USER_CONFIG_FILE = os.environ.get(
     "QFORGE_OTA_USER_CONFIG", "/home/player/.config/qforge/ota.conf"
 )
 STAGE_DIR = os.environ.get("QFORGE_OTA_STAGE", "/home/player/.local/share/qforge/updates")
-LOGINUSERS = os.environ.get(
-    "QFORGE_STEAM_LOGINUSERS", "/home/player/.local/share/Steam/config/loginusers.vdf"
+# OpenGamepadUI's settings (Godot ConfigFile). Its first-boot flow ends by writing
+# `[general] first_boot=false` here (core/ui/card_ui/ootbe/finished_menu.gd), which is the
+# setup-done marker the update gate keys on. See setup_done().
+SHELL_SETTINGS = os.environ.get(
+    "QFORGE_SHELL_SETTINGS", "/home/player/.local/share/opengamepadui/settings.cfg"
 )
 CURL = os.environ.get("QFORGE_CURL", "curl")
 
@@ -104,11 +106,20 @@ CURL = os.environ.get("QFORGE_CURL", "curl")
 DEFAULT_URL = "https://updates.qforge.invalid"
 DEFAULT_CHANNEL = "stable"
 
-# Steam's exit-code contract. 7 is "no update available" and is ALSO how every recoverable failure
+# The channels the shell's picker offers: the two the release pipeline publishes (ota/setup-server.sh
+# creates both; release-bundle.yml routes ota/vX.Y.Z to stable and ota/vX.Y.Z-beta.N to beta). `dev`
+# and `test` are hand-seeded test channels with no CI behind them, so they stay off the picker and
+# reachable only by writing USER_CONFIG_FILE by hand. `channels` still lists the channel in effect
+# when it is one of those, so the picker never shows a selection that is not in its own list.
+OFFERED_CHANNELS = ("stable", "beta")
+
+# The exit-code contract. 7 is "no update available" and is ALSO how every recoverable failure
 # exits: a check that cannot reach the server or cannot parse the manifest must not answer "yes"
 # and must not answer with a crash. Fail closed.
 EXIT_OK = 0
 EXIT_NONE = 7
+# Only `set-channel` uses it: a refused write is neither "no update" nor a version string.
+EXIT_FAIL = 1
 
 # WHAT USED TO BE HERE, because its absence is a deliberate decision and not an oversight.
 #
@@ -116,7 +127,7 @@ EXIT_NONE = 7
 # That needed three things that are now gone: a free-space check with a margin (STAGE_MARGIN_BYTES),
 # a resumable transfer (`curl -C -`), and a THROUGHPUT guard -- abort at under 1 KiB/s for two
 # minutes -- because a download with no total time limit otherwise hangs forever on a wedged
-# connection, leaving Steam on a frozen bar and the user with nothing but the power button.
+# connection, leaving the shell on a frozen bar and the user with nothing but the power button.
 #
 # rauc streams the bundle over NBD now, which is what makes `adaptive=block-hash-index` in the
 # manifest pay: it fetches only the blocks it cannot already find in the two slots (measured
@@ -210,7 +221,7 @@ def device_identity():
 
 
 def identity_of(info):
-    """The string Steam sees, and the key duplicate detection turns on. VERSION when the build has
+    """The string the caller sees, and the key duplicate detection turns on. VERSION when the build has
     a real one (CI sets it from the release tag), BUILD otherwise — a local build renders VERSION
     as the literal `dev`, which every dev image shares, so keying on it would make two different
     dev bundles look like the same update. Never a bare timestamp on a release, never a constant
@@ -330,7 +341,7 @@ def staged_identity(installer=None):
 
     Two conditions, both required. The stamp says WHAT we installed; the bootloader says whether it
     is still pending. Trusting the stamp alone would keep reporting restart-pending forever after
-    the reboot actually happened, and Steam would never offer the next update."""
+    the reboot actually happened, and the shell would never offer the next update."""
     stamp = read_staged()
     if not stamp:
         return None
@@ -341,7 +352,7 @@ def staged_identity(installer=None):
         # NAME ("rootfs.1"); the BootSlot property answers with a BOOTNAME ("B"). Comparing those
         # two is never equal, so the pending test below was always true, the "stamp is spent" branch
         # was unreachable, and a device reported restart-pending forever after its first update --
-        # exactly the failure this function's docstring warns about. Steam then never offers the
+        # exactly the failure this function's docstring warns about. The shell then never offers the
         # next update, so the fleet takes one OTA and stops. HW-caught 2026-08-03 by re-checking
         # after a real reboot; a check before the reboot cannot see it.
         status = installer.call_sync("GetSlotStatus", None, 0, 5000, None).unpack()[0]
@@ -439,18 +450,34 @@ def install(source, on_percent):
 # --- gates --------------------------------------------------------------------------------------
 
 
-def steam_logged_in():
-    """No update before somebody has signed in.
+def setup_done():
+    """No update before the first-boot setup has finished.
 
-    The update screen in OOBE is exactly what the stub this replaces existed to unblock, and a
-    multi-gigabyte download over first-boot Wi-Fi, before the user has even reached the library, is
-    the wrong first impression. Steam writes an AccountName into loginusers.vdf once a real login
-    lands, so that file is the signal."""
+    A multi-gigabyte download over first-boot Wi-Fi, before the user has even reached the library,
+    is the wrong first impression. OpenGamepadUI's first-boot flow ends by writing
+    `first_boot=false` into the [general] section of its settings file, and it shows that flow
+    again for as long as the key is missing or true — so that key is the signal, and nothing else
+    has to write a marker of its own.
+
+    Read as text, not through a ConfigFile parser: the file is Godot's format, not INI, and the
+    one value we need is a bare `false` literal. Anything unreadable means "not done" (fail
+    closed — the cost is a deferred update, never an early one)."""
+    section = None
     try:
-        with open(LOGINUSERS, "r") as handle:
-            return '"AccountName"' in handle.read()
+        with open(SHELL_SETTINGS, "r") as handle:
+            for line in handle:
+                line = line.strip()
+                if line.startswith("[") and line.endswith("]"):
+                    section = line[1:-1].strip()
+                    continue
+                if section != "general" or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                if key.strip() == "first_boot":
+                    return value.strip() == "false"
     except OSError:
-        return False
+        pass
+    return False
 
 
 # room_for() lived here: a free-space check against the bundle size plus a margin, run before the
@@ -463,10 +490,10 @@ def steam_logged_in():
 
 
 def cmd_check():
-    if not steam_logged_in():
+    if not setup_done():
         return EXIT_NONE
 
-    # An update already on disk is reported by reprinting its version, which Steam reads as
+    # An update already on disk is reported by reprinting its version, which the caller reads as
     # restart-pending rather than as a new download to start.
     pending = staged_identity()
     if pending:
@@ -485,12 +512,12 @@ def cmd_check():
 
 
 def cmd_apply():
-    if not steam_logged_in():
+    if not setup_done():
         return EXIT_NONE
 
     if staged_identity():
         # Already installed and waiting for a reboot. Re-installing would rewrite the same slot and
-        # re-arm the same trial for no gain, so report success and let Steam ask for the restart.
+        # re-arm the same trial for no gain, so report success and let the shell ask for the restart.
         emit = progress_emitter()
         emit(100)
         return EXIT_OK
@@ -500,22 +527,20 @@ def cmd_apply():
     if remote is None:
         return EXIT_NONE
 
-    # THE GATE cmd_check() HAS AND THIS PATH DID NOT, and its absence was not academic: STEAM
-    # DECIDES WHEN TO APPLY, and it does not have to have asked us first. steamui.so's updater enum
-    # carries k_EUpdaterType_Aggregated alongside _Client and _OS, and the Software Updates page
-    # drives the aggregate — so a CLIENT update going available is enough to reach this path with
-    # the OS already up to date. `--enable-duplicate-detection` is Steam asking us to notice; this
-    # is where we notice, unconditionally, rather than trusting the flag to be passed.
+    # THE GATE cmd_check() HAS, repeated here unconditionally: THE CALLER DECIDES WHEN TO APPLY, and
+    # it does not have to have asked us first. The shell this was first written for applied an
+    # aggregate of client and OS updates, so a client update alone reached this path with the OS
+    # already up to date; any future caller can do the same.
     #
     # HW-OBSERVED 2026-08-18: a card took 0.2.3 -> 0.2.4 correctly, then installed 0.2.4 A SECOND
-    # TIME after Valve published a client update, leaving BOTH slots on 0.2.4.
+    # TIME when only the shell had an update, leaving BOTH slots on 0.2.4.
     #
     # That is not merely a wasted transfer. usr/lib/rauc/post-install.sh gives the target slot a
     # fresh per-slot /var and re-arms its boot conf, so a redundant apply overwrites the previous
     # release — the rollback target — and puts the device on a trial boot of the version it was
     # already running. The one thing an A/B system exists to keep is the other side.
     #
-    # EXIT_OK, not EXIT_NONE: the state Steam asked for already holds, and 7 here would be read as
+    # EXIT_OK, not EXIT_NONE: the state the caller asked for already holds, and 7 here would be read as
     # a failed update. Terminal 100% and nothing else, so the bar completes and the UI settles on
     # up-to-date. Same shape as the staged branch above, for the same reason.
     if identity_of(remote) == identity_of(device_identity()):
@@ -539,7 +564,7 @@ def cmd_apply():
 
 
 def progress_emitter():
-    """Forward-only integer percentages on stdout. Steam's bar cannot go backwards, and the two
+    """Forward-only integer percentages on stdout. A progress bar cannot go backwards, and the two
     halves of the job report independently, so the clamp belongs here rather than in each caller."""
     last = [-1]
 
@@ -562,18 +587,79 @@ def progress_emitter():
 def cmd_channel():
     """The effective channel and where it came from, for another program to read.
 
-    This exists so qforge-select-branch does not re-implement channel_setting(). That function's
+    This exists so a channel picker does not re-implement channel_setting(). That function's
     docstring is emphatic that ONE place decides the precedence, and a second reader of the same
-    four sources is exactly the drift it warns about — the SteamUI picker would answer "which
-    channel is in force" from its own guess while the fetch used this one, and on a dev card the
-    two disagree by design.
+    four sources is exactly the drift it warns about — a picker would answer "which channel is in
+    force" from its own guess while the fetch used this one, and on a dev card the two disagree by
+    design.
 
     TAB-SEPARATED, one line, on STDOUT. The source is a path or a variable name and can contain
-    spaces ("built-in default"); the channel cannot (publish-bundle.sh rejects anything outside
-    [A-Za-z0-9._-]), so a tab splits it unambiguously with no quoting.
+    spaces ("built-in default"); the channel cannot (valid_channel() and publish-bundle.sh reject
+    anything outside [A-Za-z0-9._-]), so a tab splits it unambiguously with no quoting.
     """
     channel, source = channel_setting()
     print(f"{channel}\t{source}")
+    return EXIT_OK
+
+
+def valid_channel(name):
+    """The grammar publish-bundle.sh enforces for a channel directory: it is a URL path segment."""
+    return bool(name) and len(name) <= 64 and not name.startswith(".") and all(
+        c.isalnum() or c in "._-" for c in name
+    )
+
+
+def channel_writable():
+    """True when a choice written to USER_CONFIG_FILE would actually take effect. The env and
+    /etc outrank it (see channel_setting()), and a picker that writes a choice the fetch then
+    ignores is the silent failure the precedence order exists to prevent."""
+    _, source = channel_setting()
+    return source in (USER_CONFIG_FILE, "built-in default")
+
+
+def cmd_channels():
+    """One channel per line: the offered ones, then the one in effect if it is not among them.
+    Exit 0. A final line `pinned<TAB><source>` marks a channel the user cannot change here."""
+    current, source = channel_setting()
+    for name in OFFERED_CHANNELS:
+        print(name)
+    if current not in OFFERED_CHANNELS:
+        print(current)
+    if not channel_writable():
+        print(f"pinned\t{source}")
+    return EXIT_OK
+
+
+def cmd_set_channel(name):
+    """Persist the user's channel choice in USER_CONFIG_FILE. Never downloads anything: the next
+    `check` uses it. Exit 0 on success (including "already on it"), 1 on refusal."""
+    if not valid_channel(name):
+        log(f"invalid channel name {name!r}")
+        return EXIT_FAIL
+    current, source = channel_setting()
+    if not channel_writable():
+        log(f"channel is pinned to {current!r} by {source}; refusing to write a choice that it outranks")
+        return EXIT_FAIL
+    if name == current:
+        return EXIT_OK
+    try:
+        os.makedirs(os.path.dirname(USER_CONFIG_FILE), exist_ok=True)
+        # REWRITTEN WHOLE, not appended to. read_env_file takes the LAST assignment of a key, so
+        # appending would work and then quietly grow a file of stale channels -- and this is also
+        # the file a human edits over SSH. OTA_URL is not preserved because it is never read from
+        # this file (see config()), so a copy here would be inert and look load-bearing.
+        tmp = f"{USER_CONFIG_FILE}.tmp"
+        with open(tmp, "w") as handle:
+            handle.write(
+                "# Written by `qforge-update set-channel` (the shell's update channel picker).\n"
+                "# Safe to edit by hand; OTA_CHANNEL is the only key read from this file.\n"
+                f"OTA_CHANNEL={name}\n"
+            )
+        os.replace(tmp, USER_CONFIG_FILE)
+    except OSError as error:
+        log(f"cannot write {USER_CONFIG_FILE}: {error}")
+        return EXIT_FAIL
+    log(f"channel set to {name!r}")
     return EXIT_OK
 
 
@@ -587,7 +673,7 @@ def cmd_status():
     # does not ship, a file in $HOME nobody remembers writing. "It is checking the wrong channel"
     # is otherwise a question this command cannot answer, which is the whole reason it exists.
     print(f"server:   {base_url}/{channel}  (channel from {channel_from})")
-    print(f"logged in: {'yes' if steam_logged_in() else 'no (updates deferred)'}")
+    print(f"setup:    {'done' if setup_done() else 'first boot not finished (updates deferred)'}")
     pending = staged_identity()
     print(f"staged:   {pending or '<none>'}")
     remote = manifest(base_url, channel)
@@ -595,15 +681,16 @@ def cmd_status():
     return EXIT_OK
 
 
-USAGE = """usage: qforge-update [check|status|channel|--supports-duplicate-detection]
+USAGE = """usage: qforge-update [check|status|channel|channels|set-channel <name>|--supports-duplicate-detection]
 
   (no argument)  apply the available update: download, install, arm the trial
   check          exit 0 and print the version if an update is available, else exit 7
   status         human-readable diagnostics
   channel        the channel in effect and the source that supplied it, tab-separated
+  channels       the channels a picker offers, one per line (+ `pinned<TAB>source` if pinned)
+  set-channel N  make N the user's channel (~/.config/qforge/ota.conf); never downloads
 
-Called by SteamUI through /usr/bin/steamos-polkit-helpers/steamos-update; see the header of this
-file for the contract that shapes the output."""
+Called by the QForge shell plugin; see the header of this file for the contract that shapes the output."""
 
 
 def main(argv):
@@ -615,10 +702,10 @@ def main(argv):
     # The split is between the two shapes an unknown argument comes in, because they have opposite
     # right answers:
     #
-    #   -SOMETHING  a flag, and IGNORED ON PURPOSE. Steam adds flags to this command line over time
+    #   -SOMETHING  a flag, and IGNORED ON PURPOSE. Callers add flags to this command line over time
     #               -- --enable-duplicate-detection IS one, arriving after the interface was first
     #               written -- and a client that refused an unfamiliar one would stop applying
-    #               updates fleet-wide, silently, the day Valve shipped the next. Forward
+    #               updates fleet-wide, silently, the day a caller shipped the next. Forward
     #               compatibility is worth more here than strictness, and a flag we do not know
     #               cannot change what apply does anyway.
     #
@@ -641,6 +728,14 @@ def main(argv):
             return cmd_status()
         if arg == "channel":
             return cmd_channel()
+        if arg == "channels":
+            return cmd_channels()
+        if arg == "set-channel":
+            rest = argv[argv.index(arg) + 1:]
+            if len(rest) != 1:
+                print(USAGE, file=sys.stderr)
+                return EXIT_FAIL
+            return cmd_set_channel(rest[0])
         if not arg.startswith("-"):
             unknown.append(arg)
     if unknown:
@@ -656,7 +751,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         sys.exit(EXIT_NONE)
     except Exception as exc:
-        # Fail closed. An unhandled traceback on stdout would be parsed by Steam as a version
+        # Fail closed. An unhandled traceback on stdout would be parsed by the caller as a version
         # string, and "an update is available, called Traceback" is worse than "no update".
         log(f"unhandled error: {exc}")
         sys.exit(EXIT_NONE)

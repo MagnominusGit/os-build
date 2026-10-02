@@ -12,13 +12,11 @@ and reports "no update" — rather than asking a host someone else owns. Everyth
 server the `ota/` scripts stand up and how publishing to it works; until one exists, read *the host*
 as whatever you set up.
 
-> **Known gap: the client still waits for a Steam login.** `qforge-update`'s `check` and its apply
-> path both begin with `steam_logged_in()`, which looks for an `AccountName` in
-> `/home/player/.local/share/Steam/config/loginusers.vdf`. QForge ships no Steam client, so that file
-> never exists and the client **always** exits 7 ("no update") without contacting any server —
-> `qforge-update status` shows it as `logged in: no (updates deferred)`. The gate is to be replaced
-> in Phase 2, when the shell (OpenGamepadUI) takes over driving updates. Until then, validate a
-> bundle with `rauc install` (below), which does not go through `qforge-update` at all.
+> **The first-boot gate.** `qforge-update`'s `check` and apply paths both begin with `setup_done()`:
+> until OpenGamepadUI's first-boot flow has written `[general] first_boot=false` into
+> `/home/player/.local/share/opengamepadui/settings.cfg`, the client exits 7 ("no update") without
+> contacting any server, and `qforge-update status` shows `setup: first boot not finished (updates
+> deferred)`. A device that has finished setup checks normally.
 
 | | |
 |---|---|
@@ -71,12 +69,13 @@ then disagree with the fetch.
 available version on stdout, or exits 7 for "none" — and 7 is also how every recoverable failure
 exits (unreachable server, malformed manifest), so a check fails closed. Apply (no argument) emits
 forward-only `N%` lines on stdout and everything else on stderr. An update already installed and
-waiting for a reboot is reported by reprinting its version. Nothing on the image calls it today
-(see the known gap above); it is run by hand over SSH.
+waiting for a reboot is reported by reprinting its version. The caller is the QForge shell plugin's
+updates screen; it can also be run by hand over SSH as `player`.
 
-`/usr/bin/qforge-select-branch` still ships — a channel picker backend written for a Steam client
-settings page — but QForge has no caller for it. A user changes channel by writing
-`~/.config/qforge/ota.conf` (see the validation recipe below).
+Channel selection lives in the same program: `qforge-update channels` lists what a picker offers
+(`stable`, `beta`, plus the channel in effect if it is neither, and a `pinned<TAB><source>` line
+when `/etc` or the environment outranks the user's choice), and `qforge-update set-channel <name>`
+writes `~/.config/qforge/ota.conf`. The old Steam-shaped `qforge-select-branch` is gone.
 
 **Which channels exist:** `stable` and `beta`. `ota/setup-server.sh` creates both, and
 `release-bundle.yml` decides between them from the tag's semver pre-release suffix — `ota/v0.3.0`
@@ -217,8 +216,8 @@ QFORGE_VERSION=<base> PKIDIR=$HOME/qforge-pki make sdcard    # dev card, new boo
 #    rauc gates on the signature, so this installs exactly like a release bundle.
 QFORGE_VERSION=<bumped> PKIDIR=$HOME/qforge-pki make bundle
 
-# 3. install it. Today this is rauc directly: qforge-update refuses while its Steam-login gate is in
-#    place (see the known gap at the top). rauc also accepts an https URL and streams it.
+# 3. install it with rauc directly (no server needed). rauc also accepts an https URL and
+#    streams it; with a server, `qforge-update` on the device does the same.
 scp out/images/qforge-<bumped>.raucb player@<device>:
 ssh player@<device> rauc install qforge-<bumped>.raucb
 ```

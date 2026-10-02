@@ -11,9 +11,6 @@ import time
 import warnings
 from pathlib import Path
 
-sys.path.insert(0, "/usr/lib/qforge")
-import qforge_perf  # noqa: E402 - needs the path insert above
-
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 BUS_NAME = "org.qforge.Power"
@@ -24,7 +21,7 @@ IFACE = "org.qforge.Power1"
 PROFILES = ["eco", "balanced", "performance"]
 STATE_FILE = Path("/var/lib/qforge/powerd.state")
 # Overridable so tests/test-fan-curve.sh can drive the real parse/write paths against a
-# fabricated tree, the same trick qforge_perf uses for /proc and /sys.
+# fabricated tree.
 FACTORY_CONFIG_FILE = Path(os.environ.get(
     "QFORGE_POWERD_FACTORY", "/usr/share/qforge/power-profiles.conf"))
 CONFIG_DIR = Path(os.environ.get("QFORGE_POWERD_ETC", "/etc/qforge"))
@@ -66,8 +63,8 @@ DEFAULT_CURVE_STOPS = (60, 70, 80, 90, 100)
 # that lavd hurt in-game performance — is GONE: it was measured on SM8650 (2026-08-09) and refuted,
 # lavd came out ~62% faster on a GPU-headroom title because stock leaves the prime core near-idle.
 # See packages/scx-scheds/source.pin for the numbers. We still default to stock because swapping the
-# in-kernel scheduler is a thing to opt into rather than have imposed, and it is now selectable
-# system-wide (this property) or per-game (the `scheduler` tweak key). lavd was briefly the default
+# in-kernel scheduler is a thing to opt into rather than have imposed; it is selectable
+# system-wide through this property. lavd was briefly the default
 # (2026-07-30 to
 # 2026-08-03); flipping it back does NOT touch a device that already persisted `cpu_scheduler=lavd`
 # in powerd.state — an explicit saved choice outranks this default in both directions, so such a
@@ -84,9 +81,7 @@ DEFAULT_CURVE_STOPS = (60, 70, 80, 90, 100)
 # polls PowerProfiles.ActiveProfile on the system bus once a second and switches its own
 # performance/balanced/powersave mode live, no restart. We answer that name ourselves
 # (PPD_NAMES below) because we ship no power-profiles-daemon.
-# Single domain, shared with the tweaks file: a `scheduler` value qforge_perf accepts is exactly
-# a value this property accepts, with no second list to keep in step.
-CPU_SCHEDULERS = list(qforge_perf.SCHEDULERS)
+CPU_SCHEDULERS = ["none", "lavd"]
 DEFAULT_CPU_SCHEDULER = "none"
 SCX_UNIT = "scx.service"
 SCX_BINARY = Path("/usr/bin/scx_lavd")
@@ -160,8 +155,8 @@ XML = f"""
     <property name="ManualGpuClockMax" type="u" access="read"/>
     <property name="AvailableCpuSchedulers" type="as" access="read"/>
     <property name="CpuScheduler" type="s" access="readwrite"/>
-    <!-- The scheduler actually loaded. Equals CpuScheduler unless a running game's `scheduler`
-         tweak is overriding it, which is the only way the two ever diverge. -->
+    <!-- The scheduler actually loaded. Equals CpuScheduler except when the kernel has ejected
+         lavd underneath us (see reconcile_scheduler_live) or a switch is still in flight. -->
     <property name="ActiveCpuScheduler" type="s" access="read"/>
     <property name="FanMode" type="s" access="read"/>
     <property name="FanPwm" type="u" access="read"/>
@@ -483,22 +478,15 @@ class QforgePower:
         self.suspend_config = {}
         self.default_profile = ""
         # profile is both the persisted choice and what is in force: there is no per-game
-        # override of it. Steam's per-game performance settings switch it by writing Profile
-        # through the steamos-manager shim at game launch and exit, like any other client.
+        # override of it.
         self.profile = ""
         self.gpu_level = "auto"
         self.manual_gpu_clock = 0
-        # cpu_scheduler is the PERSISTED CHOICE and the system-wide setting — there is no
-        # `global.scheduler` in game-tweaks.json, precisely so this stays the only place the
-        # system-wide value lives. scheduler_live is what is actually loaded right now; the two
-        # differ only while a PER-GAME `scheduler` tweak holds scheduler_override. An override is
-        # never written back as the choice, or one launch of one game would rewrite it for all.
+        # cpu_scheduler is the PERSISTED CHOICE; scheduler_live is what is actually loaded right
+        # now. They differ only when the kernel ejects lavd underneath us or a start is still in
+        # flight -- see reconcile_scheduler_live().
         self.cpu_scheduler = DEFAULT_CPU_SCHEDULER
         self.scheduler_live = DEFAULT_CPU_SCHEDULER
-        self.scheduler_override = None
-        # One-tick debounce latch for a per-game `scheduler` tweak going absent; see
-        # apply_scheduler_tweak(). Only ever True between two consecutive ticks.
-        self.scheduler_drop_seen = False
         self.smoothed_temp = 0.0
         self.last_pwm = 0
         self.suspended = False
@@ -520,14 +508,9 @@ class QforgePower:
         # names, because scx_lavd --autopower reads them on its first tick. See main().
         self.fan_tick()
         GLib.timeout_add_seconds(3, self.fan_tick)
-        # Per-game perf enforcement (qforge_perf): gamescope + game-tree thread
-        # policy from game-tweaks.json, per-appid via the Steam process tree. Same
-        # cadence as the fan; a missing tweaks file or absent gamescope makes it a
-        # no-op. The Enforcer is long-lived because it remembers which game threads
-        # it changed, so it can put them back when a tweak is removed.
-        self.perf = qforge_perf.Enforcer()
-        self.perf_tick()
-        GLib.timeout_add_seconds(3, self.perf_tick)
+        # There is no per-game (per-ROM) layer: emulators carry their own per-game settings.
+        # What is left on this cadence is noticing a scheduler the kernel ejected.
+        GLib.timeout_add_seconds(3, self.scheduler_tick)
 
     def discover(self):
         self.gpu = self.discover_gpu()
@@ -842,7 +825,7 @@ class QforgePower:
 
     def apply_scheduler(self, scheduler):
         """Make `scheduler` the LIVE one by starting/stopping scx.service. Touches
-        scheduler_live only — the caller owns whether this was a choice or an override."""
+        scheduler_live only — the caller owns the persisted choice."""
         # Re-derive first: the guard below is the only thing standing between a caller and a
         # redundant unit cycle, and it is worthless if it compares against a stale belief. If the
         # kernel ejected lavd and scx_lavd exited, this is what lets the next apply start it again
@@ -870,10 +853,7 @@ class QforgePower:
         if scheduler == self.cpu_scheduler:
             return
         self.cpu_scheduler = scheduler
-        # A live override outranks the choice while it lasts; the new choice takes effect when
-        # that override lifts. Setting it during a game is therefore recorded, not ignored.
-        if self.scheduler_override is None:
-            self.apply_scheduler(scheduler)
+        self.apply_scheduler(scheduler)
 
     def gpu_freqs(self):
         if not self.gpu:
@@ -951,8 +931,8 @@ class QforgePower:
             stops = self.fan_config["curve_stops"]
             text = render_fan_dropin(
                 {p: resample_curve(c, stops) for p, c in curves.items()}, stops)
-            # Same atomic-replace rule the tweaks file follows: powerd re-reads this from its
-            # own reload path, and a half-written ini is a quarantined config.
+            # Atomic replace: powerd re-reads this from its own reload path, and a half-written
+            # ini is a quarantined config.
             temporary = FAN_CURVE_DROPIN.with_name(f".{FAN_CURVE_DROPIN.name}.new")
             temporary.write_text(text)
             os.replace(temporary, FAN_CURVE_DROPIN)
@@ -968,8 +948,7 @@ class QforgePower:
 
     def set_fan_curve(self, pwms):
         # Scoped to the profile in force, which is what FanCurve reads back and therefore what
-        # the editor is showing: under Steam's per-game profile the curve being dragged is that
-        # game's profile, and that is the one this writes.
+        # the editor is showing.
         profile = self.profile
         stops = self.fan_config["curve_stops"]
         clean = clean_curve_pwms(
@@ -1237,56 +1216,21 @@ class QforgePower:
             sd_notify("WATCHDOG=1")
         return True
 
-    def perf_tick(self):
-        # Suspended = session frozen (cgroup-freeze) and CPUs mostly offline;
-        # policy writes then are pointless at best. Never lets an exception
-        # kill the timer: a bad tweaks entry must cost one tick, not the tool.
+    def scheduler_tick(self):
+        # Suspended = session frozen and CPUs mostly offline; nothing to reconcile then. Never
+        # lets an exception kill the timer.
         try:
             if not self.suspended:
-                # Before anything reads or acts on scheduler_live, notice if the scheduler went
-                # away underneath us (sched_ext ejection that scx_lavd did not survive). Nothing
-                # else announces that, so a client would otherwise keep rendering "LAVD" for a
-                # system that is back on the stock scheduler.
+                # Notice if the scheduler went away underneath us (sched_ext ejection that
+                # scx_lavd did not survive). Nothing else announces that, so a client would
+                # otherwise keep rendering "LAVD" for a system that is back on the stock scheduler.
                 if self.reconcile_scheduler_live() and self.connection is not None:
                     self.emit_properties({
                         "ActiveCpuScheduler": GLib.Variant("s", self.scheduler_live),
                     })
-                values = self.perf.tick()
-                self.apply_scheduler_tweak(values)
         except Exception as exc:
-            print(f"qforge-powerd: perf tick failed: {exc}", file=sys.stderr)
+            print(f"qforge-powerd: scheduler tick failed: {exc}", file=sys.stderr)
         return True
-
-    def apply_scheduler_tweak(self, values):
-        """Honour the running game's `scheduler` tweak. Absent means no opinion, which restores
-        the persisted choice — that is what makes the override end when the game does."""
-        want = values.get("scheduler")
-        if want is not None and want not in self.available_cpu_schedulers():
-            want = None
-        # A tweak that vanishes for a SINGLE tick must not cycle the system CPU scheduler.
-        # `values` comes from a fresh /proc walk every 3s (qforge_perf.scan_games), and that
-        # walk answers "no game" for any tick where the tagged set comes back empty — a tick
-        # starved under load, a tree briefly unreadable. Absent reads as "no opinion", which
-        # falls back to the persisted choice below; with the documented setup of persisted
-        # "none" + a per-game "lavd" tweak, one such tick stops scx.service and the next one
-        # starts it again. Swapping the scheduler under a running game costs a visible hitch,
-        # and apply_scheduler() clears the unit's rate limit on every start, so nothing upstream
-        # of us would damp that. Require the absence to REPEAT before acting on it.
-        #
-        # Only the drop is debounced: a tweak arriving, or changing to a different scheduler, is
-        # still applied on the tick it is seen. The cost is one extra tick (3s) of holding an
-        # override after a game genuinely exits.
-        if want is None and self.scheduler_override is not None and not self.scheduler_drop_seen:
-            self.scheduler_drop_seen = True
-            return
-        self.scheduler_drop_seen = False
-        if want == self.scheduler_override:
-            return
-        self.scheduler_override = want
-        target = self.cpu_scheduler if want is None else want
-        # Deliberately not a PropertiesChanged on CpuScheduler: the property is the user's choice
-        # and it has not changed. ActiveCpuScheduler is where the override is observable.
-        self.apply_scheduler(target)
 
     def fan_safe(self):
         if not self.fan_pwm:

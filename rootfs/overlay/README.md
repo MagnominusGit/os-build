@@ -40,8 +40,8 @@ All enabled via shipped presets + `*.target.wants` symlinks. No Wi-Fi resume hoo
 re-associates unaided).
 
 **Update and storage entry points**
-`usr/bin/qforge-update` and `qforge-select-branch` are the OS update client (RAUC) and its
-channel picker; `usr/bin/qforge-format-sdcard` / `qforge-format-device` pkexec into
+`usr/bin/qforge-update` is the OS update client (RAUC), including its channel picker
+(`channels` / `set-channel`); `usr/bin/qforge-format-sdcard` / `qforge-format-device` pkexec into
 `usr/lib/qforge/storage/format-device.sh`. `50-qforge-timezone.rules` is the one polkit grant
 stock polkit still prompts for.
 

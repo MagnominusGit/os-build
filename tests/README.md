@@ -30,9 +30,9 @@ are invoked directly there rather than through `make test-disk` — a failure na
   `test-mkimage.sh`, `test-mkroot.sh`, with `lib-gptfixture.sh` rebuilding the real captured
   boards from `docs/internal-storage.md` as sparse GPTs for the two disk suites to share.
 - **The installer medium** — `test-install.sh`, `test-ui.sh`.
-- **Device behaviour** — `test-device-quirks.sh`, `test-pairingd.sh`, `test-perf.sh`,
+- **Device behaviour** — `test-device-quirks.sh`, `test-pairingd.sh`,
   `test-fan-curve.sh`, `test-cpu-scheduler.sh`, `test-power-led.sh`, `test-suspend.sh`,
-  `test-storage.sh`, `test-select-branch.sh`, `test-session.sh` (the shell gamescope hosts).
+  `test-storage.sh`, `test-session.sh` (the shell gamescope hosts).
 - **Graphics** — `test-mesa-source.sh`, `test-splash.sh`, `test-splash-status.sh`.
 - **The tree itself** — `test-guard.sh`, `test-lib-pins.sh`, `test-verify-lock.sh`, and
   `test-upstream-name.sh` (no leftover upstream name anywhere).

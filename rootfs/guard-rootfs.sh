@@ -747,7 +747,7 @@ fi
 echo "  9. no Steam / x86 / Android payload"
 REMOVED=(
   usr/bin/qforge-steam usr/bin/qforge-steamos-manager usr/bin/steamos-polkit-helpers
-  usr/bin/steamos-update usr/bin/steamos-select-branch
+  usr/bin/steamos-update usr/bin/steamos-select-branch usr/bin/qforge-select-branch
   usr/share/decky-loader usr/share/decky-plugins usr/lib/systemd/system/plugin_loader.service
   usr/bin/FEXInterpreter usr/share/fex-emu usr/share/guestos usr/share/steam/compatibilitytools.d
   usr/bin/podman usr/bin/qforge-android usr/share/qforge-android

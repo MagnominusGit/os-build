@@ -34,7 +34,7 @@ POWERD="$ROOT/rootfs/overlay/usr/bin/qforge-powerd"
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 
 # Loading qforge-powerd as a module writes a __pycache__ into rootfs/overlay/usr/bin, which the
-# assembler copies into the rootfs verbatim. Keep the bytecode in the sandbox. See test-perf.sh.
+# assembler copies into the rootfs verbatim. Keep the bytecode in the sandbox.
 export PYTHONPYCACHEPREFIX="$TMP/pycache"
 
 python3 - "$POWERD" "$ROOT" <<'PYEOF'
@@ -45,9 +45,6 @@ import sys
 
 powerd_path, root = sys.argv[1], sys.argv[2]
 
-# qforge-powerd does `sys.path.insert(0, "/usr/lib/qforge"); import qforge_perf` at module
-# scope. That path does not exist on the host, so point at the repo's copy first.
-sys.path.insert(0, os.path.join(root, "rootfs/overlay/usr/lib/qforge"))
 spec = importlib.util.spec_from_loader(
     "powerd", importlib.machinery.SourceFileLoader("powerd", powerd_path))
 pd = importlib.util.module_from_spec(spec)
@@ -64,14 +61,11 @@ class FakeProc:
 
 
 # __init__ globs sysfs and writes pwm1, so build the object without it. What stays real is
-# exactly what this suite is about: reconcile_scheduler_live, apply_scheduler's guard, and
-# apply_scheduler_tweak's override bookkeeping.
+# exactly what this suite is about: reconcile_scheduler_live and apply_scheduler's guard.
 def fresh(unit_active=False, cpu_scheduler="none", scheduler_live="none"):
     obj = pd.QforgePower.__new__(pd.QforgePower)
     obj.cpu_scheduler = cpu_scheduler
     obj.scheduler_live = scheduler_live
-    obj.scheduler_override = None
-    obj.scheduler_drop_seen = False
     obj.connection = None
     obj.unit_active = unit_active
     obj.calls = []
@@ -129,56 +123,14 @@ o = fresh(unit_active=True, scheduler_live="lavd")
 o.apply_scheduler("lavd")
 check("apply when truly live is a no-op", o.calls, [])
 
-# ------------------------------------------------------- apply_scheduler_tweak (the churn guard) ---
-# Persisted "none" + a per-game "lavd" tweak is the documented opt-in shape, and the one that
-# churns. A tweak arriving is applied on the tick it is seen.
+# ----------------------------------------------------------------- set_cpu_scheduler ---
+# The persisted choice is applied at once: there is no per-game override left to defer to.
 o = fresh(unit_active=False, cpu_scheduler="none")
-o.apply_scheduler_tweak({"scheduler": "lavd"})
-check("arriving tweak starts scx at once", o.calls, ["start"])
-check("  ...and is recorded as the override", o.scheduler_override, "lavd")
-
-# THE REGRESSION. One tick with the tweak missing is a missed /proc walk, not a game exit. It must
-# not touch the unit.
-o.apply_scheduler_tweak({})
-check("one absent tick does NOT cycle the scheduler", o.calls, ["start"])
-check("  ...and the override is still held", o.scheduler_override, "lavd")
-
-# The game really did exit: the second consecutive absence is believed.
-o.apply_scheduler_tweak({})
-check("two absent ticks revert to the persisted choice", o.calls, ["start", "stop"])
-check("  ...and the override is dropped", o.scheduler_override, None)
-
-# A flicker — present, absent, present — must produce NO unit traffic beyond the initial start.
-# This is the whole point: the scheduler swap costs a visible hitch under a running game.
-o = fresh(unit_active=False, cpu_scheduler="none")
-o.apply_scheduler_tweak({"scheduler": "lavd"})
-o.apply_scheduler_tweak({})
-o.apply_scheduler_tweak({"scheduler": "lavd"})
-check("flicker causes no extra unit traffic", o.calls, ["start"])
-check("  ...and the override survives it", o.scheduler_override, "lavd")
-
-# Only the DROP is debounced. A tweak changing to a different scheduler is a real decision and is
-# applied on the tick it is seen.
-o = fresh(unit_active=True, cpu_scheduler="none", scheduler_live="lavd")
-o.scheduler_override = "lavd"
-o.apply_scheduler_tweak({"scheduler": "none"})
-check("changed tweak is applied immediately", o.calls, ["stop"])
-check("  ...and the override follows it", o.scheduler_override, "none")
-
-# A device whose persisted choice IS lavd never churns on a flicker, because the fallback target
-# equals the override. Guards the claim that only persisted-none is exposed.
-o = fresh(unit_active=True, cpu_scheduler="lavd", scheduler_live="lavd")
-o.apply_scheduler_tweak({"scheduler": "lavd"})
-o.apply_scheduler_tweak({})
-o.apply_scheduler_tweak({})
-check("persisted lavd never cycles on a flicker", o.calls, [])
-
-# A tweak naming a scheduler the image does not ship is no opinion, not a crash — and it must go
-# through the same debounce rather than cycling the unit on arrival.
-o = fresh(unit_active=False, cpu_scheduler="none")
-o.apply_scheduler_tweak({"scheduler": "bogus"})
-check("unknown scheduler name is ignored", o.calls, [])
-check("  ...and sets no override", o.scheduler_override, None)
+o.set_cpu_scheduler("lavd")
+check("choosing lavd starts scx at once", o.calls, ["start"])
+check("  ...and records the choice", o.cpu_scheduler, "lavd")
+o.set_cpu_scheduler("lavd")
+check("re-choosing the same scheduler is a no-op", o.calls, ["start"])
 
 # ----------------------------------------------------------------------------------- report ---
 failed = [n for s, n in results if s != "PASS"]

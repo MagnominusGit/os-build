@@ -32,7 +32,7 @@ FACTORY="$ROOT/rootfs/overlay/usr/share/qforge/power-profiles.conf"
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 
 # Loading qforge-powerd as a module writes a __pycache__ into rootfs/overlay/usr/bin, which the
-# assembler copies into the rootfs verbatim. Keep the bytecode in the sandbox. See test-perf.sh.
+# assembler copies into the rootfs verbatim. Keep the bytecode in the sandbox.
 export PYTHONPYCACHEPREFIX="$TMP/pycache"
 
 QFORGE_POWERD_FACTORY="$FACTORY" QFORGE_POWERD_ETC="$TMP/etc" \
@@ -46,9 +46,6 @@ import sys
 
 powerd_path, root, tmp = sys.argv[1], sys.argv[2], pathlib.Path(sys.argv[3])
 
-# qforge-powerd does `sys.path.insert(0, "/usr/lib/qforge"); import qforge_perf` at
-# module scope. That path does not exist on the host, so point at the repo's copy first.
-sys.path.insert(0, os.path.join(root, "rootfs/overlay/usr/lib/qforge"))
 spec = importlib.util.spec_from_loader(
     "powerd", importlib.machinery.SourceFileLoader("powerd", powerd_path))
 pd = importlib.util.module_from_spec(spec)

@@ -206,8 +206,8 @@ if [ -d "$OVERLAY" ]; then
   cp -a "$OVERLAY"/. "$stage/"
   rm -f "$stage/README.md"   # rootfs/overlay/README.md documents the tree; it is NOT rootfs content
   # Host-side Python bytecode, same class of thing as the README: build-tree litter, not rootfs
-  # content. The offline suites import rootfs/overlay's clients as modules (test-perf.sh, -fan-curve,
-  # -update), and CPython writes a __pycache__ NEXT TO THE SOURCE — inside rootfs/overlay/, which this
+  # content. The offline suites import rootfs/overlay's clients as modules (test-fan-curve.sh,
+  # -cpu-scheduler, -update), and CPython writes a __pycache__ NEXT TO THE SOURCE — inside rootfs/overlay/, which this
   # cp copies verbatim. .gitignore covers the repo but NOT this copy, and the difference is not
   # theoretical: v0.2.x dev cards shipped .pyc files that the device can never load, because they
   # are the HOST's CPython ABI (3.14) and the image runs 3.13. Pruned here rather than left to the
