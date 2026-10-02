@@ -41,7 +41,8 @@
 #   8. the system UID/GID allocation matches the pin — the ids baked into this tree's passwd and
 #      group are the ones rootfs/overlay's sysusers.d pin names, not whatever sysusers counted down to
 #   9. no Steam, x86-emulation or Android payload came back — those stacks were removed on
-#      purpose, and a stray prebuilt pin or overlay copy would bring them back silently
+#      purpose, and a stray prebuilt pin or overlay copy would bring them back silently; and (9b)
+#      the shell landed where the session looks for it, without its self-updater
 #  10. no __pycache__ — host-CPython bytecode the device cannot load, which rootfs/overlay's verbatim
 #      copy will carry in whenever an offline suite has imported one of its Python clients
 #  11. every path is owned by a uid and gid this tree's own /etc/passwd and /etc/group declare, and
@@ -756,6 +757,35 @@ for n in "${REMOVED[@]}"; do
   if [ -e "$STAGE/$n" ] || [ -L "$STAGE/$n" ]; then bad "removed stack came back: /$n"; removed_bad=1; fi
 done
 [ "$removed_bad" = 0 ] && echo "    ok  none of ${#REMOVED[@]} Steam / x86 / Android paths present"
+
+# ------------------------------------------------------------------------------------------
+# 9b. The shell is there, and its self-updater is not.
+#
+# OpenGamepadUI arrives as a prebuilt tarball (packages/opengamepadui/prebuilt.pin) unpacked with a
+# strip count and a dest; get either wrong and the build succeeds while the shell lands somewhere
+# QFORGE_SESSION_CMD cannot find it — a black panel at first boot. Its self-updater is trimmed
+# (rootfs/conf/trim.list): on a RAUC root the slot carries the shell version.
+# ------------------------------------------------------------------------------------------
+echo "  9b. the shell"
+shell_ok=1
+for f in usr/bin/opengamepadui usr/share/opengamepadui/opengamepad-ui.aarch64 \
+         usr/share/opengamepadui/reaper; do
+  if [ ! -x "$STAGE/$f" ]; then
+    shell_ok=0; bad "/$f is missing or not executable — the session has no shell to start"
+  fi
+done
+for f in usr/share/opengamepadui/opengamepad-ui.pck \
+         usr/share/opengamepadui/libopengamepadui-core.linux.template_release.aarch64.so; do
+  [ -s "$STAGE/$f" ] || { shell_ok=0; bad "/$f is missing — OGUI cannot start without it"; }
+done
+for f in Makefile .gdignore; do
+  [ -e "$STAGE/$f" ] && { shell_ok=0; bad "/$f in the image root — the OGUI pin was unpacked with the wrong strip count"; }
+done
+for f in usr/lib/systemd/user/systemd-sysext-updater.service usr/share/opengamepadui/scripts/make_nice \
+         usr/share/polkit-1/actions/org.shadowblip.setcap.policy; do
+  [ -e "$STAGE/$f" ] && { shell_ok=0; bad "/$f survived the trim — OGUI's self-updater must not ship"; }
+done
+[ "$shell_ok" = 1 ] && echo "    ok  OpenGamepadUI present and executable, its self-updater absent"
 
 # ------------------------------------------------------------------------------------------
 # 10. No host Python bytecode rode in.

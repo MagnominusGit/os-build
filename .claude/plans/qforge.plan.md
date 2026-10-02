@@ -1,7 +1,7 @@
 # Plan: QForge
 
 **Complexity**: Large
-**Status**: Phase 0 done (`b318711`). Next: Phase 1.
+**Status**: Phase 0 done. Phase 1 built (release card passes the guard); not yet validated on hardware.
 
 ## Summary
 
@@ -55,16 +55,27 @@ and standalone emulators.
 | Boot on one SM8250, one SM8550, one SM8650 board | Gate: gamescope + vkcube on the panel, A/B confirm via qforge-boot-good |
 | Back up `~/qforge-pki/ca.key.pem` off this machine | Losing it means no device can ever accept another update |
 
-### Phase 1 — OpenGamepadUI as the shell (High)
+### Phase 1 — OpenGamepadUI as the shell (built, HW validation pending)
 
-- `packages/opengamepadui/`: aarch64 build — Godot 4 linux-arm64 export template + OGUI's Rust
-  GDExtension. Upstream ships x86_64 only: **prove this on one device first**.
-- `packages/powerstation/`: aarch64 build.
-- OGUI session profile: `QFORGE_SESSION_CMD` + `QFORGE_GAMESCOPE_SHELL_ARGS` matching OGUI's upstream
-  gamescope session; check QAM overlay, mangoapp, focus switching OGUI ↔ game.
-- Review gamescope patches that assume Steam focus (`0005-steamcontrolled-steam-focus-fallback`,
-  `0023-xdg-titles-are-reported-to-steam`); keep display/colour/rotation patches.
-- Tests: session profile selection; no Steam flags under the OGUI profile.
+Done:
+- `packages/opengamepadui/prebuilt.pin`: upstream's **aarch64 release tarball** (v0.46.1) — no
+  Godot/GDExtension build needed. strip 2 into `/usr`; `deps: libxinerama` (Godot's X11 backend).
+- Session profile in `session.conf`: `QFORGE_SESSION_CMD=opengamepadui`,
+  `QFORGE_GAMESCOPE_SHELL_ARGS="--steam --xwayland-count 2"` (OGUI drives gamescope through the
+  Steam-mode X atoms, so X11/Xwayland is required), plus `QT_QPA_PLATFORM=xcb`,
+  `SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS=0`, `vk_xwayland_wait_ready=false`. Driven by `qforge-session`;
+  `gamescope-session-plus` is NOT used.
+- OGUI's self-updater trimmed from the release root (incl. the `make_nice` setcap helper that any
+  user could pkexec). The OS slot carries the OGUI version.
+- gamescope `0023` (Android/xdg titles) retired; `0005` kept (it covers OGUI's window too).
+- Guard 9b (shell present, updater absent); `tests/test-session.sh`.
+- Relocked: + opengamepadui, + libxinerama, gamescope rehashed. Root 1.8G apparent / 945M allocated.
+
+Remaining:
+- **Hardware**: boot to OGUI on each SoC; check navigation with the pad (InputPlumber), quick menu
+  overlay over a game, mangoapp, focus switching OGUI ↔ game, rotation/scale per panel.
+- Check OGUI's in-app update setting cannot still download a user-local build.
+- PowerStation deferred to Phase 2 (no Qualcomm backend; would contend with qforge-powerd).
 
 ### Phase 2 — Handheld features in OGUI (High)
 

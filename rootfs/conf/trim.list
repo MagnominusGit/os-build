@@ -107,3 +107,21 @@ glob usr/lib/lib@(a|t|l|ub)san.so.*
 # it IS linked — by libb2, libsoxr, libvidstab and the fftw *_omp variants that ffmpeg pulls in.
 # libgcc_s / libstdc++ / libatomic are linked essentially everywhere. libitm and libobjc are
 # unreferenced too, but together they are 1.4M and not worth a row.
+
+# ------------------------------------------------------------------------------------------
+# OpenGamepadUI's self-updater (packages/opengamepadui/prebuilt.pin).
+#
+# OGUI can update itself by downloading a newer build into ~/.local/share/opengamepadui/updates
+# (or a systemd-sysext image) and running it instead of the one in /usr. On this image the OS is
+# read-only and updated by RAUC as a whole, so the OGUI version is the one the slot carries: a
+# per-user copy would outlive a rollback and run untested against the OS underneath it.
+#
+# The privileged half also has to go, independently of that argument. make_nice is pkexec'd to
+# setcap cap_sys_nice on "$1/.local/share/opengamepadui/updates/opengamepad-ui.<arch>", where $1 is
+# a HOME the CALLER passes, and org.shadowblip.setcap.policy grants it with allow_any=yes — any
+# user, any session, no authentication. With no updater there is nothing for it to do.
+glob usr/lib/systemd/user/systemd-sysext-updater.service
+glob usr/share/opengamepadui/scripts/update_systemd_ext.sh
+glob usr/share/opengamepadui/scripts/make_nice
+glob usr/share/polkit-1/actions/org.shadowblip.setcap.policy
+glob usr/share/polkit-1/actions/org.shadowblip.nixos_updater.policy
