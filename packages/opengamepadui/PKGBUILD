@@ -1,0 +1,79 @@
+# OpenGamepadUI: upstream's aarch64 release, with opengamepad-ui.pck rebuilt from the tagged source
+# plus our patches (see source.pin for what they fix and why).
+#
+# WHAT COMES FROM WHERE
+#   release tarball   the Godot 4.7.1 engine binary, the Rust GDExtension core (.so), reaper, the
+#                     launcher script, units, udev rule, icons -- installed as-is, exactly what the
+#                     prebuilt pin used to unpack. The self-updater bits are still removed by
+#                     rootfs/conf/trim.list, as before.
+#   source tag        the Godot project, patched, exported to opengamepad-ui.pck.
+#   Godot editor      4.7.1-stable linux.arm64, the same engine version upstream exports with
+#                     (docker/Dockerfile GODOT_VERSION) and that the release binary runs.
+#
+# WHY UNDER ARM64 WITH THE REAL CORE LOADED. A pck exported without the Rust extension loaded is NOT
+# equivalent: measured 2026-10-02 against the upstream pck, every script came out byte-identical
+# but 14 converted scenes/resources (card_ui.scn, input_manager.scn, ...) lost the properties typed
+# with extension classes. So prepare() puts upstream's aarch64 core where the project's
+# core.gdextension looks for it, and the export runs on the arm64 editor so that core can load.
+#
+# NO EXPORT TEMPLATES: --export-pack writes only the pck and never touches a template binary
+# (verified with 4.7.1). The engine binary we ship is upstream's, from the release tarball.
+#
+# INTEGRITY: build-overlay.sh runs makepkg --skipinteg, so prepare() checks sha256sums itself.
+
+pkgname=opengamepadui
+pkgver=0.46.1
+pkgrel=1
+_godot=4.7.1-stable
+pkgdesc='Open source gamepad-native game launcher (pck rebuilt with QForge patches)'
+arch=('aarch64')
+url='https://github.com/ShadowBlip/OpenGamepadUI'
+license=('GPL-3.0-or-later')
+# Godot's X11 display server dlopen()s libXinerama and refuses to start without it; everything else
+# the engine and the core load is already in the base.
+depends=('libxinerama')
+options=('!strip' '!debug')
+source=("${pkgname}-${pkgver}-aarch64.tar.gz::${url}/releases/download/v${pkgver}/opengamepadui-aarch64.tar.gz"
+        "OpenGamepadUI-${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz"
+        "Godot_v${_godot}_linux.arm64.zip::https://github.com/godotengine/godot/releases/download/${_godot}/Godot_v${_godot}_linux.arm64.zip")
+# The release tarball's digest is the one the old prebuilt pin carried (upstream's .sha256.txt).
+# The Godot zip was checked against Godot's own SHA512-SUMS.txt for 4.7.1-stable.
+sha256sums=('84b075f8f8c3925b9e0925705adab37f9237a8ff6eeabc6cf4c3af927520413c'
+            '64a36fd6ebf37fb71530ef2aca277d6392cb11355ca702baa016d6e62e0ae264'
+            '8f527179cd4ae58b402fa265fe817dc505e5b6b14574f309efe57113be562ac1')
+
+_core=libopengamepadui-core.linux.template_release.aarch64.so
+
+prepare() {
+  local i
+  # Over sha256sums, not source: build-overlay.sh appends the patches to source=() (unsummed).
+  for i in "${!sha256sums[@]}"; do
+    echo "${sha256sums[$i]}  ${source[$i]%%::*}" | sha256sum -c - >/dev/null \
+      || { echo "checksum mismatch: ${source[$i]%%::*}" >&2; return 1; }
+  done
+  cd "OpenGamepadUI-${pkgver}"
+  # The editor resolves core.gdextension's linux.debug.arm64 entry (it is a debug build) and an
+  # export resolves linux.release.arm64; give it the same upstream core under both names.
+  install -Dm755 "${srcdir}/opengamepadui/usr/share/opengamepadui/${_core}" "addons/core/bin/${_core}"
+  ln -sf "${_core}" "addons/core/bin/${_core/template_release/template_debug}"
+}
+
+build() {
+  cd "OpenGamepadUI-${pkgver}"
+  local godot="${srcdir}/Godot_v${_godot}_linux.arm64"
+  chmod +x "${godot}"
+  # A private HOME: the editor writes settings, caches and a shader cache there.
+  export HOME="${srcdir}/home" XDG_CONFIG_HOME="${srcdir}/home/.config" \
+         XDG_DATA_HOME="${srcdir}/home/.local/share" XDG_CACHE_HOME="${srcdir}/home/.cache"
+  mkdir -p "${HOME}" build
+  "${godot}" --headless --import
+  "${godot}" --headless --export-pack "Linux/X11 aarch64" build/opengamepad-ui.pck
+  test -s build/opengamepad-ui.pck
+}
+
+package() {
+  cp -a "${srcdir}/opengamepadui/usr" "${pkgdir}/"
+  install -m644 "OpenGamepadUI-${pkgver}/build/opengamepad-ui.pck" \
+    "${pkgdir}/usr/share/opengamepadui/opengamepad-ui.pck"
+  install -Dm644 "OpenGamepadUI-${pkgver}/LICENSE" -t "${pkgdir}/usr/share/licenses/${pkgname}"
+}

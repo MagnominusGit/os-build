@@ -109,7 +109,7 @@ glob usr/lib/lib@(a|t|l|ub)san.so.*
 # unreferenced too, but together they are 1.4M and not worth a row.
 
 # ------------------------------------------------------------------------------------------
-# OpenGamepadUI's self-updater (packages/opengamepadui/prebuilt.pin).
+# OpenGamepadUI's self-updater (packages/opengamepadui ships the release tarball's files as-is).
 #
 # OGUI can update itself by downloading a newer build into ~/.local/share/opengamepadui/updates
 # (or a systemd-sysext image) and running it instead of the one in /usr. On this image the OS is

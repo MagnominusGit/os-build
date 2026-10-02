@@ -761,8 +761,8 @@ done
 # ------------------------------------------------------------------------------------------
 # 9b. The shell is there, and its self-updater is not.
 #
-# OpenGamepadUI arrives as a prebuilt tarball (packages/opengamepadui/prebuilt.pin) unpacked with a
-# strip count and a dest; get either wrong and the build succeeds while the shell lands somewhere
+# OpenGamepadUI arrives as an overlay package (packages/opengamepadui: upstream's aarch64 release
+# with a patched, rebuilt pck); a packaging mistake builds fine while the shell lands somewhere
 # QFORGE_SESSION_CMD cannot find it — a black panel at first boot. Its self-updater is trimmed
 # (rootfs/conf/trim.list): on a RAUC root the slot carries the shell version.
 # ------------------------------------------------------------------------------------------
@@ -779,7 +779,7 @@ for f in usr/share/opengamepadui/opengamepad-ui.pck \
   [ -s "$STAGE/$f" ] || { shell_ok=0; bad "/$f is missing — OGUI cannot start without it"; }
 done
 for f in Makefile .gdignore; do
-  [ -e "$STAGE/$f" ] && { shell_ok=0; bad "/$f in the image root — the OGUI pin was unpacked with the wrong strip count"; }
+  [ -e "$STAGE/$f" ] && { shell_ok=0; bad "/$f in the image root — the OGUI release tarball was unpacked at the wrong level"; }
 done
 for f in usr/lib/systemd/user/systemd-sysext-updater.service usr/share/opengamepadui/scripts/make_nice \
          usr/share/polkit-1/actions/org.shadowblip.setcap.policy; do

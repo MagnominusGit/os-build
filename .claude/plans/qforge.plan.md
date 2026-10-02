@@ -101,6 +101,24 @@ Done (uncommitted):
 - Session runs `opengamepadui --skip-update-pack`: OGUI's self-updater fetches the x86_64
   `update.zip`; applying it at start would black the panel and override the image's shell version.
 
+- **OGUI v0.46.1 crash-loops on DT boards** (HW, Pocket FIT 2026-10-02: black panel after the
+  splash). HardwareManager reads DMI `product_name`; no SMBIOS on ABL UEFI → null FileAccess →
+  SIGSEGV ~10s into every start (upstream #542). Also #540: Godot 4.7 native
+  `custom_maximum_size` breaks the game launch menu. v0.45.1 crashes the same way.
+  Fix: `packages/opengamepadui` is now a local PKGBUILD — upstream's aarch64 engine/core/reaper
+  from the release tarball, `opengamepad-ui.pck` re-exported from the v0.46.1 tag + 2 patches
+  (null guard + devicetree-model fallback; rename to `scroll_maximum_size`) with the arm64
+  Godot 4.7.1 editor and the real core loaded (an x86 export without the core drops data from 14
+  scenes). Pck verified file-by-file against upstream. HW: boot to OGUI, open a game's launch menu.
+  Drop the patches when upstream releases fixes; consider sending them upstream.
+- `which` added to PKGS: OGUI probes helpers with `which <cmd>` (brightnessctl, wpctl, mangoapp,
+  bwrap); without it the brightness slider was absent.
+- HW 2026-10-02, AYANEO Pocket ACE (SM8550), build 20261002T165505Z: boots to OGUI, no crashes,
+  0 script errors, brightness slider works, volume works. Remaining log noise is harmless:
+  "Could not identify active GPU" (platform DRM device has no PCI ids; glxinfo would not help —
+  decided to skip it), a one-time burst of 68 "Unexpected NUL" (upstream /proc scan), plugin store
+  request failing on first boot. Still to check: power menu, a game's launch menu, SM8250/SM8650.
+
 Remaining OS-side (found in OGUI source):
 - OGUI power menu / idle suspend run `systemctl suspend|poweroff|reboot` as `player` — confirm
   logind/polkit allows it from the gamescope session (and that suspend routes to qforge-suspend).

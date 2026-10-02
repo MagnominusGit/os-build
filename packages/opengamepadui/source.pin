@@ -1,0 +1,26 @@
+# OpenGamepadUI — the gamepad shell gamescope hosts. Local PKGBUILD (packages/opengamepadui/PKGBUILD).
+#
+# Was a prebuilt pin of upstream's aarch64 release tarball until 2026-10-02, when the first hardware
+# boot (KONKR Pocket FIT, SM8650) showed v0.46.1 cannot run on these boards:
+#
+#   0001  upstream #542: HardwareManager reads /sys/devices/virtual/dmi/id/product_name, which does
+#         not exist on a devicetree board (no SMBIOS from the ABL UEFI), and calls a method on the
+#         null FileAccess -- a SIGSEGV in a release build, ~10s into every start, so the session
+#         crash-loops behind a black panel. Also falls back to the devicetree model for the name.
+#   0002  upstream #540: Godot 4.7 added a native Control.custom_maximum_size, so the two install
+#         dialogs that declare their own fail to compile, and game_launch_menu.gd (which depends on
+#         them) never loads -- picking a game does nothing, on every platform.
+#
+# So the PKGBUILD keeps upstream's aarch64 engine binary, Rust core and reaper from the release
+# tarball, and rebuilds only opengamepad-ui.pck from the tagged source plus these patches. Drop a
+# patch when the release that fixes it is pinned.
+#
+# Fields (see packages/README.md):
+#   name           pkgname (must match the PKGBUILD); also the work/ build-dir + repo entry
+#   pkgbuild_local path (relative to this dir) to the checked-in PKGBUILD to build
+#   pkgrel_suffix  numeric suffix appended to the PKGBUILD's pkgrel so pacman prefers our build
+#   patches        files under patches/, applied in order right after prepare()'s first `cd`
+name: opengamepadui
+pkgbuild_local: PKGBUILD
+pkgrel_suffix: 1
+patches: 0001-hardware-manager-no-dmi.patch 0002-install-dialogs-rename-custom-maximum-size.patch

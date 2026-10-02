@@ -1,0 +1,47 @@
+From d0bf347b195eab81c5f0e2c6382d99dbc8d830c0 Mon Sep 17 00:00:00 2001
+From: qforge <qforge@invalid>
+Date: Fri, 2 Oct 2026 18:38:01 +0200
+Subject: [PATCH] hardware_manager: survive boards without DMI (devicetree)
+
+---
+ core/systems/hardware/hardware_manager.gd | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/core/systems/hardware/hardware_manager.gd b/core/systems/hardware/hardware_manager.gd
+index 3336d67..73b8820 100644
+--- a/core/systems/hardware/hardware_manager.gd
++++ b/core/systems/hardware/hardware_manager.gd
+@@ -36,7 +36,11 @@ func get_bios_version() -> String:
+ 
+ ## Returns the hardware product name
+ func get_product_name() -> String:
+-	return _read_sys("/sys/devices/virtual/dmi/id/product_name")
++	var product := _read_sys("/sys/devices/virtual/dmi/id/product_name")
++	if product.is_empty():
++		# Devicetree (ARM) boards have no DMI; the board model is the closest equivalent.
++		product = _read_sys("/sys/firmware/devicetree/base/model")
++	return product
+ 
+ 
+ ## Returns the hardware vendor name
+@@ -406,8 +410,17 @@ func _exec(command: String, args: PackedStringArray = []) -> Array:
+ ## Used to read values from sysfs
+ func _read_sys(path: String) -> String:
+ 	var file := FileAccess.open(path, FileAccess.READ)
++	# Devicetree (ARM) boards have no DMI, so /sys/devices/virtual/dmi/id/* does not exist.
++	# A method call on the null FileAccess crashes a release build outright (SIGSEGV).
++	if not file:
++		return ""
+ 	var length := file.get_length()
+ 	var bytes := file.get_buffer(length)
++	# Devicetree properties are NUL-terminated; decoding the NUL would log a Unicode warning on
++	# every call and leave a U+FFFD in the string.
++	var nul := bytes.find(0)
++	if nul >= 0:
++		bytes = bytes.slice(0, nul)
+ 	return bytes.get_string_from_utf8().strip_escapes()
+ 
+ 
+-- 
+2.55.0
+
