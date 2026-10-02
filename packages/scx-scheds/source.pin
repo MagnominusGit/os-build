@@ -1,0 +1,155 @@
+# STATUS: BUILDS AND SHIPS. `make overlay` produces
+# scx-scheds-1.1.3-1.2-aarch64.pkg.tar.zst carrying scx_lavd + scx_bpfland + scx_rusty
+# (aarch64 ELF), scx.service and /etc/default/scx. It is in rootfs/customize-base.sh PKGS.
+#
+# HW-VALIDATED on SM8650, 2026-08-27, and the A/B is unusually clean because bare 1.1.3 failed so
+# fast. Bare 1.1.3 self-ejected with `RCU CPU stall detected!` every 21-35s of gameplay; patched
+# 1.1.3-1.2 ran 5m05s with ZERO `runnable_at=-`, `RCU CPU stall detected`, `runnable task stall`
+# or `disabled (runtime error)` lines — every disable in the journal is a deliberate
+# `unregistered from user space`. Roughly 10x the previous time-to-failure, signature gone.
+#
+# To re-gate after any scx bump: `qforge-scheduler lavd` plus a real gameplay leg on a title
+# that runs BELOW the frame cap, then `journalctl -k -g sched_ext`. PASS is the absence of those
+# four markers. The `Writing directly to p->scx.slice/dsq_vtime is deprecated` warnings DO still
+# appear and are EXPECTED — see the patch block below for why that site is left unpatched.
+#
+# pkgrel_suffix is 2, not 1, ON PURPOSE: 1.1.3-1.1 (unpatched, stalling) was already published
+# in card/ota v0.2.8, so the fixed build has to outrank it or pacman keeps what it has.
+#
+# scx_lavd is NOT the default CPU scheduler — it is opt-in. The default is "none" (the stock
+# in-kernel EEVDF).
+#
+# The original reason for that default is DEAD: lavd was once REPORTED to cost in-game performance,
+# and on 2026-08-09 that report was measured on SM8650 and REFUTED. An A/B/A sweep on two titles
+# found lavd FASTER, decisively so once a game has headroom below the frame cap:
+#
+#   Darksiders II (DX11 via Proton)  stock 30.4 / 31.9 fps  ->  lavd 49.6 / 51.5 fps   (~+62%)
+#   Trine EE (near the 60 cap)       stock 58.6 / 58.5 fps  ->  lavd 59.5 fps          (~+1.7%)
+#
+# Mechanism, reproducible across every stock capture: EEVDF leaves the cap-1024 prime core almost
+# idle (1.3-3.3%) and piles onto the mid cores, while lavd loads it to 23-38% and uses all 8 CPUs.
+# Also measured: --performance (core compaction OFF) is NOT better than the shipped --autopower, so
+# leave the flags alone.
+#
+# The default stays "none" as a deliberate policy choice, not because of the refuted report: lavd is
+# a non-default in-kernel scheduler swap, so it is opted into rather than imposed. A device opts in
+# with `qforge-scheduler lavd`, via the org.qforge.Power1.CpuScheduler property, or per-game and
+# globally from qforge-control. Note a device that booted while lavd WAS the default keeps it — an
+# explicit saved choice outranks the default in both directions.
+#
+# scx.service itself is never `enable`d: qforge-powerd starts it when the selected scheduler
+# says to (DEFAULT_CPU_SCHEDULER is the fallback when nothing is saved) and stops it on "none".
+# Do not add a preset or a .wants symlink for it — powerd must own the PowerProfiles bus names
+# before lavd's --autopower reads them, and enabling the unit breaks that ordering.
+#
+# The skeleton-generation failure is SOLVED — root-caused, not worked around blind. Every BPF
+# build script used to die with:
+#
+#   thread 'main' panicked at scheds/rust/scx_bpfland/build.rs:12:10:
+#     failed to generate .../bpf.bpf.o
+#     0: Failed to generate skeleton for .../bpf.bpf.o
+#     1: Broken pipe (os error 32)
+#
+# bpftool was NOT the cause — an earlier note here blamed it, wrongly. libbpf-cargo 0.26
+# generates skeletons in-process and never spawns bpftool. The real cause is scx_cargo's
+# "skip formatting" sentinel colliding with a qemu bug; the fix is the `disable_rustfmt` shim
+# in the PKGBUILD's build(), which is commented in full there. Short version: scx_cargo calls
+# .rustfmt("disable_rustfmt") expecting the spawn to fail with NotFound so libbpf-cargo leaves
+# the generated code untouched, but under x86 user-mode qemu Command::spawn() returns Ok for a
+# PATH name that does not exist, the child exits 127, and the write to its stdin gets EPIPE.
+# Measured in the pinned base-devel image: spawn("disable_rustfmt") -> Ok + exit 127 +
+# BrokenPipe, spawn("cat") -> Ok and round-trips stdin. So build() puts an identity-filter
+# `disable_rustfmt` on PATH, which is exactly the no-op upstream intends.
+#
+# The general trap, worth remembering beyond this package: under emulation a Rust
+# Command::spawn() of a missing binary does not report NotFound. Any upstream code that treats
+# "spawn fails" as a feature-detection signal will take the wrong branch here.
+#
+# What is already ruled IN (do not re-litigate):
+#   - options=(!lto) is REQUIRED and CONFIRMED. Without it the build dies earlier, linking
+#     scx_arena's build script with `undefined symbol: bpf_linker__new` / `bpf_object__open_mem`,
+#     because holo's base-devel makepkg.conf turns LTO on globally and LTO over libbpf-sys's
+#     static archive drops those symbols. Arch's own scx-scheds carries the same option.
+#   - Every depends/makedepends name here is verified to resolve via `pacman -Si` in the pinned
+#     base-devel image. Two names copied from other distros' recipes did NOT: `libelf.so` (use
+#     elfutils) and `libgcc` (use gcc-libs). Verify names before a build, never during one.
+#   - The clang invocation itself is fine: clang 21.1.5 runs with -D__TARGET_ARCH_arm64, -mcpu=v3
+#     and the vendored arm64 vmlinux.h, and preprocesses the system headers successfully.
+#
+# See also the [[scx-sched-bringup]] memory note.
+#
+# scx-scheds — built FROM SOURCE via a qforge-owned PKGBUILD (packages/scx-scheds/PKGBUILD),
+# NOT fetched from the holo monorepo: holo has no scx-scheds to fetch a PKGBUILD for (SteamOS
+# ships none). This is the "local PKGBUILD" form, like packages/mesa and packages/gtk2; makepkg
+# still downloads the upstream release tarball named in the PKGBUILD.
+#
+# Why: sched_ext lets the CPU scheduler be implemented as a BPF program loaded from userspace.
+# scx_lavd is the gaming-oriented one (latency-criticality aware, and it traces futex calls to
+# avoid lock-holder preemption). The kernel half — CONFIG_SCHED_CLASS_EXT plus the BTF chain it
+# depends on — is in kernel/kernel.config; without it the schedulers here cannot attach, since
+# libbpf resolves struct sched_ext_ops out of /sys/kernel/btf/vmlinux at load time.
+#
+# Fields:
+#   name           pkgname (must match the PKGBUILD); also the work/ build-dir + repo entry
+#   pkgbuild_local path (relative to this dir) to the checked-in PKGBUILD to build
+#   pkgrel_suffix  numeric suffix appended to the PKGBUILD's pkgrel (N -> N.<suffix>) so pacman
+#                  prefers our build on later upgrades. Integer only.
+#
+# ONE patch, and it is a straight cherry-pick of upstream 6d31ddd8 (2026-08-21), which is fixed
+# on upstream main but has NOT been released — v1.1.3 is still the newest tag. Drop this patch at
+# the first release that contains the commit; the build fails loudly if it no longer applies.
+#
+# It fixes the RCU/task stall this device hit within ~30s of every gameplay attach at 1.1.3
+# (2026-08-27, Darksiders): lavd's REENQ path reused a cached suggested_cpu_id without checking
+# it against p->cpus_ptr, so a task whose cpus_ptr had narrowed underneath it (migrate_disable,
+# sched_setaffinity, cgroup migration, hotplug) was routed to the per-CPU DSQ of a CPU that
+# cannot run it, and starved there. Our journal signature matched upstream's report almost
+# exactly — upstream reported runnable_at=-21185ms, we saw -21000/-21004/-21008/-21024ms across
+# five consecutive ejections, each followed by `RCU CPU stall detected!`.
+#
+# Why 1.1.3 and not 1.1.2, which ran this same code path: 1.1.3 moved the re-enqueue TRIGGER off
+# ops.cpu_release onto the `?tp_btf/sched_switch` hook, which fires on every fair -> RT/DL
+# transition system-wide instead of only when a higher class preempts an scx CPU. That makes the
+# REENQ path enormously hotter, which is what turns a latent staleness bug into a stall every
+# half-minute. Our lavd_ops.flags also carries SCX_OPS_ENQ_MIGRATION_DISABLED, which routes
+# exactly the migrate_disable tasks in upstream's report through ops.enqueue. That mechanism is
+# OUR inference, not upstream's claim — upstream only documents the staleness itself.
+#
+# NOT fixed here, deliberately: scheds/rust/scx_lavd/src/bpf/main.bpf.c still writes
+# `p->scx.dsq_vtime` directly at one site in the same REENQ branch, where all six sibling call
+# sites were migrated to scx_bpf_task_set_slice/_dsq_vtime. That is the sole source of the
+# kernel's `Writing directly to p->scx.slice/dsq_vtime is deprecated` warning, which therefore
+# did NOT go away on this bump the way the 1.1.2 note predicted it would. It is cosmetic — it is
+# not the stall, and it is still unfixed on upstream main (no compat.bpf.h commits since the
+# tag) — so it stays unpatched rather than carrying a speculative local delta. Report upstream.
+#
+# To bump scx: edit pkgver + sha256sums in packages/scx-scheds/PKGBUILD, and re-check that
+# services/scx.service and services/scx still exist at those paths in the new tarball (package()
+# installs both). Also re-read upstream's own kernel.config in the tarball root — it is the
+# authoritative list of required CONFIG_* symbols, and it does change between releases.
+#
+# Bump to 1.1.3 (upstream release 2026-08-19), checked 2026-08-27 against the v1.1.3 tarball:
+#   - services/scx.service and services/scx both still present, and services/scx still has the
+#     three lines package()'s sed rewrites (`SCX_SCHEDULER=`, the `# Set custom flags` comment,
+#     `#SCX_FLAGS=`). The `SCX_FLAGS='--autopower'` grep assertion therefore still fires.
+#   - scheds/rust/scx_{lavd,bpfland,rusty} all still exist, Cargo.lock is still checked in
+#     (--locked/--frozen hold), and scx_cargo still uses the `disable_rustfmt` sentinel at three
+#     call sites — so the qemu shim in build() still matches and is still needed.
+#   - upstream kernel.config is BYTE-IDENTICAL to 1.1.2's. Nothing to do in kernel/kernel.config.
+#
+# One new runtime dependency that upstream's kernel.config already covers but our fragment does
+# not name, so it was traced rather than assumed. 1.1.3's scx_lavd drops ops.cpu_acquire/release
+# on kernels >= 6.19 and attaches `SEC("?tp_btf/sched_switch")` instead — ours is 7.2, so that
+# path IS taken and CONFIG_BPF_EVENTS is now load-bearing where it was not at 1.1.2. It resolves
+# to =y here without an entry: on arm64 ARCH_SUPPORTS_UPROBES is def_bool y, so UPROBE_EVENTS
+# takes its `default y`, and BPF_EVENTS is a promptless `default y` gated on
+# (KPROBE_EVENTS || UPROBE_EVENTS) && PERF_EVENTS && BPF_SYSCALL, all of which hold. Do NOT add
+# CONFIG_BPF_EVENTS to kernel/kernel.config — it has no prompt and is already right.
+# The other kfuncs 1.1.3 migrated to (scx_bpf_task_set_slice/_dsq_vtime, added in 6.19) are
+# __weak ksyms behind bpf_ksym_exists() in scheds/include/scx/compat.bpf.h, so they are safe on
+# an older kernel too.
+
+name: scx-scheds
+pkgbuild_local: PKGBUILD
+patches: 0001-scx_lavd-validate-cached-cpu-pick-on-reenq.patch
+pkgrel_suffix: 2

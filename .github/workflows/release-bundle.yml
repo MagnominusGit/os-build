@@ -1,0 +1,390 @@
+# qforge release update bundle — builds a RAUC bundle for a device already in the field.
+#
+# Separate from release-sdcard.yml on purpose: an update ships on its own cadence, and coupling it to
+# card builds would mean either cutting cards nobody asked for or delaying updates until someone did.
+# Both delegate to image.yml so the rootfs recipe exists once.
+#
+# ============================================================================================
+# A TAG PRODUCES A SIGNED, SHIPPABLE BUNDLE. A DISPATCH PRODUCES AN UNSIGNED SMOKE TEST.
+# ============================================================================================
+# A device installs a bundle only if its signature chains to the keyring baked into its own image.
+# Pushing `ota/v*` runs the build inside a PROTECTED environment where the release key is reachable;
+# anything else builds with an ephemeral dev cert, which proves the bundle assembles, the verity
+# hashes compute, the manifest is well formed and the pin gate passed — and which every device
+# rejects. That is the intended difference, not a limitation.
+#
+# WHICH KEY ACTUALLY GOES TO CI, because this was mis-stated for a while and it matters. Not the
+# 20-year root: ~/qforge-pki/ca.key.pem stays offline and never leaves the workstation. CI gets
+# release.cert.pem + release.key.pem — the SIGNING pair, whose cert expires 2028-10-04. Devices
+# trust the CA, not that cert, so if CI is ever compromised the response is to mint a new release
+# cert from the offline root and carry on. No device changes, no keyring update, no reflash. That
+# is a materially smaller decision than "put the root of trust in GitHub", which is what the old
+# wording here described.
+#
+# SETUP, once per repo (nothing below works until this is done — the build silently falls through
+# to the dev cert, which is the safe direction):
+#
+#   1. Create a PROTECTED environment (repo settings -> Environments) named `release-signing`, with
+#      required reviewers and a branch/tag restriction. The environment is what makes signing an
+#      APPROVED action rather than an available one. Override the name with the SIGNING_ENVIRONMENT
+#      repo variable if you want a different one.
+#   2. Add RAUC_CERT_PEM + RAUC_KEY_PEM to THAT environment. NOT to repo-wide secrets — repo-wide
+#      secrets reach every workflow_dispatch and the gate would evaporate with no visible change.
+#   3. Nothing else. image.yml takes an `environment` input and declares it on its build job (a
+#      caller cannot attach an environment to a reusable workflow's job from outside), and the
+#      `build` job below passes it only on a tag.
+#
+# VERIFIED 2026-08-11: `environment: ''` means "no environment" rather than an error. Every card run
+# has taken that path since release-sdcard.yml was written, and the `build` job below now takes it
+# unconditionally — a build that names no environment is the entire point of the split. (Recorded
+# here as UNVERIFIED until the split made it load-bearing for bundles too. Had it failed, the fix
+# would have been two jobs in image.yml picked with an `if:`, not a change to the model.)
+# WHERE THE BUNDLE GOES. Not to R2, and not to a GitHub release asset: bundles are served from the
+# update server devices fetch their OTAs from (docs/ota.md; none exists yet). That is a different host with different
+# credentials from the card bucket, and deliberately so — a card is downloaded by a person with a
+# browser, a bundle is fetched by a device with a keyring. The transport is ota/publish-bundle.sh
+# and the `publish` job below calls it.
+#
+# THAT JOB IS LIVE as of 2026-08-04, on a tag only, and it still fails closed twice over:
+#
+#   1. publish-bundle.sh verifies the bundle against the CA in every device's keyring BEFORE it
+#      moves a byte. A dispatch can only produce dev-cert bundles, so the job does not run at all on
+#      one — it would exist solely to reject its own artifact.
+#   2. It refuses a bundle whose payload was built as a DEV image, which a signature check cannot
+#      distinguish from a shippable one (see publish-bundle.sh's second gate).
+#
+# BEFORE 2026-08-04 IT WENT GREEN WITHOUT PUBLISHING, and the tag therefore looked shipped. The
+# missing credential was reported as a `::notice::` and a skipped step, which is a distinction no
+# one reads at the bottom of an hour-long green run — `ota/v0.2.1` was cut, built, signed, and
+# published nowhere. It is now a hard `::error::` and a non-zero exit: the only two states are
+# "published" and "red".
+#
+# The publishing principal is `otapub` on the update server — its own unprivileged account, created
+# by ota/setup-ci-user.sh, holding no sudo and writing nothing outside the docroot. The `publish`
+# job's own header covers the key; setup-ci-user.sh's covers why it is an account rather than a
+# forced command.
+name: release bundle
+
+# TAG NAMESPACE: `ota/v*`. Bundles and cards ship on independent cadences — an update goes out far
+# more often than a card — so each gets its own namespace instead of sharing a bare `v*`. Until this
+# trigger existed, release-sdcard.yml owned `v*` alone, so tagging a release built a CARD and never
+# a bundle: exactly backwards. `ota/v1.3.0` and `card/v1.3.0` on one commit are the same OS shipped
+# two ways; a run of ota tags with no card between them is the normal state.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Bundle version (default: empty — the image stamps itself `dev` and the bundle is named after its build timestamp)'
+        required: false
+        type: string
+        default: ''
+  push:
+    tags:
+      - 'ota/v*'
+
+permissions:
+  contents: read
+
+jobs:
+  # Same reason release-sdcard.yml has one: GitHub expressions cannot strip the `ota/` prefix, so the
+  # version is derived in a shell step and image.yml keeps taking a bare version string.
+  prep:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      channel: ${{ steps.v.outputs.channel }}
+    steps:
+      - id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_VERSION:-}" ]; then
+            v="$INPUT_VERSION"
+          elif [ "$GITHUB_REF_TYPE" = tag ]; then
+            v="${REF_NAME#ota/}"
+          else
+            # Empty is legitimate here, unlike the card path: the image then calls itself `dev` and
+            # genbundle.sh names the bundle after its build timestamp, which is still unique per
+            # build. A dispatch with no version is a smoke test, and it is labelled as one.
+            v=""
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+          # ============================================================================
+          # WHICH CHANNEL THIS TAG PUBLISHES TO: the semver PRE-RELEASE suffix, and
+          # nothing else. `ota/v0.3.0` -> stable. `ota/v0.3.0-beta.1` -> beta.
+          # ============================================================================
+          # The channel is the first path segment on the update server, and it is what a
+          # device's OTA_CHANNEL selects — the environment, then /etc/qforge/ota.conf,
+          # then the user-writable ~/.config/qforge/ota.conf (qforge-update's
+          # channel_setting()). There is no Settings picker: that work was dropped with
+          # PR #82. So this line is what gives a user something to point at; without a
+          # beta directory on the server, naming `beta` is a 404 and the device's update
+          # check quietly reports "no update available" forever.
+          #
+          # NOT A SEPARATE TAG NAMESPACE (`ota-beta/v*`), which is the obvious alternative
+          # and the shape the ota/ + card/ split would suggest. The suffix wins because the
+          # VERSION STRING ITSELF then records the channel, and duplicate detection turns on
+          # that string: qforge-update's check compares the offered identity against the
+          # running one for INEQUALITY, so two channels publishing the same `0.3.0` would
+          # leave a device that switches stable -> beta believing it is already up to date.
+          # `0.3.0` and `0.3.0-beta.1` are distinct identities by construction, and the
+          # version the user reads in Settings says which channel they are on.
+          #
+          # A beta bundle is signed with the SAME release key and gated exactly as hard --
+          # the keyring and the dev-image refusal in ota/publish-bundle.sh are not relaxed
+          # here. The channel decides who is offered it, not whether it is trustworthy.
+          #
+          # Retention is per-channel for free: publish-bundle.sh writes to $DOCROOT/$CHANNEL
+          # and prunes within it, so a run of betas can never evict the stable release a
+          # device on `rel` is still being offered.
+          case "$v" in
+            *-*) channel=beta ;;
+            *)   channel=stable ;;
+          esac
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "::notice::version '${v:-<dev>}' publishes to the '$channel' channel"
+
+  # ============================================================================================
+  # build -> sign -> publish. THE BUILD HOLDS NO KEY AND NAMES NO ENVIRONMENT, so it starts the
+  # moment the tag lands instead of queueing behind a reviewer.
+  # ============================================================================================
+  # This job used to BE the signing job: it took `artifact: bundle` and the protected environment,
+  # which meant the whole 30-minute image build sat in `waiting` until someone clicked approve. The
+  # approval bought nothing during those 30 minutes — assembling a rootfs needs no release key — and
+  # it cost the obvious thing: on 2026-08-11 two consecutive upstream outages (a kernel.org 503, then
+  # github.com unreachable for 134 s mid-clone) each burned an approval and produced no bundle.
+  #
+  # Splitting moves the gate to where the key is actually used. The approval count is UNCHANGED at
+  # two — `sign` and `publish` — because the gate moved rather than multiplied. What changed is that
+  # a reviewer now approves a build that has already succeeded, which is the same correction made to
+  # the card path when its R2 upload moved out of the build job (see image.yml's header).
+  #
+  # `secrets: inherit` stays, and stays safe for the same reason as before: the signing secrets are
+  # ENVIRONMENT-scoped, and this job names no environment, so it inherits nothing that matters. It is
+  # now belt-and-braces rather than load-bearing — `artifact: rootfs` has no step that would use a
+  # key even if one were reachable.
+  build:
+    needs: prep
+    uses: ./.github/workflows/image.yml
+    secrets: inherit
+    with:
+      artifact: rootfs
+      version: ${{ needs.prep.outputs.version }}
+      environment: ''
+
+  # SIGNED ON A TAG, unsigned on a dispatch, and the difference is still the environment rather than
+  # an `if:` on a signing step. A tag push is the deliberate act — someone decided this commit ships
+  # — and it is the only path that names the protected environment, so it is the only path where the
+  # release key is reachable and the only one that waits for a reviewer. A bare workflow_dispatch
+  # stays what it was: a smoke test that proves the bundle assembles, signed with an ephemeral dev
+  # cert, rejected by every device.
+  #
+  # WHY THIS SIGNS A FRESH BUNDLE RATHER THAN RE-SIGNING ONE. `rauc resign` exists and works on our
+  # `format=verity` bundles (it truncates the old signature and regenerates — _reference/rauc/src/
+  # bundle.c, resign_bundle). It was rejected anyway: resigning means the build job first mints a
+  # DEV-cert bundle over the exact payload that is about to ship, and a bundle whose only difference
+  # from the shippable one is which key signed it is precisely the artifact ota/rauc/
+  # manifest.raucm.in's `mode` field exists to keep distinguishable. Wrapping the rootfs here instead
+  # means a tagged payload is signed exactly once, by the real key, and no other signature over those
+  # bytes ever exists.
+  sign:
+    # Not `prep`: this job deliberately consumes no version string. See the fetch step below.
+    needs: build
+    # aarch64, because genbundle.sh runs rauc inside the qforge-build container and that image is
+    # built for the target arch. Same expression as image.yml's build job so the two cannot drift
+    # onto different runner pools.
+    runs-on: ${{ vars.OVERLAY_RUNNER || 'ubuntu-24.04-arm' }}
+    environment: ${{ github.ref_type == 'tag' && (vars.SIGNING_ENVIRONMENT || 'release-signing') || '' }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+
+      # Straight into out/images/, where genbundle.sh looks. No QFORGE_VERSION here and none
+      # wanted: the bundle's identity comes out of the rootfs.release sidecar that travelled with the
+      # image, never out of this job's environment. That is the invariant genbundle.sh was rewritten
+      # to enforce, and the split would be the perfect way to violate it — this job could trivially
+      # be handed a version that disagrees with the payload's own /etc/qforge-release.
+      - name: fetch the rootfs
+        uses: actions/download-artifact@v8
+        with:
+          name: qforge-rootfs
+          path: out/images
+
+      - name: build the toolchain image
+        run: make toolchain
+
+      - name: sign the bundle
+        env:
+          RAUC_CERT_PEM: ${{ secrets.RAUC_CERT_PEM }}
+          RAUC_KEY_PEM: ${{ secrets.RAUC_KEY_PEM }}
+        run: |
+          set -euo pipefail
+          # $RUNNER_TEMP, never the workspace — the repo tree gets uploaded as artifacts and cached,
+          # and a private key that lands in either is a leaked key. Same convention as docs/ci.md
+          # and as PKIDIR locally (~/qforge-pki): outside anything the build can sweep up.
+          if [ -n "${RAUC_CERT_PEM:-}" ] && [ -n "${RAUC_KEY_PEM:-}" ]; then
+            pki="$RUNNER_TEMP/pki"
+            mkdir -p "$pki" && chmod 700 "$pki"
+            printf '%s' "$RAUC_CERT_PEM" > "$pki/release.cert.pem"
+            printf '%s' "$RAUC_KEY_PEM"  > "$pki/release.key.pem"
+            chmod 600 "$pki/release.key.pem"
+            make sign-bundle PKIDIR="$pki"
+          else
+            echo "::warning::no release signing key configured — this bundle is signed with an ephemeral dev cert and is NOT shippable"
+            make sign-bundle
+          fi
+
+      - name: package a bundle
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          cp out/images/*.raucb upload/
+          ls -lh upload/ >> "$GITHUB_STEP_SUMMARY"
+
+      # Over the SIGNED bundle, which is why this moved here from image.yml: the sum a consumer
+      # checks has to be the sum of the bytes they receive, and those bytes do not exist until the
+      # step above runs. card-meta.sh's other half — the provenance copy of rootfs/manifest.lock —
+      # comes from this job's checkout, which is the same commit the build job used.
+      - name: stage release metadata
+        run: |
+          set -euo pipefail
+          f=$(find upload -maxdepth 1 -name '*.raucb' -print -quit)
+          [ -n "$f" ] && [ -f "$f" ] || { echo "::error::no bundle to hash"; exit 1; }
+          mkdir -p meta
+          image/card-meta.sh "$f" meta
+
+      - name: upload metadata artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: qforge-bundle-meta
+          path: meta/
+          if-no-files-found: error
+
+      # Same artifact name the publish job already downloads, so nothing below had to change.
+      - name: upload the image artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: qforge-bundle
+          path: upload/
+          if-no-files-found: error
+          retention-days: 7
+
+  # The upload half. See the header: this is deliberately inert until the release key reaches a
+  # protected environment, and it is written rather than commented out so that decision is a matter
+  # of adding secrets, not of writing a job under time pressure on release day.
+  publish:
+    # `prep` alongside `sign` because the publish step below reads needs.prep.outputs.channel —
+    # a job cannot reference the outputs of one it does not declare a need on, and the reference
+    # would resolve to the EMPTY STRING rather than failing. publish-bundle.sh falls back to
+    # `stable` on an empty channel, so the symptom of forgetting this would be beta tags shipping
+    # to every device in the field.
+    needs: [prep, sign]
+    # Only a tag can have produced a signed bundle, and only a signed bundle can be published. On a
+    # dispatch this job would exist solely to fail its own keyring gate, so it does not run at all —
+    # a skipped job that is always skipped teaches people to ignore skipped jobs.
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    # THE SAME PROTECTED ENVIRONMENT AS THE SIGNING JOB, and declaring it here is not optional
+    # bookkeeping: OTA_SSH_KEY is scoped to this environment, and a job that does not name it sees
+    # `secrets.OTA_SSH_KEY` as the EMPTY STRING. Not an error, not a warning — the creds step below
+    # then reports "not set" and the run goes green having published nothing, which is exactly the
+    # failure this job was written to make impossible. If a publish ever skips with the secret
+    # visibly present in repo settings, this line is the first thing to check.
+    #
+    # The cost is a SECOND approval per release: `sign` waits for a reviewer to reach the signing
+    # key, and `publish` waits again to reach the publishing key. That is the right shape rather than
+    # an accident of reusing one environment — signing produces an artifact that still goes nowhere,
+    # while this job is the one that puts bytes in front of the fleet.
+    #
+    # DO NOT COLLAPSE THE TWO into one job to save the extra artifact round trip the build/sign split
+    # costs. That trade was considered when the split was made and rejected: it would buy back a few
+    # minutes of upload by turning "may this be signed" and "may this reach the fleet" into a single
+    # click, which is the one distinction here worth paying for.
+    environment: ${{ vars.SIGNING_ENVIRONMENT || 'release-signing' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # DO NOT PUT THE INSTANCE ADMIN KEY HERE. The key used to publish from a workstation logs in
+      # as `ubuntu`, who has PASSWORDLESS SUDO on the update server — handing CI that key hands CI
+      # root on the host every device fetches from, which is a far larger grant than "may write one
+      # directory". Which key that is, and where it lives, is deliberately not written down in a
+      # public CI file; it is an operator fact, not a build input.
+      #
+      # WHAT IS ACTUALLY IN THE SECRET, as of 2026-08-04: an ed25519 private key whose public half is
+      # committed at ota/ci-publish.pub and installed by ota/setup-ci-user.sh as the sole
+      # authorized_keys entry — prefixed `restrict` — of `otapub`, a system account on the update
+      # server with no sudo, no group but its own, and write access to nothing outside the docroot.
+      # Proven at install time: no pty, no port forwarding (local OR remote), `sudo -n true` fails,
+      # /etc is read-only to it. A forced command was considered and rejected; setup-ci-user.sh's
+      # header says why (publish-bundle.sh is not an rsync wrapper — it also runs mkdir, df, mv,
+      # chmod, sha256sum and a `bash -s` prune, and a wrapper covering those becomes a second,
+      # unversioned copy of the publish protocol).
+      #
+      # ROTATION is cheap and needs no device involvement: ssh-keygen a new pair, replace
+      # ota/ci-publish.pub, re-run setup-ci-user.sh (it REWRITES authorized_keys rather than
+      # appending, so the old key stops working), and re-set this secret. Same shape as the signing
+      # key, where the answer to a leak is a new release cert from the offline root.
+      #
+      # The signing half above does not have this problem either. There is no equivalent for shell
+      # access, which is why the account, not the key, is what bounds the damage here.
+      #
+      # The job stops without the secret rather than silently no-opping: a publish that quietly does
+      # nothing means the tag looks shipped and the fleet never sees it.
+      - name: check for publishing credentials
+        id: creds
+        env:
+          KEY: ${{ secrets.OTA_SSH_KEY }}
+        run: |
+          if [ -z "${KEY:-}" ]; then
+            echo "::error::OTA_SSH_KEY is empty — nothing was published, and this tag is NOT shipped."
+            echo "::error::The secret lives in the '${{ vars.SIGNING_ENVIRONMENT || 'release-signing' }}'"
+            echo "::error::environment. An environment-scoped secret reads as empty in any job that"
+            echo "::error::does not declare that environment — check the job's environment: line"
+            echo "::error::before assuming the secret itself is missing."
+            exit 1
+          fi
+
+      - name: fetch the bundle
+        uses: actions/download-artifact@v8
+        with:
+          name: qforge-bundle
+          path: out/images
+
+      # $RUNNER_TEMP, never the workspace, for the reason image.yml already keeps the RAUC key
+      # there: anything left in the repo tree gets swept into artifacts and caches.
+      - name: publish to the update server
+        env:
+          OTA_SSH_KEY: ${{ secrets.OTA_SSH_KEY }}
+          QFORGE_OTA_HOST: ${{ vars.OTA_HOST || 'updates.qforge.invalid' }}
+          # `otapub`, NOT the script's own default. ota/publish-bundle.sh defaults to `ubuntu`
+          # because its primary caller is a human at a workstation holding the ADMIN key, and that
+          # key is not in otapub's authorized_keys. CI is the other caller and names its own
+          # principal — the one ota/setup-ci-user.sh created and the secret above authenticates as.
+          QFORGE_OTA_USER: ${{ vars.OTA_USER || 'otapub' }}
+          # Derived in `prep` from the tag's pre-release suffix; that step carries the reasoning.
+          # publish-bundle.sh reads this (its $2 default) and it is the ONLY thing that decides
+          # which directory devices are offered this bundle from.
+          QFORGE_OTA_CHANNEL: ${{ needs.prep.outputs.channel }}
+        run: |
+          set -euo pipefail
+          # An empty channel would silently mean `stable` inside publish-bundle.sh — the one
+          # direction a mistake here must not go. Fail before the key is written to disk.
+          [ -n "${QFORGE_OTA_CHANNEL:-}" ] || {
+            echo "::error::no channel came out of the prep job — refusing to fall back to stable"
+            exit 1
+          }
+          key="$RUNNER_TEMP/ota_key"
+          printf '%s\n' "$OTA_SSH_KEY" > "$key"
+          chmod 600 "$key"
+          trap 'shred -u "$key" 2>/dev/null || rm -f "$key"' EXIT
+          bundle="$(ls out/images/qforge-*.raucb)"
+          # Build the toolchain image so publish-bundle.sh's keyring gate runs against the PINNED
+          # rauc (build/Dockerfile, RAUC_VERSION) rather than whatever the runner's archive holds.
+          # Not a detail: ubuntu-latest ships a rauc old enough to predate verity bundle support, so
+          # `apt-get install rauc` here would give a gate that fails on every bundle we produce —
+          # indistinguishable, from the log, from a genuinely bad signature.
+          docker build -t qforge-build -f build/Dockerfile build
+          QFORGE_OTA_SSH_KEY="$key" ota/publish-bundle.sh "$bundle"

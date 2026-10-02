@@ -1,0 +1,226 @@
+Subject: [PATCH] drm/msm/dpu: enable the QSEED detail enhancer and direction filter
+
+QSEED3/QSEED3Lite has a detail enhancer and a direction-detection filter, and
+dpu_hw_util.c already knows how to program both: _dpu_hw_setup_scaler3_de()
+writes the whole sharpen/shape/threshold/adjust register block, and the op_mode
+bits for DE (bit 8) and dir_en (bit 4) are already wired up. Nothing ever sets
+them. Every plane that scales on this hardware therefore gets a plain bilinear
+resample and leaves the sharpening block dark.
+
+Fill in the enhancer's default working point whenever QSEED is actually
+resampling, and enable the direction filter alongside it. The threshold pair
+(thr_quiet / thr_dieout) is what keeps this from being a blanket sharpen: flat
+and noisy regions fall outside the linear zone and are left alone, so the
+enhancer puts back edge detail a bilinear upscale loses rather than amplifying
+grain. Coefficient LUT blobs stay a userspace concern; this only covers the
+defaults the hardware ships with.
+
+Two register writes were missing on the newer scaler revisions:
+
+  - DE_LPF_BLEND (0x64), the low-pass blend weight between the enhanced and
+    the source pixel, exists from QSEED revision 3.0 and was never written.
+  - DIR_FILTER_WEIGHT (0x60) was only written from the QSEED3Lite LUT path,
+    so a pipe with no userspace LUT blob ran the direction filter at whatever
+    weight was left in the register. Write it for every 2.4-and-later scaler.
+
+The DE_SHARPEN_CTL blend field (bits 20-23) also had no struct member, so add
+one rather than leaving a hole in the register description.
+
+Deliberately gated on src != dst. The extents compared here are already
+post-rotation (_dpu_plane_setup_scaler3() swaps them at the top for an inline
+rotated pipe), so a rotated 1:1 RGB pipe -- which has to keep the scaler
+programmed as a pass-through -- correctly does not sharpen.
+
+Authored by tiopex <tiopxyz@gmail.com>.
+
+NOT UPSTREAM as of the 7.2.5 tree this is pinned to.
+
+ON HARDWARE 2026-09-12, but only partly exercised -- be precise about which half.
+
+Shipped in the image that Pocket ACE, Pocket FIT and Pocket S2 all booted during
+the inline-rotation gate, with the display up and no regression, so the patch is
+proven not to break a non-scaling pipe. The DIR_FILTER_WEIGHT write DID run:
+every one of those pipes has a QSEED 3.2/3.3 scaler, so it is past the 0x2004
+gate, and it wrote dir_weight = 0 on every atomic commit.
+
+The DETAIL ENHANCER ITSELF never engaged, because nothing scaled. gamescope hands
+the panel its native mode, and for a rotated pipe _dpu_plane_setup_scaler3()
+compares the extents AFTER its rot90 swap: src 1920x1080 becomes 1080x1920, which
+is exactly dst, so `src_w != dst_w || src_h != dst_h` was false throughout. The
+enhancer stays dark until something actually resamples -- a game at a non-native
+resolution reaching the plane without a compositor pass first.
+
+So: the plumbing is HW-clean, the sharpening is unproven. When a scaling case does
+appear, look for over-sharpening or ringing on upscaled content before trusting
+the curve; these are the hardware's default values, not a tuned choice.
+
+SM8250 NOW COVERED FOR THE NON-SCALING PATH, 2026-09-13, image 20260913T180307Z.
+The gate above used Pocket ACE, Pocket FIT and Pocket S2 -- every one of them
+SM8550 or SM8650 -- so nothing had exercised a 3.0 scaler. Pocket Max and AYN
+Thor Lite have now both booted this patch with their displays up and no
+regression. Both are QSEED 3.0 (dpu_vig_sblk_qseed3_3_0), so the DIR_FILTER_WEIGHT
+write past the 0x2004 gate -- which runs on EVERY atomic commit, scaling or not --
+is clean on 3.0 as well as on 3.2/3.3.
+
+THE 3.0 CUTOFF FOR DE_LPF_BLEND IS AN ASSERTION, NOT A CITATION -- read this
+before widening it. The `scaler_version >= 0x3000` gate says the register exists
+from QSEED revision 3.0, and no source available to this tree confirms that: the
+hardware documentation is not public, and the revision at which 0x64 becomes
+valid could equally be 3.2. The claim has been disputed elsewhere, on the grounds
+that a 3.0 scaler predates the register entirely. Nobody in either direction has
+produced a datasheet.
+
+What keeps that from being urgent is the placement: the write sits INSIDE
+`if (de.enable)`, and de.enable is only set by the src != dst branch below. So on
+a 3.0 part the contested register is untouched until something actually
+resamples. The exposure is exactly "a scaling plane on SM8250".
+
+THE SCALING CASE HAS NOW RUN ON A 3.0 SCALER -- POCKET MAX, 2026-09-13. At its
+shipped settings that board never scales: the compositor renders at the panel's
+own size and the live plane reads src-pos 1080x1920 against crtc-pos 1080x1920,
+so the branch below is false and 0x64 is never written. That is a property of
+the configuration, not of the hardware, and the compositor already carries the
+flag that changes it -- the one that clamps the logical output on a rotated
+panel and lets the plane upscale, used in production on the wide SM8650 panel.
+Pointing it at 720 lines on Pocket Max gives
+
+    logical output 1920x1080 -> 1280x720, plane upscales to the 1080x1920 mode
+    plane[59]  src-pos = 720x1280    crtc-pos = 1080x1920   <- scaling, 1.5x
+    plane[89]  src-pos = 1080x1920   crtc-pos = 1080x1920   <- 1:1, untouched
+
+so de.enable, dir_en and dir_weight are all set on a QSEED 3.0 part and 0x64 IS
+written. Result: dmesg clean -- no DPU errors, no underruns, no timeouts, no
+wedge -- with the display up and scanning out the scaled plane. The two planes
+above also show the src != dst gate discriminating correctly per-plane.
+
+So the "3.0 predates DE_LPF_BLEND" worry does not show up as a safety problem on
+3.0. Be precise about what that does and does not establish: a clean dmesg does
+not prove the register is valid there, only that writing it breaks nothing. If
+0x64 is reserved on 3.0 the write is simply inert, and the enhancer still runs
+without its blend weight.
+
+THE CURVES HAVE NOW BEEN LOOKED AT, and they are deliberately LEFT ALONE. Judged
+on Pocket Max at both 1.5x (max-height 720) and an exact 2x (max-height 540).
+The enhancer is unmistakably active: the image goes soft overall, as an upscale
+should, while high-contrast edges -- white on black -- stay sharp. That
+selectivity is the whole point of thr_quiet/thr_dieout, and the INTEGER scale is
+what makes it conclusive: a plain 2x resample softens everything uniformly and
+cannot leave one class of edge crisp, so the resampler is ruled out as the
+explanation. Operator verdict: not pretty, but nothing horrible. That is not
+enough to justify tuning a hardware default on one board's eyeballing, so the
+curve stays as shipped.
+
+READ THIS BEFORE CHANGING IT: Pocket Max was a TEST RIG for the above, not the
+case that matters. It never scales at its shipped settings -- the flag had to be
+forced. The board that scales in PRODUCTION is the wide SM8650 panel, which
+renders 1080p and lets the DPU upscale to 1440x2560 (~1.33x) as its normal
+configuration, on a QSEED 3.2 part. This patch has therefore been sharpening
+that board since it landed and nobody has evaluated it there. Judge it there
+before touching anything.
+
+If it does need to change, dropping de.enable while KEEPING dir_en is the
+cleanest option: the direction filter improves diagonal edges and carries no
+taste, while the enhancer is the part with the overshoot. Note a version gate
+does NOT help -- the only board that scales in production is 3.2, so gating to
+>= 0x3200 changes nothing where it matters.
+
+If that case ever turns up and misbehaves, the cheap fix is to move the DE gate to
+`>= 0x3200`. That excludes every 3.0 part and costs nothing on the boards the
+sharpening was wanted for, which are all 3.2 or later. Do not widen the gate below
+3.0 without a register map.
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_util.h
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_util.h
+@@ -66,6 +66,7 @@
+  * @ adjust_a:      A-coefficients for mapping curve
+  * @ adjust_b:      B-coefficients for mapping curve
+  * @ adjust_c:      C-coefficients for mapping curve
++ * @ blend:         blend weight between the enhanced and the source pixel
+  */
+ struct dpu_hw_scaler3_de_cfg {
+ 	u32 enable;
+@@ -81,6 +82,7 @@
+ 	int16_t adjust_a[DPU_MAX_DE_CURVES];
+ 	int16_t adjust_b[DPU_MAX_DE_CURVES];
+ 	int16_t adjust_c[DPU_MAX_DE_CURVES];
++	uint32_t blend;
+ };
+ 
+ 
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_util.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_hw_util.c
+@@ -67,6 +67,8 @@
+ #define QSEED3LITE_COEF_LUT_CTRL              0x4C
+ #define QSEED3LITE_COEF_LUT_SWAP_BIT          0
+ #define QSEED3LITE_DIR_FILTER_WEIGHT          0x60
++#define QSEED3_DE_LPF_BLEND                   0x64
++#define QSEED3_DEFAULT_DE_LPF_BLEND    0x3FF00000
+ #define QSEED3LITE_FILTERS                 2
+ #define QSEED3LITE_SEPARABLE_LUTS             10
+ #define QSEED3LITE_LUT_SIZE                   33
+@@ -256,7 +258,8 @@
+ 
+ 	sharp_ctl = ((de_cfg->limit & 0xF) << 9) |
+ 		((de_cfg->prec_shift & 0x7) << 13) |
+-		((de_cfg->clip & 0x7) << 16);
++		((de_cfg->clip & 0x7) << 16) |
++		((de_cfg->blend & 0xF) << 20);
+ 
+ 	shape_ctl = (de_cfg->thr_quiet & 0xFF) |
+ 		((de_cfg->thr_dieout & 0x3FF) << 16);
+@@ -326,8 +329,15 @@
+ 	if (scaler3_cfg->de.enable) {
+ 		_dpu_hw_setup_scaler3_de(c, &scaler3_cfg->de, scaler_offset);
+ 		op_mode |= BIT(8);
++		if (scaler_version >= 0x3000)
++			DPU_REG_WRITE(c, QSEED3_DE_LPF_BLEND + scaler_offset,
++				      QSEED3_DEFAULT_DE_LPF_BLEND);
+ 	}
+ 
++	if (scaler_version >= 0x2004)
++		DPU_REG_WRITE(c, QSEED3LITE_DIR_FILTER_WEIGHT + scaler_offset,
++			      scaler3_cfg->dir_weight & 0xFF);
++
+ 	if (scaler3_cfg->lut_flag) {
+ 		if (scaler_version < 0x2004)
+ 			_dpu_hw_setup_scaler3_lut(c, scaler3_cfg, scaler_offset);
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_plane.c
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_plane.c
+@@ -492,6 +492,38 @@
+ 	scale_cfg->lut_flag = 0;
+ 	scale_cfg->blend_cfg = 1;
+ 	scale_cfg->enable = 1;
++
++	/*
++	 * The direction filter and the detail enhancer only earn their power
++	 * when QSEED is really resampling. A rotated 1:1 RGB pipe keeps the
++	 * scaler on as a pass-through (see above) and must not be sharpened.
++	 *
++	 * The curve below is the hardware's own default working point: the
++	 * enhancer adds back the high-frequency detail a bilinear upscale
++	 * loses, with thr_quiet/thr_dieout holding it off flat and noisy
++	 * regions so it sharpens edges rather than grain.
++	 */
++	if (src_w != dst_w || src_h != dst_h) {
++		scale_cfg->dir_en = 1;
++		scale_cfg->dir_weight = 32;
++
++		scale_cfg->de.enable = 1;
++		scale_cfg->de.sharpen_level1 = 8;
++		scale_cfg->de.sharpen_level2 = 8;
++		scale_cfg->de.clip = 0;
++		scale_cfg->de.limit = 4;
++		scale_cfg->de.thr_quiet = 8;
++		scale_cfg->de.thr_dieout = 256;
++		scale_cfg->de.thr_low = 8;
++		scale_cfg->de.thr_high = 64;
++		scale_cfg->de.prec_shift = 2;
++		scale_cfg->de.blend = 0;
++		for (i = 0; i < DPU_MAX_DE_CURVES; i++) {
++			scale_cfg->de.adjust_a[i] = 112;
++			scale_cfg->de.adjust_b[i] = 0;
++			scale_cfg->de.adjust_c[i] = 0;
++		}
++	}
+ }
+ 
+ static void _dpu_plane_setup_pixel_ext(struct dpu_hw_scaler3_cfg *scale_cfg,

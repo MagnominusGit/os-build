@@ -1,0 +1,94 @@
+# qforge CI — the offline suites. See also .github/workflows/overlay.yml (the package pipeline).
+#
+# WHERE THE IMAGE BUILD LIVES: .github/workflows/image.yml, called by release-sdcard.yml and
+# release-bundle.yml. It used to be listed here as impossible, then as merely unwired; both old
+# blockers are gone (the lock pins overlay rows to their SOURCES rather than to bytes no clean runner
+# could reproduce, and an overlay build turned out to cost ~34 minutes on a native aarch64 runner
+# rather than the ~4h it costs emulated on a dev box). CI is the only thing that PUBLISHES a release
+# image, because the R2 and signing credentials live here — building one locally is supported.
+#
+# So this file covers the half that has always been cleanly CI-shaped: the offline suites. They are what
+# caught a broken RAUC backend, an unarmed slot after a failed install, and a signing self-test that
+# could have gone green while asserting nothing.
+#
+# NO SECRETS, ON PURPOSE. The signing job checks the committed keyring against the committed
+# release certificate — both public, so this runs on a fork's pull request with access to nothing.
+# The private half (does the signing KEY match that cert) announces itself as skipped here and runs
+# where a PKIDIR is mounted. Bundle signing still needs exactly ONE secret, the release key, scoped
+# to a protected environment rather than the repo; the CA key stays offline and never
+# reaches a runner, which is what the two-level PKI bought us.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A superseded push has nothing to tell us, and the signing job builds a container.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: offline suites (slot state, bootctl, post-install)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      # grub-common carries grub-editenv, and tests/test-install.sh SKIPS its strongest case
+      # without it: that our hand-rolled parts.env block is byte-identical to one GRUB's own tool
+      # writes. The suites otherwise inherit the runner's PATH, which is exactly how a check ends up
+      # asserting nothing on the only machine that runs it unattended. Install it so the case runs.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends grub-common
+      # 354 checks over the update path: the initramfs READS the slot state, qforge-bootctl
+      # WRITES it, and the post-install hook drives both while reformatting a partition. Pure
+      # shell against temp-dir sandboxes — no build, no container, no root, no device.
+      - run: make test
+
+  disk:
+    name: installer disk suites (select-target, carve)
+    runs-on: ubuntu-latest
+    # carve.sh lays real GPTs across every captured board fixture and re-reads each one back, so
+    # this is minutes rather than seconds — but it is still sgdisk on sparse files, not a build.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      # `make test-disk` runs these in qforge-build, which is where sgdisk and mtools already
+      # live for verify-image. CI does NOT do that: that image is the ~1 GB aarch64 cross-toolchain,
+      # and building it to get three apt packages is exactly the cost that moved the signing job off
+      # it. The suites need no root, no container and no device — only the tools — so install them.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gdisk mtools dosfstools
+      # 181 assertions over the two installer-only scripts that CHOOSE a stranger's disk and then
+      # DELETE partitions on it. They are driven off the REAL GPTs captured in
+      # docs/internal-storage.md, so a rule tightened for one board and broken for another is caught
+      # here. Run separately rather than through `make test-disk` so a failure names which one.
+      - run: tests/test-select-target.sh
+      - run: tests/test-carve.sh
+
+  signing:
+    name: RAUC signing self-test
+    runs-on: ubuntu-latest
+    # Builds build/Dockerfile's `signing` stage — rauc, openssl and mksquashfs over ubuntu:26.04,
+    # ~66 MB of apt payload — because the self-test signs real bundles and verifies them through
+    # the shipped system.conf. It used to build the FULL toolchain image for that, i.e. the aarch64
+    # cross-compiler, a foreign arm64 architecture, autotools, AutoGen and fontconfig, ~1.08 GB.
+    #
+    # That is why this job is no longer the slow one. It normally ran ~80s, essentially all docker
+    # build; on 2026-08-04 (run 30917187270) the identical build took 1739s on archive throughput
+    # alone and finished 61 seconds inside this timeout. The baseline was tolerable, the variance
+    # was not, and 94% of the payload driving it had nothing to do with what this job asserts.
+    #
+    # Still uncached, and now that is the right call rather than a deferral: there is little left
+    # to cache, and a cache would be one more thing that can be stale about a signing check.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      # Every case in here is a NEGATIVE — it feeds ota/rauc/verify-signing.sh a deliberately
+      # broken config or cert profile and requires it to go red. The failure mode of a check is
+      # not "it breaks", it is "it stays green while asserting nothing".
+      - run: make test-signing

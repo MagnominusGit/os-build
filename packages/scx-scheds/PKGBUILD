@@ -1,0 +1,185 @@
+# scx-scheds — sched_ext userspace schedulers, built FROM SOURCE via a qforge-owned PKGBUILD.
+# holo has no scx-scheds package at all, so there is no PKGBUILD to curl from the monorepo;
+# build-overlay.sh sees `pkgbuild_local` in source.pin and uses this checked-in recipe.
+#
+# sched_ext moves the scheduling policy into a BPF program loaded by a userspace binary. The
+# kernel side (CONFIG_SCHED_CLASS_EXT + the DEBUG_INFO_BTF chain it depends on) lives in
+# kernel/kernel.config; at attach time libbpf reads struct sched_ext_ops out of
+# /sys/kernel/btf/vmlinux, so a kernel built without BTF cannot run any of these.
+#
+# Which schedulers we build, and why not all of them:
+#   scx_lavd     — the point of the exercise. Latency-criticality aware, tuned for gaming
+#                  handhelds; traces futex calls to avoid lock-holder preemption.
+#   scx_bpfland  — interactive-workload fallback, in case lavd regresses on a title.
+#   scx_rusty    — general-purpose multi-domain fallback.
+# Everything else in the workspace is skipped. These three share almost all of their crate
+# graph, so the incremental cost over lavd alone is small — which is the deciding factor when
+# the whole build runs under arm64 qemu emulation. scxtop is deliberately NOT built: it drags
+# in a protobuf + TUI stack for interactive diagnostics that would meaningfully lengthen an
+# already-slow emulated build. Add it back to the -p list if it is ever wanted on-device.
+#
+# BPF objects are compiled by libbpf-cargo (clang + bpftool) against the vmlinux.h that upstream
+# vendors per-arch at scheds/vmlinux/arch/arm64/ — so the build does NOT need BTF from the host
+# kernel, only from the target kernel at runtime.
+#
+# To bump: edit pkgver + sha256sums, re-check services/scx.service and services/scx still exist
+# in the new tarball, and re-read the tarball's own kernel.config against kernel/kernel.config.
+
+pkgname=scx-scheds
+pkgver=1.1.3
+pkgrel=1
+pkgdesc="sched_ext userspace schedulers (scx_lavd and fallbacks)"
+url="https://github.com/sched-ext/scx"
+arch=(aarch64)
+license=(GPL-2.0-only)
+# LTO must stay off. holo's base-devel makepkg.conf enables it globally, and LTO over the static
+# archive libbpf-sys produces drops the libbpf symbols the build scripts need — the build dies
+# linking scx_arena's build script with `undefined symbol: bpf_linker__new` / `bpf_object__open_mem`
+# despite libbpf being installed. Arch's own scx-scheds carries the same `options=(!lto)`.
+options=(!lto)
+
+# Runtime deps, derived from what the three shipped binaries actually link — NOT from Arch's
+# recipe, which lists the whole upstream workspace's needs. The schedulers embed their BPF
+# skeletons at build time (libbpf-cargo links libbpf statically), so nothing here loads a BPF
+# object from disk or shells out to bpftool at runtime. Measured on the built tree: every one of
+# scx_{lavd,bpfland,rusty} NEEDs exactly libelf, libz, libgcc_s, libm, libc — and the only other
+# files the package ships are scx.service, etc/default/scx and a LICENSE, neither of which
+# references bpftool or jq.
+#
+# Dropping bpf is what makes this worth doing: `bpf` pulls binutils (an assembler and a linker)
+# and llvm-libs onto a sealed read-only root, ~220MB for a bpftool nothing invokes. protobuf,
+# libbpf, libseccomp and jq go the same way — declared upstream for scxtop and the loader, which
+# we do not build (see the header). makedepends below is untouched: the BUILD genuinely needs
+# bpftool, clang and llvm, and those live in the container, not on the image.
+depends=(
+  bash          # scx.service's ExecStart is `/bin/bash -c` (it expands the override env vars)
+  glibc
+  gcc-libs      # Arch's recipe says `libgcc`, which is not a package here
+  elfutils      # libelf.so; the soname-style `libelf.so` is not an installable target here
+  zlib          # libz.so.1, linked directly by all three binaries
+)
+makedepends=(
+  rust          # provides cargo
+  clang
+  llvm
+  llvm-libs
+  python
+  bpf           # bpftool, used by libbpf-cargo for skeleton generation
+  libbpf
+  elfutils
+  pkgconf
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('4dd6dd77ce1cdb9213f14339b17b9ba284e76055f866f6aede53f2488d838979')
+
+# The schedulers to build and install. Kept in one place so the -p flags and the install loop
+# below cannot drift apart.
+_scheds=(scx_lavd scx_bpfland scx_rusty)
+
+prepare() {
+  # build-overlay.sh runs makepkg with --skipinteg (it has to, for the patch sources it injects
+  # into other packages), so the sha256sums array above is never actually checked. Assert the
+  # tarball hash ourselves — otherwise the pin is decorative and this build silently trusts
+  # whatever GitHub served.
+  echo "${sha256sums[0]}  $srcdir/$pkgname-$pkgver.tar.gz" | sha256sum -c -
+
+  cd "scx-$pkgver"
+  # build-overlay.sh injects `patch -p1 < "$srcdir/<patch>"` for each source.pin `patches:` entry
+  # right here, after the first `cd`. Keep this `cd` as the first statement in prepare().
+
+  # rust-toolchain.toml pins channel=stable and asks for rustfmt+clippy. That file is a rustup
+  # feature and the `rust` package is not rustup, so plain cargo ignores it — but drop it anyway
+  # so a future rustup-based builder cannot try to download a toolchain mid-build.
+  rm -f rust-toolchain.toml
+
+  # Pre-fetch every crate now so build() can run --frozen: fetching is the one step that needs
+  # the network, and failing here gives a clearer error than failing deep in a compile.
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "scx-$pkgver"
+  export CARGO_TARGET_DIR=target
+
+  # Give the `disable_rustfmt` sentinel a real binary, or nothing here builds under emulation.
+  #
+  # scx_cargo tells libbpf-cargo to leave the generated skeletons unformatted by pointing its
+  # .rustfmt() at a command that deliberately does not exist ("disable_rustfmt", three call
+  # sites in rust/scx_cargo/src/bpf_builder.rs). libbpf-cargo spawns it, gets
+  # ErrorKind::NotFound, and returns the generated code untouched. That contract holds on a
+  # native host and breaks under x86 user-mode qemu: for a bare PATH-searched name,
+  # Command::spawn() there returns Ok even when nothing is found, the child immediately exits
+  # 127, and libbpf-cargo's write to its stdin hits EPIPE. That — not bpftool — is the
+  # `Failed to generate skeleton ... Broken pipe (os error 32)` that killed every BPF build
+  # script here; libbpf-cargo 0.26 generates skeletons in-process and never spawns bpftool.
+  #
+  # Measured in the pinned base-devel image under emulation:
+  #   spawn("disable_rustfmt") -> Ok, child exit 127, write_all -> BrokenPipe
+  # So supply a `disable_rustfmt` that IS spawnable and is an identity filter: copying stdin to
+  # stdout is exactly the "content left untouched" upstream asks for, so the skeletons come out
+  # byte-identical to a native build. Preferred over patching the three .rustfmt() call sites
+  # because it touches no upstream source and so survives a version bump unchanged. If upstream
+  # ever renames the sentinel the shim stops matching and the build fails loudly, as before.
+  #
+  # The shim MUST buffer the whole input before answering — a streaming `exec cat` deadlocks.
+  # libbpf-cargo write_all()s the entire skeleton into the child's stdin and only reads its
+  # stdout afterwards, in wait_with_output(). A filter that echoes as it reads therefore fills
+  # its stdout pipe with nobody draining it, blocks, stops draining stdin, and both sides wedge
+  # forever. That is not theoretical: `exec cat` got scx_arena/scx_bpfland/scx_rusty through
+  # (their skeletons are 119-146K, small enough to sit in the pipe buffers plus cat's own) and
+  # then hung scx_lavd for over an hour with the shim parked in anon_pipe_write — lavd links
+  # ~20 .bpf.o into one 22M object, so its skeleton dwarfs the others. Spooling to a temp file
+  # bounds the exchange: stdin is drained to EOF first, which lets write_all() return, and only
+  # then does the parent read a stdout nobody is still writing to.
+  mkdir -p "$srcdir/qemu-shim"
+  cat > "$srcdir/qemu-shim/disable_rustfmt" <<'SHIM'
+#!/bin/sh
+# Identity filter that fully consumes stdin before emitting stdout (see PKGBUILD build()).
+set -e
+t="$(mktemp)"
+trap 'rm -f "$t"' EXIT
+cat > "$t"
+cat "$t"
+SHIM
+  chmod 0755 "$srcdir/qemu-shim/disable_rustfmt"
+  export PATH="$srcdir/qemu-shim:$PATH"
+
+  local args=()
+  local s
+  for s in "${_scheds[@]}"; do args+=(-p "$s"); done
+  cargo build --release --frozen "${args[@]}"
+}
+
+package() {
+  cd "scx-$pkgver"
+  local s
+  for s in "${_scheds[@]}"; do
+    install -Dm0755 "target/release/$s" "$pkgdir/usr/bin/$s"
+  done
+
+  install -Dm0644 services/scx.service "$pkgdir/usr/lib/systemd/system/scx.service"
+
+  # Upstream's services/scx defaults to scx_cosmos, which we do not build. Rewrite it to the
+  # scheduler we ship rather than shipping a config that names a missing binary. Left as a
+  # normal config file under /etc so it stays user-editable.
+  #
+  # SCX_FLAGS='--autopower' is what couples the scheduler to the power profile: lavd then polls
+  # PowerProfiles.ActiveProfile on the system bus once a second and switches its own
+  # performance/balanced/powersave mode live, with no unit restart. qforge-powerd answers that
+  # name (we ship no power-profiles-daemon) — see the PPD_NAMES block in
+  # rootfs/overlay/usr/bin/qforge-powerd for why both bus names exist and why ordering matters.
+  # Deliberately set HERE and not via a scx.service.d drop-in: upstream's ExecStart is
+  # `${SCX_FLAGS_OVERRIDE:-$SCX_FLAGS}`, so a drop-in would silently outrank a user's own edit to
+  # this file. Keeping it in the file means a user can see it and change it.
+  sed -e 's/^SCX_SCHEDULER=.*/SCX_SCHEDULER=scx_lavd/' \
+      -e 's|^# Set custom flags.*|# Flags for the scheduler above. --autopower makes scx_lavd follow the active power profile\n# (qforge-powerd answers PowerProfiles on the system bus); drop it to pin one mode by hand.|' \
+      -e "s/^#SCX_FLAGS=.*/SCX_FLAGS='--autopower'/" \
+      services/scx > "$srcdir/scx.default"
+  grep -q "^SCX_FLAGS='--autopower'$" "$srcdir/scx.default" ||
+    { echo "scx defaults file did not gain SCX_FLAGS; upstream services/scx changed shape" >&2; return 1; }
+  install -Dm0644 "$srcdir/scx.default" "$pkgdir/etc/default/scx"
+
+  install -Dm0644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
+
+# vim:set sw=2 sts=-1 et:

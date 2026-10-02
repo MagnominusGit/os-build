@@ -1,0 +1,69 @@
+#!/bin/bash
+# qforge device-env — emit QFORGE_* per-board facts for userspace consumers.
+#
+# Single runtime source of truth for the unified image: resolves the devicetree
+# model string to a profile conf layered over defaults.conf, then prints a fixed
+# set of QFORGE_* assignments (shell-quoted) on stdout. Consumers eval it:
+#     eval "$(/usr/lib/qforge/device-env)"
+#
+# qforge-powerd reads QFORGE_SOC_CLASS (underclock-table key); qforge-session
+# reads the panel/output block. Hardware truth still lives in the DTS — this only
+# re-exports the subset userspace needs plus knobs with no DTS home (fake-output-mm,
+# suspend mode). Panel orientation, rotation-shader and gamepad-quirk are
+# deliberately NOT carried: qforge uses upstream composite rotation (auto-engaged
+# off the connector) and a fixed InputPlumber config.
+set -euo pipefail
+
+device_dir=${QFORGE_DEVICE_DIR:-/usr/lib/qforge/devices}
+
+source "$device_dir/defaults.conf"
+
+model=${QFORGE_MODEL:-}
+if [[ -z "$model" ]]; then
+    model=$(tr -d '\0' </sys/firmware/devicetree/base/model 2>/dev/null || true)
+fi
+case "$model" in
+    "AYANEO Pocket ACE")         profile=ayaneo-pocket-ace ;;
+    "AYANEO Pocket DMG")         profile=ayaneo-pocket-dmg ;;
+    "AYANEO Pocket DS")          profile=ayaneo-pocket-ds ;;
+    "AYANEO Pocket EVO")         profile=ayaneo-pocket-evo ;;
+    "AYANEO Pocket S 1K")        profile=ayaneo-pocket-s1k ;;
+    "AYANEO Pocket S 2K")        profile=ayaneo-pocket-s2k ;;
+    "AYANEO Pocket S2")          profile=ayaneo-pocket-s2 ;;
+    "AYN Odin 2")                profile=ayn-odin-2 ;;
+    "AYN Odin 2 Mini")           profile=ayn-odin-2-mini ;;
+    "AYN Odin 2 Portal")         profile=ayn-odin-2-portal ;;
+    "AYN Thor")                  profile=ayn-thor ;;
+    "AYN Thor Lite")             profile=ayn-thor-lite ;;
+    "KONKR Pocket FIT")          profile=konkr-pocket-fit ;;
+    "MANGMI Pocket Max")         profile=mangmi-pocket-max ;;
+    "Retroid Pocket 5")          profile=retroid-pocket-5 ;;
+    "Retroid Pocket 6")          profile=retroid-pocket-6 ;;
+    "Retroid Pocket 6 TOP-DPAD") profile=retroid-pocket-6 ;;
+    "Retroid Pocket Flip2")      profile=retroid-pocket-flip2 ;;
+    "Retroid Pocket Mini")       profile=retroid-pocket-mini ;;
+    "Retroid Pocket Mini V2")    profile=retroid-pocket-mini-v2 ;;
+    "Retroid Pocket Nova")       profile=retroid-pocket-nova ;;
+    *)                           profile= ;;
+esac
+
+if [[ -n "$profile" && -r "$device_dir/$profile.conf" ]]; then
+    source "$device_dir/$profile.conf"
+fi
+
+vars=(
+    QFORGE_DEVICE_ID
+    QFORGE_DEVICE_NAME
+    QFORGE_SOC_CLASS
+    QFORGE_SUSPEND_MODE
+    QFORGE_PRIMARY_CONNECTOR
+    QFORGE_PANEL_TYPE
+    QFORGE_PANEL_NATIVE_WIDTH
+    QFORGE_PANEL_NATIVE_HEIGHT
+    QFORGE_PANEL_REFRESH_RATES
+    QFORGE_GAMESCOPE_FAKE_OUTPUT_MM
+)
+
+for var in "${vars[@]}"; do
+    printf '%s=%q\n' "$var" "${!var:-}"
+done

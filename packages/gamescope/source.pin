@@ -1,0 +1,47 @@
+# gamescope — built FROM SOURCE via a qforge-owned PKGBUILD (packages/gamescope/PKGBUILD),
+# NOT fetched from the holo monorepo. build-overlay.sh sees `pkgbuild_local` below and uses that
+# checked-in recipe instead of curl'ing one; makepkg still clones the upstream git source (the
+# gamescope tag + its submodules) named in it.
+#
+# This switched from the holo `pkgbuild_repo` fetch (was pinned at holo's 3.16.17-1) to a local
+# PKGBUILD carrying a newer gamescope (the version is the PKGBUILD's pkgver, which is the single
+# source of truth a bump edits). Reason: 3.16.17's Wayland explicit-sync
+# (linux-drm-syncobj) WSI present path intermittently deadlocks on the first frame on this HW,
+# wedging ~2/3 of cold session starts. We already rebuild gamescope from source for the
+# composite-rotation patch, so we bump the version here (same medicine as packages/mesa) rather than
+# carry a runtime workaround. See docs/bringup-phase2.md step 1e + the gamescope-flip-blocker
+# memory, and packages/README.md for the overlay mechanism.
+#
+# Why source-built at all: originally because the msm DPU cannot ROTATE_90 a LINEAR plane, so
+# gamescope had to rotate the portrait-native Pocket S2 panel in its GPU composite step. That patch
+# (our PR #2228) is UPSTREAM as of 3.16.28 and was dropped from `patches:` below — upstream
+# auto-engages composite rotation when the primary plane lacks the needed rotation bit, which is the
+# same condition our patch tested, so behaviour is unchanged and no launch flag is needed. We still
+# build from source for 0001-0017: 0001 reuses the freed number for --rotated-output-max-height,
+# which is what lets a panel WIDER than the DPU rotator's 1088-line cap keep scanout rotation (see
+# patches/README.md). 0002-0006 are ours, and 0007/0008 are third-party patches that
+# are not in any gamescope release.
+#
+# 0014 IS COUPLED TO THE KERNEL and the two must move together. It drives the DPU's CRTC CTM so a
+# directly scanned-out frame is still colour managed (night mode was silently dead on that path
+# once inline rotation made it reachable — HW-confirmed on Pocket FIT 2026-09-13). Setting a CTM
+# only works because kernel patch 0515 carries v3 7/8 of the SMMU series; without it the first CTM
+# re-reserves DPU resources without reprogramming the encoder, CTL_FLUSH is written with zero and
+# the display freezes. If 0515 is ever reverted to a set without 7/8, 0014 must come out in the
+# same commit.
+#
+# Fields:
+#   name           pkgname (must match the PKGBUILD); also the work/ build-dir + repo entry
+#   pkgbuild_local path (relative to this dir) to the checked-in PKGBUILD to build
+#   pkgrel_suffix  numeric suffix appended to the PKGBUILD's pkgrel (N -> N.<suffix>) so pacman
+#                  prefers our build over holo's binary. Integer only (makepkg requires
+#                  pkgrel = integer[.integer]).
+#   patches        space-separated files under ./patches/, applied `patch -p1` in the gamescope
+#                  source root (after `cd gamescope` in prepare()), in the order listed.
+#
+# To bump gamescope: edit pkgver in packages/gamescope/PKGBUILD, re-verify the patch applies against
+# the new tag (patch -p1 --dry-run on a shallow clone), and re-roll it only if a hunk fails.
+name: gamescope
+pkgbuild_local: PKGBUILD
+pkgrel_suffix: 1
+patches: 0001-drmbackend-rotated-output-max-height.patch 0002-sanitize-nightmode-atom.patch 0003-drmbackend-fake-output-mm.patch 0004-fps-limit-atom-persist.patch 0005-steamcontrolled-steam-focus-fallback.patch 0007-vendor-wayland-protocols-wrap.patch 0014-drm-color-manage-direct-scanout-via-the-dpu-ctm.patch 0015-color-p3-red-is-wide-gamut.patch 0016-steamcompmgr-arm64-virtual-white.patch 0017-color-neutral-virtual-white-keeps-scanout.patch 0018-drm-sdr-color-management-through-the-dpu-output-luts.patch 0019-rendervulkan-fragment-shader-composite.patch 0020-libliftoff-treat-enodev-as-no-fit.patch 0021-libliftoff-give-planes-the-layer-zpos.patch 0023-xdg-titles-are-reported-to-steam.patch

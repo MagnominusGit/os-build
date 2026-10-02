@@ -1,0 +1,319 @@
+# qforge mesa — built FROM SOURCE off the upstream release TARBALL (not a git clone, not the
+# holo binary repo). This tracks the stock Arch/holo mesa recipe AS CLOSELY AS POSSIBLE so the
+# freedreno driver is built exactly the way upstream builds it; the ONLY deliberate deviations are:
+#   * driver selection      — gallium-drivers / vulkan-drivers narrowed to `freedreno` (qforge
+#                             only ever targets Qualcomm Adreno), which also drops every other
+#                             vulkan-*/opencl/docs split package and the NVK rust-crate machinery.
+#   * gallium-rusticl=false — no OpenCL on a handheld; avoids dragging the Rust toolchain + a
+#                             per-release rust-crate table that would need regenerating each bump.
+#   * html-docs=disabled    — no Sphinx HTML docs in the image.
+# Everything else (arch-meson invocation, --auto-features=enabled behaviour, the rest of the meson
+# options, the kept makedepends, and the package split for the components we DO build) mirrors
+# upstream. LLVM/clang stay ON, exactly as upstream ships mesa.
+#
+# packages/build-overlay.sh uses this via `pkgbuild_local` in packages/mesa/source.pin; the result
+# lands in the arch-scoped local pacman repo that customize-base.sh prepends ahead of the holo
+# repos, so this replaces holo's `mesa` and `vulkan-freedreno`. SM875x / a8xx enablement patches go
+# under packages/mesa/patches/ and are applied -p1 by build-overlay.sh (declared in source.pin).
+#
+# Maintainer: Laurent Carlier <lordheavym@gmail.com>   (upstream Arch mesa)
+# Maintainer: Felix Yan <felixonmars@archlinux.org>
+# Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+
+pkgbase=mesa
+pkgname=(
+  mesa
+  vulkan-freedreno
+  vulkan-mesa-device-select
+  vulkan-mesa-layers
+)
+pkgver=26.2.3
+_pkgver=${pkgver/[a-z]/-&}
+pkgrel=1
+epoch=1
+pkgdesc="Open-source OpenGL drivers (qforge freedreno-only build)"
+url="https://www.mesa3d.org/"
+arch=(aarch64)
+license=("MIT AND BSD-3-Clause AND SGI-B-2.0")
+makedepends=(
+  # Mirrors upstream makedepends, minus the Rust toolchain (rust, rust-bindgen, cbindgen — only
+  # needed by NVK/rusticl, both off) and Sphinx (python-sphinx, python-sphinx-hawkmoth — html-docs
+  # off). LLVM/clang/libclc/spirv-llvm-translator stay because arch-meson runs --auto-features=
+  # enabled and mesa-clc/llvm enable like they do upstream.
+  clang
+  directx-headers
+  expat
+  gcc-libs
+  glibc
+  libdisplay-info
+  libdrm
+  libelf
+  libglvnd
+  libpng
+  libva
+  libvdpau
+  libx11
+  libxcb
+  libxext
+  libxml2
+  libxrandr
+  libxshmfence
+  libxxf86vm
+  llvm
+  llvm-libs
+  lm_sensors
+  spirv-llvm-translator
+  spirv-tools
+  systemd-libs
+  vulkan-icd-loader
+  wayland
+  xcb-util-keysyms
+  zlib
+  zstd
+
+  cmake
+  elfutils
+  glslang
+  libclc
+  meson
+  python-mako
+  python-packaging
+  python-ply
+  python-pycparser
+  python-yaml
+  wayland-protocols
+  xorgproto
+
+  # mesa-only deps
+  libsysprof-capture
+  valgrind
+)
+options=(
+  # GCC LTO is considered broken by upstream until explicit notice.
+  !lto
+)
+source=(
+  "https://archive.mesa3d.org/mesa-$_pkgver.tar.xz"
+)
+# Provenance: sha256 of the tarball named in source= above. build-overlay.sh runs makepkg with
+# --skipinteg (our locally-added patch sources have no checksums), so this is recorded for human/CI
+# verification and matches the pinned URL+sha in packages/mesa/source.pin. The upstream .sig +
+# validpgpkeys are dropped (the pipeline does not do PGP verification).
+#
+# WHERE THIS HASH COMES FROM, because it is not self-evident and the obvious source does not exist:
+# mesa publishes NO .sha256sum next to the tarball — that URL 404s, and has at every bump so far.
+# The detached .sig is the only upstream integrity artifact, so the hash is computed locally from a
+# tarball whose signature verified. Do not believe a bump request claiming a `.sha256sum` sidecar
+# exists; check it yourself.
+#
+# EVERY BUMP, verify the .sig and check the issuer fingerprint against:
+#
+#   Eric Engestrom, 5755 1DE1 5B96 8F63 41C2 48F6 8D8E 31AF C324 28A6
+#
+# which has signed every mesa release this image has shipped and validated on hardware. Comparing
+# the signer against that reference is the load-bearing step: an unknown-trust "good signature" on
+# its own only proves the tarball matches whatever key came with it. A fingerprint that does NOT
+# match is not automatically an attack — mesa can rotate release managers, and hence signing keys,
+# at a branch bump — but it is a stop-and-establish-trust-out-of-band, not a hash to paste in.
+sha256sums=(
+  '1628058a8d2c0615975de5a15ab7bbb9638c50000b5bed9456ff423ea034a81f'
+)
+
+prepare() {
+  cd mesa-$_pkgver
+  # build-overlay.sh injects `patch -p1 < "$srcdir/<patch>"` lines right here (after the first
+  # `cd` in prepare()) for every file listed in source.pin's `patches:`. NOTE: unlike upstream we
+  # do NOT loop over source for *.patch here — the pipeline owns patch application.
+
+  # Include package release in the GL version string (matches upstream; helps clients invalidate
+  # GPU shader caches across rebuilds).
+  echo "$_pkgver-qforge$epoch.$pkgrel" >VERSION
+}
+
+# llvm=disabled is a SIZE decision with no functional cost here, and it is worth spelling out
+# because "mesa without LLVM" usually means "no software rendering". Not in this build:
+# llvmpipe and softpipe are gallium drivers, and `gallium-drivers=freedreno` above never selects
+# them — there is no swrast driver on the image to lose (usr/lib/dri/ holds only the dril loader).
+# What DID link libLLVM was gallium's `draw` module, which freedreno does not use: it is for
+# drivers that do vertex processing on the CPU. So the meson default (llvm=auto, enabled because
+# llvm-config exists in the builder) was dragging a 151MB JIT onto a sealed read-only root to
+# serve nothing. rusticl is already off for the same family of reasons.
+#
+# Consequence to keep in mind: with llvmpipe absent there is no CPU fallback if Turnip fails to
+# initialise — but that was already true before this flag, so it is not a regression.
+build() {
+  local meson_options=(
+    -D android-libbacktrace=disabled
+    -D b_ndebug=true
+    -D gallium-drivers=freedreno              # qforge: Adreno only (upstream builds every vendor)
+    -D gallium-extra-hud=true
+    -D gallium-mediafoundation=disabled
+    -D gallium-rusticl=false                  # qforge: no OpenCL (avoids LLVM/Rust crate chain)
+    -D gallium-va=disabled                    # qforge: no VA-capable driver in a freedreno build
+    -D gles1=disabled
+    -D html-docs=disabled                     # qforge: no Sphinx docs in the image
+    -D intel-rt=disabled                      # aarch64 (upstream disables on non-x86)
+    -D libunwind=disabled
+    -D llvm=disabled                          # qforge: nothing in this build uses it (see above)
+    -D microsoft-clc=disabled
+    -D sysprof=true
+    -D valgrind=enabled
+    -D video-codecs=all
+    -D vulkan-drivers=freedreno               # qforge: Turnip only
+    -D vulkan-layers=device-select,intel-nullhw,overlay,screenshot,vram-report-limit
+  )
+
+  # Build only minimal debug info to reduce size (matches upstream).
+  CFLAGS+=" -g1"
+  CXXFLAGS+=" -g1"
+
+  # Raise the ISA floor off the stock armv8-a baseline: fp16 and dotprod for the format-conversion
+  # and compiler paths, plus the implied armv8.1-a LSE atomics. Turnip's own runtime feature checks
+  # are unaffected — this only changes what the compiler may emit ahead of time.
+  # See "CPU baseline" in packages/README.md for the fleet floor and why i8mm is absent.
+  CFLAGS+=" -march=armv8.2-a+fp16+dotprod"
+  CXXFLAGS+=" -march=armv8.2-a+fp16+dotprod"
+
+  arch-meson mesa-$_pkgver build "${meson_options[@]}"
+  meson compile -C build
+}
+
+_pick() {
+  local p="$1" f d; shift
+  for f; do
+    d="$srcdir/$p/${f#"$pkgdir"/}"
+    mkdir -p "$(dirname "$d")"
+    mv -v "$f" "$d"
+    rmdir -p --ignore-fail-on-non-empty "$(dirname "$f")"
+  done
+}
+
+package_mesa() {
+  depends=(
+    expat
+    gcc-libs
+    glibc
+    libdrm
+    libelf
+    libglvnd
+    libx11
+    libxcb
+    libxext
+    libxshmfence
+    libxxf86vm
+    # llvm-libs deliberately absent — see the llvm=disabled note above build(). It must be
+    # dropped HERE too, not just from the meson options: a stale depends line would keep pacman
+    # installing the 151MB package for a libgallium that no longer NEEDs it.
+    lm_sensors
+    spirv-tools
+    wayland
+    zlib
+    zstd
+  )
+  optdepends=("opengl-man-pages: for the OpenGL API man pages")
+  provides=(
+    "libva-mesa-driver=$epoch:$pkgver-$pkgrel"
+    "mesa-libgl=$epoch:$pkgver-$pkgrel"
+    "mesa-vdpau=$epoch:$pkgver-$pkgrel"
+    libva-driver
+    opengl-driver
+    vdpau-driver
+  )
+  conflicts=(
+    'libva-mesa-driver<1:24.2.7-1'
+    'mesa-libgl<17.0.1-2'
+    'mesa-vdpau<1:24.2.7-1'
+  )
+  replaces=(
+    'libva-mesa-driver<1:24.2.7-1'
+    'mesa-libgl<17.0.1-2'
+    'mesa-vdpau<1:24.2.7-1'
+  )
+
+  meson install -C build --destdir "$pkgdir" --no-rebuild
+
+  (
+    local libdir=usr/lib icddir=usr/share/vulkan/icd.d
+
+    cd "$pkgdir"
+
+    # Split out only the components we build (freedreno Vulkan + the Vulkan layers); everything
+    # else stays in `mesa`. (Upstream also splits radeon/intel/nouveau/etc. — not built here.)
+    _pick vkfdreno $icddir/freedreno_icd.*.json
+    _pick vkfdreno $libdir/libvulkan_freedreno.so
+
+    _pick vkdevice $libdir/libVkLayer_MESA_device_select.so
+    _pick vkdevice usr/share/vulkan/implicit_layer.d
+
+    _pick vklayer $libdir/libVkLayer_*.so
+    _pick vklayer usr/bin/mesa-*-control.py
+    _pick vklayer usr/share/vulkan/explicit_layer.d
+
+    # indirect rendering
+    ln -sr $libdir/libGLX_{mesa,indirect}.so.0
+  )
+
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+}
+
+package_vulkan-freedreno() {
+  pkgdesc="Open-source Vulkan driver for Adreno GPUs (Turnip)"
+  depends=(
+    expat
+    gcc-libs
+    glibc
+    libdisplay-info  # Turnip's WSI/EDID path links libdisplay-info.so.3 (upstream lists this too);
+                     # without it the ICD fails to load and the loader reports "no drivers".
+    libdrm
+    libx11
+    libxcb
+    libxshmfence
+    spirv-tools
+    systemd-libs
+    vulkan-icd-loader
+    vulkan-mesa-device-select
+    wayland
+    xcb-util-keysyms
+    zlib
+    zstd
+  )
+  optdepends=("vulkan-mesa-layers: additional vulkan layers")
+  provides=(vulkan-driver)
+
+  mv vkfdreno/* "$pkgdir"
+
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+}
+
+package_vulkan-mesa-device-select() {
+  pkgdesc="Mesa's Vulkan Device Select layer"
+  depends=(
+    glibc
+    libdrm
+    libxcb
+    wayland
+  )
+
+  mv vkdevice/* "$pkgdir"
+
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+}
+
+package_vulkan-mesa-layers() {
+  pkgdesc="Mesa's Vulkan layers"
+  depends=(
+    gcc-libs
+    glibc
+    libpng
+
+    python
+  )
+  conflicts=(vulkan-mesa-layer)
+  replaces=(vulkan-mesa-layer)
+
+  mv vklayer/* "$pkgdir"
+
+  install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
+}
+
+# vim:set sw=2 sts=-1 et:

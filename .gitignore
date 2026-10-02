@@ -1,0 +1,104 @@
+# reference sources
+/_reference/
+/_ref/
+
+# Build outputs
+/out/
+/work/
+# build/ IS SOURCE, and everything under it is tracked. It holds the docker build context and the
+# seed fetcher — inputs, not outputs; nothing in the tree writes into it (outputs go to out/ and
+# work/, both ignored above).
+#
+# It used to carry `/build/*` with a lone `!/build/Dockerfile`, which was wrong in a way that hides
+# itself: an ignored path is skipped by a plain `git add` with NO error, so a new input added here
+# looks committed, is absent from the tree, and CI builds without it. Five files were tracked under
+# that rule anyway — .gitignore does not apply to already-tracked files — so the rule policed
+# nothing that existed and only sat waiting for the next new file. Removed rather than patched with
+# a negation per input, which would have been a list to keep in sync forever.
+#
+# The invariant, if this is ever reconsidered: `git ls-files | git check-ignore --stdin` must print
+# NOTHING. Anything it prints is a tracked file the next contributor cannot re-add.
+*.img
+*.img.*
+*.raw
+*.iso
+*.tar
+*.tar.*
+*.squashfs
+*.erofs
+*.caibx
+*.caidx
+*.castr/
+*.raucb
+
+# Pacman/devtools build artifacts
+*.pkg.tar.zst
+*.pkg.tar.xz
+src/
+pkg/
+/.makepkg/
+# ... but our own apps' SOURCE is repo content, not a makepkg build dir.
+# (An excluded directory's children cannot be re-included, so the dir itself is negated.)
+!/apps/qforge-splash/src/
+
+# The splash drawer's compiled output. Unlike build/ at the repo root, THIS build/ is an
+# artifact directory: `make splash` writes an aarch64 binary and the test suite writes a host
+# one beside it.
+/apps/qforge-splash/build/
+
+# Device-proprietary firmware, fetched on demand from the pinned Nova-Deck/qcom-firmwares
+# repo + verified against its sha256sums.txt (never committed here — only in that repo).
+/firmware/blobs/
+/firmware/qcom-fw/
+# Open linux-firmware blobs, fetched on demand + verified against firmware/LINUX_FW.pin
+/firmware/linux-fw/
+
+# Local Claude Code settings (keep .claude/plans/ tracked)
+/.claude/settings.local.json
+
+# Local secrets / signing material
+*.key
+*.pem
+cosign.key
+*.gpg
+/secrets/
+# ...with exactly ONE exception: the RAUC device keyring is a public CA CERTIFICATE, and it is
+# the thing every device trusts (it ships as /etc/rauc/keyring.pem). It has to be committed, or
+# what the image trusts is not reviewable. Private key material lives under out/pki -- covered
+# by /out/ above, and ota/gen-signing-ca.sh refuses to write a key anywhere else in the tree.
+# The negation works only because no parent directory of this path is itself excluded. Verify
+# with `git status --short`: the keyring must appear as `??` (untracked). Note `git check-ignore
+# -v` is NOT the check -- it prints this negation line and exits 0 for a file it does not ignore.
+!/ota/rauc/qforge-ca.pem
+# ...and ONE more, on the same reasoning: the release SIGNING certificate is public too (a cert is
+# what you hand out; the key is what you keep), and committing it is what lets CI prove the keyring
+# above is the CA behind the cert that signs releases -- a check that otherwise needs the private
+# key and therefore never runs on a push. A cert whose key we no longer hold ships a device that
+# rejects every future bundle, and nothing else in the repo can see that. Rotation becomes a commit,
+# which is an audit trail rather than a chore. Two negations is where this stops: every PEM under
+# ota/rauc/ is asserted to contain no PRIVATE KEY by tests/test-verify-signing.sh, so the
+# exception is policed by a test and not by care.
+!/ota/rauc/release.cert.pem
+# Dev-card Wi-Fi credentials for throwaway dev cards (QFORGE_DEV=1) — never committed.
+# ./dev.env IS tracked and holds no secrets; it sources this file when it exists. The split is
+# what lets a fresh clone run `set -a; . ./dev.env; set +a` with nothing to edit, while a PSK
+# never sits in a tracked file (where --skip-worktree would not survive a stash or a rebase).
+/dev.env.local
+
+# Editor / OS noise
+*.swp
+*~
+.DS_Store
+
+# Python bytecode. Nothing in rootfs/overlay/ is imported as a module at runtime — the clients are
+# executed — so a __pycache__ there only ever comes from a host-side test importing one of them.
+#
+# THIS RULE DOES NOT KEEP IT OUT OF AN IMAGE, which is what the comment here used to claim.
+# rootfs/overlay/ is injected with `cp -a` of the WORKING TREE (rootfs/assemble-rootfs.sh), and a copy
+# does not consult .gitignore — so v0.2.x dev cards shipped host-CPython 3.14 .pyc into an image
+# running 3.13, dead bytes the device can never load. Found on hardware 2026-08-10. The image is
+# kept clean by three other things: the suites redirect bytecode via PYTHONPYCACHEPREFIX, the
+# assembler prunes __pycache__ after the copy, and guard-rootfs.sh asserts none survived. This
+# rule only keeps the repo clean.
+__pycache__/
+*.pyc

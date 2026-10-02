@@ -1,0 +1,370 @@
+#!/usr/bin/env bash
+# Offline test for the remote-access path: /usr/bin/qforge-pairingd and its unit.
+#
+#   tests/test-pairingd.sh
+#
+# WHY THIS FILE EXISTS. The pairing agent listens on an unauthenticated port and its answer to a
+# single POST decides whether a stranger on the same Wi-Fi gets a shell on the device. Its
+# sharpest guarantee is the kind that reads as obviously true and fails silently: a submitted
+# line cannot carry authorized_keys options (command=, permitopen=) that would turn "install a
+# key" into "install a forced command". That is not observable on hardware without deliberately
+# attacking the device, so it is pinned here instead. The design intentionally has NO time window
+# — the daemon accepts keys for exactly as long as it runs (always, until the shell has a
+# remote-access switch) — so the unit's structural guarantees are pinned here too.
+#
+# Everything runs on the host with no root and no device: the agent is imported by path and its
+# one privileged effect (writing another account's home) is exercised against a scratch home.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DAEMON="$ROOT/rootfs/overlay/usr/bin/qforge-pairingd"
+UNIT="$ROOT/rootfs/overlay/usr/lib/systemd/system/qforge-pairingd.service"
+
+PASS=0; FAIL=0; SKIP=0; CASE=""
+ok()   { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
+bad()  { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
+skip() { SKIP=$((SKIP+1)); printf '  skip %s -- %s\n' "$CASE" "$1"; }
+
+for f in "$DAEMON" "$UNIT"; do
+  [ -f "$f" ] || { echo "missing: $f" >&2; exit 1; }
+done
+
+# --- 1. the agent: key parsing, key install, HTTP surface ----------------------------------------
+#
+# Driven from python because that is where the code is. The harness prints the same "ok"/"FAIL"
+# lines this script does and exits nonzero if any case failed, so the two tallies stay one report.
+CASE="agent"
+if ! command -v ssh-keygen >/dev/null 2>&1; then
+  skip "ssh-keygen not on PATH — cannot generate or validate test keys"
+else
+  # -B is load-bearing: importing the daemon by path writes __pycache__ NEXT TO IT, i.e. inside
+  # rootfs/overlay/usr/bin, which assemble-rootfs.sh copies wholesale into the image. Without this,
+  # running the tests silently bakes a stale .pyc of the pairing agent into the shipped rootfs.
+  agent_out="$(python3 -B - "$DAEMON" <<'PY'
+import importlib.machinery, importlib.util
+import json, os, pwd, stat, subprocess, sys, tempfile, threading, time
+import urllib.request, urllib.error
+
+daemon_path = sys.argv[1]
+spec = importlib.util.spec_from_loader(
+    "pairingd", importlib.machinery.SourceFileLoader("pairingd", daemon_path))
+pd = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(pd)
+
+P = F = 0
+def ok(m):
+    global P; P += 1; print(f"  ok   agent -- {m}")
+def bad(m):
+    global F; F += 1; print(f"  FAIL agent -- {m}")
+
+tmp = tempfile.mkdtemp()
+home = os.path.join(tmp, "home")
+os.makedirs(home)
+
+# Real keys, so validation is tested against the same tool that runs on the device.
+def genkey(kind="ed25519"):
+    p = os.path.join(tmp, f"k_{kind}_{time.time_ns()}")
+    subprocess.run(["ssh-keygen", "-q", "-t", kind, "-N", "", "-C", "tester@host", "-f", p],
+                   check=True)
+    return open(p + ".pub").read().strip()
+
+KEY = genkey()
+KEY2 = genkey()
+
+# --- key parsing -------------------------------------------------------------------------------
+if pd.parse_public_key(KEY.encode()) is not None:
+    ok("accepts a well-formed ed25519 public key")
+else:
+    bad("rejected a valid ed25519 public key")
+
+# The pairing clients append a marker after the comment; it must survive as a plain label.
+if pd.parse_public_key((KEY + " 900b919520e4cf601998a71eec318fec").encode()) is not None:
+    ok("accepts a key carrying a trailing client marker")
+else:
+    bad("rejected a key with a trailing client marker")
+
+# A key file written on Windows arrives CRLF-terminated. docs/remote-access.md promises that
+# works, so it is checked here rather than left as a claim.
+if pd.parse_public_key((KEY + "\r\n").encode()) is not None:
+    ok("accepts a CRLF-terminated key file")
+else:
+    bad("rejected a CRLF-terminated key — Windows pairing would fail")
+
+# THE ONE THAT MATTERS: authorized_keys options must never be smuggled in ahead of the key.
+for hostile, label in [
+    (f'command="/bin/sh" {KEY}',              "command= option prefix"),
+    (f'no-pty,permitopen="10.0.0.1:22" {KEY}', "permitopen option prefix"),
+    (f'environment="LD_PRELOAD=/tmp/x" {KEY}', "environment= option prefix"),
+]:
+    if pd.parse_public_key(hostile.encode()) is None:
+        ok(f"rejects {label}")
+    else:
+        bad(f"ACCEPTED {label} — a registration could install a forced command")
+
+if pd.parse_public_key((KEY + "\n" + KEY2).encode()) is None:
+    ok("rejects a body carrying two keys")
+else:
+    bad("accepted two keys in one registration")
+
+for junk, label in [
+    (b"", "empty body"),
+    (b"not a key at all", "non-key text"),
+    (b"\x00\x01\x02\xff", "binary garbage"),
+    (b"ssh-dss AAAAB3NzaC1kc3M= x", "disallowed key type"),
+    ("ssh-ed25519 not-actually-base64 c".encode(), "malformed key blob"),
+]:
+    if pd.parse_public_key(junk) is None:
+        ok(f"rejects {label}")
+    else:
+        bad(f"accepted {label}")
+
+parsed = pd.parse_public_key((KEY + " tab\there\x07bell").encode())
+if parsed is not None and "\t" not in parsed and "\x07" not in parsed:
+    ok("strips control characters from the comment field")
+else:
+    bad("comment field kept control characters")
+
+# --- key install -------------------------------------------------------------------------------
+# getpwnam is replaced so the test writes into a scratch home as the invoking user; ownership is
+# set to our own uid/gid, which is the same call the daemon makes as root.
+fake = pwd.struct_passwd((pd.SESSION_USER, "x", os.getuid(), os.getgid(), "", home, "/bin/sh"))
+pd.pwd.getpwnam = lambda n: fake if n == pd.SESSION_USER else (_ for _ in ()).throw(KeyError(n))
+
+akeys = os.path.join(home, ".ssh", "authorized_keys")
+if pd.install_key(pd.parse_public_key(KEY.encode())) and os.path.exists(akeys):
+    ok("installs the key into the session user's authorized_keys")
+else:
+    bad("did not install the key")
+
+m_dir = stat.S_IMODE(os.stat(os.path.join(home, ".ssh")).st_mode)
+m_file = stat.S_IMODE(os.stat(akeys).st_mode)
+if m_dir == 0o700 and m_file == 0o600:
+    ok("creates .ssh 0700 and authorized_keys 0600")
+else:
+    bad(f"wrong modes: .ssh={oct(m_dir)} authorized_keys={oct(m_file)} (sshd would refuse these)")
+
+pd.install_key(pd.parse_public_key(KEY.encode()))
+if open(akeys).read().count(KEY.split()[1]) == 1:
+    ok("re-registering the same key does not duplicate it")
+else:
+    bad("duplicate key appended on re-registration")
+
+# A pre-existing file with no trailing newline must not have its last key joined to the new one.
+with open(akeys, "w") as f:
+    f.write(KEY)
+pd.install_key(pd.parse_public_key(KEY2.encode()))
+lines = [l for l in open(akeys).read().splitlines() if l.strip()]
+if len(lines) == 2 and KEY.split()[1] in lines[0] and KEY2.split()[1] in lines[1]:
+    ok("appends without corrupting a file that lacked a trailing newline")
+else:
+    bad(f"append corrupted the file: {lines!r}")
+
+# --- HTTP surface --------------------------------------------------------------------------------
+def serve():
+    srv = pd.PairingServer(("127.0.0.1", 0), pd.PairingHandler)
+    threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.05},
+                     daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}"
+
+def req(url, data=None, method=None):
+    r = urllib.request.Request(url, data=data, method=method or ("POST" if data else "GET"))
+    try:
+        with urllib.request.urlopen(r, timeout=10) as resp:
+            return resp.status, resp.read().decode()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()
+
+srv, base = serve()
+
+code, body = req(base + "/login-name")
+if code == 200 and body.strip() == pd.SESSION_USER:
+    ok("GET /login-name names the session account")
+else:
+    bad(f"GET /login-name returned {code} {body!r}")
+
+# There is no window: if the daemon answers at all, it is accepting keys, so /status is always
+# open. (A closed daemon is a closed port, which the client sees as connection-refused instead.)
+code, body = req(base + "/status")
+if code == 200 and json.loads(body)["pairing_open"] is True:
+    ok("GET /status reports pairing open while the daemon runs")
+else:
+    bad(f"GET /status returned {code} {body!r}")
+
+code, _ = req(base + "/nope")
+if code == 404:
+    ok("unknown path is 404")
+else:
+    bad(f"unknown path returned {code}")
+
+os.remove(akeys)
+code, body = req(base + "/register", data=KEY.encode())
+if code == 200 and os.path.exists(akeys):
+    ok("a registration installs the key")
+else:
+    bad(f"registration: {code} {body!r} installed={os.path.exists(akeys)}")
+
+# A hostile line must install nothing — the key install is the only privileged effect now, so
+# "did it install?" is the whole question.
+os.remove(akeys) if os.path.exists(akeys) else None
+code, _ = req(base + "/register", data=b"command=\"/bin/sh\" " + KEY.encode())
+if code == 400 and not os.path.exists(akeys):
+    ok("a rejected key installs nothing")
+else:
+    bad(f"rejected key still wrote a file (code={code}, installed={os.path.exists(akeys)})")
+
+code, _ = req(base + "/register", data=b"x" * (pd.MAX_BODY_BYTES + 1))
+if code == 400:
+    ok("oversized body is refused")
+else:
+    bad(f"oversized body returned {code}")
+
+srv.shutdown()
+
+print(f"__TALLY__ {P} {F}")
+sys.exit(1 if F else 0)
+PY
+)"
+  agent_rc=$?
+  # Reprint the harness's lines, then fold its tally into ours.
+  printf '%s\n' "$agent_out" | grep -v '^__TALLY__' || true
+  tally="$(printf '%s\n' "$agent_out" | sed -n 's/^__TALLY__ //p')"
+  if [ -n "$tally" ]; then
+    PASS=$((PASS + ${tally%% *}))
+    FAIL=$((FAIL + ${tally##* }))
+  else
+    bad "agent harness did not report a tally (rc=$agent_rc) — it crashed before finishing"
+  fi
+fi
+
+# --- 2. the unit: structural guarantees ----------------------------------------------------------
+CASE="unit"
+# Always on until the shell has a remote-access switch: enabled at boot, by preset AND by the
+# committed wants symlink (the preset alone is lost if preset-all does not run).
+if grep -q '^WantedBy=multi-user.target' "$UNIT"; then
+  ok "unit is WantedBy=multi-user.target — pairing runs from boot"
+else
+  bad "unit has no WantedBy=multi-user.target: pairing would not start at boot"
+fi
+if grep -qx 'enable qforge-pairingd.service' "$ROOT/rootfs/overlay/usr/lib/systemd/system-preset/60-qforge-pairingd.preset" 2>/dev/null \
+   && [ -L "$ROOT/rootfs/overlay/etc/systemd/system/multi-user.target.wants/qforge-pairingd.service" ]; then
+  ok "preset + wants symlink both enable pairingd"
+else
+  bad "pairingd is missing its preset or its multi-user.target.wants symlink"
+fi
+
+# Restart=on-failure keeps the running daemon matching the switch after a crash; a clean stop by
+# the switch helper is not a failure, so --disable still stops it for good. (The old Restart=no
+# existed only to protect a time window that no longer exists.)
+if grep -qE '^Restart=on-failure[[:space:]]*$' "$UNIT"; then
+  ok "Restart=on-failure — a crash does not leave the switch showing on with the port shut"
+else
+  bad "unit is not Restart=on-failure: a crash would silently drop pairing while the switch shows on"
+fi
+
+# WITHDRAWAL IS THE LOAD-BEARING HALF, and it has to be in the unit rather than in the daemon.
+# Measured on a Pocket ACE (systemd 258): a resolved DNS-SD registration is NOT bound to the
+# caller's bus connection, so the daemon exiting does not retract it -- the advert stays live and
+# the object stays on the bus. ExecStopPost runs however the daemon ends, which is the only way
+# to honour "a device that is not in pairing mode does not announce a pairing port".
+if grep -qE '^ExecStopPost=.*UnregisterService' "$UNIT"; then
+  ok "withdraws its network advertisement on stop"
+else
+  bad "unit leaves its advertisement published after it stops — a closed port stays advertised"
+fi
+
+# THE CROSS-FILE COUPLING. resolved derives the registration's object path from the service id by
+# escaping it ('-' -> '_2d'), so the id in the daemon fixes the path the unit must unregister.
+# Nothing at runtime notices a mismatch: registration succeeds, withdrawal silently addresses an
+# object that does not exist, and the advert outlives the switch. Derive the path here rather
+# than spelling it out, so this fails when either side moves.
+sid="$(sed -n 's/^DNSSD_SERVICE_ID = "\(.*\)"$/\1/p' "$DAEMON")"
+if [ -z "$sid" ]; then
+  bad "cannot read DNSSD_SERVICE_ID from the daemon — the unit's unregister path cannot be checked"
+else
+  # systemd escapes any non-alphanumeric byte as _<hex>; the id only ever contains [a-z-] here.
+  escaped="$(printf '%s' "$sid" | sed 's/-/_2d/g')"
+  want="/org/freedesktop/resolve1/dnssd/$escaped"
+  # Read the path back OUT of the unit and compare exactly, rather than grepping for the expected
+  # one: a substring match passes when the id is a PREFIX of what the unit unregisters (shortening
+  # 'qforge-pairing' to 'qforge-pair' still "matched"), which is precisely the drift this
+  # guards and the loosest possible spelling of it.
+  have="$(sed -n 's|^ExecStopPost=.*UnregisterService o \([^ ]*\).*|\1|p' "$UNIT")"
+  if [ "$have" = "$want" ]; then
+    ok "the unit unregisters the object path DNSSD_SERVICE_ID ('$sid') actually produces"
+  else
+    bad "the unit unregisters '$have' but DNSSD_SERVICE_ID ('$sid') produces '$want' — the advert would survive the switch"
+  fi
+  # The daemon derives the same path for its own take-over call below, so the escaping must agree
+  # with the literal in the unit. Run the daemon's function rather than re-implementing it.
+  # The daemon guards its entry point with `if __name__ == "__main__"`, so executing the module
+  # body under any other name defines its functions and starts nothing.
+  derived="$(python3 -c "
+ns = {'__name__': 'pairingd'}
+exec(open('$DAEMON').read(), ns)
+print(ns['dnssd_object_path']())
+" 2>/dev/null)"
+  if [ "$derived" = "$want" ]; then
+    ok "the daemon derives the same object path the unit spells out"
+  else
+    bad "the daemon derives '$derived' but the unit unregisters '$want' — a crashed instance's registration would never be cleared"
+  fi
+fi
+
+# THE CRASH-RESTART PATH, and it took hardware to find. systemd does NOT run ExecStopPost on the
+# Restart= auto-restart path -- measured on a dev card (systemd 258) with an ExecStopPost probe
+# that logged on `systemctl restart` and did NOT log between a SIGKILL and the restart it
+# triggered. So the replacement instance meets its predecessor's registration still in place, and
+# a plain RegisterService fails DnssdServiceExists: the advert survives, but owned by nothing, and
+# the daemon that is actually listening believes it failed to advertise. Restart=on-failure is the
+# whole reason this daemon survives a crash, so it must not be the path that loses the advert.
+if grep -q 'UnregisterService' "$DAEMON"; then
+  ok "the daemon clears a previous instance's registration before registering its own"
+else
+  bad "the daemon only registers: after a crash-restart RegisterService fails DnssdServiceExists and the advert is orphaned"
+fi
+
+# The advertisement must never decide whether remote access works. It shipped once as a FATAL
+# ExecStartPre writing into /etc under ProtectSystem=full -- which mounts /etc read-only -- so
+# the install failed EROFS and took the entire pairing path down with it: port closed, on-screen
+# switch apparently dead, and no way to see why on a device with no shell and no serial console.
+# Publishing is inside the daemon now, so the two halves are asserted where they each live.
+if grep -qE '^ExecStopPost=-' "$UNIT"; then
+  ok "withdrawing the advertisement is non-fatal — it cannot block a clean stop"
+else
+  bad "ExecStopPost is fatal: a failed withdrawal would make stopping the agent fail"
+fi
+if grep -q 'log(f"could not advertise' "$DAEMON"; then
+  ok "publishing the advertisement is non-fatal — it cannot block pairing"
+else
+  bad "the daemon does not swallow an advertisement failure: mDNS trouble would stop key delivery"
+fi
+
+# Publishing writes nothing now, so the carve-out that used to let it write /etc/avahi must be
+# gone -- a stale ReadWritePaths is standing write access to /etc that nothing needs.
+if grep -qE '^ReadWritePaths=' "$UNIT"; then
+  bad "unit still grants ReadWritePaths: registering over D-Bus needs no write access to /etc"
+else
+  ok "no /etc write access: the advertisement costs the unit no ReadWritePaths at all"
+fi
+
+# avahi was the second mDNS stack on 5353 and the point of the change is that nothing pulls it in
+# any more. Matched on DIRECTIVES, not on the word: both files explain in prose why avahi is gone,
+# and that prose is the reason the next person does not re-add it. What actually reintroduces the
+# daemon is an ordering/dependency line or an Exec line naming it, either of which is invisible in
+# behaviour until two responders are back on the wire.
+if grep -qE '^(Wants|Requires|Requisite|BindsTo|PartOf|After|Before|Exec[A-Za-z]*)=.*avahi' "$UNIT"; then
+  bad "a unit directive names avahi again — that puts a second responder on 5353: $(grep -nE '^[A-Za-z]+=.*avahi' "$UNIT" | head -1)"
+else
+  ok "no unit directive pulls avahi in"
+fi
+
+# The service file publishing was moved off. Left in the overlay it is dead weight that reads as
+# live configuration, and it is the thing an ExecStartPre would be re-pointed at.
+if [ -e "$ROOT/rootfs/overlay/usr/share/qforge/pairing.avahi-service" ]; then
+  bad "pairing.avahi-service is still in the overlay — publishing moved to the resolve1 bus, nothing reads that file"
+else
+  ok "the avahi service file is gone from the overlay"
+fi
+
+printf '\n%s: %d passed, %d failed, %d skipped\n' "$(basename "$0")" "$PASS" "$FAIL" "$SKIP"
+[ "$FAIL" -eq 0 ]

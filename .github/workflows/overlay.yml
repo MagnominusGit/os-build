@@ -1,0 +1,188 @@
+# qforge overlay package pipeline — prove the from-source packages still compile.
+#
+# WHAT THIS IS FOR. `make overlay` rebuilds ~8 holo packages from source with our patches. A change
+# to a source.pin, a patch, or a PKGBUILD can break one of those builds, and without this the first
+# thing that notices is a release build — 30 minutes in, hours after the change landed. So: build the
+# packages a pull request actually touched, and nothing else.
+#
+# IT PUBLISHES NOTHING, AND THAT IS THE DESIGN. This used to be a build-once-and-cache pipeline: it
+# pushed every package to GHCR keyed by packages/inputhash.sh, opened a bot PR carrying each
+# artifact's sha256 into packages/*/artifact.pin, and a release build verified those bytes. All of
+# that was sized against the DEV BOX cost of an overlay build — ~4h for the set under arm64
+# emulation — on the assumption CI would pay the same.
+#
+# IT DOES NOT. MEASURED on ubuntu-24.04-arm (run 30490159103), which is real aarch64 and never
+# registers qemu:
+#
+#     sddm 5m   mesa 5m   gamescope 4m   scx-scheds 4m   mangohud 3m   rauc 1m
+#
+# well under 30 minutes for the WHOLE set, serially, against a release card build that already runs 33-41
+# minutes and has a 350-minute budget. The store was buying half an hour and charging ~1300 lines, two
+# PATs, and a bot with write access to main. It was retired 2026-08-04; a release build now compiles
+# the overlay in-run from the sources in the commit it is building (.github/workflows/image.yml), and
+# a dev keeps the per-package input-hash cache build-overlay.sh has always maintained under
+# work/repo/<arch>/.stamps/. If someone proposes reintroducing a cache, the numbers above are the
+# thing to re-measure first.
+#
+# WHY NATIVE ARM. The dev box compiles these under qemu; these runners are real aarch64, so
+# build-overlay.sh's own binfmt probe passes and it never registers qemu or asks for --privileged.
+# The indirection through vars.OVERLAY_RUNNER is the escape hatch if a hosted runner turns out too
+# slow. Do NOT point it at a self-hosted runner while this repo is public.
+#
+# FORK PULL REQUESTS RUN THIS FINE. Nothing here needs a credential — no registry, no write token,
+# `contents: read` and no secrets at all — so a fork's read-only token is sufficient.
+#
+# NOT TRIGGERED BY A PUSH TO main, deliberately: a PR already built what it changed, and a
+# direct-to-main package edit is caught by the next release build. Use workflow_dispatch to force a
+# pass over a branch that never saw a PR.
+name: overlay packages
+
+on:
+  pull_request:
+    paths:
+      - 'packages/*/source.pin'
+      - 'packages/*/patches/**'
+      - 'packages/*/PKGBUILD'
+      - 'packages/build-overlay.sh'
+      - 'packages/inputhash.sh'
+      - 'build/builder.pin'
+      - 'build/snapshot.pin'
+      - 'build/lib-pins.sh'
+      - '.github/workflows/overlay.yml'
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: 'Space-separated package names to build (empty = all)'
+        required: false
+        default: ''
+
+# A superseded push means the sources moved; there is no published state to corrupt, so cancelling
+# mid-flight only ever loses compute.
+concurrency:
+  group: overlay-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Cheap, and x86 on purpose: this only reads committed files and a git diff.
+  plan:
+    name: what changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      any: ${{ steps.plan.outputs.any }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The base ref has to be present to diff against, and a PR of any depth can move a package.
+          fetch-depth: 0
+
+      # BEFORE anything is compiled. This is the same comparison over the same two committed inputs
+      # that `make test` runs — see packages/verify-lock-rows.sh for why it needs no repo — and it
+      # takes about a second. Duplicated on purpose: `ci` triggers on paths this workflow ignores, so
+      # it catches a commit touching only rootfs/manifest.lock; this copy keeps the expensive
+      # pipeline self-guarding rather than dependent on a sibling workflow having already gone red.
+      - name: lock rows still name the sources in packages/
+        run: packages/verify-lock-rows.sh
+
+      # Every ${{ }} value reaches the shell as an ENVIRONMENT VARIABLE, never spliced into the
+      # script text. PACKAGES is operator-supplied (workflow_dispatch), so splicing it would be a
+      # command-injection hole; the others are ours, but the rule is only useful if it is absolute.
+      - id: plan
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          PACKAGES: ${{ inputs.packages || '' }}
+        run: |
+          set -euo pipefail
+
+          # dir -> the name build-overlay.sh --only matches on. They are equal for every package
+          # today, but the pin's `name:` field is what the builder keys off (and what
+          # verify-lock-rows.sh reads), so derive it rather than assuming the directory name.
+          declare -A NAMEOF=()
+          for pin in packages/*/source.pin; do
+            d="$(dirname "$pin")"
+            n="$(sed -n 's/^name:[[:space:]]*//p' "$pin" | head -1)"
+            [ -n "$n" ] || { echo "::error::$pin: missing name"; exit 1; }
+            NAMEOF["$d"]="$n"
+          done
+          # Only these dirs are compiled here. packages/inputplumber carries a
+          # prebuilt.pin and no sources, so there is nothing to build for them.
+          [ ${#NAMEOF[@]} -gt 0 ] || { echo "::error::no packages/*/source.pin found"; exit 1; }
+
+          all() { printf '%s\n' "${NAMEOF[@]}"; }
+
+          sel=""
+          why=""
+          if [ -n "${PACKAGES:-}" ]; then
+            # Validate against the tree rather than trusting the operator's spelling: a typo must be
+            # an error, not a silently empty build set.
+            for want in $PACKAGES; do
+              found=""
+              for d in "${!NAMEOF[@]}"; do [ "${NAMEOF[$d]}" = "$want" ] && found=1; done
+              [ -n "$found" ] || { echo "::error::no such package: $want"; exit 1; }
+              sel+="$want"$'\n'
+            done
+            why="requested by hand"
+          elif [ -z "${BASE_REF:-}" ]; then
+            # A dispatch with no list. Unknown scope must WIDEN the check, never silence it.
+            sel="$(all)"
+            why="no diff base (dispatch) — building everything"
+          else
+            changed="$(git diff --name-only "origin/$BASE_REF...HEAD")"
+            # A change to the builder itself, the hash formula, or the container it builds in can
+            # break any package, so it selects all of them.
+            if printf '%s\n' "$changed" | grep -qE '^(packages/build-overlay\.sh|packages/inputhash\.sh|build/builder\.pin|build/snapshot\.pin|build/lib-pins\.sh)$'; then
+              sel="$(all)"
+              why="the builder or its base image moved — building everything"
+            else
+              for d in "${!NAMEOF[@]}"; do
+                printf '%s\n' "$changed" | grep -q "^$d/" && sel+="${NAMEOF[$d]}"$'\n'
+              done
+              why="changed since origin/$BASE_REF"
+            fi
+          fi
+
+          sel="$(printf '%s' "$sel" | sed '/^$/d' | sort -u)"
+          n=$(printf '%s' "$sel" | grep -c . || true)
+          m=$(printf '%s' "$sel" | jq -R . | jq -sc '{pkg: .}')
+          echo "matrix=$m" >> "$GITHUB_OUTPUT"
+          # `any` drives the build job's `if`. An empty selection is a legitimate outcome (a PR that
+          # only touches a prebuilt.pin, say) but GitHub still schedules a matrix job for an empty
+          # list unless it is gated, and an empty-list job fails rather than skipping.
+          echo "any=$([ "$n" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "$n package(s) to build — $why" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "$m" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: build ${{ matrix.pkg }}
+    needs: plan
+    if: needs.plan.outputs.any == 'true'
+    runs-on: ${{ vars.OVERLAY_RUNNER || 'ubuntu-24.04-arm' }}
+    # 90, not the 360 this carried while it was sized for emulated builds: the slowest package
+    # measured ~5 minutes natively. A job approaching this limit means something regressed
+    # badly enough to be worth failing over rather than waiting out.
+    timeout-minutes: 90
+    strategy:
+      # One package failing must not cancel the others: they are independent builds (each already
+      # runs in its own fresh container, deliberately — a shared one once poisoned sddm's Qt6
+      # resolution), and knowing which ones ALSO break is the useful part of a red run.
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Same builder-tarball cache as image.yml's build job; lib-pins.sh re-verifies the sha256.
+      - uses: actions/cache@v6
+        with:
+          path: work/builder
+          key: builder-${{ hashFiles('build/builder.pin') }}
+
+      # --no-index because the repo db is rebuilt from scratch over EVERYTHING present, and this
+      # job holds one package. Nothing consumes this build — it exists to go red.
+      - name: build
+        env:
+          PKG: ${{ matrix.pkg }}
+        run: packages/build-overlay.sh --only "$PKG" --no-index

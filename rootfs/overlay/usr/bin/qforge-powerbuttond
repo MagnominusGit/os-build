@@ -1,0 +1,52 @@
+#!/bin/sh
+# qforge-powerbuttond — power-key dispatcher. logind is told to ignore the key (logind.conf.d
+# 10-qforge-powerkey.conf) so it neither suspends nor powers off, leaving this daemon the ONLY
+# handler while awake. Short press -> QFORGE_POWER_SHORT_CMD (default: a logind suspend, which
+# lands in qforge-suspend's fake-suspend); long hold -> QFORGE_POWER_LONG_CMD (default: power
+# off). The shell can replace either through /etc/qforge/rest.conf once it draws its own power menu.
+#
+# Runs as a ROOT system service: it reads the power-key evdev directly (no session-ACL dependency).
+# While asleep qforge-suspend holds an EXCLUSIVE grab on the power key, so this daemon sees no
+# events then and cannot bounce the device back into suspend on resume.
+set -u
+
+CONF=/etc/qforge/rest.conf
+[ -r "$CONF" ] && . "$CONF"
+: "${QFORGE_WAKE_KEY:=KEY_POWER}"
+: "${QFORGE_WAKE_LONGPRESS_MS:=1000}"  # hold >= this -> long action; shorter -> short action. 0 = always short.
+: "${QFORGE_WAKE_DEBOUNCE:=2}"         # seconds to ignore repeat presses after one fires
+: "${QFORGE_POWER_SHORT_CMD:=systemctl suspend}"
+: "${QFORGE_POWER_LONG_CMD:=systemctl poweroff}"
+
+command -v libinput >/dev/null 2>&1 || { echo "qforge-powerbuttond: libinput missing" >&2; exit 1; }
+
+now_ms() { date +%s%3N; }
+
+# Word-split on purpose: the commands are "program arg..." strings from the config.
+# shellcheck disable=SC2086
+run_action() { $1 >/dev/null 2>&1 || echo "qforge-powerbuttond: '$1' failed" >&2; }
+
+echo "qforge-powerbuttond: $QFORGE_WAKE_KEY short -> '$QFORGE_POWER_SHORT_CMD', long (${QFORGE_WAKE_LONGPRESS_MS}ms) -> '$QFORGE_POWER_LONG_CMD'" >&2
+last=0; have_press=0; press_ms=0
+# Watch all seat0 devices (the power key is not on a fixed node) and time it pressed->released, deciding
+# short-vs-long on release; the action is dispatched in the BACKGROUND so a slow command never stalls
+# the read loop (and the hold timing). stdbuf -oL forces line-buffering (piped libinput block-buffers).
+stdbuf -oL libinput debug-events 2>/dev/null | while IFS= read -r line; do
+  case "$line" in
+    *"$QFORGE_WAKE_KEY"*pressed*)  press_ms=$(now_ms); have_press=1 ;;
+    *"$QFORGE_WAKE_KEY"*released*)
+      [ "$have_press" = 1 ] || continue
+      held=$(( $(now_ms) - press_ms )); have_press=0
+      now=$(date +%s)
+      [ $((now - last)) -lt "$QFORGE_WAKE_DEBOUNCE" ] && continue
+      last=$now
+      if [ "$QFORGE_WAKE_LONGPRESS_MS" -gt 0 ] && [ "$held" -ge "$QFORGE_WAKE_LONGPRESS_MS" ]; then
+        echo "qforge-powerbuttond: held ${held}ms -> long action" >&2
+        ( run_action "$QFORGE_POWER_LONG_CMD" ) &
+      else
+        echo "qforge-powerbuttond: tap ${held}ms -> short action" >&2
+        ( run_action "$QFORGE_POWER_SHORT_CMD" ) &
+      fi
+      ;;
+  esac
+done

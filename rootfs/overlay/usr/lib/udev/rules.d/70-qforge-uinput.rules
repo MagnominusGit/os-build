@@ -1,0 +1,11 @@
+# qforge uinput access — let the session create virtual input devices.
+#
+# The shell and emulators open /dev/uinput to inject virtual controllers and hotkeys. On the RO
+# root that node defaults to root:root 0600, so any of them fails with "Couldn't open /dev/uinput
+# for writing" — the game renders but takes no virtual input.
+#
+# Grant group `input` (the session user is already a member) read+write on the node.
+# static_node= applies the perms to the statically-created node BEFORE anything
+# opens it, so the first launch after boot already has access (a plain rule only
+# fires on a uevent, which uinput — a misc device — may not emit in time).
+SUBSYSTEM=="misc", KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"

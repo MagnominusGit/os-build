@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# qforge overlay input hash — the one definition of "which sources is this package built from".
+#
+#   packages/inputhash.sh <package-dir>     # e.g. packages/mesa
+#
+# Prints a 64-char hex digest of the package's COMMITTED build inputs: its source.pin, the
+# patches the pin declares, the local PKGBUILD if it has one, and the builder pin (see below).
+# Everything makepkg fetches is downstream of these (the pin carries pkgbuild_ref, a local PKGBUILD
+# carries pkgver + the upstream source's own sha256sums), so hashing them pins the build.
+#
+# SIX CALLERS, ONE FORMULA, and they have to agree or the build breaks in confusing ways:
+#
+#   packages/build-overlay.sh   incremental-rebuild cache key (work/repo/<arch>/.stamps/<n>.hash)
+#   rootfs/genmanifest.sh       writes it into rootfs/manifest.lock as the `qforge` rows' pin
+#   rootfs/fetchlock.sh         re-derives it and refuses the install when the lock disagrees
+#   packages/verify-lock-rows.sh  the same comparison as fetchlock but from COMMITTED FILES ONLY,
+#                               so it runs in a second before any build rather than after one
+#   packages/build-overlay.sh   the per-package rebuild stamp, work/repo/<arch>/.stamps/<name>.hash
+#
+# WHY THIS IS THE `qforge` ROWS' PIN AND NOT THE BUILT ARTIFACT'S SHA256. Our overlay builds
+# are not bit-reproducible: rebuilding from identical inputs moves every artifact's sha256, so an
+# artifact hash in the lock only ever verified on the machine that last ran `make relock` — it
+# said "you rebuilt", never "the inputs changed", and it made a clean CI runner fail every run.
+# This hash says the thing that is actually true across machines: these bytes were built from the
+# reviewed sources. It is a WEAKER claim about the artifact and a STRONGER one about provenance.
+#
+# There used to be a second, byte-level claim alongside it (packages/*/artifact.pin, checked only on
+# release builds, naming the sha256 a GHCR store had published). It was retired 2026-08-04 with the
+# store: a release image's overlay is now compiled in the same CI run that publishes the image, so
+# there are no foreign bytes for a byte hash to be about.
+#
+# PATH INDEPENDENCE IS THE WHOLE POINT, and it is the one thing easy to get wrong here. The
+# obvious `sha256sum "${inputs[@]}" | sha256sum` is WRONG: sha256sum prints "<hash>  <path>", so
+# the digest follows the checkout directory and a developer's /home/... never agrees with a CI
+# runner's workspace. Hash the CONTENT COLUMN only. (That was the real bug in the formula this
+# replaced — it was inlined in build-overlay.sh, where a per-machine cache key made it harmless,
+# and it would have silently defeated the lock the moment the value crossed a machine.)
+#
+# Filenames still count, just indirectly: the patch list and the PKGBUILD name are fields IN
+# source.pin, which is itself hashed, so renaming a patch moves the digest.
+set -euo pipefail
+
+DIR="${1:?usage: packages/inputhash.sh <package-dir>}"
+PIN="$DIR/source.pin"
+[ -f "$PIN" ] || { echo "no source.pin in $DIR" >&2; exit 1; }
+
+pin_field() { sed -n "s/^$2:[[:space:]]*//p" "$1" | head -1; }
+
+name="$(pin_field "$PIN" name)"
+: "${name:?$PIN: missing name}"
+
+# Declared order, not glob order: the pin lists its patches in application order, and a stable
+# input order is what makes the digest reproducible rather than filesystem-dependent.
+inputs=("$PIN")
+for p in $(pin_field "$PIN" patches); do
+  src="$DIR/patches/$p"
+  [ -f "$src" ] || { echo "$name: missing patch $src (declared in $PIN)" >&2; exit 1; }
+  inputs+=("$src")
+done
+local_pb="$(pin_field "$PIN" pkgbuild_local)"
+if [ -n "$local_pb" ]; then
+  [ -f "$DIR/$local_pb" ] || { echo "$name: missing local PKGBUILD $DIR/$local_pb (declared in $PIN)" >&2; exit 1; }
+  inputs+=("$DIR/$local_pb")
+fi
+
+# The BUILDER is an input too, and the one the file list above cannot see: it is the compiler, the
+# libraries every makedepend resolves to, and the glibc/Python/Qt the artifact links against — all
+# taken from the pinned snapshot (build/builder.pin is that snapshot's system.rootfs.zst, and
+# build/lib-pins.sh asserts the two agree). Without it a snapshot bump left every stamp "up to date",
+# so the overlay stayed built against the OLD base while the lock claimed nothing had changed. The
+# pin's sha256 value, not the file, so a comment edit there rebuilds nothing.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$ROOT/build/lib-pins.sh"
+builder="$(pins_builder_sha)"
+
+{ sha256sum "${inputs[@]}" | cut -d' ' -f1; printf 'builder %s\n' "$builder"; } | sha256sum | cut -c1-64

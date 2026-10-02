@@ -1,0 +1,40 @@
+# qforge qcom-firmware pin — DEVICE-PROPRIETARY firmware blobs (GPU zap shaders,
+# adsp/cdsp DSP images, AudioReach tplg, ath12k Wi-Fi/BT, Renesas xHCI), republished
+# from each device's Android vendor image to the Nova-Deck/qcom-firmwares repo.
+#
+# Pinned by commit: a git commit SHA is content-addressed, so it nails the exact bytes.
+# fetch-qcom-fw.sh additionally verifies every fetched file against the repo's own
+# sha256sums.txt (belt-and-suspenders against a corrupt/tampered download).
+#
+# Open firmware (Adreno microcode, qca BT, Iris VPU) is NOT here — it comes from the
+# official linux-firmware repo via firmware/fetch-linux-fw.sh (firmware/LINUX_FW.pin).
+#
+# Fetch + verify with:  firmware/fetch-qcom-fw.sh
+repo:   https://github.com/Nova-Deck/qcom-firmwares
+commit: dbf238bd885d5858543b9588fbee9d0645a25d4f
+
+# --- SM8250: OPEN, with one exception, and one still-open gap ----------------------------
+# The six SM8250 boards need almost nothing from this repo. Their GPU microcode, zap shader,
+# adsp, cdsp, Venus, ath11k/QCA6390 Wi-Fi and qca Bluetooth are all in linux-firmware and are
+# pinned in LINUX_FW.pin instead. Exactly one blob a board .dts asks for is not open:
+#
+#   qcom/sm8250/ayn/thor/aw883xx_acf.bin   [present as of the commit above]
+#       AW88166 amp calibration for the AYN Thor Lite only, requested by its two amp nodes.
+#       Its bytes are IDENTICAL to the SM8550 AYN Thor's acf we already republish (sha256
+#       ecb54190..., 85704 bytes) — AYN reused one amp tuning across both devices. It is
+#       still stored at its own path, per that repo's per-device rule: a device must never
+#       reference another device's path, or a later per-device fix silently regresses it.
+#
+# Still missing everywhere, and NOT faked with a near-miss:
+#
+#   qcom/sm8250/slpi.mbn
+#       Requested by the &slpi node in kernel/dts/qcom/sm8250-retroidpocket-common.dtsi (and
+#       the other boards). linux-firmware carries ONLY qcom/sm8250/Thundercomm/RB5/slpi.mbn
+#       — a different board's signing — so it cannot be installed under the requested name.
+#       Confirmed against the WHENCE at the pinned linux-firmware commit, not just a 404.
+#       Re-confirmed 2026-08-18 at the 20260810 release (LINUX_FW.pin's new commit): qcom/sm8250/
+#       still holds only a650_zap.mbn, adsp.mbn, cdsp.mbn, the three .jsn configs and
+#       Thundercomm/RB5. The gap is unchanged, so auto-rotation stays dead on SM8250.
+#       Cost while missing: the sensor DSP never boots, i.e. no accelerometer, so no
+#       auto-rotation. Nothing else depends on it; QCOM_Q6V5_PAS is =m and the failed
+#       request is a log line, not a boot failure.

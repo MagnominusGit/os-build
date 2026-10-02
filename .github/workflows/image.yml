@@ -1,0 +1,341 @@
+# qforge image builder — the shared rootfs stage behind every RELEASE artifact.
+#
+# workflow_call only: this builds nothing on its own schedule. .github/workflows/release-sdcard.yml
+# and release-bundle.yml call it on their own triggers, which is the whole reason it exists — the two
+# artifacts are wanted at different cadences (a card is for flashing a device from scratch, a bundle
+# is for updating one already in the field) and neither should have to wait on the other.
+#
+# WHAT MAKES CI THE PRODUCER OF A RELEASE IMAGE is the CREDENTIALS, not a build gate. Signing a
+# bundle needs the release key in a protected environment, and publishing either artifact needs a
+# key that lives in one; none of them is reachable from a dev box. Building one locally is fine and
+# supported — `make sdcard` with no QFORGE_DEV produces a real release image, which is how OOBE
+# gets tested on hardware without waiting for a run here. There used to be a hard gate
+# (packages/*/artifact.pin, enforced by packages/verify-pins.sh) that made a local release build
+# impossible; it was retired 2026-08-04 along with the overlay store — see
+# .github/workflows/overlay.yml for the measurements behind that.
+#
+# THE TWO ARTIFACTS SHIP TO DIFFERENT PLACES, AND NEITHER SHIPS FROM HERE. A CARD goes to the public
+# Cloudflare R2 bucket a person downloads and flashes from (see ota/publish-card.sh for why not a
+# GitHub release asset: ~5 GiB against a 2 GiB cap). A BUNDLE goes to the update server
+# devices fetch their OTAs from — a different host, different credentials, different audience. Both
+# paths stop at a workflow artifact here and are handed off to a publishing job in the caller.
+#
+# The card used to be uploaded from THIS job, which meant the R2 credentials were in scope for the
+# whole 350-minute build — a job that bootstraps a rootfs, compiles the overlay from third-party
+# sources and runs several container stages as uid 0. Moving the upload out (2026-08-11) shrank that
+# window to the couple of minutes an upload takes, put the reviewer's approval AFTER a green build
+# rather than before a six-hour one, and made a failed upload retryable without a rebuild. Do not
+# move it back. Do not "unify" the two paths either: the only thing they legitimately share is
+# everything up to and including the assembled rootfs, which is exactly what this workflow shares.
+#
+# `artifact: rootfs` IS THE SAME MOVE, APPLIED TO SIGNING (2026-08-11). It stops at that shared
+# boundary and uploads the bare image plus its identity sidecar, signing nothing. release-bundle.yml
+# then wraps it in a separate, environment-gated `sign` job. The reason is identical to the R2 one
+# above: the signing key sat in a protected environment, so the ENTIRE build queued behind a human
+# — an approval granted before a 30-minute build rather than after it, blocking on a reviewer to do
+# work that needs no key at all. Two consecutive upstream outages during ota/v0.2.4 made the cost
+# obvious: each one burned an approval and produced nothing.
+#
+# The cost is one extra artifact round trip of ~4 GiB (6 G apparent, sparse), against up to half an
+# hour of human latency. It buys back nothing if approvals are instant — they are not.
+#
+# THIS MODE IS NOT A THIRD RELEASE ARTIFACT. Nothing consumes a rootfs.img except the sign job in
+# the same run, which is why it carries no release metadata and why the card path never asks for it.
+#
+# THE OVERLAY IS COMPILED HERE, IN THIS RUN, from the sources in the commit being built. That is
+# ~34 minutes on a native aarch64 runner for the whole set (measured per package in
+# .github/workflows/overlay.yml) against this job's 350-minute budget. It used to be retrieved from a
+# GHCR store keyed by packages/inputhash.sh; the store was retired because it was sized against the
+# ~4h EMULATED dev-box cost and CI never paid that. Compiling in-run also removes the question of
+# whether the bytes in work/repo are the reviewed ones — nothing else ever writes them.
+#
+# ============================================================================================
+# DISK: THERE IS ROOM, AND THIS IS THE MEASUREMENT SO NOBODY RE-ENGINEERS FOR A CONSTRAINT THAT IS
+# NOT THERE. One full build peaks near 50 GB — work/ ~25 GB (kernel 14, base 8, prebuilt) plus out/ ~21 GB, of which sdcard.img alone is 19 G apparent / 17 G real. GitHub's
+# docs quote "14 GB SSD" for hosted arm64 runners, which is what led to an elaborate design here
+# that walked the build target by target and deleted each stage's inputs as it went.
+#
+# MEASURED 2026-07-30 on ubuntu-24.04-arm (.github/workflows/preflight.yml): 109 G free, 120 G after
+# clearing the preinstalled toolchains. So the real figure is ~8x the documented one and the peak
+# fits with better than 2x headroom.
+#
+# The staged version was therefore reverted to a plain `make sdcard`. Its cost was never the extra
+# steps — it was that deleting work/base while keeping work/.base.stamp depends on subtle make
+# semantics, and cleverness like that earns a baffling 40-minute rebuild eventually. That was a
+# reasonable trade against a hard limit and a bad one without it. `df -h` stays, because the card
+# only grows as packages land and this is where you would look first.
+#
+# The paths are root-owned (every container stage runs as uid 0 through the bind mount — the same
+# reason Makefile's clean targets shell out to busybox), hence sudo.
+# ============================================================================================
+name: image
+
+on:
+  workflow_call:
+    inputs:
+      artifact:
+        description: 'Which release artifact to produce: sdcard | bundle | rootfs | installer'
+        required: true
+        type: string
+      version:
+        description: 'Version stamped into the image (the R2 prefix is named by the caller)'
+        required: false
+        type: string
+        default: ''
+      environment:
+        description: 'Deployment environment to run the build job in. Empty = none. Set it to the
+          protected signing environment to make the release key reachable.'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      # Only the bundle path needs these, and only when signing with the real release key. Absent,
+      # genbundle.sh mints an ephemeral dev cert — fine for a smoke test, NOT a shippable update.
+      RAUC_CERT_PEM:
+        required: false
+      RAUC_KEY_PEM:
+        required: false
+      # NO R2_* HERE. The card upload lives in release-sdcard.yml's own publish job, so the bucket
+      # credentials never enter this workflow — see the header. A caller passing them would be
+      # handing a six-hour build a credential it has no step to use.
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ inputs.artifact }}
+    runs-on: ${{ vars.OVERLAY_RUNNER || 'ubuntu-24.04-arm' }}
+    # THE ENVIRONMENT IS THE AUTHORIZATION BOUNDARY FOR SIGNING, and it has to be declared here
+    # rather than by the caller: a reusable workflow's job cannot be attached to an environment from
+    # outside. Empty means no environment, which is the sdcard path and every unsigned smoke test.
+    #
+    # RAUC_CERT_PEM/RAUC_KEY_PEM must live in THAT environment, never in repo-wide secrets. That is
+    # the whole mechanism: a job that does not name the environment cannot see them, so it silently
+    # falls through to the ephemeral dev cert below and produces something no device will install.
+    # Repo-wide secrets would reach every workflow_dispatch and there would be no gate at all.
+    environment: ${{ inputs.environment }}
+    # The overlay is pulled rather than built, but the base bootstrap, the kernel and the rootfs
+    # assembly are still real work under docker. 350 rather than 180: on a 4-vCPU runner the kernel
+    # alone is a large fraction of the old budget. 360 is GitHub's hard ceiling for a job.
+    timeout-minutes: 350
+    env:
+      # QFORGE_VERSION is the ONLY version knob the build has. The Makefile's ID_ENV forwards it
+      # into the rootfs container, rootfs/assemble-rootfs.sh stamps it into /etc/qforge-release,
+      # and ota/genbundle.sh reads it back out of the assembled image to name the bundle. Absent,
+      # the artifact ships identifying itself as `dev`.
+      #
+      # There used to be a second knob, `VERSION`, which named the bundle independently — the pair
+      # could disagree, and the OTA client's update check compares exactly those two strings. It was
+      # removed 2026-08-03. A plain `VERSION` workflow variable outlived it as publish-card.sh's
+      # first argument and went with the upload in 2026-08-11; the R2 path prefix is now named in
+      # release-sdcard.yml's publish job, from the same prep output that feeds this input.
+      QFORGE_VERSION: ${{ inputs.version }}
+      ARTIFACT: ${{ inputs.artifact }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: validate the requested artifact
+        run: |
+          set -euo pipefail
+          case "$ARTIFACT" in
+            sdcard|bundle|rootfs|installer) ;;
+            *) echo "::error::artifact must be sdcard, bundle, rootfs or installer, got '$ARTIFACT'"; exit 1 ;;
+          esac
+
+      # No reclaiming of the runner image's preinstalled toolchains: there is ~109 G free and the
+      # build peaks near 50, so `sudo rm -rf` over /usr/share/dotnet and friends would be real risk
+      # for space we do not need.
+      - name: disk baseline
+        run: |
+          set -euo pipefail
+          { echo "### disk"; echo '```'; echo "start:"; df -h /; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Same cache as overlay.yml's verify job and for the same reason: fetchlock verifies EVERY row,
+      # so a cold runner downloads ~382 snapshot packages (~700MB). These are third-party bytes
+      # pinned by a sha256 in the lock, so a miss re-downloads and re-verifies — slow, never wrong.
+      - uses: actions/cache@v6
+        with:
+          path: work/pacman-cache
+          key: pacman-cache-${{ hashFiles('build/snapshot.pin', 'rootfs/manifest.lock') }}
+          restore-keys: pacman-cache-
+
+      # The arm64 builder's tarball (build/builder.pin): the snapshot's own system.rootfs.zst,
+      # ~330MB. build/lib-pins.sh re-verifies its sha256 before importing, so a hit is never
+      # trusted, only spared the download. No restore-keys: another pin's tarball is useless.
+      - uses: actions/cache@v6
+        with:
+          path: work/builder
+          key: builder-${{ hashFiles('build/builder.pin') }}
+
+      # ~30 minutes cold for the from-source packages. The runner is fresh, so this is always
+      # cold; there is no stamp cache to hit here the way there is on a dev box.
+      - name: build the overlay packages
+        run: make overlay
+
+      - name: build the toolchain image
+        run: make toolchain
+
+      # No QFORGE_DEV: this is a release build by construction, which is what makes
+      # the pin gate apply. Setting it would silently produce a dev image with Wi-Fi creds baked in.
+
+      - name: build ${{ inputs.artifact }}
+        env:
+          RAUC_CERT_PEM: ${{ secrets.RAUC_CERT_PEM }}
+          RAUC_KEY_PEM: ${{ secrets.RAUC_KEY_PEM }}
+        run: |
+          set -euo pipefail
+          # `rootfs` STOPS BEFORE SIGNING, and that is its entire reason to exist: it is the half of
+          # a bundle build that needs no key, so it can run with no environment and therefore
+          # without waiting for a reviewer. release-bundle.yml's `sign` job picks the image up from
+          # the artifact below and wraps it. Nothing else calls this mode.
+          if [ "$ARTIFACT" = rootfs ]; then
+            make rootfs
+          elif [ "$ARTIFACT" = bundle ]; then
+            # $RUNNER_TEMP, never the workspace — the repo tree gets uploaded as artifacts and
+            # cached, and a private key that lands in either is a leaked key. This is the convention
+            # docs/ci.md already set for this secret; it also mirrors how PKIDIR works locally
+            # (~/qforge-pki), i.e. outside anything the build can sweep up.
+            if [ -n "${RAUC_CERT_PEM:-}" ] && [ -n "${RAUC_KEY_PEM:-}" ]; then
+              pki="$RUNNER_TEMP/pki"
+              mkdir -p "$pki" && chmod 700 "$pki"
+              printf '%s' "$RAUC_CERT_PEM" > "$pki/release.cert.pem"
+              printf '%s' "$RAUC_KEY_PEM"  > "$pki/release.key.pem"
+              chmod 600 "$pki/release.key.pem"
+              make bundle PKIDIR="$pki"
+            else
+              echo "::warning::no release signing key configured — this bundle is signed with an ephemeral dev cert and is NOT shippable"
+              make bundle
+            fi
+          elif [ "$ARTIFACT" = installer ]; then
+            # The recovery medium. No signing key of any kind: like a card, it is flashed over USB
+            # by someone holding the device, so there is no signature for anything to verify.
+            # `make installer` bootstraps the installer root — a separate package set and lock from
+            # the shipped image — and lays the two-partition medium.
+            make installer
+            # THE ONLY THING THAT OPENS THE BUILT IMAGE. Everything in `make test` reads the
+            # scripts, and a script that says the right thing while producing the wrong image passes
+            # all of it — so this is the gate between a green build and a published medium.
+            make verify-image
+          else
+            make sdcard
+          fi
+
+      # gzip, not zstd, and level 6. MEASURED on a real card (19 G apparent / 17 G real, both slots
+      # populated): gz -6 = 8.97 GiB in 33s, zstd -6 = 8.77 GiB in 7s, zstd -19 = 8.49 GiB in 444s.
+      # Every option landed within 0.5 GiB of the others because the payload is ALREADY compressed
+      # (the btrfs root carries compress=zstd), so this is not a size decision — it is a
+      # compatibility one, and .gz is what balenaEtcher and Raspberry Pi Imager have opened for
+      # years. Note gzip's level knob does nothing at all here: -6 and -9 are byte-for-byte
+      # identical.
+      #
+      # Those numbers predate 2026-08-04, when release cards stopped populating slot B (a second
+      # copy of an incompressible root: see image/make-sdcard.sh). The same gz -6 over the same
+      # 19G-apparent card now measures 5.08 GiB — 3.89 GiB less, 43% off. Nothing about the CHOICE
+      # changes: the payload is still already-compressed and the formats still land within a
+      # fraction of each other, so the comparison above is kept as the record of why .gz.
+      - name: compress the card
+        if: inputs.artifact == 'sdcard'
+        run: |
+          set -euo pipefail
+          command -v pigz >/dev/null || sudo apt-get install -y -qq pigz
+          mkdir -p upload
+          pigz -6 -c out/images/sdcard.img > upload/sdcard.img.gz
+          ls -lh upload/ >> "$GITHUB_STEP_SUMMARY"
+          { echo '```'; echo "after build+compress:"; df -h /; echo '```'; } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: package a bundle
+        if: inputs.artifact == 'bundle'
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          cp out/images/*.raucb upload/
+          ls -lh upload/ >> "$GITHUB_STEP_SUMMARY"
+
+      # Same .gz as the card, for the same compatibility reason: this is a file a person downloads
+      # and writes to a card with balenaEtcher or Raspberry Pi Imager. It is ~600 MiB rather than the
+      # card's ~5 GiB, so the compression time the card's note measures barely registers here.
+      #
+      # AND THE IDENTITY SIDECAR, which installer/mkimage.sh writes from the same values it stamped
+      # inside the image. The publish job names the R2 prefix from the release tag, but a person
+      # holding the downloaded file needs the build to be nameable without opening a squashfs out of
+      # the middle of a GPT — and installer/verify-image.sh asserts the two are byte-identical.
+      - name: compress the installer medium
+        if: inputs.artifact == 'installer'
+        run: |
+          set -euo pipefail
+          command -v pigz >/dev/null || sudo apt-get install -y -qq pigz
+          mkdir -p upload
+          pigz -6 -c out/images/installer.img > upload/installer.img.gz
+          cp out/images/installer.release upload/
+          ls -lh upload/ >> "$GITHUB_STEP_SUMMARY"
+          { echo "### installer"; echo '```'; cat out/images/installer.release; echo '```'; } \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      # BOTH FILES, and the sidecar is not optional garnish. genbundle.sh reads the version out of
+      # rootfs.release rather than out of its own environment, precisely so a bundle cannot claim an
+      # identity its payload does not carry — ship the image without it and the sign job fails at
+      # "no identity sidecar", which is the correct outcome but a confusing place to learn it.
+      #
+      # --sparse=always because rootfs.img is 6 G apparent over ~4 G of real blocks; a plain cp
+      # writes all six to the runner's disk for no gain.
+      - name: stage the rootfs
+        if: inputs.artifact == 'rootfs'
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          cp --sparse=always out/images/rootfs.img out/images/rootfs.release upload/
+          ls -lh upload/ >> "$GITHUB_STEP_SUMMARY"
+
+      # Checksums + the pins this image was actually built against. One producer (image/card-meta.sh)
+      # for both the R2 copy and the workflow artifact, so the two cannot drift.
+      #
+      # NOT ON THE ROOTFS PATH. The sums here are what a consumer checks against the thing they
+      # fetched, and nobody fetches a rootfs.img — it is an intermediate that exists for exactly one
+      # downstream job. Hashing it would produce a sha256sums.txt naming a file that never ships,
+      # sitting next to the one that does. release-bundle.yml's `sign` job runs card-meta.sh over
+      # the SIGNED bundle instead, which is the artifact with an audience.
+      - name: stage release metadata
+        if: inputs.artifact != 'rootfs'
+        run: |
+          set -euo pipefail
+          # Name the file from the artifact rather than globbing for it: exactly one of the two
+          # exists, so any `ls` over both is a guaranteed non-zero exit under pipefail.
+          if [ "$ARTIFACT" = sdcard ]; then
+            f=upload/sdcard.img.gz
+          elif [ "$ARTIFACT" = installer ]; then
+            f=upload/installer.img.gz
+          else
+            f=$(find upload -maxdepth 1 -name '*.raucb' -print -quit)
+          fi
+          [ -n "$f" ] && [ -f "$f" ] || { echo "::error::no $ARTIFACT output to hash"; exit 1; }
+          # meta/ at the workspace root, NOT under out/. Every container stage runs as uid 0
+          # through the bind mount, so out/ and everything in it is root-owned — which is why the
+          # Makefile's clean targets shell out to busybox rather than using host rm. The runner
+          # cannot mkdir inside it. This bit once already; do not "tidy" the path back into out/.
+          mkdir -p meta
+          image/card-meta.sh "$f" meta
+
+      - name: upload metadata artifact
+        if: inputs.artifact != 'rootfs'
+        uses: actions/upload-artifact@v7
+        with:
+          name: qforge-${{ inputs.artifact }}-meta
+          path: meta/
+          if-no-files-found: error
+
+      # The image itself, UNCONDITIONALLY — this is the only way it leaves this job now that neither
+      # artifact is shipped from here. The card path used to skip this upload when publishing,
+      # because the bucket already held the bytes; that shortcut died with the in-job upload.
+      #
+      # RETENTION IS SHORT ON PURPOSE. A card is ~5 GiB and the repo default is 90 days, so keeping
+      # every release card around for a quarter is real storage against no use: a publishing job
+      # downloads this within the same run, and the only reason to want it afterwards is to re-run a
+      # failed publish. Seven days is far longer than anyone takes to notice that.
+      - name: upload the image artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: qforge-${{ inputs.artifact }}
+          path: upload/
+          if-no-files-found: error
+          retention-days: 7
