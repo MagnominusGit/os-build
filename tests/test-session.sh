@@ -41,9 +41,15 @@ pin_field() { sed -n "s/^$1:[[:space:]]*//p" "$PIN" | head -1; }
 # =================================================================================================
 CASE="the shell"
 cmd="$(conf QFORGE_SESSION_CMD)"
-[ "$cmd" = "opengamepadui" ] \
+[ "${cmd%% *}" = "opengamepadui" ] \
   && ok "QFORGE_SESSION_CMD is upstream's launcher, opengamepadui" \
   || bad "QFORGE_SESSION_CMD is '$cmd', not opengamepadui"
+# OGUI's update pack is the x86_64 build: applying one at start leaves a black panel on this device,
+# and any update pack would override the OS image's shell version.
+case " $cmd " in
+  *" --skip-update-pack "*) ok "the shell never applies a downloaded update pack (--skip-update-pack)" ;;
+  *) bad "QFORGE_SESSION_CMD '$cmd' lacks --skip-update-pack — a downloaded x86_64 update.zip would replace the shell" ;;
+esac
 sh -n "$CONF" 2>/dev/null && ok "session.conf parses as sh" || bad "session.conf is not valid sh"
 
 # =================================================================================================

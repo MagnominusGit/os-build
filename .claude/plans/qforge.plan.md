@@ -96,12 +96,14 @@ Done (uncommitted):
 - Per-game layer removed: `qforge_perf.py`, `tests/test-perf.sh`, powerd's perf tick and
   scheduler override (powerd keeps a 3s scheduler-reconcile tick).
 - Phase 1 card kept as `out/images/sdcard.p1.img`.
+- `brightnessctl` 0.5.1 (overlay PKGBUILD — not in the holo snapshot; logind backend, not setuid)
+  so OGUI's brightness slider exists. Relocked (+1 row). HW: check the slider moves the panel.
+- Session runs `opengamepadui --skip-update-pack`: OGUI's self-updater fetches the x86_64
+  `update.zip`; applying it at start would black the panel and override the image's shell version.
 
 Remaining OS-side (found in OGUI source):
-- `brightnessctl` is not in the image → OGUI brightness unsupported. Add it to PKGS + relock.
 - OGUI power menu / idle suspend run `systemctl suspend|poweroff|reboot` as `player` — confirm
   logind/polkit allows it from the gamescope session (and that suspend routes to qforge-suspend).
-- OGUI self-updater: launch with `--skip-update-pack` (it would fetch the x86_64 update.zip).
 - PowerStation shim (above) — or accept a dead performance menu for now.
 - Clean remaining Steam wording in `automount.sh`, `qforge-suspend`, `qforge-scheduler`,
   `power-ops.sh`, `qforge-session`.

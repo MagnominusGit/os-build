@@ -1,0 +1,18 @@
+# brightnessctl — built FROM SOURCE via a qforge-owned PKGBUILD (packages/brightnessctl/PKGBUILD).
+# It is an Arch [extra] package but absent from the pinned holo aarch64 snapshot (`make relock`
+# failed with "target not found: brightnessctl"), so there is no repo row to resolve. Same "local
+# PKGBUILD" form as packages/f3/source.pin.
+#
+# Why: it is OpenGamepadUI's only usable backlight provider — core/global/display_manager.gd picks
+# it when `which brightnessctl` succeeds (the alternative is a SteamOS helper we do not ship), and
+# without one the brightness slider is absent. See the PKGBUILD for the build flags.
+#
+# Version: 0.5.1, upstream's latest release (2020-02-02) and what Arch ships.
+#
+# Fields (see packages/README.md):
+#   name           pkgname (must match the PKGBUILD); also the work/ build-dir + repo entry
+#   pkgbuild_local path (relative to this dir) to the checked-in PKGBUILD to build
+#   pkgrel_suffix  numeric suffix appended to the PKGBUILD's pkgrel so pacman prefers our build
+name: brightnessctl
+pkgbuild_local: PKGBUILD
+pkgrel_suffix: 1

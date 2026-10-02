@@ -121,7 +121,12 @@ BOOTSTRAP_PKGS=(base)
 #   f3                  f3probe, the counterfeit-card check before formatting an SD card. Overlay.
 #   upower              battery service; needs kernel patches 0526/0527 for charge_full/charge_now.
 #                       D-Bus activated, so it needs no preset.
-PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-tools mesa gamescope seatd sddm mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit ffmpeg e2fsprogs xorg-xwayland noto-fonts noto-fonts-cjk noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools)
+#   brightnessctl       OpenGamepadUI's ONLY usable backlight provider (display_manager.gd picks it
+#                       when `which brightnessctl` succeeds; the other is a SteamOS helper we do not
+#                       ship) — without it the brightness slider is absent. As the session user it
+#                       sets the panel through logind's SetBrightness, so no udev/group grant is needed.
+#                       Overlay (packages/brightnessctl): not in the holo snapshot.
+PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-tools mesa gamescope seatd sddm mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit ffmpeg e2fsprogs xorg-xwayland noto-fonts noto-fonts-cjk noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl)
 
 # Dev-only packages — installed ONLY under QFORGE_DEV=1, NEVER in a release base.
 # On-device bring-up tools: evtest reads raw /dev/input events; usbutils provides lsusb.

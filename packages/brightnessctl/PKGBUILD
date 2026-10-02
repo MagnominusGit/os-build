@@ -1,0 +1,33 @@
+# brightnessctl — backlight control for OpenGamepadUI's brightness slider.
+#
+# OGUI calls it as the session user (`--list --class backlight --machine`, `--machine --class
+# backlight info`, `--device <dev> set N%`), all supported by 0.5.1.
+#
+# ENABLE_SYSTEMD=1, exactly as Arch builds it, and that one flag decides how it gets permission:
+# a non-root write goes through logind's Session.SetBrightness, which logind grants to the ACTIVE
+# session's owner — and sddm's autologin gives `player` exactly that on seat0. The Makefile then
+# installs the binary 0755 (not setuid 4711) and skips 90-brightnessctl.rules (no video-group sysfs
+# grant), so the image gains no privileged path for it at all.
+#
+# Recipe mirrors Arch's packaging/packages/brightnessctl PKGBUILD; sha256 of the same tarball whose
+# sha512 Arch pins (41ac8635…).
+
+pkgname=brightnessctl
+pkgver=0.5.1
+pkgrel=1
+pkgdesc='Lightweight brightness control tool (logind backend)'
+arch=('aarch64')
+url='https://github.com/Hummer12007/brightnessctl'
+license=('MIT')
+depends=('systemd-libs')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/${pkgver}.tar.gz")
+sha256sums=('a68869e23f56ac4f2e28f1783002810ddbf10f95e1af9b48b2912fb169f46994')
+
+build() {
+  make -C "${pkgname}-${pkgver}" ENABLE_SYSTEMD=1
+}
+
+package() {
+  make -C "${pkgname}-${pkgver}" ENABLE_SYSTEMD=1 DESTDIR="${pkgdir}" install
+  install -Dm644 "${pkgname}-${pkgver}/LICENSE" -t "${pkgdir}/usr/share/licenses/${pkgname}"
+}

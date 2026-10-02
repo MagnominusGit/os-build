@@ -33,6 +33,7 @@ binutils 2.46-1 aarch64 stripped 8e2a9ec36b5c4b83625992677de0dd9d26941ebbf0ef0a5
 bluez 5.86-4 aarch64 snapshot d0755307801cdd80d53c2aecce8d752526062aa5af71674cfb5000c5570c7091
 bluez-libs 5.86-4 aarch64 snapshot 1fb047d23fcfd12f2c19174eeb153a4be13dd963f49e5565145affbf4f88fe97
 bluez-utils 5.86-4 aarch64 snapshot 9e4763b2985029f68a4a028db6f53249a27a57701cb42293afd7133adb470a30
+brightnessctl 0.5.1-1.1 aarch64 qforge 7cafccf770aaeefa26f111ef5cf8727b1bec001647e6e18cb0b58aaebf69c60d
 brotli 1.2.0-1 aarch64 snapshot f97a489112a09abd9d0fdacbf47a3b26dc50e683a4f7dd97f3cf121d64edee9d
 btrfs-progs 6.19-1 aarch64 snapshot e22a096a6bed59ebe78e3781bae45d7d127ce9cbf48364f7446d47b1500cec86
 bubblewrap 0.11.0-2 aarch64 snapshot 903ad62be66f01a700d79ab684fdc992de1e4786a31ce155388200d61be0c8c8
