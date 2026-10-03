@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Philippe Simons <simons.philippe@gmail.com>
+Date: Sat, 3 Oct 2026 20:30:00 +0200
+Subject: [PATCH] ksmbd: exempt FSCTL_PIPE_TRANSCEIVE from the generic file-id lookup
+
+Backport of Gael Blivet's upstream fix, unchanged but for the hunk offset:
+"[PATCH] ksmbd: exempt FSCTL_PIPE_TRANSCEIVE from the generic file-id lookup"
+(linux-cifs, 2026-07-31), Reviewed-by and Tested-by ChenXiaoSong, applied by
+Namjae Jeon to ksmbd-for-next-next (2026-08-03). Not in the pinned 7.2.8.
+
+Upstream message:
+
+  smb2_ioctl() rejects FSCTL_PIPE_TRANSCEIVE with STATUS_OBJECT_NAME_NOT_FOUND
+  before fsctl_pipe_transceive() runs. RPC pipe IDs live in
+  sess->rpc_handle_list, a separate namespace from the ksmbd_file table the
+  generic ksmbd_lookup_fd_slow() gate searches, so the lookup always misses.
+
+  Adding FSCTL_PIPE_TRANSCEIVE to the same no_fileid_ioctl exemption as
+  FSCTL_PIPE_WAIT fixes it.
+
+  Fixes: 0726814421c2 ("ksmbd: add SMB3 request replay support")
+
+Why QForge carries it: the player's SMB shares (/etc/ksmbd/ksmbd.conf) could be
+opened by URL but not listed. Measured on the MANGMI Pocket Max (2026-10-03):
+`smbclient -L` failed with "rpc_pipe_bind for pipe srvsvc failed ...
+NT_STATUS_CONNECTION_DISCONNECTED" for guests AND for an authenticated user,
+with our [ipc$] and with ksmbd-tools' stock one; ksmbd debug showed "IPC pipe
+create request" then "Failed to process 11 [-2]" (SMB2_IOCTL, -ENOENT), and
+ksmbd.mountd never saw the RPC. So a file manager pointed at smb://qforge.local/
+showed nothing.
+
+Origin: posted (applied to ksmbd-for-next-next). Drop when it reaches mainline
+or the 7.2 stable series.
+
+---
+ fs/smb/server/smb2pdu.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/fs/smb/server/smb2pdu.c b/fs/smb/server/smb2pdu.c
+--- a/fs/smb/server/smb2pdu.c
++++ b/fs/smb/server/smb2pdu.c
+@@ -9634,6 +9634,7 @@ int smb2_ioctl(struct ksmbd_work *work)
+ 	case FSCTL_QUERY_NETWORK_INTERFACE_INFO:
+ 	case FSCTL_VALIDATE_NEGOTIATE_INFO:
+ 	case FSCTL_PIPE_WAIT:
++	case FSCTL_PIPE_TRANSCEIVE:
+ 		no_fileid_ioctl = true;
+ 		break;
+ 	default:
+-- 
+2.51.0

@@ -211,11 +211,18 @@ Remaining OS-side (found in OGUI source):
   `_smb._tcp` record. `[ipc$] guest ok = yes` is needed: ksmbd-tools adds [ipc$] without it, so a
   guest could not list shares. HW (Pocket Max, 20261003T175813Z): direct share URLs work as guest
   (anonymous or any name) from Linux; Windows 10/11 refuse SMB guest logins by default.
-  - Open: listing the shares at the server root (`smb://qforge.local/`) fails for every user, guest
+  - ✅ Listing the shares at the server root (`smb://qforge.local/`) failed for every user, guest
     or authenticated, with stock or our [ipc$]: kernel 7.2's `smb2_ioctl()` looks the RPC pipe id up
     as an open file and returns -ENOENT before `fsctl_pipe_transceive()` runs. Upstream regression
-    from "ksmbd: add SMB3 request replay support", fixed by "ksmbd: exempt FSCTL_PIPE_TRANSCEIVE ..."
-    (linux-cifs, 2026-07): add it to the no_fileid_ioctl exemption. Backport into kernel/patches.
+    from "ksmbd: add SMB3 request replay support"; backported Gael Blivet's fix (applied to
+    ksmbd-for-next-next) as kernel/patches/1000. HW (20261003T183508Z): guest `smbclient -L` and
+    the desktop file manager list roms/bios/saves/states.
+  - HW end to end (same card): folders created at login with no manual step; BIOS + CTR copied in
+    over the guest shares (~58 MB/s, owned by player, with a POSIX ACL from ksmbd); DuckStation
+    seeded from the image; the CTR memory card landed in ~/saves/psx and is visible on the `saves`
+    share; with SaveStateOnExit (now in the seed) OGUI's Exit wrote ~/states/psx/
+    SCUS-94426_resume.sav. Not yet checked: what DuckStation does with that resume state on the next
+    launch; two short runs right after enabling it wrote no state (likely exited during boot).
 - Licence check: never ship BIOS. DuckStation is CC BY-NC-ND (no commercial use, no modified
   versions) -- confirm shipping its unmodified AppImage fits how QForge is distributed.
 

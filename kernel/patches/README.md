@@ -68,7 +68,7 @@ Audited 2026-09-22 against v7.3-rc4 (merge status from git, review state from pa
 replies — lore was not reachable, so "never posted" means no patchwork hit). Re-audit on
 every bump: this table is a snapshot, the `Drop when` column is what to re-check.
 
-Totals: 5 `mainline`, 15 `posted`, 17 `qforge`, 56 `community`. (`0310` and `0430` were
+Totals: 5 `mainline`, 16 `posted`, 17 `qforge`, 56 `community`. (`0310` and `0430` were
 deleted at the 7.2.8 bump: stable backported both, byte-identical.) Half the stack will
 never land upstream, which is why provenance is a table and not a number band.
 
@@ -150,6 +150,7 @@ never land upstream, which is why provenance is a table and not a number band.
 | `0940` | posted | Same series, `-3-`. | when merged |
 | `0970` | community | ROCKNIX `0500`. A hack. | never |
 | `0980` | qforge | Never posted. | never |
+| `1000` | posted | Gael Blivet "ksmbd: exempt FSCTL_PIPE_TRANSCEIVE from the generic file-id lookup" (linux-cifs 2026-07-31; Reviewed/Tested-by ChenXiaoSong), applied by Namjae Jeon to ksmbd-for-next-next. Fixes `0726814421c2` (SMB3 request replay): RPC over IPC$ (share listing) always failed. | when in mainline or 7.2 stable |
 | `1010` | community | Edouard Durand. Never posted; the bug is still in v7.3-rc4. | when sent and merged |
 | `1030` | community | spycat88, ROCKNIX `0071`. A hack. | never |
 | `1040` | community | Kars Mulder's Linux-Pollrate-Patch via ROCKNIX `0506`. | never |
