@@ -245,7 +245,8 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
    version. Never auto-update at launch.
 5. Per-emulator first-run config: write the emulator's own config before its first start
    (DuckStation: settings.ini with wizard off, BIOS/ROM dirs, Vulkan, `[Pad1]` SDL-0 mapping,
-   auto-updater off). Never overwrite a user-changed config after that.
+   auto-updater off, `[Hotkeys] OpenPauseMenu = SDL-0/Back & SDL-0/Start` -- by default only
+   keyboard Escape opens its menu, so a controller can never reach Exit; HW-verified). Never overwrite a user-changed config after that.
 
 **Launcher `qforge-launch <system> <rom>`** (in the image, `/usr/bin`, shell, unit-tested)
 - Resolves the emulator from the system, mounts `/home/player/emulators/<emu>/current` and runs
@@ -306,6 +307,16 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
     (`fusermount3 -uz`).
   - The wrapper traps TERM and waits; it never forwards the signal (that would be the second
     Ctrl+C).
+- **`qforge-launch <system> <rom>` done** (2026-10-03): `/usr/bin/qforge-launch` with
+  `/etc/qforge/launch.conf` (system -> emulator) and `/etc/qforge/emulators/<emu>.conf` (BINARY
+  inside the AppImage, ARGS); runs `/home/player/emulators/<emu>/current`. Offline suite
+  `tests/test-launch.sh` (fake AppImage / emulator / fusermount3, OGUI reap replayed; in
+  `make test`). HW ✅ on the Pocket Max, dev build 20261003T153817Z: an OGUI card running
+  `qforge-launch psx .../ctr.chd` boots CTR directly; OGUI Exit graceful (~190 ms), and quitting
+  from DuckStation's own pause menu returns to OGUI (`-batch`); no core dump, process or mount left.
+  The FUSE type is named after the file `current` points to (`fuse.0.1-12070.AppImage`), as the
+  stale sweep assumes; only the mount dir takes the link's name.
+  Not yet: per-game CPU pinning and per-device defaults (both go in qforge-launch).
 - ROM cards show in All Games as well as in their system tab.
 
 **Open questions for review**

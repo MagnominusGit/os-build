@@ -1,0 +1,93 @@
+#!/bin/bash
+# qforge-launch — start a ROM in its system's emulator, from an OpenGamepadUI library card.
+#
+#   qforge-launch <system> <rom>
+#
+# Emulators are not in the image: the QForge OGUI plugin downloads each one as an upstream AppImage
+# into /home/player/emulators/<emulator>/ and points `current` at the version to run (plan Phase
+# 3/4). This script is what every ROM card runs. /etc/qforge/launch.conf maps a system to its
+# emulator; /etc/qforge/emulators/<emulator>.conf says which binary inside the AppImage to run and
+# with what arguments.
+#
+# The AppImage is mounted and its real binary run; every rule below was found on hardware
+# (DuckStation, MANGMI Pocket Max, 2026-10-03) and each one cost a crash:
+#
+#   - Never exec the AppImage or its AppRun. The runtime starts AppRun, a symlink to the binary; Qt
+#     takes applicationDirPath from that path, misses usr/bin/qt.conf, finds no platform plugin and
+#     aborts. Desktops hide this with a system Qt; QForge has none.
+#   - OGUI stops a game with Reaper.reap(): every PID in the tree, leaves inward, gets
+#     `kill -TERM -- -PID` and then `kill -TERM PID`, each a separate command. The emulator runs
+#     under setsid so it leads its own process group: its two signals arrive back to back and
+#     coalesce into one, as when OGUI launches it directly. Inside our group it got a second,
+#     later SIGTERM through `-<our pid>`, which DuckStation takes as "Ctrl+C again: force quit"
+#     and abort()s — a core dump and a 14 s exit.
+#   - We never forward a signal to the emulator, for the same reason: it already has OGUI's.
+#   - The mount runtime is in the tree too. It starts with SIGTERM ignored, or OGUI's Exit pulls the
+#     files out from under an emulator that is still shutting down. After the emulator exits it is
+#     released with SIGHUP (the runtime holds the mount busy until it exits) and fusermount3 -u.
+#   - Exit pressed twice is SIGKILL for everything, which leaves a dead mount: sweep ours first.
+#
+# Exit status: the emulator's, or 2 for a bad invocation, 3 when the emulator is not installed or
+# its AppImage does not mount.
+
+set -uo pipefail
+
+CONF=${QFORGE_LAUNCH_CONF:-/etc/qforge/launch.conf}
+EMU_CONF_DIR=${QFORGE_EMU_CONF_DIR:-/etc/qforge/emulators}
+EMU_DIR=${QFORGE_EMU_DIR:-/home/player/emulators}
+MOUNTS=${QFORGE_MOUNTS:-/proc/mounts}
+UNMOUNT_TRIES=50   # x 0.1 s for the runtime to let go of the mount after SIGHUP
+MOUNT_TIMEOUT=30   # s for the AppImage runtime to print its mount point
+
+die() { echo "qforge-launch: $2" >&2; exit "$1"; }
+
+[ $# -eq 2 ] || die 2 "usage: qforge-launch <system> <rom>"
+system=$1 rom=$2
+[[ $system =~ ^[a-z0-9_]+$ ]] || die 2 "bad system name '$system'"
+[ -f "$rom" ] || die 2 "no such ROM: $rom"
+
+emulator=$(sed -n "s/^$system=\([a-z0-9_-]*\)[[:space:]]*$/\1/p" "$CONF" 2>/dev/null | tail -1)
+[ -n "$emulator" ] || die 2 "no emulator for system '$system' in $CONF"
+emu_conf="$EMU_CONF_DIR/$emulator.conf"
+[ -f "$emu_conf" ] || die 2 "missing $emu_conf"
+
+BINARY= ARGS=()
+# shellcheck source=/dev/null
+. "$emu_conf"
+[ -n "$BINARY" ] || die 2 "$emu_conf sets no BINARY"
+
+img="$EMU_DIR/$emulator/current"
+[ -x "$img" ] || die 3 "$emulator is not installed ($img missing or not executable)"
+
+# The runtime names its FUSE filesystem after the AppImage file `current` points at.
+fstype="fuse.$(basename "$(readlink -f "$img")")"
+awk -v t="$fstype" '$3 == t {print $2}' "$MOUNTS" | while read -r stale; do
+  echo "qforge-launch: releasing stale mount $stale" >&2
+  fusermount3 -uz "$stale"
+done
+
+trap '' TERM
+exec {mount_fd}< <(exec "$img" --appimage-mount)
+mount_pid=$!
+if ! read -r -t "$MOUNT_TIMEOUT" -u "$mount_fd" mnt || [ ! -d "$mnt" ]; then
+  kill -KILL "$mount_pid" 2>/dev/null
+  die 3 "$img did not mount"
+fi
+trap : TERM INT HUP
+
+echo "qforge-launch: $system -> $emulator: $mnt/$BINARY ${ARGS[*]} $rom" >&2
+setsid "$mnt/$BINARY" "${ARGS[@]}" "$rom" &
+emu_pid=$!
+# wait returns early when a trapped signal arrives; keep waiting until the emulator is gone.
+while kill -0 "$emu_pid" 2>/dev/null; do wait "$emu_pid"; done
+wait "$emu_pid"; rc=$?
+
+kill -HUP "$mount_pid" 2>/dev/null
+mounted() { awk -v m="$mnt" '$2 == m {found=1} END {exit !found}' "$MOUNTS"; }
+for _ in $(seq "$UNMOUNT_TRIES"); do
+  mounted || break
+  fusermount3 -u "$mnt" 2>/dev/null && break
+  sleep 0.1
+done
+mounted && echo "qforge-launch: $mnt still busy; the next launch sweeps it" >&2
+exit "$rc"
