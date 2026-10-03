@@ -234,7 +234,8 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
 3. Tabs: one tab per system that has at least one ROM, populated from the provider's items.
    Check first whether OGUI's library grid can be reused for a tab or the plugin builds its own.
 4. Emulator manager: QForge-published manifest (JSON over HTTPS on the QForge update server)
-   `emulator -> {version, url (our mirror), sha256, arch, default args}`. Install = download to
+   `emulator -> {version, url (our mirror), sha256, arch, binary (inside the AppImage), default
+   args}`. Install = download to
    `/home/player/emulators/<emu>/<version>.AppImage`, verify sha256, chmod +x, flip a `current`
    symlink (rollback = previous AppImage kept until the new one has launched once).
    PRE_LAUNCH hook installs it when missing (progress shown). Updates: NOT via OGUI's
@@ -247,8 +248,8 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
    auto-updater off). Never overwrite a user-changed config after that.
 
 **Launcher `qforge-launch <system> <rom>`** (in the image, `/usr/bin`, shell, unit-tested)
-- Resolves the emulator from the system, execs
-  `/home/player/emulators/<emu>/current <per-emu args> <rom>` (DuckStation:
+- Resolves the emulator from the system, mounts `/home/player/emulators/<emu>/current` and runs
+  `<mount>/<binary> <per-emu args> <rom>` under the AppImage rules above (DuckStation:
   `-batch -fullscreen -- <rom>`; `-batch` returns to OGUI when the game closes).
 - The one place for per-game CPU pinning (Phase 3) and per-device defaults.
 - Keeps the plugin free of emulator details beyond the manifest; testable over SSH without OGUI.
@@ -280,10 +281,31 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
 **Decided 2026-10-03**
 - Download source: the QForge server MIRRORS pinned upstream AppImages (we pick the version,
   sha256 in the manifest); no direct upstream GitHub downloads.
-- FUSE: add `fuse3` to the image (fusermount3 setuid) and run AppImages directly, no extraction.
-  Re-check DuckStation then: launched as the AppImage, Qt's applicationDirPath is inside the
-  mount, so the `AppRun` symlink problem from the extracted test should not apply. Install
-  becomes download + verify + chmod + `current` symlink.
+- FUSE: `fuse3` in the image (fusermount3 setuid, already on the guard permit list), AppImages
+  stay packed. Install = download + verify + chmod + `current` symlink.
+  HW ✅ 2026-10-03 (Pocket Max, dev build 20261003T135813Z): AppImage mounts as player; CTR runs,
+  controller OK; OGUI Exit graceful in ~70 ms, no core dump, no leftover process or mount -- but
+  only through a launcher wrapper (prototype `/home/player/emulators/appimage-run`, to become
+  the AppImage path of `qforge-launch`). Rules it encodes, each found on HW:
+  - Never exec the AppImage (or AppRun): the runtime starts `AppRun`, a symlink; Qt takes
+    applicationDirPath from it, misses `usr/bin/qt.conf`, finds no platform plugin and aborts.
+    Same in DuckStation v0.1-11580 / 11894; desktops hide it with a system Qt. Mount with
+    `--appimage-mount` and exec `<mount>/<binary>` (manifest field `binary`, e.g.
+    `usr/bin/duckstation-qt`). Report upstream.
+  - OGUI `Reaper.reap()` (`core/systems/launcher/reaper.gd:65`) signals every PID in the tree,
+    leaves inward, as `kill -TERM -- -PID` then `kill -TERM PID`, separate commands. Run the
+    emulator under `setsid` so it leads its own group: its two signals arrive back to back and
+    coalesce, as when OGUI launches it directly. Inside the wrapper's group it got a second,
+    later SIGTERM, which DuckStation takes as "force quit" -> abort(), core dump, 14 s exit.
+    No OGUI patch needed.
+  - The mount runtime is in the tree too: start it with SIGTERM ignored, or OGUI tears the files
+    away under a shutting-down emulator. The runtime also ignores INT (bash background) -- release
+    it after the emulator exits with SIGHUP to the runtime, then `fusermount3 -u` (the parent
+    holds the mount busy until it exits).
+  - Exit pressed twice = SIGKILL leaves a dead mount: sweep `fuse.<appimage>` mounts on start
+    (`fusermount3 -uz`).
+  - The wrapper traps TERM and waits; it never forwards the signal (that would be the second
+    Ctrl+C).
 - ROM cards show in All Games as well as in their system tab.
 
 **Open questions for review**
