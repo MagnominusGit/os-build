@@ -223,7 +223,8 @@ fi
 # FOREGROUND command returns, so with the client in the foreground the TERM trap never ran, nothing
 # told the shell to quit, and every `systemctl stop/restart qforge-session` sat out TimeoutStopSec
 # (90 s) before a SIGKILL (HW 2026-10-03). `wait` returns as soon as a trapped signal arrives.
-# `<&0`: an sh background job otherwise gets /dev/null as stdin instead of the session's tty1.
+# stdin goes through fd 3: a non-interactive sh points a background job's stdin at /dev/null
+# BEFORE its own redirections, so dash turns `<&0` into /dev/null; `<&3` is the session's tty1.
 #
 # Running games go FIRST, while gamescope is still up. OGUI does not stop them when it quits: its
 # per-game reaper is re-parented to PID 1 and the game keeps running until gamescope goes, then
@@ -282,8 +283,10 @@ stop_session() {
 }
 trap stop_session HUP INT TERM
 set +e
-$QFORGE_SESSION_CMD <&0 &
+exec 3<&0
+$QFORGE_SESSION_CMD <&3 3<&- &
 CLIENT_PID=$!
+exec 3<&-
 wait "$CLIENT_PID"
 status=$?
 set -e
