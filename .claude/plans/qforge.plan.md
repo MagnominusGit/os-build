@@ -1,7 +1,10 @@
 # Plan: QForge
 
 **Complexity**: Large
-**Status**: Phase 0 done. Phase 1 built, HW validation pending. Phase 2 in progress.
+**Status** (2026-10-03): Phases 0-2 done -- HW-validated on SM8550 (AYANEO Pocket ACE) and SM8250
+(MANGMI Pocket Max); SM8650 not booted since the OGUI crash fix. Phase 3 in progress (DuckStation,
+qforge-launch, folder layout, SMB shares done; more emulators and hotkeys later). Phase 4 designed
+(QForge OGUI plugin). Phase 5 not started.
 
 ## Summary
 
@@ -9,8 +12,9 @@ QForge is a standalone retro-emulation Linux distribution for Qualcomm Snapdrago
 (SM8250 / SM8550 / SM8650). It is derived from the upstream project credited in README.md (GPL-2.0-or-later): it reuses
 that project's Holo aarch64 base, unified kernel/DTS, steamcl + GRUB boot chain, RAUC A/B updates
 and installer, without the Steam client, x86 emulation or the Android container. The shell is
-[OpenGamepadUI](https://github.com/ShadowBlip/OpenGamepadUI) inside gamescope, launching RetroArch
-and standalone emulators.
+[OpenGamepadUI](https://github.com/ShadowBlip/OpenGamepadUI) inside gamescope. Emulators are upstream
+AppImages that the QForge OGUI plugin downloads from their own releases (not in the image), started
+per ROM by `qforge-launch`.
 
 ## Decisions
 
@@ -45,17 +49,17 @@ and standalone emulators.
 - `make relock` run: `rootfs/manifest.lock` re-resolved without the removed stacks' dependencies.
   `installer/manifest.lock` needs no relock (same package set and snapshot); relock it after the
   first `make kernel` if its package list changes.
-- **Not yet done on hardware**: no card has been built or booted from this tree.
+- Since built and booted many times (2026-10-02/03): root image ~1.0G apparent in its 2G slot.
 
 ### Phase 0 follow-ups (before the first real build)
 
 | Task | Why |
 |---|---|
-| Build `make sdcard`, check `du --apparent-size out/images/rootfs.img` | Confirm the 2G slot has ≥1G headroom; `make-sdcard.sh`'s `fits` check is the backstop |
-| Boot on one SM8250, one SM8550, one SM8650 board | Gate: gamescope + vkcube on the panel, A/B confirm via qforge-boot-good |
+| ✅ Build `make sdcard`, check `du --apparent-size out/images/rootfs.img` (~1.0G in the 2G slot) | Confirm the 2G slot has ≥1G headroom; `make-sdcard.sh`'s `fits` check is the backstop |
+| Boot on one SM8250 ✅, one SM8550 ✅, one SM8650 (open: not booted since the OGUI fix) | Gate: gamescope + vkcube on the panel, A/B confirm via qforge-boot-good |
 | ✅ Back up `~/qforge-pki/ca.key.pem` off this machine (done 2026-10-03) | Losing it means no device can ever accept another update |
 
-### Phase 1 — OpenGamepadUI as the shell (built, HW validation pending)
+### Phase 1 — OpenGamepadUI as the shell — done (SM8650 still to boot)
 
 Done:
 - `packages/opengamepadui/prebuilt.pin`: upstream's **aarch64 release tarball** (v0.46.1) — no
@@ -72,15 +76,16 @@ Done:
 - Relocked: + opengamepadui, + libxinerama, gamescope rehashed. Root 1.8G apparent / 945M allocated.
 
 Remaining:
-- **Hardware**: boot to OGUI on each SoC; check navigation with the pad (InputPlumber), quick menu
-  overlay over a game, mangoapp, focus switching OGUI ↔ game, rotation/scale per panel.
+- ✅ **Hardware** (SM8550 Pocket ACE, SM8250 Pocket Max, 2026-10-02/03): boots to OGUI; pad
+  navigation (InputPlumber), quick-menu overlay over a running game, mangoapp, focus switching
+  OGUI <-> game (DuckStation), panel rotation. Open: SM8650.
 - Check OGUI's in-app update setting cannot still download a user-local build.
-- PowerStation deferred to Phase 2 (no Qualcomm backend; would contend with qforge-powerd).
+- ✅ PowerStation: done in Phase 2 (patched upstream PowerStation, qforge-powerd stripped down).
 
-### Phase 2 — Handheld features in OGUI (High) — in progress
+### Phase 2 — Handheld features in OGUI (High) — done
 
 Decisions (2026-10-02, from reading OGUI v0.46.1 source in `_ref/OpenGamepadUI`):
-- **No OGUI plugin for now.** Only OGUI's built-in screens; QForge-only controls (fan curve,
+- **No OGUI plugin for now** (superseded 2026-10-03: the Phase 4 QForge plugin). Only OGUI's built-in screens; QForge-only controls (fan curve,
   scheduler, update channel) stay CLI/SSH (`qforge-scheduler`, `qforge-update`, powerd D-Bus).
 - **No per-game (per-ROM) layer.** The upstream tweaks layer (game-tweaks.json, qforge_perf, the
   per-game `scheduler` override) existed for x86 titles under FEX/Proton; emulators carry their own
