@@ -190,7 +190,12 @@ Remaining OS-side (found in OGUI source):
   - sched_ext: scx_lavd honours the affinity mask (HW-checked).
 - PowerStation follow-up for upstream: order SetCoresEnabled by `cpu_capacity` instead of CPU
   number (Qualcomm numbers cores slowest-first; other SoCs do not).
-- Per-device defaults from the device profiles; InputPlumber hotkeys (exit to shell, save states).
+- InputPlumber hotkeys (exit to shell, save states).
+- Per-device defaults: DROPPED as a standalone item (2026-10-03). Nothing needs one today (DuckStation's
+  seed is the same on every device; per-device pinning went with the per-game player choice). Add a
+  device-specific value from `/usr/lib/qforge/devices/<device>.conf` only when an emulator needs it --
+  likely first: Azahar's screen layout on the dual-screen Pocket DS, or resolution scaling once a heavy
+  emulator shows a real gap between SoCs.
 - Layout `/home/player/{roms/<system>,bios,saves,states}`; ROMs also from SD via automount.
 - Licence check: never ship BIOS. DuckStation is CC BY-NC-ND (no commercial use, no modified
   versions) -- confirm shipping its unmodified AppImage fits how QForge is distributed.
@@ -260,7 +265,7 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
 - Resolves the emulator from the system, mounts `/home/player/emulators/<emu>/current` and runs
   `<mount>/<binary> <per-emu args> <rom>` under the AppImage rules above (DuckStation:
   `-batch -fullscreen -- <rom>`; `-batch` returns to OGUI when the game closes).
-- The one place for per-game CPU pinning (Phase 3) and per-device defaults.
+- The one place for per-game CPU pinning (Phase 3), and for any device-specific value later.
 - Keeps the plugin free of emulator details beyond the manifest; testable over SSH without OGUI.
 
 **Plugin store: QForge's own, upstream's masked** (decided 2026-10-03)
@@ -324,7 +329,6 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
   from DuckStation's own pause menu returns to OGUI (`-batch`); no core dump, process or mount left.
   The FUSE type is named after the file `current` points to (`fuse.0.1-12070.AppImage`), as the
   stale sweep assumes; only the mount dir takes the link's name.
-  Not yet: per-device defaults (would go in qforge-launch).
 - ✅ **Per-game CPU pinning** (2026-10-03): `qforge-launch --cpus big <system> <rom>` starts the
   emulator under `taskset -c <fast cores>`: every ONLINE CPU whose cpu_capacity is above the
   smallest online one (SM8250 cpu4-7, SM8550 cpu3-7, SM8650 cpu2-7), never by number, never the
