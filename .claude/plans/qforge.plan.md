@@ -252,7 +252,7 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
    downloads; a "reset to QForge defaults" action on its Emulators page if needed later.
    HW ✅ (Pocket Max, settings.ini removed first): seeded, no wizard, pad + Select+Start + Exit OK.
    Contents (DuckStation: settings.ini with wizard off, BIOS/ROM dirs, Vulkan, `[Pad1]` SDL-0 mapping,
-   auto-updater off, `[Hotkeys] OpenPauseMenu = SDL-0/Back & SDL-0/Start` -- by default only
+   ConfirmPowerOff off (SIGTERM path), auto-updater off, `[Hotkeys] OpenPauseMenu = SDL-0/Back & SDL-0/Start` -- by default only
    keyboard Escape opens its menu, so a controller can never reach Exit; HW-verified). Never overwrite a user-changed config after that.
 
 **Launcher `qforge-launch <system> <rom>`** (in the image, `/usr/bin`, shell, unit-tested)
@@ -334,6 +334,19 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
   logged as a failure. HW (bind-mounted script + runtime drop-in): restart 0.9-2.3 s (stop
   ~0.1 s + RestartSec), OGUI stdin still /dev/tty1. tests/test-session.sh runs the real script
   with a fake gamescope and client; it fails on the old script.
+- ✅ **Games running when the session stops** (fixed 2026-10-03). OGUI quits without stopping
+  them: its reaper goes to PID 1, the game runs on until gamescope dies, then loses its display
+  and aborts (core dump, ~15 s orphan holding the GPU into the next session). qforge-session now
+  stops games FIRST, gamescope still up, exactly as OGUI's Exit does (Reaper.reap pattern),
+  finding OGUI's reapers by executable (so a game outliving a crashed OGUI is covered too), waits
+  up to 10 s (QFORGE_GAME_STOP_TIMEOUT), then SIGKILLs leftovers. HW: CTR shut down gracefully,
+  game gone ~330 ms after the stop, mount released, restart 3.5 s, no core dump; the stale mount
+  a killed run left was swept by the next launch.
+  Found on the way: DuckStation's `ConfirmPowerOff` IS needed. Its menu Exit never asks, but a
+  SIGTERM does, and the dialog waited out the 10 s timeout (game killed, stale mount). Restored
+  in the seed, with a test.
+- Open (low): gamescope SIGABRT core dump when a game is SIGKILLed during the session stop
+  (only seen on the timeout path, 17:04:34 2026-10-03). Not seen on a clean stop.
 - ROM cards show in All Games as well as in their system tab.
 
 **Open questions for review**

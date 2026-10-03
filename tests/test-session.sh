@@ -146,13 +146,20 @@ done
 CASE="session stop"
 T="$(mktemp -d)" && [ -d "$T" ] || { echo "mktemp -d failed" >&2; exit 1; }
 spids=()
-cleanup_t() { [ ${#spids[@]} -gt 0 ] && kill -KILL "${spids[@]}" 2>/dev/null; [ -n "${T:-}" ] && rm -rf "$T"; }
+# Also the fake reapers and games (pid files): a regression orphans them exactly like the real bug.
+cleanup_t() {
+  [ ${#spids[@]} -gt 0 ] && kill -KILL "${spids[@]}" 2>/dev/null
+  [ -n "${T:-}" ] && [ -d "$T" ] || return
+  cat "$T"/*.pids 2>/dev/null | xargs -r kill -KILL 2>/dev/null
+  rm -rf "$T"
+}
 trap cleanup_t EXIT
 mkdir -p "$T/bin" "$T/run" "$T/home"
 # gamescope: answer the startup handshake on the -R fifo, then run until SIGTERM.
 cat > "$T/bin/gamescope" <<EOF
 #!/bin/bash
 trap 'echo gamescope-term >> "$T/log"; exit 0' TERM
+echo \$\$ > "$T/gs.pid"
 while [ \$# -gt 0 ]; do [ "\$1" = -R ] && { r=\$2; shift; }; shift; done
 echo ":1 gamescope-0" > "\$r"
 while :; do sleep 0.05; done
@@ -162,14 +169,37 @@ cat > "$T/client" <<EOF
 #!/bin/bash
 echo "stdin=\$(readlink /proc/\$\$/fd/0)" >> "$T/log"
 trap 'echo client-term >> "$T/log"; exit 0' TERM
+if [ -e "$T/with-game" ]; then "$T/reaper" "$T/reaper.sh" & fi
 echo client-up >> "$T/log"
 while [ ! -e "$T/client-exit" ]; do sleep 0.05; done
 exit 5
 EOF
-chmod +x "$T/bin/gamescope" "$T/client"
+# OGUI's reaper is a binary found by its executable path, so the fake is a copy of bash (its
+# /proc/PID/exe is then $T/reaper) running a script: start the game in its own session, as
+# qforge-launch starts an emulator, and exit once no child is left.
+cp "$(command -v bash)" "$T/reaper"
+cat > "$T/reaper.sh" <<EOF
+echo \$\$ > "$T/reaper.pid"; echo \$\$ >> "$T/fakes.pids"
+setsid "$T/game" &
+wait
+echo reaper-exit >> "$T/log"
+EOF
+# The game: on SIGTERM records whether gamescope is still up, takes 0.2 s to "save", exits. With
+# $T/game-stubborn it ignores SIGTERM.
+cat > "$T/game" <<EOF
+#!/bin/bash
+if [ -e "$T/game-stubborn" ]; then trap '' TERM
+else trap 'kill -0 \$(cat "$T/gs.pid") 2>/dev/null && echo game-term-display-up >> "$T/log" || echo game-term-display-gone >> "$T/log"; sleep 0.2; echo game-exit >> "$T/log"; exit 0' TERM
+fi
+echo \$\$ >> "$T/fakes.pids"
+echo game-up >> "$T/log"
+while :; do sleep 0.05; done
+EOF
+chmod +x "$T/bin/gamescope" "$T/client" "$T/game"
 run_session() {
   : > "$T/log"; rm -f "$T/client-exit"
   PATH="$T/bin:$PATH" XDG_RUNTIME_DIR="$T/run" HOME="$T/home" QFORGE_SESSION_CMD="$T/client" \
+    QFORGE_OGUI_REAPER="$T/reaper" QFORGE_GAME_STOP_TIMEOUT=1 \
     sh "$SESSION" < "$T/stdin" > "$T/session.out" 2>&1 &
   spid=$!; spids+=("$spid")
 }
@@ -209,6 +239,62 @@ else
   else
     bad "the fake client never started (second run)"
   fi
+fi
+
+# -------------------------------------------------------------------------------------------------
+CASE="session stop with a game running"
+if [ -e /etc/qforge/session.conf ] || [ -e /usr/lib/qforge/device-env ]; then
+  ok "skipped (host has QForge's session.conf/device-env)"
+else
+  # Index of a line in the log: the order is the point (game before shell before gamescope).
+  at() { grep -nx "$1" "$T/log" | head -1 | cut -d: -f1; }
+  touch "$T/with-game"; rm -f "$T/game-stubborn"
+  run_session
+  if waitfor 'grep -qx game-up "$T/log"'; then
+    kill -TERM "$spid"
+    waitfor "! kill -0 $spid 2>/dev/null" || { bad "the session did not end"; kill -KILL "$spid"; }
+    wait "$spid"
+    grep -qx game-term-display-up "$T/log" \
+      && ok "the game got SIGTERM while gamescope was still up (a clean shutdown, not a lost display)" \
+      || bad "the game was not stopped before gamescope ($(grep game-term "$T/log" || echo 'no SIGTERM'))"
+    [ -n "$(at game-exit)" ] && [ -n "$(at reaper-exit)" ] && [ -n "$(at client-term)" ] \
+      && [ "$(at reaper-exit)" -lt "$(at client-term)" ] \
+      && ok "the game and its reaper were gone before the shell was stopped" \
+      || bad "order in the log: $(tr '\n' ' ' < "$T/log")"
+    waitfor 'grep -qx gamescope-term "$T/log"' && [ "$(at game-exit)" -lt "$(at gamescope-term)" ] \
+      && ok "gamescope was stopped last" || bad "gamescope stopped before the game exited"
+  else
+    bad "the fake game never started: $(tail -3 "$T/session.out")"
+  fi
+
+  # The shell exits on its own (a crash) with a game running: the game still goes first.
+  run_session
+  if waitfor 'grep -qx game-up "$T/log"'; then
+    touch "$T/client-exit"
+    waitfor "! kill -0 $spid 2>/dev/null" || { bad "the session did not end"; kill -KILL "$spid"; }
+    wait "$spid"
+    grep -qx game-term-display-up "$T/log" && [ -n "$(at reaper-exit)" ] \
+      && ok "shell crashed with a game running: the orphaned game is still stopped cleanly" \
+      || bad "a game left behind by an exiting shell was not stopped cleanly: $(tr '\n' ' ' < "$T/log")"
+  else
+    bad "the fake game never started (crash case)"
+  fi
+
+  # A game that ignores SIGTERM is killed after QFORGE_GAME_STOP_TIMEOUT (1 s here).
+  touch "$T/game-stubborn"
+  run_session
+  if waitfor 'grep -qx game-up "$T/log"'; then
+    kill -TERM "$spid"
+    waitfor "! kill -0 $spid 2>/dev/null" || { bad "the session did not end"; kill -KILL "$spid"; }
+    wait "$spid"
+    rp="$(cat "$T/reaper.pid")"
+    grep -q "still running after 1s" "$T/session.out" && ! kill -0 "$rp" 2>/dev/null \
+      && ok "a game ignoring SIGTERM is killed after the timeout, and the session still ends" \
+      || bad "a stubborn game was not killed (session.out: $(tail -2 "$T/session.out"))"
+  else
+    bad "the fake game never started (stubborn case)"
+  fi
+  rm -f "$T/with-game" "$T/game-stubborn"
 fi
 
 printf '\ntest-session.sh: %d passed, %d failed\n' "$PASS" "$FAIL"

@@ -224,9 +224,56 @@ fi
 # told the shell to quit, and every `systemctl stop/restart qforge-session` sat out TimeoutStopSec
 # (90 s) before a SIGKILL (HW 2026-10-03). `wait` returns as soon as a trapped signal arrives.
 # `<&0`: an sh background job otherwise gets /dev/null as stdin instead of the session's tty1.
+#
+# Running games go FIRST, while gamescope is still up. OGUI does not stop them when it quits: its
+# per-game reaper is re-parented to PID 1 and the game keeps running until gamescope goes, then
+# loses its display and aborts — no clean shutdown, a core dump, and ~15 s of an orphaned emulator
+# holding the GPU while the next session starts (HW 2026-10-03, DuckStation). They are stopped the
+# way OGUI's own Exit stops them (Reaper.reap), the signal pattern qforge-launch is built for, and
+# found by executable so a game outliving a crashed OGUI is stopped too.
+: "${QFORGE_OGUI_REAPER:=/usr/share/opengamepadui/reaper}"
+: "${QFORGE_GAME_STOP_TIMEOUT:=10}"   # s for running games to shut down before they are killed
+GAME_STOP_TIMEOUT=$QFORGE_GAME_STOP_TIMEOUT
+descendants() {        # depth first, like OGUI's Reaper.pstree()
+  for _d in $(ps -o pid= --ppid "$1" 2>/dev/null); do echo "$_d"; descendants "$_d"; done
+  return 0
+}
+game_reapers() {       # one OGUI reaper per running game
+  for _p in /proc/[0-9]*; do
+    [ "$(readlink "$_p/exe" 2>/dev/null)" = "$QFORGE_OGUI_REAPER" ] && echo "${_p#/proc/}"
+  done
+  return 0
+}
+stop_games() {
+  _reapers=$(game_reapers)
+  [ -n "$_reapers" ] || return 0
+  echo "qforge-session: stopping running game(s) before the shell" >&2
+  for _r in $_reapers; do
+    # Leaves inward, `kill -TERM -- -PID` then `kill -TERM PID` for each process under the reaper.
+    for _p in $(descendants "$_r" | tac); do
+      kill -TERM -- "-$_p" 2>/dev/null || true
+      kill -TERM "$_p" 2>/dev/null || true
+    done
+  done
+  _t=0
+  while [ "$_t" -lt $((GAME_STOP_TIMEOUT * 10)) ]; do
+    _alive=""
+    for _r in $_reapers; do kill -0 "$_r" 2>/dev/null && _alive=1; done
+    [ -n "$_alive" ] || return 0
+    sleep 0.1; _t=$((_t + 1))
+  done
+  echo "qforge-session: game(s) still running after ${GAME_STOP_TIMEOUT}s — killing them" >&2
+  for _r in $_reapers; do
+    for _p in $(descendants "$_r"); do kill -KILL "$_p" 2>/dev/null || true; done
+    kill -KILL "$_r" 2>/dev/null || true
+  done
+  return 0
+}
+
 CLIENT_PID=""
 stop_session() {
   trap - HUP INT TERM
+  stop_games
   if [ -n "$CLIENT_PID" ]; then
     kill -TERM "$CLIENT_PID" 2>/dev/null || true
     wait "$CLIENT_PID" 2>/dev/null || true
@@ -241,6 +288,9 @@ wait "$CLIENT_PID"
 status=$?
 set -e
 trap cleanup HUP INT TERM
+# The client exited on its own (power action, or a crash): a game it left running still has to go
+# before gamescope does.
+stop_games
 
 # The client asked for a power action on its way out. It did NOT call logind — it touched a sentinel
 # and exited cleanly precisely so the host could finish tearing the session down first, which is the
