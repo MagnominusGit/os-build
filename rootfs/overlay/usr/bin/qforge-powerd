@@ -3,7 +3,6 @@ import configparser
 import os
 import shutil
 import signal
-import shlex
 import socket
 import subprocess
 import sys
@@ -16,28 +15,37 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 BUS_NAME = "org.qforge.Power"
 OBJECT_PATH = "/org/qforge/Power"
 IFACE = "org.qforge.Power1"
-# Every profile here must have a [profile.<id>] section in power-profiles.conf. These are
-# IDS; the UI labels come from that config and are looked up through label_for().
-PROFILES = ["eco", "balanced", "performance"]
+# qforge-powerd owns what nothing else on the image does: the fan, the CPU frequency GOVERNOR (the
+# kernel default is `performance`, see kernel/kernel.config, so something has to replace it at
+# boot), the sched_ext scheduler choice, and the suspend-time clock clamp.
+#
+# It does NOT own CPU or GPU frequency LIMITS, core online state or boost any more: PowerStation
+# (packages/powerstation, org.shadowblip.PowerStation) does, because that is the service
+# OpenGamepadUI's performance menu drives. The eco/balanced/performance power profiles that used to
+# set those limits were dropped on 2026-10-03 with the Steam-era power-profiles-daemon interface
+# they were selected through; nothing on the image can select one any more.
 STATE_FILE = Path("/var/lib/qforge/powerd.state")
 # Overridable so tests/test-fan-curve.sh can drive the real parse/write paths against a
 # fabricated tree.
 FACTORY_CONFIG_FILE = Path(os.environ.get(
-    "QFORGE_POWERD_FACTORY", "/usr/share/qforge/power-profiles.conf"))
+    "QFORGE_POWERD_FACTORY", "/usr/share/qforge/power.conf"))
 CONFIG_DIR = Path(os.environ.get("QFORGE_POWERD_ETC", "/etc/qforge"))
-CONFIG_FILE = CONFIG_DIR / "power-profiles.conf"
+CONFIG_FILE = CONFIG_DIR / "power.conf"
 # Three layers, lowest first: /usr factory -> the operator's own /etc file -> drop-ins. The
 # split exists because the /etc file is OPERATOR territory (hand-written, commented, and it
-# may override underclock tables or the whole [fan] block), while FAN_CURVE_DROPIN is ours to
+# may override the governor, a factory curve or the whole [fan] block), while FAN_CURVE_DROPIN is ours to
 # rewrite from scratch on every FanCurve set. configparser cannot round-trip comments, so
 # writing the user's curve into the /etc file would silently eat an operator's notes on every
 # slider drag. An operator who wants the last word still has it: drop-ins are read in sorted
 # order, so a 90-*.conf of their own outranks ours.
 CONFIG_DROPIN_DIR = Path(f"{CONFIG_FILE}.d")
 FAN_CURVE_DROPIN = CONFIG_DROPIN_DIR / "50-fan-curves.conf"
-# A curve powerd itself wrote, as opposed to a factory one. The name is what makes
+# The curve powerd itself writes, as opposed to a factory one. The name is what makes
 # FanCurveIsCustom answerable, and what ResetFanCurve deletes.
-CUSTOM_CURVE_PREFIX = "custom-"
+CUSTOM_CURVE = "custom"
+# Measured the better choice for frame-time consistency on these SoCs (see kernel/kernel.config);
+# overridable with [cpu] governor= in the config.
+DEFAULT_CPU_GOVERNOR = "ondemand"
 FAN_SAFE_PWM = 128
 # Fallback only: the factory config carries curve_stops. It matters when an /etc file from an
 # older image is layered over a newer /usr, which is exactly the case an OTA produces.
@@ -52,7 +60,7 @@ DEFAULT_CURVE_STOPS = (60, 70, 80, 90, 100)
 # Deliberately just these two, matching Valve's vocabulary exactly. scx-scheds also ships
 # scx_bpfland and scx_rusty, but those stay SSH-only per-title fallbacks rather than QAM
 # entries. Not to be confused with the cpufreq governor (schedutil / performance): that is
-# frequency policy, a separate axis, and stays owned by the power profile.
+# frequency policy, a separate axis ([cpu] governor below).
 #
 # THE DEFAULT IS "none", i.e. the stock in-kernel scheduler — same as SteamOS, for a different
 # reason. SteamOS defaults to stock because scx there may not be installed at all (its manager
@@ -72,69 +80,15 @@ DEFAULT_CURVE_STOPS = (60, 70, 80, 90, 100)
 #
 # THE DEFAULT IS NOT IMPLEMENTED BY ENABLING scx.service, and must not be. The unit ships
 # installed but never `enable`d; restore_cpu_scheduler() below is the only thing that starts it
-# at boot. That is load-bearing for the --autopower coupling described next: a preset or a
-# .wants symlink would start lavd independently of us, before we own the PowerProfiles names,
-# which is the one ordering that silently breaks it. See main().
-#
-# The power profile owns lavd's INTERNAL power mode. We ship scx_lavd with `--autopower`
-# (packages/scx-scheds/PKGBUILD writes it into /etc/default/scx), so once lavd is running it
-# polls PowerProfiles.ActiveProfile on the system bus once a second and switches its own
-# performance/balanced/powersave mode live, no restart. We answer that name ourselves
-# (PPD_NAMES below) because we ship no power-profiles-daemon.
+# at boot, so a fresh device boots on the stock scheduler and only a persisted choice starts lavd.
+# (scx_lavd used to run with --autopower, following the power profile through the
+# power-profiles-daemon names powerd answered; with the profiles gone it runs in its default mode.)
 CPU_SCHEDULERS = ["none", "lavd"]
 DEFAULT_CPU_SCHEDULER = "none"
 SCX_UNIT = "scx.service"
 SCX_BINARY = Path("/usr/bin/scx_lavd")
 SCX_SYSFS = Path("/sys/kernel/sched_ext")
 SCX_TIMEOUT = 15
-
-# Resolving a D-Bus sender to a pid costs a round trip to the bus daemon. It only ever happens on
-# an actual profile change (a human action), so the cost is irrelevant -- but the timeout must stay
-# short, because a wedged bus must not turn a profile set into a hang.
-SENDER_LOOKUP_TIMEOUT_MS = 500
-
-# power-profiles-daemon compatibility, served for two independent consumers:
-#
-#   net.hadess.PowerProfiles              scx_lavd --autopower. It hardcodes interface, service
-#                                         AND path (scx_utils/src/autopower.rs) with no fallback
-#                                         to the newer name, so this one is load-bearing: drop it
-#                                         and the whole coupling above silently stops working.
-#   org.freedesktop.UPower.PowerProfiles  glib's GPowerProfileMonitorDBus, which uses only this
-#                                         name (no net.hadess reference anywhere in libgio), so
-#                                         g_power_profile_monitor_dup_default() is dead without
-#                                         it. Also the name real PPD prefers today.
-#
-# Both expose the same ActiveProfile, so one handler serves both; the table exists so they cannot
-# drift. Upstream scx chose the legacy name deliberately (sched-ext/scx#1017: tuned-ppd implements
-# net.hadess and not the freedesktop name) and main still hardcodes it, so this is not a
-# transitional hack we can retire on the next scx bump.
-#
-# WHY THE MAPPING MATTERS MORE THAN IT LOOKS: when lavd cannot reach PPD it falls back to reading
-# policy0/energy_performance_preference then scaling_governor, and it treats a governor it does
-# not recognise as Unknown. A transition from a KNOWN profile into Unknown makes it disable
-# autopower permanently, silently, for the life of the process. On this hardware there is no EPP
-# file at all and the governors in play are ondemand/performance, so that fallback is worse than
-# useless — Performance -> Balanced would kill it outright. Hence: we must own these names BEFORE
-# the scheduler we start takes its first tick (see main()).
-PPD_NAMES = (
-    ("net.hadess.PowerProfiles", "/net/hadess/PowerProfiles", "net.hadess.PowerProfiles"),
-    (
-        "org.freedesktop.UPower.PowerProfiles",
-        "/org/freedesktop/UPower/PowerProfiles",
-        "org.freedesktop.UPower.PowerProfiles",
-    ),
-)
-# Our profile ids <-> PPD's. PPD has exactly these three and so do we, which is why this is a
-# plain mapping and not a policy. Note these are ids, NOT the UI labels ("Eco") that the
-# org.qforge.Power1 Profile property speaks — do not route one through the other.
-PPD_PROFILES = {"eco": "power-saver", "balanced": "balanced", "performance": "performance"}
-PPD_PROFILE_IDS = {ppd: ours for ours, ppd in PPD_PROFILES.items()}
-
-
-def normalize_profile(profile):
-    value = profile.strip().lower()
-    return value if value in PROFILES else ""
-
 
 XML = f"""
 <node>
@@ -145,14 +99,6 @@ XML = f"""
     <method name="GetStatus">
       <arg type="a{{sv}}" name="status" direction="out"/>
     </method>
-    <property name="AvailableProfiles" type="as" access="read"/>
-    <property name="Profile" type="s" access="readwrite"/>
-    <property name="SuggestedDefaultProfile" type="s" access="read"/>
-    <property name="AvailableGpuPerformanceLevels" type="as" access="read"/>
-    <property name="GpuPerformanceLevel" type="s" access="readwrite"/>
-    <property name="ManualGpuClock" type="u" access="readwrite"/>
-    <property name="ManualGpuClockMin" type="u" access="read"/>
-    <property name="ManualGpuClockMax" type="u" access="read"/>
     <property name="AvailableCpuSchedulers" type="as" access="read"/>
     <property name="CpuScheduler" type="s" access="readwrite"/>
     <!-- The scheduler actually loaded. Equals CpuScheduler except when the kernel has ejected
@@ -165,9 +111,8 @@ XML = f"""
     <!-- The editable fan curve, as PWM values sampled at FIXED temperature stops.
          Editing only the PWMs is what makes an invalid curve unreachable rather than
          rejected: the stops are already sorted, so "temperatures must rise" cannot be
-         violated and there is no ordering to validate. FanCurve is scoped to the ACTIVE
-         profile and is re-emitted when the profile changes, because a fan curve is a
-         property of a thermal policy, not of a title.
+         violated and there is no ordering to validate. There is one curve for the
+         device; it is not per title.
 
          The STORAGE grammar is unchanged (`temp:pwm,...`, arbitrary point count), so an
          operator can still hand-author a curve of any shape over SSH and powerd will
@@ -179,31 +124,9 @@ XML = f"""
     <property name="FanCurveMinPwm" type="u" access="read"/>
     <property name="FanCurveMaxPwm" type="u" access="read"/>
     <property name="FanCurveIsCustom" type="b" access="read"/>
-    <!-- Deletes what powerd wrote and returns to the factory curve. Neither touches an
-         operator's own override in the /etc file. No argument on either, so that reset
-         addresses exactly what FanCurve addresses: the active profile, or everything. -->
+    <!-- Deletes what powerd wrote and returns to the factory curve. Does not touch an
+         operator's own override in the /etc file. -->
     <method name="ResetFanCurve"/>
-    <method name="ResetAllFanCurves"/>
-  </interface>
-</node>
-"""
-
-
-# One PPD interface per bus name — same body, different interface name, so it is a template.
-# ActiveProfile is readwrite: a PPD client setting it is a legitimate way to change the profile,
-# and it lands in exactly the same code path as our own Profile property. Profiles and
-# PerformanceDegraded exist so a client can enumerate and reason about us instead of finding a
-# stub; PerformanceDegraded is always "" because we never thermally-throttle the profile behind
-# the user's back (the fan curve absorbs it). HoldProfile/ReleaseProfile are deliberately absent:
-# they need per-sender cookie refcounting with NameOwnerChanged cleanup, and nothing on the device
-# asks for them. A client that needs holds sees them missing rather than broken.
-def ppd_xml(iface):
-    return f"""
-<node>
-  <interface name="{iface}">
-    <property name="ActiveProfile" type="s" access="readwrite"/>
-    <property name="Profiles" type="aa{{sv}}" access="read"/>
-    <property name="PerformanceDegraded" type="s" access="read"/>
   </interface>
 </node>
 """
@@ -282,27 +205,6 @@ def sd_notify(message):
             sock.sendall(message.encode())
     except OSError:
         pass
-
-
-def shell_env():
-    helper = os.environ.get("QFORGE_DEVICE_ENV", "/usr/lib/qforge/device-env")
-    command = (
-        f'eval "$({shlex.quote(helper)})"; '
-        'for name in "${!QFORGE_@}"; do printf "%s=%s\\n" "$name" "${!name}"; done'
-    )
-    proc = subprocess.run(
-        ["bash", "-c", command],
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
-    env = {}
-    for line in proc.stdout.splitlines():
-        if "=" in line:
-            key, value = line.split("=", 1)
-            env[key] = value
-    return env
 
 
 def ints_from_file(path):
@@ -392,60 +294,28 @@ def clean_curve_pwms(pwms, stops, low, high):
     return clean
 
 
-def render_fan_dropin(curves, stops):
-    """The whole drop-in, rebuilt from scratch. {profile: [pwm at each stop]} -> ini text."""
-    lines = [
+def render_fan_dropin(pwms, stops):
+    """The whole drop-in, rebuilt from scratch, for one custom curve sampled at `stops`."""
+    curve = format_fan_curve(list(zip(stops, pwms)))
+    return "\n".join([
         "# Written by qforge-powerd (org.qforge.Power1 FanCurve). Rebuilt in full on",
         "# every change, so comments added here do not survive -- put operator overrides in",
         f"# {CONFIG_FILE} (read first) or a higher-numbered drop-in (read after) instead.",
         "#",
-        "# `ResetFanCurve` deletes a profile's pair of sections below; when none are left the",
-        "# whole file goes and the factory curves apply again.",
-    ]
-    for profile in PROFILES:
-        pwms = curves.get(profile)
-        if not pwms:
-            continue
-        name = f"{CUSTOM_CURVE_PREFIX}{profile}"
-        curve = format_fan_curve(list(zip(stops, pwms)))
-        lines += [
-            "",
-            f"[fan_curve.{name}]",
-            f"label=Custom ({profile.title()})",
-            f"curve={curve}",
-            "",
-            f"[profile.{profile}]",
-            f"fan_curve={name}",
-        ]
-    return "\n".join(lines) + "\n"
-
-
-def read_fan_dropin(path=None):
-    """Our own drop-in back as {profile: [(temp, pwm)]}; anything unreadable is 'no curves'."""
-    parser = configparser.ConfigParser()
-    try:
-        if not parser.read(path or FAN_CURVE_DROPIN):
-            return {}
-    except configparser.Error:
-        return {}
-    curves = {}
-    for profile in PROFILES:
-        section = f"fan_curve.{CUSTOM_CURVE_PREFIX}{profile}"
-        if not parser.has_section(section):
-            continue
-        curve = parse_fan_curve(parser.get(section, "curve", fallback=""))
-        if curve:
-            curves[profile] = curve
-    return curves
+        "# `ResetFanCurve` deletes this file and the factory curve applies again.",
+        "",
+        f"[fan_curve.{CUSTOM_CURVE}]",
+        "label=Custom",
+        f"curve={curve}",
+        "",
+        "[fan]",
+        f"curve={CUSTOM_CURVE}",
+    ]) + "\n"
 
 
 def require_section(parser, section):
     if not parser.has_section(section):
         raise ValueError(f"missing config section [{section}]")
-
-
-def require_ratio(parser, section, key):
-    return clamp(parser.getfloat(section, key), 0.0, 1.0)
 
 
 def fan_safe_once():
@@ -469,19 +339,12 @@ def fan_safe_once():
 
 class QforgePower:
     def __init__(self):
-        self.env = shell_env()
-        self.profile_config = {}
-        self.profile_labels = {}
-        self.underclock_config = {}
         self.fan_curves = {}
+        self.fan_curve_name = ""
+        self.fan_curve_points = []
         self.fan_config = {}
         self.suspend_config = {}
-        self.default_profile = ""
-        # profile is both the persisted choice and what is in force: there is no per-game
-        # override of it.
-        self.profile = ""
-        self.gpu_level = "auto"
-        self.manual_gpu_clock = 0
+        self.cpu_governor = DEFAULT_CPU_GOVERNOR
         # cpu_scheduler is the PERSISTED CHOICE; scheduler_live is what is actually loaded right
         # now. They differ only when the kernel ejects lavd underneath us or a start is still in
         # flight -- see reconcile_scheduler_live().
@@ -494,18 +357,12 @@ class QforgePower:
         self.suspend_save = {}
         self.connection = None
         self.load_config()
-        self.profile = self.default_profile
         self.discover()
-        self.apply_underclock_refs()
         self.load_state()
         if self.fan_pwm:
             current = read_text(self.fan_pwm)
             self.last_pwm = int(current) if current.isdigit() else self.fan_config["min_pwm"]
-        self.apply_profile()
-        if self.gpu_level == "manual" and self.manual_gpu_clock:
-            self.set_gpu_manual_clock(self.manual_gpu_clock)
-        # restore_cpu_scheduler() is NOT called here — main() runs it once we own the PPD bus
-        # names, because scx_lavd --autopower reads them on its first tick. See main().
+        self.apply_cpu_governor()
         self.fan_tick()
         GLib.timeout_add_seconds(3, self.fan_tick)
         # There is no per-game (per-ROM) layer: emulators carry their own per-game settings.
@@ -513,6 +370,8 @@ class QforgePower:
         GLib.timeout_add_seconds(3, self.scheduler_tick)
 
     def discover(self):
+        # The GPU devfreq node is still discovered, but only for the suspend clamp: its
+        # frequency range at runtime belongs to PowerStation.
         self.gpu = self.discover_gpu()
         self.cpu_policies = sorted(Path("/sys/devices/system/cpu/cpufreq").glob("policy*"))
         self.fan_hwmon = self.discover_fan_hwmon()
@@ -521,28 +380,8 @@ class QforgePower:
         self.fan_rpm = self.fan_hwmon / "fan1_input" if self.fan_hwmon else None
         self.temp_paths = self.discover_temps()
 
-    def cpu_device_class(self):
-        return self.env.get("QFORGE_SOC_CLASS", "")
-
-    def apply_underclock_refs(self):
-        device_class = self.cpu_device_class()
-        if not device_class:
-            return
-        for profile in PROFILES:
-            config = self.profile_config[profile]
-            if config["cpu_max_policy"]:
-                continue
-            level = config.get("cpu_underclock", "none")
-            if level in ("", "none", "stock"):
-                continue
-            caps = self.underclock_config.get(device_class, {}).get(level)
-            if caps:
-                config["cpu_max_policy"] = dict(caps)
-
     def parse_config(self, include_user=True):
-        underclock_config = {}
         fan_curves = {}
-        profile_config = {}
         parser = configparser.ConfigParser()
         config_files = [FACTORY_CONFIG_FILE]
         if include_user:
@@ -550,34 +389,13 @@ class QforgePower:
                 config_files.append(CONFIG_FILE)
             # Sorted, and read last: our own 50- drop-in outranks the operator's /etc file,
             # a 90- of theirs outranks us. Later files win key-by-key, so a drop-in holding
-            # only `fan_curve=` overrides that key and inherits the rest of the profile.
+            # only `[fan] curve=` overrides that key and inherits the rest of [fan].
             config_files.extend(sorted(CONFIG_DROPIN_DIR.glob("*.conf")))
         if not parser.read(config_files):
             raise FileNotFoundError(FACTORY_CONFIG_FILE)
-        require_section(parser, "general")
-        default_profile = parser.get("general", "default_profile").strip().lower()
-        if default_profile not in PROFILES:
-            raise ValueError(f"invalid default_profile: {default_profile}")
-        for section in parser.sections():
-            if not section.startswith("underclock."):
-                continue
-            parts = section.split(".")
-            if len(parts) != 3:
-                continue
-            device_class, level = parts[1], parts[2]
-            caps = {}
-            for key, value in parser.items(section):
-                if not key.startswith("cpu_max_policy"):
-                    continue
-                policy_id = key.removeprefix("cpu_max_policy")
-                if not policy_id.isdigit():
-                    continue
-                try:
-                    caps[int(policy_id)] = int(value)
-                except ValueError:
-                    pass
-            if caps:
-                underclock_config.setdefault(device_class, {})[level] = caps
+        cpu_governor = parser.get("cpu", "governor", fallback=DEFAULT_CPU_GOVERNOR).strip()
+        if not cpu_governor:
+            raise ValueError("empty [cpu] governor")
         for section in parser.sections():
             if not section.startswith("fan_curve."):
                 continue
@@ -587,41 +405,16 @@ class QforgePower:
             curve = parse_fan_curve(parser.get(section, "curve", fallback=""))
             if curve:
                 fan_curves[parts[1]] = curve
-        if not fan_curves:
-            raise ValueError("missing fan curves")
-        for profile in PROFILES:
-            section = f"profile.{profile}"
-            require_section(parser, section)
-            fan_curve = parser.get(section, "fan_curve").strip().lower()
-            curve = parse_fan_curve(fan_curve)
-            config = {
-                "label": parser.get(section, "label", fallback="").strip() or profile.replace("_", " ").title(),
-                "cpu_governor": parser.get(section, "cpu_governor").strip(),
-                "cpu_max": require_ratio(parser, section, "cpu_max"),
-                "cpu_underclock": parser.get(section, "cpu_underclock").strip().lower(),
-                "gpu_max": require_ratio(parser, section, "gpu_max"),
-                "gpu_min": require_ratio(parser, section, "gpu_min"),
-                "fan_curve": fan_curve,
-                "cpu_max_policy": {},
-            }
-            if curve:
-                config["fan_curve"] = curve
-            elif fan_curve in fan_curves:
-                config["fan_curve"] = fan_curve
-            else:
-                raise ValueError(f"unknown fan_curve for {profile}: {fan_curve}")
-            for key, value in parser.items(section):
-                if not key.startswith("cpu_max_policy"):
-                    continue
-                policy_id = key.removeprefix("cpu_max_policy")
-                if not policy_id.isdigit():
-                    continue
-                try:
-                    config["cpu_max_policy"][int(policy_id)] = int(value)
-                except ValueError:
-                    pass
-            profile_config[profile] = config
         require_section(parser, "fan")
+        # [fan] curve= names a [fan_curve.<name>] section or spells the points out inline.
+        curve_value = parser.get("fan", "curve").strip()
+        inline = parse_fan_curve(curve_value)
+        if inline:
+            curve_name, curve_points = "", inline
+        elif curve_value.lower() in fan_curves:
+            curve_name, curve_points = curve_value.lower(), fan_curves[curve_value.lower()]
+        else:
+            raise ValueError(f"unknown [fan] curve: {curve_value}")
         fan_config = {
             key: parser.getint("fan", key)
             for key in ("min_pwm", "max_pwm", "ramp_up", "ramp_down")
@@ -662,7 +455,8 @@ class QforgePower:
             "fan_low_pwm": fan_low_pwm,
             "fan_safe_pwm": fan_safe_pwm,
         }
-        return default_profile, underclock_config, fan_curves, profile_config, fan_config, suspend_config
+        return (cpu_governor, fan_curves, curve_name, curve_points, fan_config,
+                suspend_config)
 
     def load_config(self):
         try:
@@ -671,14 +465,13 @@ class QforgePower:
             restore_factory_config(exc)
             parsed = self.parse_config(include_user=False)
         (
-            self.default_profile,
-            self.underclock_config,
+            self.cpu_governor,
             self.fan_curves,
-            self.profile_config,
+            self.fan_curve_name,
+            self.fan_curve_points,
             self.fan_config,
             self.suspend_config,
         ) = parsed
-        self.profile_labels = {p: self.profile_config[p].get("label", p) for p in PROFILES}
 
     def discover_gpu(self):
         for path in Path("/sys/class/devfreq").glob("*.gpu"):
@@ -710,29 +503,21 @@ class QforgePower:
         return control
 
     def load_state(self):
+        # Only the scheduler choice is persisted now. A state file from an image that still had
+        # power profiles also carries profile=/gpu_level=/manual_gpu_clock=; those are ignored and
+        # dropped on the next save.
         if not STATE_FILE.exists():
             return
         for line in read_text(STATE_FILE).splitlines():
             if "=" not in line:
                 continue
             key, value = line.split("=", 1)
-            if key == "profile" and value in PROFILES:
-                self.profile = value
-            elif key == "gpu_level" and value in ("auto", "manual"):
-                self.gpu_level = value
-            elif key == "manual_gpu_clock" and value.isdigit():
-                self.manual_gpu_clock = int(value)
-            elif key == "cpu_scheduler" and value in CPU_SCHEDULERS:
+            if key == "cpu_scheduler" and value in CPU_SCHEDULERS:
                 self.cpu_scheduler = value
 
     def save_state(self):
         STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        STATE_FILE.write_text(
-            f"profile={self.profile}\n"
-            f"gpu_level={self.gpu_level}\n"
-            f"manual_gpu_clock={self.manual_gpu_clock}\n"
-            f"cpu_scheduler={self.cpu_scheduler}\n"
-        )
+        STATE_FILE.write_text(f"cpu_scheduler={self.cpu_scheduler}\n")
 
     def available_cpu_schedulers(self):
         # No sched_ext in this kernel, or no scx binary: only the in-kernel scheduler exists.
@@ -796,8 +581,8 @@ class QforgePower:
         # is saved. scx.service is never `enable`d, so this (and an explicit `systemctl start`) is
         # the only path that loads a BPF scheduler — a fresh device therefore boots on the stock
         # in-kernel scheduler and only a persisted `cpu_scheduler=lavd` starts the unit here.
-        # Called from main() once the PPD bus names are owned, NOT from __init__ — scx_lavd runs
-        # with --autopower and reads ActiveProfile on its first tick.
+        # Called from main() once our bus name is owned, so the unit's start job is not opened
+        # from inside our own still-pending start (Type=dbus).
         if len(self.available_cpu_schedulers()) == 1:
             self.cpu_scheduler = "none"
             self.scheduler_live = "none"
@@ -870,67 +655,21 @@ class QforgePower:
             return [int(low), int(high)]
         return []
 
-    def closest(self, freqs, target):
-        return min(freqs, key=lambda freq: abs(freq - target)) if freqs else 0
-
-    def choose_at_least(self, freqs, target):
-        for freq in freqs:
-            if freq >= target:
-                return freq
-        return freqs[-1] if freqs else 0
-
-    def choose_at_most(self, freqs, target):
-        below = [freq for freq in freqs if freq <= target]
-        return below[-1] if below else freqs[0] if freqs else 0
-
-    def policy_id(self, policy):
-        try:
-            return int(policy.name.removeprefix("policy"))
-        except ValueError:
-            return -1
-
-    def cpu_max_target(self, settings, policy_id, freqs):
-        if self.cpu_device_class() in self.underclock_config:
-            return settings["cpu_max_policy"].get(policy_id, freqs[-1])
-        return int(freqs[-1] * settings["cpu_max"])
-
-    def profile_settings(self):
-        return self.profile_config.get(self.profile, self.profile_config["balanced"])
-
-    def active_curve(self, profile=None):
-        """The effective curve for a profile, as points -- factory or custom, resolved."""
-        settings = self.profile_config.get(
-            profile or self.profile, self.profile_settings())
-        curve = settings["fan_curve"]
-        if isinstance(curve, str):
-            curve = self.fan_curves.get(curve, [])
-        return list(curve)
-
-    def active_curve_name(self, profile=None):
-        curve = self.profile_config.get(
-            profile or self.profile, self.profile_settings())["fan_curve"]
-        return curve if isinstance(curve, str) else ""
-
     def fan_curve_pwms(self):
-        return resample_curve(self.active_curve(), self.fan_config["curve_stops"])
+        return resample_curve(self.fan_curve_points, self.fan_config["curve_stops"])
 
     def reload_config(self):
         """Re-read every layer and re-apply. Shared by the Reload method and every curve
         write, so a curve edit cannot drift from what an operator's `Reload` would do."""
         self.load_config()
         self.discover()
-        self.apply_underclock_refs()
-        self.apply_profile()
-        if self.gpu_level == "manual" and self.manual_gpu_clock:
-            self.set_gpu_manual_clock(self.manual_gpu_clock)
+        self.apply_cpu_governor()
 
-    def write_fan_dropin(self, curves):
-        """Rebuild the drop-in from `curves`, or remove it when nothing is left to say."""
-        if curves:
+    def write_fan_dropin(self, pwms):
+        """Rebuild the drop-in for a custom curve, or remove it when `pwms` is None."""
+        if pwms is not None:
             CONFIG_DROPIN_DIR.mkdir(parents=True, exist_ok=True)
-            stops = self.fan_config["curve_stops"]
-            text = render_fan_dropin(
-                {p: resample_curve(c, stops) for p, c in curves.items()}, stops)
+            text = render_fan_dropin(pwms, self.fan_config["curve_stops"])
             # Atomic replace: powerd re-reads this from its own reload path, and a half-written
             # ini is a quarantined config.
             temporary = FAN_CURVE_DROPIN.with_name(f".{FAN_CURVE_DROPIN.name}.new")
@@ -947,32 +686,22 @@ class QforgePower:
         }
 
     def set_fan_curve(self, pwms):
-        # Scoped to the profile in force, which is what FanCurve reads back and therefore what
-        # the editor is showing.
-        profile = self.profile
-        stops = self.fan_config["curve_stops"]
         clean = clean_curve_pwms(
-            pwms, stops, self.fan_config["min_pwm"], self.fan_config["max_pwm"])
-        curves = read_fan_dropin()
-        curves[profile] = list(zip(stops, clean))
-        self.write_fan_dropin(curves)
-        print(f"qforge-powerd: fan curve for {profile} set to "
-              f"{format_fan_curve(curves[profile])}", file=sys.stderr)
+            pwms, self.fan_config["curve_stops"], self.fan_config["min_pwm"],
+            self.fan_config["max_pwm"])
+        self.write_fan_dropin(clean)
+        print(f"qforge-powerd: fan curve set to {format_fan_curve(self.fan_curve_points)}",
+              file=sys.stderr)
 
-    def reset_fan_curve(self, every=False):
+    def reset_fan_curve(self):
         # Unconditional, including when there was nothing to remove: the reload has to run
         # either way so the reported end state is the real one, and an operator may have
         # edited the file since we last read it.
-        curves = {}
-        if not every:
-            curves = read_fan_dropin()
-            curves.pop(self.profile, None)
-        self.write_fan_dropin(curves)
-        target = "all profiles" if every else self.profile
-        print(f"qforge-powerd: fan curve reset to factory for {target}", file=sys.stderr)
+        self.write_fan_dropin(None)
+        print("qforge-powerd: fan curve reset to factory", file=sys.stderr)
 
     def write_governor(self, path, preferred):
-        """Set the profile's governor, falling back only once the kernel has refused it.
+        """Set the governor, falling back only once the kernel has refused it.
 
         The preferred name is tried by WRITING it, not by looking it up in
         scaling_available_governors first. That list holds the governors currently
@@ -984,7 +713,7 @@ class QforgePower:
         precisely so this cannot bite, but powerd also runs on images it did not ship with,
         and the /etc config may name a governor the factory one never did.)
 
-        The fallback is logged. This same fallback once made eco and balanced identical at
+        The fallback is logged. This same fallback once made two power profiles identical at
         the governor level for a whole release, silently, and the only reason it was ever
         found was a hand check of scaling_available_governors on a device."""
         target = path / "scaling_governor"
@@ -1001,40 +730,12 @@ class QforgePower:
               f"'{read_text(target)}'", file=sys.stderr)
         return None
 
-    def apply_profile(self):
-        settings = self.profile_settings()
+    def apply_cpu_governor(self):
+        """Replace the kernel's boot governor (performance) on every policy. Frequency LIMITS
+        are not touched: they are the kernel's defaults until PowerStation is asked to change
+        them, and the suspend clamp restores whatever was in force."""
         for policy in self.cpu_policies:
-            freqs = self.cpu_available_freqs(policy)
-            if not freqs:
-                continue
-            self.write_governor(policy, settings["cpu_governor"])
-            write_text(policy / "scaling_min_freq", freqs[0])
-            target = self.cpu_max_target(settings, self.policy_id(policy), freqs)
-            write_text(policy / "scaling_max_freq", self.choose_at_most(freqs, target))
-        if self.gpu and self.gpu_level == "auto":
-            self.apply_gpu_auto(settings)
-
-    def resolved_cpu_caps(self):
-        settings = self.profile_settings()
-        caps = {}
-        for policy in self.cpu_policies:
-            freqs = self.cpu_available_freqs(policy)
-            if not freqs:
-                continue
-            policy_id = self.policy_id(policy)
-            target = self.cpu_max_target(settings, policy_id, freqs)
-            caps[f"policy{policy_id}"] = self.choose_at_most(freqs, target)
-        return caps
-
-    def resolved_gpu_auto_limits(self):
-        freqs = self.gpu_freqs()
-        if not freqs:
-            return (0, 0)
-        settings = self.profile_settings()
-        max_freq = self.choose_at_most(freqs, int(freqs[-1] * settings["gpu_max"]))
-        min_target = int(freqs[-1] * settings["gpu_min"])
-        min_freq = self.choose_at_least(freqs, min_target) if min_target else freqs[0]
-        return (min(min_freq, max_freq), max_freq)
+            self.write_governor(policy, self.cpu_governor)
 
     def suspend(self):
         if self.suspend_save:
@@ -1069,12 +770,6 @@ class QforgePower:
         self.suspended = False
         self.suspend_fan_active = False
         self.smoothed_temp = 0.0
-        if not self.suspend_save:
-            self.apply_profile()
-            if self.gpu_level == "manual" and self.manual_gpu_clock:
-                self.set_gpu_manual_clock(self.manual_gpu_clock)
-            self.fan_tick()
-            return
         for policy, min_freq, max_freq in self.suspend_save.get("cpu", []):
             freqs = self.cpu_available_freqs(policy)
             if freqs:
@@ -1095,35 +790,7 @@ class QforgePower:
             if gpu_save.get("governor"):
                 write_text(self.gpu / "governor", gpu_save["governor"])
         self.suspend_save = {}
-        self.apply_profile()
-        if self.gpu_level == "manual" and self.manual_gpu_clock:
-            self.set_gpu_manual_clock(self.manual_gpu_clock)
         self.fan_tick()
-
-    def apply_gpu_auto(self, settings=None):
-        freqs = self.gpu_freqs()
-        if not freqs:
-            return
-        settings = settings or self.profile_settings()
-        write_text(self.gpu / "governor", "simple_ondemand")
-        max_freq = self.choose_at_most(freqs, int(freqs[-1] * settings["gpu_max"]))
-        min_target = int(freqs[-1] * settings["gpu_min"])
-        min_freq = self.choose_at_least(freqs, min_target) if min_target else freqs[0]
-        write_text(self.gpu / "min_freq", freqs[0])
-        write_text(self.gpu / "max_freq", max_freq)
-        write_text(self.gpu / "min_freq", min(min_freq, max_freq))
-
-    def set_gpu_manual_clock(self, mhz):
-        freqs = self.gpu_freqs()
-        if not freqs:
-            return 0
-        hz = self.closest(freqs, mhz * 1000000)
-        write_text(self.gpu / "min_freq", freqs[0])
-        write_text(self.gpu / "governor", "userspace")
-        write_text(self.gpu / "max_freq", hz)
-        write_text(self.gpu / "min_freq", hz)
-        self.manual_gpu_clock = hz // 1000000
-        return self.manual_gpu_clock
 
     def read_temps(self):
         values = []
@@ -1168,7 +835,7 @@ class QforgePower:
         return clamp(int(pwm), self.fan_config["min_pwm"], self.fan_config["max_pwm"])
 
     def target_pwm(self, temp):
-        curve = self.active_curve()
+        curve = self.fan_curve_points
         if not curve:
             return self.fan_config["min_pwm"]
         return self.quantize_pwm(curve_pwm(curve, temp))
@@ -1244,35 +911,7 @@ class QforgePower:
         value = read_text(self.fan_rpm) if self.fan_rpm else ""
         return int(value) if value.isdigit() else 0
 
-    def label_for(self, profile):
-        return self.profile_labels.get(profile, profile)
-
-    def profile_for_label(self, label):
-        target = label.strip()
-        for pid, lbl in self.profile_labels.items():
-            if lbl == target:
-                return pid
-        return normalize_profile(target)
-
     def get_property(self, prop):
-        freqs = self.gpu_freqs()
-        if prop == "AvailableProfiles":
-            return GLib.Variant("as", [self.label_for(p) for p in PROFILES])
-        if prop == "Profile":
-            return GLib.Variant("s", self.label_for(self.profile))
-        if prop == "SuggestedDefaultProfile":
-            return GLib.Variant("s", self.label_for(self.default_profile))
-        if prop == "AvailableGpuPerformanceLevels":
-            return GLib.Variant("as", ["auto", "manual"] if self.gpu else [])
-        if prop == "GpuPerformanceLevel":
-            return GLib.Variant("s", self.gpu_level)
-        if prop == "ManualGpuClock":
-            value = self.manual_gpu_clock or (freqs[-1] // 1000000 if freqs else 0)
-            return GLib.Variant("u", value)
-        if prop == "ManualGpuClockMin":
-            return GLib.Variant("u", freqs[0] // 1000000 if freqs else 0)
-        if prop == "ManualGpuClockMax":
-            return GLib.Variant("u", freqs[-1] // 1000000 if freqs else 0)
         if prop == "AvailableCpuSchedulers":
             return GLib.Variant("as", self.available_cpu_schedulers())
         if prop == "CpuScheduler":
@@ -1296,89 +935,12 @@ class QforgePower:
         if prop == "FanCurveMaxPwm":
             return GLib.Variant("u", self.fan_config["max_pwm"])
         if prop == "FanCurveIsCustom":
-            return GLib.Variant(
-                "b", self.active_curve_name().startswith(CUSTOM_CURVE_PREFIX))
+            return GLib.Variant("b", self.fan_curve_name == CUSTOM_CURVE)
         raise KeyError(prop)
 
-    def describe_sender(self, sender):
-        """Best-effort "who asked" for the log line. Never raises: attribution is not worth a
-        failed profile set, and a unique name alone is useless after the fact -- by the time anyone
-        reads the journal the bus has forgotten which process :1.19 was."""
-        if not sender:
-            return "powerd itself"
-        try:
-            reply = self.connection.call_sync(
-                "org.freedesktop.DBus",
-                "/org/freedesktop/DBus",
-                "org.freedesktop.DBus",
-                "GetConnectionUnixProcessID",
-                GLib.Variant("(s)", (sender,)),
-                GLib.VariantType("(u)"),
-                Gio.DBusCallFlags.NONE,
-                SENDER_LOOKUP_TIMEOUT_MS,
-                None,
-            )
-            pid = reply.get_child_value(0).get_uint32()
-        except Exception:
-            return sender
-        comm = read_text(f"/proc/{pid}/comm") or "?"
-        return f"{sender} pid={pid} ({comm})"
-
-    def select_profile(self, profile, sender=None):
-        # The single place a profile is applied. Both the org.qforge.Power1 Profile property
-        # (which speaks UI labels) and PPD's ActiveProfile (which speaks ids) come through here,
-        # so the two can never apply a profile differently.
-        if profile not in PROFILES:
-            raise ValueError(profile)
-        previous = self.profile
-        self.profile = profile
-        self.apply_profile()
-        # Logged unconditionally, including a re-select of the value already in effect. The
-        # question this answers is "what changed my profile, and when" LONG after the fact, and a
-        # daemon that logs nothing turns that into a live-capture session every single time. A
-        # rewrite back to the same value is precisely the case worth seeing, because that is what
-        # an out-of-band writer fighting the user looks like.
-        print(
-            f"qforge-powerd: profile {previous} -> {profile} by {self.describe_sender(sender)}",
-            file=sys.stderr,
-        )
-        # FanCurve rides along because the property is scoped to the active profile: the
-        # value did not change, but what it addresses did, and a tab that only listened for
-        # PropertiesChanged would otherwise keep showing the previous profile's curve.
-        return {
-            "Profile": GLib.Variant("s", self.label_for(self.profile)),
-            **self.fan_curve_changed(),
-        }
-
-    def set_property(self, prop, value, sender=None):
+    def set_property(self, prop, value):
         changed = {}
-        if prop == "Profile":
-            # Resolve first so the error names what the caller actually sent, not "".
-            label = value.get_string()
-            profile = self.profile_for_label(label)
-            if profile not in PROFILES:
-                raise ValueError(label)
-            changed = self.select_profile(profile, sender)
-        elif prop == "GpuPerformanceLevel":
-            level = value.get_string()
-            if level not in ("auto", "manual"):
-                raise ValueError(level)
-            self.gpu_level = level
-            if level == "auto":
-                self.apply_profile()
-            else:
-                freqs = self.gpu_freqs()
-                target = self.manual_gpu_clock or (freqs[-1] // 1000000 if freqs else 0)
-                if target:
-                    self.set_gpu_manual_clock(target)
-            changed["GpuPerformanceLevel"] = GLib.Variant("s", self.gpu_level)
-        elif prop == "ManualGpuClock":
-            mhz = value.get_uint32()
-            self.manual_gpu_clock = mhz
-            if self.gpu_level == "manual":
-                mhz = self.set_gpu_manual_clock(mhz)
-            changed["ManualGpuClock"] = GLib.Variant("u", mhz)
-        elif prop == "CpuScheduler":
+        if prop == "CpuScheduler":
             self.set_cpu_scheduler(value.get_string())
             changed["CpuScheduler"] = GLib.Variant("s", self.cpu_scheduler)
         elif prop == "FanCurve":
@@ -1388,22 +950,10 @@ class QforgePower:
             raise KeyError(prop)
         self.save_state()
         self.emit_properties(changed)
-        if "Profile" in changed:
-            self.emit_ppd_profile()
 
     def status(self):
-        gpu_min, gpu_max = self.resolved_gpu_auto_limits()
         return {
-            "profile": self.get_property("Profile"),
-            "default_profile": self.get_property("SuggestedDefaultProfile"),
-            "cpu_underclock": GLib.Variant("s", self.profile_settings()["cpu_underclock"]),
-            "cpu_caps": GLib.Variant("a{su}", self.resolved_cpu_caps()),
-            "gpu_level": self.get_property("GpuPerformanceLevel"),
-            "gpu_auto_min": GLib.Variant("u", gpu_min // 1000000 if gpu_min else 0),
-            "gpu_auto_max": GLib.Variant("u", gpu_max // 1000000 if gpu_max else 0),
-            "manual_gpu_clock": self.get_property("ManualGpuClock"),
-            "manual_gpu_clock_min": self.get_property("ManualGpuClockMin"),
-            "manual_gpu_clock_max": self.get_property("ManualGpuClockMax"),
+            "cpu_governor": GLib.Variant("s", self.cpu_governor),
             "cpu_scheduler": self.get_property("CpuScheduler"),
             # The kernel's own view ("enabled"/"disabled"/absent), which the property above
             # cannot express: it lags a start by ~1s and goes back to "disabled" on its own if
@@ -1428,13 +978,6 @@ class QforgePower:
             GLib.Variant("(sa{sv}as)", (iface, changed, [])),
         )
 
-    def emit_ppd_profile(self):
-        # lavd polls, so this is not what makes the coupling work — but real PPD emits it and
-        # glib's GPowerProfileMonitor subscribes to it rather than polling.
-        changed = {"ActiveProfile": GLib.Variant("s", PPD_PROFILES[self.profile])}
-        for _bus_name, path, iface in PPD_NAMES:
-            self.emit_properties(changed, path=path, iface=iface)
-
     def handle_method_call(self, _conn, _sender, _path, iface, method, _params, invocation):
         if iface != IFACE:
             invocation.return_dbus_error(f"{BUS_NAME}.Error.UnknownInterface", iface)
@@ -1449,9 +992,9 @@ class QforgePower:
             self.emit_properties(self.fan_curve_changed())
             invocation.return_value(None)
             return
-        if method in ("ResetFanCurve", "ResetAllFanCurves"):
+        if method == "ResetFanCurve":
             try:
-                self.reset_fan_curve(every=(method == "ResetAllFanCurves"))
+                self.reset_fan_curve()
             except Exception as exc:
                 print(f"qforge-powerd: {method} failed: {exc}", file=sys.stderr)
                 invocation.return_dbus_error(f"{BUS_NAME}.Error.FanCurveFailed", str(exc))
@@ -1480,57 +1023,20 @@ class QforgePower:
         except Exception:
             return None
 
-    def handle_set_property(self, _conn, sender, _path, iface, prop, value):
+    def handle_set_property(self, _conn, _sender, _path, iface, prop, value):
         if iface != IFACE:
             return False
         try:
-            self.set_property(prop, value, sender)
+            self.set_property(prop, value)
             return True
         except Exception as exc:
             print(f"qforge-powerd: set {prop} failed: {exc}", file=sys.stderr)
             return False
 
-    def ppd_get_property(self, _conn, _sender, _path, _iface, prop):
-        if prop == "ActiveProfile":
-            return GLib.Variant("s", PPD_PROFILES[self.profile])
-        if prop == "Profiles":
-            return GLib.Variant(
-                "aa{sv}",
-                [
-                    {
-                        "Profile": GLib.Variant("s", PPD_PROFILES[profile]),
-                        "Driver": GLib.Variant("s", "qforge-powerd"),
-                    }
-                    for profile in PROFILES
-                ],
-            )
-        if prop == "PerformanceDegraded":
-            return GLib.Variant("s", "")
-        return None
-
-    def ppd_set_property(self, _conn, sender, _path, _iface, prop, value):
-        if prop != "ActiveProfile":
-            return False
-        try:
-            requested = value.get_string()
-            profile = PPD_PROFILE_IDS.get(requested)
-            if profile is None:
-                raise ValueError(requested)
-            changed = self.select_profile(profile, sender)
-        except Exception as exc:
-            print(f"qforge-powerd: PPD set {prop} failed: {exc}", file=sys.stderr)
-            return False
-        self.save_state()
-        self.emit_properties(changed)
-        self.emit_ppd_profile()
-        return True
-
     def register(self, connection):
-        # Called from whichever bus name wins its bus_acquired first — we own several now, and the
-        # objects must exist before any of those names becomes visible to clients.
-        if self.connection is not None:
-            return
         self.connection = connection
+        # Keep a reference to the node: Gio does not own the DBusInterfaceInfo we hand it, and a
+        # collected node takes the registration's interface info with it.
         self.node = Gio.DBusNodeInfo.new_for_xml(XML)
         connection.register_object(
             OBJECT_PATH,
@@ -1539,19 +1045,6 @@ class QforgePower:
             self.handle_get_property,
             self.handle_set_property,
         )
-        # Keep a reference to each node: Gio does not own the DBusInterfaceInfo we hand it, and a
-        # collected node takes the registration's interface info with it.
-        self.ppd_nodes = []
-        for _bus_name, path, iface in PPD_NAMES:
-            node = Gio.DBusNodeInfo.new_for_xml(ppd_xml(iface))
-            self.ppd_nodes.append(node)
-            connection.register_object(
-                path,
-                node.interfaces[0],
-                None,
-                self.ppd_get_property,
-                self.ppd_set_property,
-            )
 
 
 def main():
@@ -1571,64 +1064,20 @@ def main():
     def bus_acquired(connection, _name):
         power.register(connection)
 
+    def name_acquired(_connection, _name):
+        power.restore_cpu_scheduler()
+
     def name_lost(_connection, _name):
         loop.quit()
 
-    owner_ids = [
-        Gio.bus_own_name(
-            Gio.BusType.SYSTEM,
-            BUS_NAME,
-            Gio.BusNameOwnerFlags.NONE,
-            bus_acquired,
-            None,
-            name_lost,
-        )
-    ]
-
-    # Restoring the saved CPU scheduler is deliberately NOT done in __init__ any more. scx_lavd
-    # runs with --autopower and reads PowerProfiles.ActiveProfile from its very first tick; if we
-    # start it before we answer that name it falls through to sysfs, and on this hardware a later
-    # profile change into an unrecognised governor makes it disable autopower permanently and
-    # silently. So: own the names first, start the scheduler second.
-    #
-    # The backstop matters. A name we cannot acquire (a real power-profiles-daemon got there first)
-    # never fires name_acquired, and the user's scheduler choice must not be collateral damage of
-    # that — so a timer restores it regardless. Whichever path runs first wins; the other no-ops.
-    pending_ppd_names = {bus_name for bus_name, _path, _iface in PPD_NAMES}
-    restored = False
-
-    def restore_scheduler(reason):
-        nonlocal restored
-        if restored:
-            return False
-        restored = True
-        if reason != "ppd-names-acquired":
-            print(
-                f"qforge-powerd: restoring CPU scheduler without full PPD ownership ({reason});"
-                f" still unowned: {' '.join(sorted(pending_ppd_names))}",
-                file=sys.stderr,
-            )
-        power.restore_cpu_scheduler()
-        return False
-
-    def ppd_name_acquired(_connection, name):
-        pending_ppd_names.discard(name)
-        if not pending_ppd_names:
-            restore_scheduler("ppd-names-acquired")
-
-    for ppd_bus_name, _path, _iface in PPD_NAMES:
-        owner_ids.append(
-            Gio.bus_own_name(
-                Gio.BusType.SYSTEM,
-                ppd_bus_name,
-                Gio.BusNameOwnerFlags.NONE,
-                bus_acquired,
-                ppd_name_acquired,
-                None,
-            )
-        )
-
-    GLib.timeout_add_seconds(5, restore_scheduler, "timeout")
+    owner_id = Gio.bus_own_name(
+        Gio.BusType.SYSTEM,
+        BUS_NAME,
+        Gio.BusNameOwnerFlags.NONE,
+        bus_acquired,
+        name_acquired,
+        name_lost,
+    )
 
     def stop(_signum, _frame):
         power.fan_safe()
@@ -1640,8 +1089,7 @@ def main():
         loop.run()
     finally:
         power.fan_safe()
-        for owner_id in owner_ids:
-            Gio.bus_unown_name(owner_id)
+        Gio.bus_unown_name(owner_id)
 
 
 if __name__ == "__main__":

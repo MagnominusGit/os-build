@@ -1,0 +1,118 @@
+From 5288dc27d3207fdeb402061ea351b83887006baa Mon Sep 17 00:00:00 2001
+From: Philippe Simons <simons.philippe@gmail.com>
+Date: Sat, 3 Oct 2026 12:27:33 +0200
+Subject: [PATCH 1/2] fix(CPU): do not halve the cores of CPUs without SMT
+
+On a CPU without SMT (every current arm64 part) the cpuinfo flags have no
+"ht", so SmtEnabled reported false. SetCoresEnabled then capped the count
+at half the cores, and clients that halve their core-count range while SMT
+is "off" (OpenGamepadUI's performance menu) did the same: applying a
+profile on an 8-core Snapdragon took 4 cores offline.
+
+- SmtEnabled reports true when smt/control says the CPU has no SMT
+  ("notsupported"/"notimplemented") or the file is missing: there are no
+  sibling threads to turn off, every logical CPU is usable. Setting it to
+  false on such a CPU is NotSupported; setting it to true is a no-op.
+- Cores are grouped by the lowest CPU in topology/thread_siblings_list
+  instead of topology/core_id. core_id is only unique within a package or
+  cluster, so on big.LITTLE parts (where each cluster numbers from 0)
+  unrelated physical cores were grouped as if they were SMT siblings.
+---
+ src/performance/cpu/core.rs         | 12 +++++++++++
+ src/performance/cpu/cpu_features.rs | 33 +++++++++++++++++++++++++++--
+ 2 files changed, 43 insertions(+), 2 deletions(-)
+
+diff --git a/src/performance/cpu/core.rs b/src/performance/cpu/core.rs
+index 135412d..a17fe82 100644
+--- a/src/performance/cpu/core.rs
++++ b/src/performance/cpu/core.rs
+@@ -21,6 +21,18 @@ impl CPUCore {
+         CPUCore { number, path }
+     }
+ 
++    /// Returns the lowest CPU number in this core's thread siblings list. SMT
++    /// siblings share it and every physical core has its own, unlike
++    /// `topology/core_id`, which is only unique within a package or cluster.
++    pub fn sibling_group(&self) -> Option<u32> {
++        let path = format!("{0}/topology/thread_siblings_list", self.path);
++        let list = std::fs::read_to_string(path).ok()?;
++        list.trim()
++            .split([',', '-'])
++            .filter_map(|n| n.parse::<u32>().ok())
++            .min()
++    }
++
+     /// Asyncronously set the core to online
+     pub async fn set_online_async(&self, enabled: bool) -> Result<(), std::io::Error> {
+         let enabled_str = if enabled { "enabled" } else { "disabled" };
+diff --git a/src/performance/cpu/cpu_features.rs b/src/performance/cpu/cpu_features.rs
+index 68fbb7b..5d1b4db 100644
+--- a/src/performance/cpu/cpu_features.rs
++++ b/src/performance/cpu/cpu_features.rs
+@@ -41,11 +41,15 @@ impl Cpu {
+             let _ = core.set_online(true);
+         }
+ 
+-        // Organize cores by core id
++        // Organize cores by the physical core they belong to. `topology/core_id`
++        // is only unique within a package or cluster (on arm64 big.LITTLE parts
++        // every cluster numbers its cores from 0), so use the lowest CPU in the
++        // core's thread siblings list instead: it is the same for SMT siblings
++        // and different for every physical core, on every architecture.
+         let mut core_count = 0;
+         for core in cores {
+             core_count += 1;
+-            let core_id = core.core_id().unwrap();
++            let core_id = core.sibling_group().unwrap_or(core.number);
+             core_map.entry(core_id).or_insert_with(|| {
+                 let list: Vec<CPUCore> = Vec::new();
+                 list
+@@ -105,6 +109,13 @@ impl Cpu {
+     // Returns whether or not SMT is currently enabled
+     #[zbus(property)]
+     pub async fn smt_enabled(&self) -> fdo::Result<bool> {
++        // A CPU without SMT has no sibling threads to turn off: every logical
++        // CPU is a physical core and all of them are usable. Report that as
++        // "enabled" so callers that halve the core count when SMT is off do
++        // not take half of a non-SMT CPU offline.
++        if !smt_supported().await {
++            return Ok(true);
++        }
+         if !has_feature("ht".to_string()).await? {
+             return Ok(false);
+         }
+@@ -123,6 +134,14 @@ impl Cpu {
+     #[zbus(property)]
+     pub async fn set_smt_enabled(&mut self, enabled: bool) -> fdo::Result<()> {
+         log::info!("Setting smt enabled to {}", enabled);
++        if !smt_supported().await {
++            if enabled {
++                return Ok(());
++            }
++            return Err(fdo::Error::NotSupported(String::from(
++                "SMT is not supported by this CPU",
++            )));
++        }
+         let status = if enabled { "on" } else { "off" };
+ 
+         // Open the sysfs file to write to
+@@ -288,6 +307,16 @@ async fn get_features() -> fdo::Result<Vec<String>> {
+     Ok(features)
+ }
+ 
++/// Returns whether the CPU has SMT that the kernel can switch. The kernel
++/// reports "notsupported" or "notimplemented" in smt/control for CPUs without
++/// SMT (every current arm64 part), and older kernels may not have the file.
++async fn smt_supported() -> bool {
++    match fs::read_to_string(SMT_PATH).await {
++        Ok(status) => !matches!(status.trim(), "notsupported" | "notimplemented"),
++        Err(_) => false,
++    }
++}
++
+ // Returns a list of all detected cores
+ pub fn get_cores() -> Vec<CPUCore> {
+     let mut cores: Vec<CPUCore> = Vec::new();
+-- 
+2.55.0
+

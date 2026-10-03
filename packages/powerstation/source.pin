@@ -1,0 +1,15 @@
+# PowerStation — the org.shadowblip.PowerStation D-Bus service OpenGamepadUI's performance menu
+# talks to (CPU core count, GPU clock range). Built FROM SOURCE via the local PKGBUILD: the holo
+# snapshot has no powerstation, and upstream's aarch64 release cannot see an SoC GPU at all.
+#
+# The two patches are ours and are meant for upstream (ShadowBlip/PowerStation); drop each one
+# when a release carries it:
+#   0001  CPUs without SMT (every arm64 part) reported SmtEnabled=false, so SetCoresEnabled and
+#         OGUI both halved the core count; and cores were grouped by topology/core_id, which on
+#         big.LITTLE repeats per cluster. Groups by thread_siblings_list instead.
+#   0002  A devfreq backend for GPUs that are not PCI devices (Adreno under msm): clock limits,
+#         min/max range and the manual switch on /sys/class/devfreq/*.gpu.
+name: powerstation
+pkgbuild_local: PKGBUILD
+patches: 0001-fix-CPU-do-not-halve-the-cores-of-CPUs-without-SMT.patch 0002-feat-GPU-support-devfreq-scaled-GPUs-that-are-not-PC.patch
+pkgrel_suffix: 1

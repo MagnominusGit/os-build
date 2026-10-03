@@ -1,0 +1,622 @@
+From 19b94adaad6a575c6147490177c16da34784d1df Mon Sep 17 00:00:00 2001
+From: Philippe Simons <simons.philippe@gmail.com>
+Date: Sat, 3 Oct 2026 12:27:33 +0200
+Subject: [PATCH 2/2] feat(GPU): support devfreq-scaled GPUs that are not PCI
+ devices
+
+SoC GPUs are platform devices: the card has no PCI class, vendor or device
+file, so get_gpu failed before it got anywhere and no GPU was exported on
+arm64 handhelds.
+
+Add a devfreq backend for them. A card without a PCI class file is handed
+to it; it finds the devfreq node that scales the GPU (the card's own device
+for panfrost/panthor/lima/etnaviv, or the Adreno node bound into msm's
+display DRM device), identifies the GPU from its devicetree compatible
+(vendor id is the PCI id Vulkan reports, e.g. 5143 for Qualcomm), and maps:
+
+- ClockLimitMhzMin/Max   -> lowest/highest available_frequencies
+- ClockValueMhzMin/Max   -> min_freq/max_freq (snapped to an OPP)
+- ManualClock            -> narrows the governor's range; turning it off
+                            restores the full range. Starts off: the range
+                            sysfs reports includes thermal limits, so it
+                            cannot tell a user's choice apart.
+- class "integrated", no TDP interface.
+---
+ src/performance/gpu/dbus/devices.rs       |  26 +-
+ src/performance/gpu/dbus/gpu.rs           |  22 ++
+ src/performance/gpu/devfreq/devfreqgpu.rs | 316 ++++++++++++++++++++++
+ src/performance/gpu/devfreq/mod.rs        |   1 +
+ src/performance/gpu/mod.rs                |   1 +
+ 5 files changed, 365 insertions(+), 1 deletion(-)
+ create mode 100644 src/performance/gpu/devfreq/devfreqgpu.rs
+ create mode 100644 src/performance/gpu/devfreq/mod.rs
+
+diff --git a/src/performance/gpu/dbus/devices.rs b/src/performance/gpu/dbus/devices.rs
+index a66f44f..761580b 100644
+--- a/src/performance/gpu/dbus/devices.rs
++++ b/src/performance/gpu/dbus/devices.rs
+@@ -3,7 +3,7 @@ use std::sync::Arc;
+ use tokio::sync::Mutex;
+ 
+ use crate::performance::gpu::{
+-    amd, intel,
++    amd, devfreq, intel,
+     interface::{GPUDevice, GPUResult},
+     tdp::{TDPDevice, TDPResult},
+ };
+@@ -104,6 +104,7 @@ impl TDPDevices {
+ pub enum GPUDevices {
+     AmdGpu(amd::amdgpu::AmdGpu),
+     IntelGpu(intel::intelgpu::IntelGPU),
++    DevfreqGpu(devfreq::devfreqgpu::DevfreqGpu),
+ }
+ 
+ impl GPUDevices {
+@@ -111,6 +112,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.get_tdp_interface().await,
+             Self::IntelGpu(dev) => dev.get_tdp_interface().await,
++            Self::DevfreqGpu(dev) => dev.get_tdp_interface().await,
+         }
+     }
+ 
+@@ -118,6 +120,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.get_gpu_path().await,
+             Self::IntelGpu(dev) => dev.get_gpu_path().await,
++            Self::DevfreqGpu(dev) => dev.get_gpu_path().await,
+         }
+     }
+ 
+@@ -125,6 +128,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.name().await,
+             Self::IntelGpu(dev) => dev.name().await,
++            Self::DevfreqGpu(dev) => dev.name().await,
+         }
+     }
+ 
+@@ -132,6 +136,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.path().await,
+             Self::IntelGpu(dev) => dev.path().await,
++            Self::DevfreqGpu(dev) => dev.path().await,
+         }
+     }
+ 
+@@ -139,6 +144,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.class().await,
+             Self::IntelGpu(dev) => dev.class().await,
++            Self::DevfreqGpu(dev) => dev.class().await,
+         }
+     }
+ 
+@@ -146,6 +152,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.class_id().await,
+             Self::IntelGpu(dev) => dev.class_id().await,
++            Self::DevfreqGpu(dev) => dev.class_id().await,
+         }
+     }
+ 
+@@ -153,6 +160,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.vendor().await,
+             Self::IntelGpu(dev) => dev.vendor().await,
++            Self::DevfreqGpu(dev) => dev.vendor().await,
+         }
+     }
+ 
+@@ -160,6 +168,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.vendor_id().await,
+             Self::IntelGpu(dev) => dev.vendor_id().await,
++            Self::DevfreqGpu(dev) => dev.vendor_id().await,
+         }
+     }
+ 
+@@ -167,6 +176,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.device().await,
+             Self::IntelGpu(dev) => dev.device().await,
++            Self::DevfreqGpu(dev) => dev.device().await,
+         }
+     }
+ 
+@@ -174,6 +184,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.device_id().await,
+             Self::IntelGpu(dev) => dev.device_id().await,
++            Self::DevfreqGpu(dev) => dev.device_id().await,
+         }
+     }
+ 
+@@ -181,6 +192,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.subdevice().await,
+             Self::IntelGpu(dev) => dev.subdevice().await,
++            Self::DevfreqGpu(dev) => dev.subdevice().await,
+         }
+     }
+ 
+@@ -188,6 +200,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.subdevice_id().await,
+             Self::IntelGpu(dev) => dev.subdevice_id().await,
++            Self::DevfreqGpu(dev) => dev.subdevice_id().await,
+         }
+     }
+ 
+@@ -195,6 +208,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.subvendor_id().await,
+             Self::IntelGpu(dev) => dev.subvendor_id().await,
++            Self::DevfreqGpu(dev) => dev.subvendor_id().await,
+         }
+     }
+ 
+@@ -202,6 +216,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.revision_id().await,
+             Self::IntelGpu(dev) => dev.revision_id().await,
++            Self::DevfreqGpu(dev) => dev.revision_id().await,
+         }
+     }
+ 
+@@ -209,6 +224,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.clock_limit_mhz_min().await,
+             Self::IntelGpu(dev) => dev.clock_limit_mhz_min().await,
++            Self::DevfreqGpu(dev) => dev.clock_limit_mhz_min().await,
+         }
+     }
+ 
+@@ -216,6 +232,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.clock_limit_mhz_max().await,
+             Self::IntelGpu(dev) => dev.clock_limit_mhz_max().await,
++            Self::DevfreqGpu(dev) => dev.clock_limit_mhz_max().await,
+         }
+     }
+ 
+@@ -223,6 +240,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.clock_value_mhz_min().await,
+             Self::IntelGpu(dev) => dev.clock_value_mhz_min().await,
++            Self::DevfreqGpu(dev) => dev.clock_value_mhz_min().await,
+         }
+     }
+ 
+@@ -230,6 +248,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.set_clock_value_mhz_min(value).await,
+             Self::IntelGpu(dev) => dev.set_clock_value_mhz_min(value).await,
++            Self::DevfreqGpu(dev) => dev.set_clock_value_mhz_min(value).await,
+         }
+     }
+ 
+@@ -237,6 +256,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.clock_value_mhz_max().await,
+             Self::IntelGpu(dev) => dev.clock_value_mhz_max().await,
++            Self::DevfreqGpu(dev) => dev.clock_value_mhz_max().await,
+         }
+     }
+ 
+@@ -244,6 +264,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.set_clock_value_mhz_max(value).await,
+             Self::IntelGpu(dev) => dev.set_clock_value_mhz_max(value).await,
++            Self::DevfreqGpu(dev) => dev.set_clock_value_mhz_max(value).await,
+         }
+     }
+ 
+@@ -251,6 +272,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.manual_clock().await,
+             Self::IntelGpu(dev) => dev.manual_clock().await,
++            Self::DevfreqGpu(dev) => dev.manual_clock().await,
+         }
+     }
+ 
+@@ -258,6 +280,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.set_manual_clock(enabled).await,
+             Self::IntelGpu(dev) => dev.set_manual_clock(enabled).await,
++            Self::DevfreqGpu(dev) => dev.set_manual_clock(enabled).await,
+         }
+     }
+ 
+@@ -265,6 +288,7 @@ impl GPUDevices {
+         match self {
+             Self::AmdGpu(dev) => dev.get_gpu_busy_percent().await,
+             Self::IntelGpu(dev) => dev.get_gpu_busy_percent().await,
++            Self::DevfreqGpu(dev) => dev.get_gpu_busy_percent().await,
+         }
+     }
+ }
+diff --git a/src/performance/gpu/dbus/gpu.rs b/src/performance/gpu/dbus/gpu.rs
+index e35aeb2..f65c099 100644
+--- a/src/performance/gpu/dbus/gpu.rs
++++ b/src/performance/gpu/dbus/gpu.rs
+@@ -12,6 +12,7 @@ use crate::performance::gpu::amd::amdgpu::AmdGpu;
+ use crate::performance::gpu::connector::Connector;
+ use crate::performance::gpu::dbus::devices::GPUDevices;
+ use crate::performance::gpu::dbus::tdp::GPUTDPDBusIface;
++use crate::performance::gpu::devfreq::devfreqgpu::DevfreqGpu;
+ use crate::performance::gpu::drm;
+ use crate::performance::gpu::intel::intelgpu::IntelGPU;
+ use crate::performance::gpu::intel::monitor::{IntelMonitorGPU, MonitorStrategy};
+@@ -288,6 +289,27 @@ pub async fn get_gpus() -> Vec<GPUDBusInterface> {
+ pub async fn get_gpu(path: String) -> Result<GPUDBusInterface, std::io::Error> {
+     let filename = path.split("/").last().unwrap();
+     let file_prefix = format!("{0}/{1}", path, "device");
++
++    // A GPU that is not a PCI device (the GPU of an arm64 SoC) has no class,
++    // vendor or device id to read and no pci.ids entry. Hand it to the devfreq
++    // backend, which identifies it from devicetree instead.
++    if !PathBuf::from(format!("{file_prefix}/class")).exists() {
++        return match DevfreqGpu::new(filename, &path) {
++            Some(gpu) => {
++                log::info!(
++                    "Found {} {} at {path} ({})",
++                    gpu.vendor,
++                    gpu.device,
++                    gpu.devfreq.display()
++                );
++                Ok(GPUDBusInterface::new(Arc::new(Mutex::new(GPUDevices::DevfreqGpu(gpu)))).await)
++            }
++            None => Err(std::io::Error::new(
++                std::io::ErrorKind::Unsupported,
++                "Not a PCI device and no devfreq-scaled GPU found",
++            )),
++        };
++    }
+     let class_id = fs::read_to_string(format!("{0}/{1}", file_prefix, "class"))?
+         .trim()
+         .replace("0x", "")
+diff --git a/src/performance/gpu/devfreq/devfreqgpu.rs b/src/performance/gpu/devfreq/devfreqgpu.rs
+new file mode 100644
+index 0000000..6c6ca63
+--- /dev/null
++++ b/src/performance/gpu/devfreq/devfreqgpu.rs
+@@ -0,0 +1,316 @@
++//! GPUs that are not PCI devices and scale their clock through devfreq.
++//!
++//! On SoCs the GPU is a platform device: there is no PCI class, vendor or
++//! device id to read, and no pci.ids entry to look up. Its clock is governed by
++//! the generic devfreq framework instead, which exposes the operating points in
++//! `available_frequencies` and accepts a floor and a ceiling (in Hz) through
++//! `min_freq` and `max_freq`. The governor keeps scaling between those two, so
++//! "manual" clocking here narrows the range rather than pinning one frequency.
++//!
++//! Two layouts are handled:
++//! - the GPU is the DRM device itself (panfrost, panthor, lima, etnaviv): the
++//!   devfreq node hangs off the card's own device;
++//! - the GPU is a separate platform device bound into the display driver's DRM
++//!   device (msm, where the card belongs to the display controller and the
++//!   Adreno GPU sits at its own address).
++
++use std::{
++    fs,
++    path::{Path, PathBuf},
++    sync::Arc,
++};
++
++use tokio::sync::Mutex;
++
++use crate::constants::PREFIX;
++use crate::performance::gpu::{
++    dbus::devices::TDPDevices,
++    interface::{GPUDevice, GPUError, GPUResult},
++};
++
++const DEVFREQ_PATH: &str = "/sys/class/devfreq";
++const HZ_PER_MHZ: f64 = 1_000_000.0;
++
++#[derive(Debug, Clone)]
++pub struct DevfreqGpu {
++    pub name: String,
++    pub path: String,
++    pub vendor: String,
++    pub vendor_id: String,
++    pub device: String,
++    /// The devfreq node that scales this GPU, e.g. /sys/class/devfreq/3d00000.gpu
++    pub devfreq: PathBuf,
++    pub manual_clock: bool,
++}
++
++impl DevfreqGpu {
++    /// Builds the GPU for the given card in /sys/class/drm, or `None` when the
++    /// card has no devfreq-scaled GPU we know how to find.
++    pub fn new(name: &str, card_path: &str) -> Option<Self> {
++        let devfreq = find_devfreq(card_path)?;
++        let compatible = read_compatible(&devfreq.join("device"));
++        let (vendor, vendor_id, device) = identify(&compatible);
++        // There is no "manual" switch in devfreq to read back, and the range min_freq/max_freq
++        // report is the EFFECTIVE one (thermal and PM QoS limits included), so a narrowed range at
++        // startup says nothing about what a user asked for. Start in automatic; a client that
++        // wants manual turns it on, as it does on every other backend.
++        let gpu = DevfreqGpu {
++            name: name.to_string(),
++            path: card_path.to_string(),
++            vendor,
++            vendor_id,
++            device,
++            devfreq,
++            manual_clock: false,
++        };
++        Some(gpu)
++    }
++
++    /// The operating points, in Hz, lowest first.
++    fn frequencies(&self) -> GPUResult<Vec<u64>> {
++        let text = fs::read_to_string(self.devfreq.join("available_frequencies"))?;
++        let mut freqs = text
++            .split_whitespace()
++            .map(|f| f.parse::<u64>())
++            .collect::<Result<Vec<u64>, _>>()?;
++        if freqs.is_empty() {
++            return Err(GPUError::FailedOperation(format!(
++                "{} lists no available frequencies",
++                self.devfreq.display()
++            )));
++        }
++        freqs.sort_unstable();
++        freqs.dedup();
++        Ok(freqs)
++    }
++
++    fn read_hz(&self, file: &str) -> GPUResult<u64> {
++        Ok(fs::read_to_string(self.devfreq.join(file))?
++            .trim()
++            .parse::<u64>()?)
++    }
++
++    fn write_hz(&self, file: &str, hz: u64) -> GPUResult<()> {
++        let path = self.devfreq.join(file);
++        log::debug!("Writing value '{}' to: {}", hz, path.display());
++        fs::write(&path, hz.to_string())
++            .map_err(|err| GPUError::FailedOperation(format!("{}: {err}", path.display())))
++    }
++
++    /// The operating point closest to the requested clock.
++    fn closest(&self, mhz: f64) -> GPUResult<u64> {
++        if !mhz.is_finite() || mhz <= 0.0 {
++            return Err(GPUError::InvalidArgument(format!(
++                "invalid clock: {mhz} MHz"
++            )));
++        }
++        let target = mhz * HZ_PER_MHZ;
++        let freqs = self.frequencies()?;
++        Ok(*freqs
++            .iter()
++            .min_by(|a, b| {
++                (**a as f64 - target)
++                    .abs()
++                    .total_cmp(&(**b as f64 - target).abs())
++            })
++            .unwrap())
++    }
++
++    /// Sets the floor and the ceiling together, ordering the two writes so the
++    /// kernel never sees a floor above the ceiling in between.
++    fn set_range(&self, min: u64, max: u64) -> GPUResult<()> {
++        let (min, max) = (min.min(max), min.max(max));
++        if min > self.read_hz("max_freq")? {
++            self.write_hz("max_freq", max)?;
++            self.write_hz("min_freq", min)
++        } else {
++            self.write_hz("min_freq", min)?;
++            self.write_hz("max_freq", max)
++        }
++    }
++
++    fn require_manual(&self) -> GPUResult<()> {
++        if self.manual_clock {
++            Ok(())
++        } else {
++            Err(GPUError::FailedOperation(
++                "manual clock is disabled; enable it before setting clock values".to_string(),
++            ))
++        }
++    }
++}
++
++impl GPUDevice for DevfreqGpu {
++    async fn get_gpu_path(&self) -> String {
++        format!("{0}/GPU/{1}", PREFIX, self.name().await)
++    }
++
++    /// SoC GPUs expose no TDP control.
++    async fn get_tdp_interface(&self) -> Option<Arc<Mutex<TDPDevices>>> {
++        None
++    }
++
++    async fn name(&self) -> String {
++        self.name.clone()
++    }
++
++    async fn path(&self) -> String {
++        self.path.clone()
++    }
++
++    /// A GPU on the SoC shares memory with the CPU.
++    async fn class(&self) -> String {
++        "integrated".to_string()
++    }
++
++    async fn class_id(&self) -> String {
++        String::new()
++    }
++
++    async fn vendor(&self) -> String {
++        self.vendor.clone()
++    }
++
++    async fn vendor_id(&self) -> String {
++        self.vendor_id.clone()
++    }
++
++    async fn device(&self) -> String {
++        self.device.clone()
++    }
++
++    async fn device_id(&self) -> String {
++        String::new()
++    }
++
++    async fn subdevice(&self) -> String {
++        String::new()
++    }
++
++    async fn subdevice_id(&self) -> String {
++        String::new()
++    }
++
++    async fn subvendor_id(&self) -> String {
++        String::new()
++    }
++
++    async fn revision_id(&self) -> String {
++        String::new()
++    }
++
++    async fn clock_limit_mhz_min(&self) -> GPUResult<f64> {
++        Ok(*self.frequencies()?.first().unwrap() as f64 / HZ_PER_MHZ)
++    }
++
++    async fn clock_limit_mhz_max(&self) -> GPUResult<f64> {
++        Ok(*self.frequencies()?.last().unwrap() as f64 / HZ_PER_MHZ)
++    }
++
++    async fn clock_value_mhz_min(&self) -> GPUResult<f64> {
++        Ok(self.read_hz("min_freq")? as f64 / HZ_PER_MHZ)
++    }
++
++    async fn set_clock_value_mhz_min(&mut self, value: f64) -> GPUResult<()> {
++        self.require_manual()?;
++        let min = self.closest(value)?;
++        let max = self.read_hz("max_freq")?.max(min);
++        self.set_range(min, max)
++    }
++
++    async fn clock_value_mhz_max(&self) -> GPUResult<f64> {
++        Ok(self.read_hz("max_freq")? as f64 / HZ_PER_MHZ)
++    }
++
++    async fn set_clock_value_mhz_max(&mut self, value: f64) -> GPUResult<()> {
++        self.require_manual()?;
++        let max = self.closest(value)?;
++        let min = self.read_hz("min_freq")?.min(max);
++        self.set_range(min, max)
++    }
++
++    async fn manual_clock(&self) -> GPUResult<bool> {
++        Ok(self.manual_clock)
++    }
++
++    /// Enabling keeps the current range so the caller can narrow it; disabling
++    /// hands the whole range back to the governor.
++    async fn set_manual_clock(&mut self, enabled: bool) -> GPUResult<()> {
++        if !enabled {
++            let freqs = self.frequencies()?;
++            self.set_range(*freqs.first().unwrap(), *freqs.last().unwrap())?;
++        }
++        self.manual_clock = enabled;
++        Ok(())
++    }
++
++    /// devfreq has no generic load file; report it only where the driver
++    /// exposes one (msm: `gpu_busy_percent` is not available, so this errors).
++    async fn get_gpu_busy_percent(&self) -> GPUResult<u8> {
++        let path = self.devfreq.join("device/gpu_busy_percent");
++        let text = fs::read_to_string(&path)
++            .map_err(|_| GPUError::FailedOperation("gpu_busy_percent not supported".to_owned()))?;
++        Ok(text.trim().parse::<u8>()?)
++    }
++}
++
++/// Finds the devfreq node that scales the GPU behind the given DRM card.
++fn find_devfreq(card_path: &str) -> Option<PathBuf> {
++    // The GPU is the DRM device: panfrost, panthor, lima, etnaviv.
++    let own = Path::new(card_path).join("device/devfreq");
++    // Not `?`: on msm the card's device has no devfreq directory, and that must fall through to
++    // the search below rather than end it.
++    if let Some(node) = fs::read_dir(&own).ok().and_then(|d| d.flatten().next()) {
++        return Some(node.path());
++    }
++
++    // The GPU is a separate platform device bound into the DRM device, as on
++    // msm, where the card is the display controller's. Pick the devfreq node
++    // whose device is a known GPU.
++    let driver = fs::read_link(Path::new(card_path).join("device/driver")).ok()?;
++    let driver = driver.file_name()?.to_string_lossy().into_owned();
++    if !driver.starts_with("msm") {
++        return None;
++    }
++    fs::read_dir(DEVFREQ_PATH)
++        .ok()?
++        .flatten()
++        .map(|entry| entry.path())
++        .find(|node| {
++            read_compatible(&node.join("device"))
++                .iter()
++                .any(|c| c.starts_with("qcom,adreno"))
++        })
++}
++
++/// Reads a device's devicetree `compatible` strings, most specific first.
++fn read_compatible(device: &Path) -> Vec<String> {
++    fs::read(device.join("of_node/compatible"))
++        .map(|raw| {
++            raw.split(|b| *b == 0)
++                .filter(|s| !s.is_empty())
++                .map(|s| String::from_utf8_lossy(s).into_owned())
++                .collect()
++        })
++        .unwrap_or_default()
++}
++
++/// Turns devicetree compatible strings into (vendor, PCI vendor id, device).
++/// The PCI vendor id is the one the GPU reports through Vulkan, so a client can
++/// match this card against its active Vulkan device.
++fn identify(compatible: &[String]) -> (String, String, String) {
++    for c in compatible {
++        // "qcom,adreno-650.2" or "qcom,adreno-43050c01"
++        if let Some(model) = c.strip_prefix("qcom,adreno-") {
++            let model = model.split('.').next().unwrap_or(model);
++            return ("Qualcomm".into(), "5143".into(), format!("Adreno {model}"));
++        }
++        if c.starts_with("arm,mali") {
++            let model = c.trim_start_matches("arm,mali-").to_string();
++            return ("ARM".into(), "13b5".into(), format!("Mali {model}"));
++        }
++    }
++    let first = compatible.first().cloned().unwrap_or_default();
++    let vendor = first.split(',').next().unwrap_or_default().to_string();
++    (vendor, String::new(), first)
++}
+diff --git a/src/performance/gpu/devfreq/mod.rs b/src/performance/gpu/devfreq/mod.rs
+new file mode 100644
+index 0000000..72431b9
+--- /dev/null
++++ b/src/performance/gpu/devfreq/mod.rs
+@@ -0,0 +1 @@
++pub mod devfreqgpu;
+diff --git a/src/performance/gpu/mod.rs b/src/performance/gpu/mod.rs
+index 0bd5a8a..7683580 100644
+--- a/src/performance/gpu/mod.rs
++++ b/src/performance/gpu/mod.rs
+@@ -3,6 +3,7 @@ pub mod amd;
+ pub mod asus;
+ pub mod connector;
+ pub mod dbus;
++pub mod devfreq;
+ pub mod drm;
+ pub mod intel;
+ pub mod interface;
+-- 
+2.55.0
+

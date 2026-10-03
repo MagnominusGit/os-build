@@ -64,7 +64,8 @@ if [ -r "$POW_LIB" ]; then . "$POW_LIB"; else power_enter() { :; }; power_leave(
 
 # Hand the fan + clocks to qforge-powerd for the sleep window: its Suspend() parks the fan on the
 # suspend curve (closing the "fan keeps spinning during fake-suspend" gap — power-ops.sh never owned
-# the fan) and pins CPU/GPU to minimum; Resume() restores the active profile. powerd is in
+# the fan) and pins CPU/GPU to minimum; Resume() restores the limits that were in force before (whatever
+# PowerStation or the kernel defaults had set). powerd is in
 # system.slice, never frozen, so this D-Bus call lands even while user.slice is frozen. Best-effort:
 # a down/absent powerd must NOT block the freeze/thaw. Skip via QFORGE_SUSPEND_SKIP="powerd".
 powerd_call() {  # $1 = Suspend | Resume

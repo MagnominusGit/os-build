@@ -1,0 +1,70 @@
+# powerstation — ShadowBlip's performance-control D-Bus service, built FROM SOURCE via a
+# qforge-owned PKGBUILD (holo has no powerstation package). OpenGamepadUI's performance menu only
+# speaks org.shadowblip.PowerStation; without this service it shows "Waiting for PowerStation".
+#
+# Pinned to a COMMIT on main rather than the v0.8.2 tag: main carries the drm.rs driver-query
+# refactor our GPU patch builds on, and the patches are meant to go upstream against main.
+# The patches (see source.pin) make it usable on these SoCs: CPUs without SMT keep all their
+# cores, and the Adreno GPU (a platform device, no PCI ids) is found and clocked through devfreq.
+#
+# It owns the knobs it exposes: core online state (cpuN/online), cpufreq boost, and the GPU
+# devfreq range. qforge-powerd no longer touches any of them at runtime (it keeps the fan, the
+# sched_ext scheduler and the suspend-time clamp, which saves and restores whatever was set).
+#
+# To bump: change _commit + sha256sums, re-apply the patches (drop any upstream merged), and
+# re-check the install list against upstream's Makefile `install` target.
+pkgname=powerstation
+_commit=b161e805be01b91e4f62d119951f141245e4a822
+pkgver=0.8.4
+pkgrel=1
+pkgdesc="D-Bus service for CPU and GPU performance control (OpenGamepadUI's performance menu)"
+url="https://github.com/ShadowBlip/PowerStation"
+arch=(aarch64)
+license=(GPL-3.0-or-later)
+# Runtime deps from what the binary links: libudev (the udev crate), libgcc_s, libc. hwdata's
+# pci.ids is only read for PCI GPUs, which these boards do not have.
+depends=(
+  glibc
+  gcc-libs
+  systemd-libs  # libudev.so.1
+)
+makedepends=(
+  rust          # provides cargo
+  pkgconf       # the udev crate finds libudev through pkg-config
+  git           # cargo fetches the rog_platform (asusctl) git dependency
+)
+source=("$pkgname-$_commit.tar.gz::$url/archive/$_commit.tar.gz")
+sha256sums=('6ffeb325891fcd5813b42b2f3e1461409abd26ce441b0d8c6f524a3d47c246ce')
+
+prepare() {
+  # build-overlay.sh runs makepkg with --skipinteg (for the patch sources it injects), so the
+  # sha256sums above are never checked by makepkg. Assert the tarball hash ourselves.
+  echo "${sha256sums[0]}  $srcdir/$pkgname-$_commit.tar.gz" | sha256sum -c -
+  cd "PowerStation-$_commit"
+  # build-overlay.sh injects `patch -p1 < "$srcdir/<patch>"` for each source.pin `patches:` entry
+  # right here, after the first `cd`. Keep this `cd` as the first statement in prepare().
+  #
+  # Fetch every crate now so build() can run --frozen: this is the one step that needs the
+  # network, and failing here is clearer than failing mid-compile.
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "PowerStation-$_commit"
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+package() {
+  cd "PowerStation-$_commit"
+  # Mirrors upstream's Makefile `install` target. Upstream's rootfs also carries a
+  # dbus-1/system-services file, but it is a leftover demo stub the Makefile never installs.
+  install -Dm755 target/release/powerstation "$pkgdir/usr/bin/powerstation"
+  install -Dm644 rootfs/usr/share/dbus-1/system.d/org.shadowblip.PowerStation.conf \
+    "$pkgdir/usr/share/dbus-1/system.d/org.shadowblip.PowerStation.conf"
+  install -Dm644 rootfs/usr/lib/systemd/system/powerstation.service \
+    "$pkgdir/usr/lib/systemd/system/powerstation.service"
+  install -Dm644 -t "$pkgdir/usr/share/powerstation/platform/" \
+    rootfs/usr/share/powerstation/platform/*
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

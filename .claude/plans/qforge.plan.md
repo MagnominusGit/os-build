@@ -86,9 +86,15 @@ Decisions (2026-10-02, from reading OGUI v0.46.1 source in `_ref/OpenGamepadUI`)
   per-game `scheduler` override) existed for x86 titles under FEX/Proton; emulators carry their own
   per-game settings (Phase 3). Profile, GPU clock, CPU scheduler, fan curve stay system-wide.
 - **Update gate = OGUI's own OOBE marker**: `settings.cfg [general] first_boot=false`.
-- **Perf UI = PowerStation shim (if kept).** OGUI's performance menu speaks only
-  `org.shadowblip.PowerStation` (no PPD/UPower profiles); a minimal CPU/GPU/Card/TDP tree in
-  qforge-powerd mapped onto eco/balanced/performance + GPU clock would light it up.
+- **Perf UI = upstream PowerStation, patched (2026-10-03).** OGUI's performance menu speaks only
+  `org.shadowblip.PowerStation`. We build upstream PowerStation (`packages/powerstation`, main @
+  b161e80) with two patches meant for upstream: non-SMT CPUs keep all cores (it halved them and
+  grouped big.LITTLE cores by per-cluster core_id), and a devfreq backend for non-PCI GPUs
+  (Adreno under msm: clock limits, min/max range, manual switch). OGUI patch 0003 hides the TDP /
+  thermal / power-profile controls an SoC GPU does not have. qforge-powerd's power profiles, PPD
+  interface and GPU clock control were removed; it keeps the fan (one curve, `power.conf`), the
+  boot CPU governor (ondemand; the kernel default is performance), sched_ext and the suspend clamp.
+  scx_lavd no longer runs with --autopower.
 
 Done (uncommitted):
 - qforge-update gates on the OGUI first-boot marker (was Steam's loginusers.vdf); Steam wording
@@ -120,14 +126,23 @@ Done (uncommitted):
   request failing on first boot. Still to check: power menu, a game's launch menu, SM8250/SM8650.
 
 Remaining OS-side (found in OGUI source):
-- OGUI power menu / idle suspend run `systemctl suspend|poweroff|reboot` as `player` — confirm
-  logind/polkit allows it from the gamescope session (and that suspend routes to qforge-suspend).
-- PowerStation shim (above) — or accept a dead performance menu for now.
+- ✅ OGUI power menu suspend / reboot / poweroff work from the session (HW, Pocket Max 2026-10-03).
+- ✅ PowerStation (above) HW-tested 2026-10-03 on the Pocket Max (SM8250, dev build
+  20261003T114234Z): Adreno 650 found via devfreq, menu populated without TDP controls, GPU max
+  405 -> 400 MHz OPP lands in devfreq, core count 4 offlines cpu4-7, all 8 cores kept after OGUI's
+  default apply, ondemand on every policy; GPU cap and core count survive suspend/resume.
+- Send upstream: PowerStation 0001/0002 (ShadowBlip/PowerStation), OGUI 0003 + the #542/#540
+  fixes (ShadowBlip/OpenGamepadUI). Branches: `_ref/PowerStation` qforge-arm,
+  `_ref/OpenGamepadUI` qforge-perf-menu.
 - HW 2026-10-03, MANGMI Pocket Max (SM8250), dev build 20261003T094820Z (`29a24b7`): first
   SM8250 boot. qforge-session.service (no sddm) gives an Active wayland session on seat0/VT1,
   boot-good confirmed slot A, polkit grants NM / timezone / power / udisks to the session with no
   prompt, OGUI up without crashes (only the known glxinfo / GPU-id errors), backlight controllable.
-  Still to check: session restart after a gamescope kill, OGUI power menu, a game's launch menu.
+  Also verified: session restarts after gamescope is killed (Restart=always, new seat0 session);
+  OGUI power menu suspend / reboot / poweroff, and power-key short press -> qforge-suspend (both
+  suspend cycles resume with radios, CPUs, backlight and the session intact). gamescope does
+  direct multi-plane scanout here (OGUI + mangoapp on 2 KMS planes, UBWC, DPU 90-degree rotation),
+  compositing only occasionally. A game's launch menu / game scanout moves to Phase 3.
 - ✅ Steam wording cleaned (2026-10-03) across the overlay; what remains names a measurement
   taken under the Steam client or the boot chain (steamcl, steamos-bootconf), on purpose.
 - ✅ `kernel/kernel.config` CONFIG_PROC_CHILDREN comment fixed (2026-10-03; next card build
@@ -142,12 +157,24 @@ Remaining OS-side (found in OGUI source):
 
 ### Phase 3 — Emulators (High)
 
-- Native PKGBUILDs under `packages/`: RetroArch + curated cores, PPSSPP, Dolphin, melonDS, Flycast,
-  Azahar, mupen64plus.
+- Emulators to ship (decided 2026-10-03): Dolphin, ARMSX2, DuckStation, Azahar, rpcs3, Cemu.
+  Packaging: probably AppImages (they bundle their own Qt / ffmpeg, which is why the root dropped
+  both). Check per AppImage whether it uses the system's patched Mesa/Turnip or a bundled one --
+  that decides GPU support on these SoCs. (Earlier plan: native PKGBUILDs, RetroArch + cores.)
+- **Per-game CPU pinning at launch** (decided 2026-10-03). The performance menu's core-count
+  slider stays a POWER control: PowerStation offlines the fastest cores first, so "4 cores" on
+  SM8250/SM8550/SM8650 is the little cluster only. Keeping a game's threads on the fast cores
+  (no migration across clusters) is done per game instead: the launcher sets the emulator's CPU
+  affinity to the big cores, so background work (audio, input, Wi-Fi) keeps the little ones.
+  - Pick the big cores from `/sys/devices/system/cpu/cpuN/cpu_capacity`, not by CPU number.
+  - Per-emulator setting with a per-device default; rpcs3 and Cemu are the likely beneficiaries.
+  - Check against sched_ext: scx_lavd does its own big.LITTLE placement when it is selected.
+- PowerStation follow-up for upstream: order SetCoresEnabled by `cpu_capacity` instead of CPU
+  number (Qualcomm numbers cores slowest-first; other SoCs do not).
 - Per-device defaults from the device profiles; InputPlumber hotkeys (exit to shell, save states).
 - Layout `/home/player/{roms/<system>,bios,saves,states}`; ROMs also from SD via automount.
-- Licence allowlist in `verify-lock`; never ship BIOS; no DuckStation (CC BY-NC-ND) or
-  non-commercial cores if distribution model requires it.
+- Licence check: never ship BIOS. DuckStation is CC BY-NC-ND (no commercial use, no modified
+  versions) -- confirm shipping its unmodified AppImage fits how QForge is distributed.
 
 ### Phase 4 — ROM library in OGUI (Medium)
 

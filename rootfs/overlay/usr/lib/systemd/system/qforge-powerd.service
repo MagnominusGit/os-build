@@ -1,5 +1,5 @@
 [Unit]
-Description=qforge power policy daemon (performance profiles, GPU level, fan curve)
+Description=qforge power daemon (fan curve, boot CPU governor, sched_ext)
 StartLimitIntervalSec=0
 
 [Service]

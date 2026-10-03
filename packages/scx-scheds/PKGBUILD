@@ -163,20 +163,14 @@ package() {
   # scheduler we ship rather than shipping a config that names a missing binary. Left as a
   # normal config file under /etc so it stays user-editable.
   #
-  # SCX_FLAGS='--autopower' is what couples the scheduler to the power profile: lavd then polls
-  # PowerProfiles.ActiveProfile on the system bus once a second and switches its own
-  # performance/balanced/powersave mode live, with no unit restart. qforge-powerd answers that
-  # name (we ship no power-profiles-daemon) — see the PPD_NAMES block in
-  # rootfs/overlay/usr/bin/qforge-powerd for why both bus names exist and why ordering matters.
-  # Deliberately set HERE and not via a scx.service.d drop-in: upstream's ExecStart is
-  # `${SCX_FLAGS_OVERRIDE:-$SCX_FLAGS}`, so a drop-in would silently outrank a user's own edit to
-  # this file. Keeping it in the file means a user can see it and change it.
+  # No SCX_FLAGS: lavd runs in its default mode. It used to run with --autopower, following the
+  # power profile through the power-profiles-daemon names qforge-powerd answered; those profiles
+  # (and the names) were dropped on 2026-10-03, and --autopower with nobody answering falls back
+  # to reading the cpufreq governor, which is not a power policy here.
   sed -e 's/^SCX_SCHEDULER=.*/SCX_SCHEDULER=scx_lavd/' \
-      -e 's|^# Set custom flags.*|# Flags for the scheduler above. --autopower makes scx_lavd follow the active power profile\n# (qforge-powerd answers PowerProfiles on the system bus); drop it to pin one mode by hand.|' \
-      -e "s/^#SCX_FLAGS=.*/SCX_FLAGS='--autopower'/" \
       services/scx > "$srcdir/scx.default"
-  grep -q "^SCX_FLAGS='--autopower'$" "$srcdir/scx.default" ||
-    { echo "scx defaults file did not gain SCX_FLAGS; upstream services/scx changed shape" >&2; return 1; }
+  grep -q "^SCX_SCHEDULER=scx_lavd$" "$srcdir/scx.default" ||
+    { echo "scx defaults file did not gain SCX_SCHEDULER; upstream services/scx changed shape" >&2; return 1; }
   install -Dm0644 "$srcdir/scx.default" "$pkgdir/etc/default/scx"
 
   install -Dm0644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

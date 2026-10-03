@@ -39,8 +39,8 @@
 #
 # scx.service itself is never `enable`d: qforge-powerd starts it when the selected scheduler
 # says to (DEFAULT_CPU_SCHEDULER is the fallback when nothing is saved) and stops it on "none".
-# Do not add a preset or a .wants symlink for it — powerd must own the PowerProfiles bus names
-# before lavd's --autopower reads them, and enabling the unit breaks that ordering.
+# Do not add a preset or a .wants symlink for it — powerd's persisted choice is the only thing
+# that decides whether it runs, and an enabled unit would start lavd regardless of that choice.
 #
 # The skeleton-generation failure is SOLVED — root-caused, not worked around blind. Every BPF
 # build script used to die with:

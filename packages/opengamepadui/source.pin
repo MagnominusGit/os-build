@@ -10,6 +10,10 @@
 #   0002  upstream #540: Godot 4.7 added a native Control.custom_maximum_size, so the two install
 #         dialogs that declare their own fail to compile, and game_launch_menu.gd (which depends on
 #         them) never loads -- picking a game does nothing, on every platform.
+#   0003  ours, for upstream: the performance menu showed TDP, thermal-limit and power-profile
+#         controls for any integrated GPU. An SoC GPU (Adreno, via our PowerStation devfreq
+#         backend) has none of them, so they appeared with a -1 range and wrote nowhere. Shown now
+#         only when HardwareManager reports the capability.
 #
 # So the PKGBUILD keeps upstream's aarch64 engine binary, Rust core and reaper from the release
 # tarball, and rebuilds only opengamepad-ui.pck from the tagged source plus these patches. Drop a
@@ -23,4 +27,4 @@
 name: opengamepadui
 pkgbuild_local: PKGBUILD
 pkgrel_suffix: 1
-patches: 0001-hardware-manager-no-dmi.patch 0002-install-dialogs-rename-custom-maximum-size.patch
+patches: 0001-hardware-manager-no-dmi.patch 0002-install-dialogs-rename-custom-maximum-size.patch 0003-performance-menu-hide-unsupported-controls.patch

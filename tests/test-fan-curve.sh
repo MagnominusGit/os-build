@@ -12,9 +12,8 @@
 # So this drives the REAL parse, resample, write and reset paths against fabricated config
 # trees and asserts on the answers.
 #
-# It also covers the curve following a profile switch, because the curve is scoped to the profile
-# IN FORCE: a switch (Steam's per-game one included) moves which curve is read, written and reset,
-# and that is decision logic on the same config layers.
+# It also covers the boot CPU governor and the persisted state, the other two things powerd still
+# owns besides the fan (power profiles were dropped on 2026-10-03; PowerStation owns the limits).
 #
 # NOT covered here: pwm1 writes and the D-Bus surface itself -- those need gi, a bus and a
 # device. The property handlers are thin wrappers over the functions checked here.
@@ -24,10 +23,10 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 POWERD="$ROOT/rootfs/overlay/usr/bin/qforge-powerd"
-FACTORY="$ROOT/rootfs/overlay/usr/share/qforge/power-profiles.conf"
+FACTORY="$ROOT/rootfs/overlay/usr/share/qforge/power.conf"
 
 [[ -f $POWERD ]]  || { echo "qforge-powerd missing: $POWERD" >&2; exit 1; }
-[[ -f $FACTORY ]] || { echo "power-profiles.conf missing: $FACTORY" >&2; exit 1; }
+[[ -f $FACTORY ]] || { echo "power.conf missing: $FACTORY" >&2; exit 1; }
 
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 
@@ -71,13 +70,10 @@ etc.mkdir(parents=True, exist_ok=True)
 # about: the config layering, the curve maths, and the drop-in read/write.
 def fresh():
     obj = pd.QforgePower.__new__(pd.QforgePower)
-    obj.env = {}                      # no QFORGE_SOC_CLASS -> underclock refs no-op
-    obj.gpu_level = "auto"
-    obj.manual_gpu_clock = 0
+    obj.cpu_scheduler = pd.DEFAULT_CPU_SCHEDULER
     obj.discover = lambda: None
-    obj.apply_profile = lambda: None
+    obj.apply_cpu_governor = lambda: None
     obj.load_config()
-    obj.profile = obj.default_profile
     return obj
 
 # ------------------------------------------------------------------ pure curve maths ---
@@ -118,93 +114,79 @@ raises("pwms must match the stop count",
 # ------------------------------------------------------------------ layering ---
 power = fresh()
 check("factory stops are read from the config", power.fan_config["curve_stops"], stops)
-check("factory profile starts on a factory curve", power.active_curve_name(), "moderate")
-check("FanCurveIsCustom is false on factory",
-      power.active_curve_name().startswith(pd.CUSTOM_CURVE_PREFIX), False)
+check("factory starts on the moderate curve", power.fan_curve_name, "moderate")
+check("FanCurveIsCustom is false on factory", power.fan_curve_name == pd.CUSTOM_CURVE, False)
 check("factory curve resamples to the shipped moderate curve",
       power.fan_curve_pwms(), pd.resample_curve(moderate, stops))
+check("factory governor is ondemand", power.cpu_governor, "ondemand")
 
 # An operator's own /etc file must still win over factory and survive everything below.
-(etc / "power-profiles.conf").write_text(
+(etc / "power.conf").write_text(
     "# operator notes that must never be eaten\n"
     "[fan_curve.operator]\n"
     "curve=95:255,60:51\n"
-    "[profile.balanced]\n"
-    "fan_curve=operator\n"
+    "[fan]\n"
+    "curve=operator\n"
 )
 power = fresh()
-check("operator /etc file overrides factory", power.active_curve_name(), "operator")
+check("operator /etc file overrides factory", power.fan_curve_name, "operator")
 check("operator curve is what resamples", power.fan_curve_pwms(),
       pd.resample_curve(pd.parse_fan_curve("95:255,60:51"), stops))
+check("an operator [fan] override inherits the rest of [fan]", power.fan_config["min_pwm"], 51)
 
 # ------------------------------------------------------------------ write + reset ---
 power.set_fan_curve([60, 90, 120, 180, 240])
 check("write lands in the drop-in dir", pd.FAN_CURVE_DROPIN.exists(), True)
-check("the drop-in outranks the operator file",
-      power.active_curve_name(), f"{pd.CUSTOM_CURVE_PREFIX}balanced")
-check("FanCurveIsCustom is true after a write",
-      power.active_curve_name().startswith(pd.CUSTOM_CURVE_PREFIX), True)
+check("the drop-in outranks the operator file", power.fan_curve_name, pd.CUSTOM_CURVE)
+check("FanCurveIsCustom is true after a write", power.fan_curve_name == pd.CUSTOM_CURVE, True)
 check("what was written is what reads back", power.fan_curve_pwms(), [60, 90, 120, 180, 240])
 check("and it is what the fan tick would run at a stop",
-      pd.curve_pwm(power.active_curve(), 80), 120)
+      pd.curve_pwm(power.fan_curve_points, 80), 120)
 check("the operator's comments survived",
-      "operator notes that must never be eaten" in (etc / "power-profiles.conf").read_text(),
-      True)
+      "operator notes that must never be eaten" in (etc / "power.conf").read_text(), True)
 
-# A second profile's curve must not clobber the first.
-power.profile = "performance"
+# A second write replaces the first rather than adding to it.
 power.set_fan_curve([100, 130, 160, 200, 255])
-check("second profile written", power.fan_curve_pwms(), [100, 130, 160, 200, 255])
-power.profile = "balanced"
-check("first profile untouched by the second", power.fan_curve_pwms(), [60, 90, 120, 180, 240])
+check("a second write replaces the curve", power.fan_curve_pwms(), [100, 130, 160, 200, 255])
 
 # Only the shipped `temp:pwm` grammar goes to disk -- no new format to keep in step.
 saved = configparser.ConfigParser()
 saved.read(pd.FAN_CURVE_DROPIN)
 check("drop-in uses the shipped curve grammar",
-      saved.get(f"fan_curve.{pd.CUSTOM_CURVE_PREFIX}balanced", "curve"),
-      "100:240,90:180,80:120,70:90,60:60")
+      saved.get(f"fan_curve.{pd.CUSTOM_CURVE}", "curve"), "100:255,90:200,80:160,70:130,60:100")
+check("drop-in selects its own curve", saved.get("fan", "curve"), pd.CUSTOM_CURVE)
 
 power.reset_fan_curve()
-check("reset drops only the active profile", power.active_curve_name(), "operator")
-check("reset falls back to the operator curve, not factory", power.fan_curve_pwms(),
-      pd.resample_curve(pd.parse_fan_curve("95:255,60:51"), stops))
-check("the other profile's curve survives a single reset",
-      sorted(pd.read_fan_dropin()), ["performance"])
+check("reset removes the file", pd.FAN_CURVE_DROPIN.exists(), False)
+check("reset falls back to the operator curve, not factory", power.fan_curve_name, "operator")
+(etc / "power.conf").unlink()
 
-power.reset_fan_curve(every=True)
-check("resetting everything removes the file", pd.FAN_CURVE_DROPIN.exists(), False)
-check("and the operator layer is still in charge", power.active_curve_name(), "operator")
-
-# ------------------------------------------------ the curve follows the profile ---
-# The curve is scoped to the profile in force. Steam switches that profile per game by writing
-# Profile at launch and exit (through the steamos-manager shim), so select_profile is the one
-# path every switch takes, and the curve and its editor have to follow it.
+# Inline points in [fan] curve= are a curve too, with no name to call it by.
+(etc / "power.conf").write_text("[fan]\ncurve=90:255,0:51\n")
 power = fresh()
-power.fan_tick = lambda: None         # no fan hwmon on the host
-power.gpu = None                      # no GPU either: get_property() probes it for the freq list
-# select_profile builds the D-Bus variants of its PropertiesChanged payload, and gi is imported
-# in main() -- not on the host. A stand-in that records (signature, value) is enough to assert
-# on what the payload says.
-class GLibStub:
-    Variant = staticmethod(lambda signature, value: (signature, value))
-pd.GLib = GLibStub
+check("an inline [fan] curve is used", power.fan_curve_points, pd.parse_fan_curve("90:255,0:51"))
+check("and is not reported as custom", power.fan_curve_name == pd.CUSTOM_CURVE, False)
+(etc / "power.conf").unlink()
 
-changed = power.select_profile("performance")
-check("a profile switch takes force", power.profile, "performance")
-check("the curve follows the switch", power.fan_curve_pwms(),
-      pd.resample_curve(power.active_curve("performance"), stops))
-check("the payload announces the profile", changed["Profile"], ("s", "Performance"))
-# The editor re-reads FanCurve off this payload; without it a tab listening for signals would
-# keep showing the previous profile's curve.
-check("the payload re-announces the curve", "FanCurve" in changed, True)
-check("no ActiveProfile left in the payload", "ActiveProfile" in changed, False)
+# A [fan] curve= naming nothing is a broken config, not a silent fallback to some curve.
+(etc / "power.conf").write_text("[fan]\ncurve=nonesuch\n")
+power = fresh()
+check("an unknown curve name is quarantined", (etc / "power.conf").exists(), False)
+check("and the daemon comes up on the factory curve", power.fan_curve_name, "moderate")
+for leftover in etc.glob("power.conf.invalid-*"):
+    leftover.unlink()
 
-# An edit belongs to the profile running now, e.g. the one Steam picked for this game.
-power.set_fan_curve([10, 20, 30, 40, 50])
-check("a curve edit lands on the profile in force", sorted(pd.read_fan_dropin()),
-      ["performance"])
-power.reset_fan_curve(every=True)
+# ------------------------------------------------------------------ persisted state ---
+# A state file from an image that still had power profiles must load, keep the scheduler and
+# shed the rest on the next save.
+pd.STATE_FILE = tmp / "powerd.state"
+pd.STATE_FILE.write_text("profile=performance\ngpu_level=manual\nmanual_gpu_clock=500\n"
+                         "cpu_scheduler=lavd\n")
+power = fresh()
+power.load_state()
+check("a legacy state file keeps the scheduler choice", power.cpu_scheduler, "lavd")
+power.save_state()
+check("and is rewritten with only the scheduler", pd.STATE_FILE.read_text(), "cpu_scheduler=lavd\n")
 
 # ------------------------------------------------------------------ quarantine ---
 # A bad DROP-IN must be quarantined too. Dropping only the /etc file would leave the real
@@ -218,11 +200,11 @@ check("quarantine renames out of the glob's reach",
           for p in pd.CONFIG_DROPIN_DIR.iterdir()), True)
 check("and the daemon comes up on factory", power.fan_config["min_pwm"], 51)
 check("quarantine took the /etc layer with it",
-      (etc / "power-profiles.conf").exists(), False)
+      (etc / "power.conf").exists(), False)
 
 # ------------------------------------------------------------------- cpu governor ---
-# write_governor's fallback is the quietest failure in this daemon: it once left eco and
-# balanced on the SAME governor for a whole release, because the preferred one was missing
+# write_governor's fallback is the quietest failure in this daemon: it once left two power
+# profiles on the SAME governor for a whole release, because the preferred one was missing
 # from scaling_available_governors and nothing said so. The rule under test is that the
 # preferred name is tried by WRITING it -- a governor built as a module is absent from that
 # list until the write itself autoloads it, so a list check would make it unreachable.
@@ -245,7 +227,7 @@ def kernel_like(accepts):
 
 power_gov = fresh()
 
-# The shipping case: everything the profiles name is present.
+# The shipping case: every governor the config might name is present.
 pd.try_write = kernel_like({"schedutil", "ondemand", "conservative", "performance"})
 policy = fake_policy("policy0", None, ["schedutil", "ondemand", "conservative", "performance"])
 check("preferred governor is written", power_gov.write_governor(policy, "conservative"),
@@ -288,17 +270,26 @@ check("preferred==schedutil is not reported as a fallback",
 pd.try_write = real_try_write
 
 
-# Every governor the shipped profiles name must be one the kernel config asks for, or the
-# fallback above turns a profile into a silent duplicate of another.
+# apply_cpu_governor puts the configured governor on EVERY policy: the kernel boots on
+# `performance`, and a policy left on it runs flat out.
+power_gov = fresh()
+power_gov.cpu_governor = "ondemand"
+power_gov.cpu_policies = [fake_policy(f"apply{i}", None, ["ondemand", "performance"])
+                          for i in range(3)]
+pd.QforgePower.apply_cpu_governor(power_gov)
+check("the governor lands on every policy",
+      [pd.read_text(p / "scaling_governor") for p in power_gov.cpu_policies],
+      ["ondemand"] * 3)
+
+# The governor the shipped config names must be one the kernel config builds, or the fallback
+# above silently replaces it.
 factory = configparser.ConfigParser()
-factory.read(os.path.join(root, "rootfs/overlay/usr/share/qforge/power-profiles.conf"))
-named = {factory.get(s, "cpu_governor") for s in factory.sections()
-         if s.startswith("profile.") and factory.has_option(s, "cpu_governor")}
+factory.read(os.path.join(root, "rootfs/overlay/usr/share/qforge/power.conf"))
+named = factory.get("cpu", "governor")
 kconfig = pathlib.Path(root, "kernel/kernel.config").read_text()
-missing = sorted(g for g in named
-                 if f"CONFIG_CPU_FREQ_GOV_{g.upper()}=y" not in kconfig
-                 and f"CONFIG_CPU_FREQ_DEFAULT_GOV_{g.upper()}=y" not in kconfig)
-check("every governor the profiles name is built =y", missing, [])
+check("the shipped governor is built =y",
+      f"CONFIG_CPU_FREQ_GOV_{named.upper()}=y" in kconfig
+      or f"CONFIG_CPU_FREQ_DEFAULT_GOV_{named.upper()}=y" in kconfig, True)
 
 for status, name in results:
     print(f"{status} {name}")
