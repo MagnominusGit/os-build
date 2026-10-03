@@ -275,16 +275,22 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
    Check first whether OGUI's library grid can be reused for a tab or the plugin builds its own.
 4. Emulator manager, modelled on armada's Decky store (armada-os/armada, `decky/armada-store`;
    decided 2026-10-03): NO mirror -- AppImages come straight from each emulator's own releases.
-   A catalog (`catalog.json`, in the plugin) lists per emulator: the releases API URL (GitHub /
-   GitLab), an asset regex (e.g. `^DuckStation-arm64\.AppImage$`), the binary inside the AppImage
-   and default args. Install: resolve the release (armada: newest non-draft, prereleases only if
-   nothing else; ordered by publication date, not tag string), download over HTTPS only (refuse a
+   A catalog (`catalog.json`) lists per emulator: the releases API URL (GitHub / GitLab), the
+   PINNED release tag, an asset regex (e.g. `^DuckStation-arm64\.AppImage$`), the binary inside the
+   AppImage and default args. Decided 2026-10-03: QForge HOSTS the catalog (fetched over HTTPS from
+   the QForge server; the copy bundled in the plugin is only the offline fallback) and pins one
+   tested tag per emulator, so QForge alone decides when an update is offered: bumping a tag in the
+   hosted catalog after testing is what makes the plugin offer it. No "newest" mode (armada follows
+   upstream's newest; an upstream change could break a seed or the launch args unnoticed). Rolling
+   tags are never pinned: DuckStation's `latest` (the 0.1-12070 build tested so far) replaces its
+   asset in place, so its pin must be a numbered release (v0.1-11894 or newer), re-tested on HW.
+   Install: fetch that tag's release, download over HTTPS only (refuse a
    redirect to http), verify the asset's sha256 against the API's `digest` field (GitHub publishes
    one per asset; matched our tested DuckStation AppImage) -- armada does not verify, we do --
    then stage and rename atomically to `/home/player/emulators/<emu>/<tag>.AppImage`, chmod +x,
-   flip `current` (previous AppImage kept until the new one has launched once). Open: pin a tested
-   tag per emulator in the catalog, or follow upstream's newest like armada (DuckStation's `latest`
-   is a rolling tag whose asset is replaced in place).
+   flip `current` (previous AppImage kept until the new one has launched once). Update check =
+   installed tag vs the hosted catalog's tag (armada's 1 h cache, and a failed fetch never counts
+   as "no update").
    PRE_LAUNCH hook installs it when missing (progress shown). Updates: NOT via OGUI's
    `has_update` -- in v0.46.1 no UI calls it, and it is per library item, so one DuckStation
    update would flag every PSX card. Proposed: a plugin "Emulators" page (installed vs published
@@ -322,8 +328,8 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
   (and anything else we publish). OGUI then gives us, unchanged: periodic store check
   (`on_update_timeout`), "update available" when `plugin.version` is greater and the API is
   compatible, install with sha256 verification into `user://plugins/<id>.zip`.
-- The QForge server only hosts the plugin store (`plugins.json` + plugin zips); emulators come
-  from upstream (part 4). Trust (decided 2026-10-03): HTTPS to the QForge host is enough; the plugin
+- The QForge server hosts the plugin store (`plugins.json` + plugin zips) and the emulator
+  catalog (`catalog.json`, pinned tags); the emulators themselves come from upstream (part 4). Trust (decided 2026-10-03): HTTPS to the QForge host is enough; the plugin
   index carries a sha256 per archive (emulators: GitHub's per-asset digest), no separate signature. Downloads must refuse plain
   http and invalid certificates.
 
