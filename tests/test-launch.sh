@@ -22,12 +22,14 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LAUNCH="$ROOT/rootfs/overlay/usr/bin/qforge-launch"
 LAUNCH_CONF="$ROOT/rootfs/overlay/etc/qforge/launch.conf"
 EMU_CONF="$ROOT/rootfs/overlay/etc/qforge/emulators/duckstation.conf"
+SEED_DIR="$ROOT/rootfs/overlay/usr/share/qforge/emulators"
+DS_SEED="$SEED_DIR/duckstation/settings.ini"
 
 PASS=0; FAIL=0; CASE=""
 ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
 
-for f in "$LAUNCH" "$LAUNCH_CONF" "$EMU_CONF"; do
+for f in "$LAUNCH" "$LAUNCH_CONF" "$EMU_CONF" "$DS_SEED"; do
   [ -f "$f" ] || { echo "missing input: $f" >&2; exit 1; }
 done
 command -v setsid >/dev/null || { echo "setsid (util-linux) is required" >&2; exit 1; }
@@ -99,7 +101,10 @@ ROM="$T/roms/psx/Crash Team Racing (USA).chd"
 
 export PATH="$T/bin:$PATH"
 export QFORGE_LAUNCH_CONF="$LAUNCH_CONF" QFORGE_EMU_CONF_DIR="$(dirname "$EMU_CONF")"
-export QFORGE_EMU_DIR="$T/emus" QFORGE_MOUNTS="$T/mounts"
+export QFORGE_EMU_DIR="$T/emus" QFORGE_MOUNTS="$T/mounts" QFORGE_EMU_SEED_DIR="$SEED_DIR"
+# The launcher seeds first-run settings into $HOME: never let a test run reach the real one.
+export HOME="$T/home"
+mkdir -p "$HOME"
 
 reset_logs() { rm -f "$T"/{emu,appimage,fusermount}.log "$T/stop-emu"; }
 field() { sed -n "s/^$1=//p" "$T/emu.log" | head -1; }
@@ -149,6 +154,46 @@ case $? in
   2) bad "duckstation.conf lacks -batch: closing the game would leave DuckStation's UI, not OGUI" ;;
   *) bad "duckstation.conf ARGS do not end with -- (a ROM named '-x' would be read as an option)" ;;
 esac
+
+# DuckStation reads INI values as "key = value"; check the keys the hardware test needed.
+ini() { awk -v sec="[$1]" -v key="$2" '$0 == sec {in_s=1; next} /^\[/ {in_s=0}
+  in_s { split($0, kv, " = "); if (kv[1] == key) { print kv[2]; exit } }' "$DS_SEED"; }
+[ "$(ini Main SetupWizardIncomplete)" = false ] && ok "duckstation seed: setup wizard skipped" || bad "duckstation seed does not skip the setup wizard"
+[ "$(ini AutoUpdater CheckAtStartup)" = false ] && ok "duckstation seed: self-updater off (QForge ships the version)" || bad "duckstation seed leaves DuckStation's auto-updater on"
+[ "$(ini GPU Renderer)" = Vulkan ] && ok "duckstation seed: Vulkan (Turnip)" || bad "duckstation seed renderer is not Vulkan"
+[ "$(ini InputSources SDL)" = true ] && [ "$(ini Pad1 Cross)" = SDL-0/A ] && [ "$(ini Pad1 Start)" = SDL-0/Start ] \
+  && ok "duckstation seed: Port 1 mapped to the InputPlumber pad (SDL-0)" || bad "duckstation seed has no SDL-0 mapping for Port 1 (the wizard that would make one is skipped)"
+[ "$(ini Hotkeys OpenPauseMenu)" = "SDL-0/Back & SDL-0/Start" ] \
+  && ok "duckstation seed: Select+Start opens the pause menu (default is keyboard Escape only)" \
+  || bad "duckstation seed: no controller binding for OpenPauseMenu, so Exit is unreachable with a pad"
+grep -q 'SDL-0/Guide' "$DS_SEED" && bad "duckstation seed binds Guide, which OpenGamepadUI owns" || ok "duckstation seed leaves Guide to OGUI"
+
+# =================================================================================================
+CASE="first-run settings (SEED)"
+seeded="$HOME/.local/share/duckstation/settings.ini"
+rm -rf "$HOME"; mkdir -p "$HOME"
+reset_logs
+start_launcher
+wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+cmp -s "$DS_SEED" "$seeded" && ok "first launch copies the image's settings.ini into ~/.local/share/duckstation" \
+  || bad "first launch did not seed $seeded"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+echo "player changed this" > "$seeded"
+reset_logs
+start_launcher
+wait_for emu_up || bad "the emulator never started"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+[ "$(cat "$seeded")" = "player changed this" ] && ok "an existing settings file is never overwritten" \
+  || bad "a later launch overwrote the player's settings"
+mkdir -p "$T/conf-bad"; cp "$LAUNCH_CONF" "$T/conf-bad/launch.conf"
+for entry in "settings.ini:/etc/passwd" "settings.ini:../../escape" "settings.ini:" "settings.ini"; do
+  printf 'BINARY=usr/bin/duckstation-qt\nARGS=(--)\nSEED=(%q)\n' "$entry" > "$T/conf-bad/duckstation.conf"
+  [ "$(QFORGE_EMU_CONF_DIR="$T/conf-bad" code psx "$ROM")" = 2 ] \
+    && ok "SEED entry '$entry' is refused (exit 2)" || bad "SEED entry '$entry' was accepted"
+done
+printf 'BINARY=usr/bin/duckstation-qt\nARGS=(--)\nSEED=(missing.ini:.config/x.ini)\n' > "$T/conf-bad/duckstation.conf"
+[ "$(QFORGE_EMU_CONF_DIR="$T/conf-bad" code psx "$ROM")" = 2 ] && [ ! -e "$HOME/.config/x.ini" ] \
+  && ok "a seed file the image lacks is an error, not a silent skip" || bad "a missing seed file was ignored"
 
 # =================================================================================================
 CASE="normal run, game closed by the emulator"

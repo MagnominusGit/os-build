@@ -6,8 +6,13 @@
 # Emulators are not in the image: the QForge OGUI plugin downloads each one as an upstream AppImage
 # into /home/player/emulators/<emulator>/ and points `current` at the version to run (plan Phase
 # 3/4). This script is what every ROM card runs. /etc/qforge/launch.conf maps a system to its
-# emulator; /etc/qforge/emulators/<emulator>.conf says which binary inside the AppImage to run and
-# with what arguments.
+# emulator; /etc/qforge/emulators/<emulator>.conf says which binary inside the AppImage to run,
+# with what arguments, and which first-run settings to seed.
+#
+# First-run settings (SEED) live in the image, /usr/share/qforge/emulators/<emulator>/, and are
+# copied into $HOME before the emulator's first start — never over an existing file, so whatever the
+# player changes in the emulator is kept. One set per emulator serves every device: InputPlumber
+# presents each handheld's joypad as the same virtual pad (SDL-0 to the emulators).
 #
 # The AppImage is mounted and its real binary run; every rule below was found on hardware
 # (DuckStation, MANGMI Pocket Max, 2026-10-03) and each one cost a crash:
@@ -35,6 +40,7 @@ set -uo pipefail
 CONF=${QFORGE_LAUNCH_CONF:-/etc/qforge/launch.conf}
 EMU_CONF_DIR=${QFORGE_EMU_CONF_DIR:-/etc/qforge/emulators}
 EMU_DIR=${QFORGE_EMU_DIR:-/home/player/emulators}
+SEED_DIR=${QFORGE_EMU_SEED_DIR:-/usr/share/qforge/emulators}
 MOUNTS=${QFORGE_MOUNTS:-/proc/mounts}
 UNMOUNT_TRIES=50   # x 0.1 s for the runtime to let go of the mount after SIGHUP
 MOUNT_TIMEOUT=30   # s for the AppImage runtime to print its mount point
@@ -51,13 +57,24 @@ emulator=$(sed -n "s/^$system=\([a-z0-9_-]*\)[[:space:]]*$/\1/p" "$CONF" 2>/dev/
 emu_conf="$EMU_CONF_DIR/$emulator.conf"
 [ -f "$emu_conf" ] || die 2 "missing $emu_conf"
 
-BINARY= ARGS=()
+BINARY= ARGS=() SEED=()
 # shellcheck source=/dev/null
 . "$emu_conf"
 [ -n "$BINARY" ] || die 2 "$emu_conf sets no BINARY"
 
 img="$EMU_DIR/$emulator/current"
 [ -x "$img" ] || die 3 "$emulator is not installed ($img missing or not executable)"
+
+for entry in "${SEED[@]}"; do
+  src="$SEED_DIR/$emulator/${entry%%:*}" dst=${entry#*:}
+  [[ $entry == *:* && -n $dst && $dst != /* && /$dst/ != */../* ]] \
+    || die 2 "$emu_conf: bad SEED entry '$entry' (want <file>:<path under \$HOME>)"
+  [ -e "$HOME/$dst" ] && continue
+  [ -f "$src" ] || die 2 "$emu_conf seeds $src, which the image does not have"
+  mkdir -p "$(dirname "$HOME/$dst")" && cp "$src" "$HOME/$dst" \
+    || die 2 "could not seed $HOME/$dst"
+  echo "qforge-launch: first run of $emulator: seeded $HOME/$dst" >&2
+done
 
 # The runtime names its FUSE filesystem after the AppImage file `current` points at.
 fstype="fuse.$(basename "$(readlink -f "$img")")"

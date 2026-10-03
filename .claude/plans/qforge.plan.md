@@ -243,8 +243,15 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
    update would flag every PSX card. Proposed: a plugin "Emulators" page (installed vs published
    version, Update / Roll back buttons) + an OGUI notification when the manifest has a newer
    version. Never auto-update at launch.
-5. Per-emulator first-run config: write the emulator's own config before its first start
-   (DuckStation: settings.ini with wizard off, BIOS/ROM dirs, Vulkan, `[Pad1]` SDL-0 mapping,
+5. Per-emulator first-run config -- MOVED to the image (decided 2026-10-03, done): defaults in
+   `/usr/share/qforge/emulators/<emu>/`, named by `SEED=(<file>:<path under $HOME>)` in
+   `/etc/qforge/emulators/<emu>.conf`; qforge-launch copies them before the first start, never
+   over an existing file. One set per emulator for every device: InputPlumber presents each
+   handheld's joypad as one virtual Xbox Elite pad (SDL-0). Per-device overrides via
+   `/usr/lib/qforge/devices/<device>.conf` only if a device ever needs one. The plugin only
+   downloads; a "reset to QForge defaults" action on its Emulators page if needed later.
+   HW ✅ (Pocket Max, settings.ini removed first): seeded, no wizard, pad + Select+Start + Exit OK.
+   Contents (DuckStation: settings.ini with wizard off, BIOS/ROM dirs, Vulkan, `[Pad1]` SDL-0 mapping,
    auto-updater off, `[Hotkeys] OpenPauseMenu = SDL-0/Back & SDL-0/Start` -- by default only
    keyboard Escape opens its menu, so a controller can never reach Exit; HW-verified). Never overwrite a user-changed config after that.
 
@@ -317,6 +324,9 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
   The FUSE type is named after the file `current` points to (`fuse.0.1-12070.AppImage`), as the
   stale sweep assumes; only the mount dir takes the link's name.
   Not yet: per-game CPU pinning and per-device defaults (both go in qforge-launch).
+- **Open: `systemctl restart qforge-session` takes 90 s** on the 20261003T153817Z dev card: the
+  stop hits TimeoutStopSec and systemd SIGKILLs (first seen at uptime 107 s, before any game
+  launch, so not qforge-launch). Something in the session ignores SIGTERM; find what.
 - ROM cards show in All Games as well as in their system tab.
 
 **Open questions for review**
