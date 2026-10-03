@@ -136,9 +136,10 @@ Remaining OS-side (found in OGUI source):
   20261003T114234Z): Adreno 650 found via devfreq, menu populated without TDP controls, GPU max
   405 -> 400 MHz OPP lands in devfreq, core count 4 offlines cpu4-7, all 8 cores kept after OGUI's
   default apply, ondemand on every policy; GPU cap and core count survive suspend/resume.
-- Send upstream: PowerStation 0001/0002 (ShadowBlip/PowerStation), OGUI 0003 + the #542/#540
-  fixes (ShadowBlip/OpenGamepadUI). Branches: `_ref/PowerStation` qforge-arm,
-  `_ref/OpenGamepadUI` qforge-perf-menu.
+- Send upstream: PowerStation 0001/0002 (ShadowBlip/PowerStation), branch `_ref/PowerStation`
+  qforge-arm. OGUI sent 2026-10-03: #559 (0001, fixes #542), #560 (0002, fixes #540), #561 (0003),
+  from loki666/OpenGamepadUI branches fix/no-dmi-devicetree, fix/custom-maximum-size,
+  fix/perf-menu-soc-gpu. Drop each patch once it lands in a release.
 - HW 2026-10-03, MANGMI Pocket Max (SM8250), dev build 20261003T094820Z (`29a24b7`): first
   SM8250 boot. qforge-session.service (no sddm) gives an Active wayland session on seat0/VT1,
   boot-good confirmed slot A, polkit grants NM / timezone / power / udisks to the session with no
@@ -486,7 +487,7 @@ plus the ROM library that launches them)
 
 - PowerStation: order SetCoresEnabled by `cpu_capacity` instead of CPU number (Qualcomm numbers
   cores slowest-first; other SoCs do not); plus our patches 0001/0002 (`_ref/PowerStation` qforge-arm).
-- OpenGamepadUI: patch 0003 and the #542/#540 fixes (`_ref/OpenGamepadUI` qforge-perf-menu).
+- OpenGamepadUI: SENT 2026-10-03 as #559 / #560 / #561.
 - DuckStation: AppRun is a symlink, so on a system without Qt, Qt's applicationDirPath misses
   `usr/bin/qt.conf` and no platform plugin loads.
 
