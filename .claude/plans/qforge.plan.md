@@ -147,12 +147,6 @@ Remaining OS-side (found in OGUI source):
   taken under the Steam client or the boot chain (steamcl, steamos-bootconf), on purpose.
 - ✅ `kernel/kernel.config` CONFIG_PROC_CHILDREN comment fixed (2026-10-03; next card build
   rebuilds the kernel).
-- **OGUI's storage screen is dead**: its removable-media manager calls
-  `/usr/bin/steamos-polkit-helpers/steamos-{format-sdcard,retrigger-automounts,trim-devices}`,
-  which Phase 0 removed (guard-forbidden). Decide: ship those three paths as thin wrappers over
-  qforge-format-sdcard / block-event, or accept no Format button.
-- **SD automount is ext4-only**, inherited from the Steam library requirement that no longer
-  applies; ROM cards are usually exfat. Decide whether to automount exfat/vfat too.
 - qforge-pairingd stays always-on (no shell switch).
 
 ### Phase 3 — Emulators (High)
@@ -182,6 +176,16 @@ Remaining OS-side (found in OGUI source):
 - Artwork scraping later (ScreenScraper needs credentials).
 
 ### Phase 5 — Release infrastructure (Medium)
+
+- **OGUI's storage screen is dead** (deferred 2026-10-03: only matters once QForge runs from
+  internal UFS and the SD slot is free for storage; booted from the only SD slot it has nothing to
+  manage): its removable-media manager calls
+  `/usr/bin/steamos-polkit-helpers/steamos-{format-sdcard,retrigger-automounts,trim-devices}`,
+  which Phase 0 removed (guard-forbidden). Decide: ship those three paths as thin wrappers over
+  qforge-format-sdcard / block-event, or accept no Format button.
+- **SD automount is ext4-only** (deferred 2026-10-03 with the storage screen: a second card only
+  exists to mount once QForge runs from internal UFS), inherited from the Steam library requirement that no longer
+  applies; ROM cards are usually exfat. Decide whether to automount exfat/vfat too.
 
 - Update server via `ota/setup-server.sh`; replace the `updates.qforge.invalid` placeholder in
   `qforge-update`, `installer/release-info`, `installer/netcfg`.
