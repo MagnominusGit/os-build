@@ -258,7 +258,8 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
   All Games. A plugin adds the per-system tabs and fills their grids.
 - `BoxArtProvider` (GRID_PORTRAIT / GRID_LANDSCAPE / BANNER / LOGO): artwork per item, later.
 
-**Plugin parts**
+**Plugin parts** (overall shape, 2026-10-03: like armada's Decky store -- a store for the emulators
+plus the ROM library that launches them)
 1. Systems table (in the plugin): `psx -> {name "PlayStation", exts [chd, cue, pbp, m3u, iso],
    emulator duckstation}`, `ps2 -> armsx2`, `gc/wii -> dolphin`, `3ds -> azahar`, `ps3 -> rpcs3`,
    `wiiu -> cemu`. ROM dirs `/home/player/roms/<system>/` (one level deep; m3u wins over its
@@ -296,11 +297,18 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
    flip `current` (previous AppImage kept until the new one has launched once). Update check =
    installed tag vs the hosted catalog's tag (armada's 1 h cache, and a failed fetch never counts
    as "no update").
-   PRE_LAUNCH hook installs it when missing (progress shown). Updates: NOT via OGUI's
-   `has_update` -- in v0.46.1 no UI calls it, and it is per library item, so one DuckStation
-   update would flag every PSX card. Proposed: a plugin "Emulators" page (installed vs published
-   version, Update / Roll back buttons) + an OGUI notification when the manifest has a newer
-   version. Never auto-update at launch.
+   **Store screen** (decided 2026-10-03, armada-store style): the plugin's own page lists the
+   catalog's emulators with installed vs catalog tag, and per emulator: Download, Update (when the
+   hosted catalog's pinned tag is newer), Delete, and **Open** -- start the emulator's own GUI for
+   the settings OGUI does not expose (graphics, per-game options, controller tweaks). Open needs a
+   no-ROM mode in the launcher (`qforge-launch --gui <emulator>`: same AppImage mount / setsid /
+   exit handling, GUI args from the emulator conf instead of the ROM args, e.g. DuckStation without
+   `-batch`). An OGUI notification points at the store when the catalog offers an update. Updates
+   are never applied at launch. Not via OGUI's `has_update`: in v0.46.1 no UI calls it, and it is
+   per library item, so one DuckStation update would flag every PSX card.
+   **ROM whose emulator is not installed**: the PRE_LAUNCH hook does NOT download silently -- it
+   shows a popup offering to download the emulator (name, size from the release asset), with
+   progress, then launches the ROM; declining cancels the launch.
 5. Per-emulator first-run config -- MOVED to the image (decided 2026-10-03, done): defaults in
    `/usr/share/qforge/emulators/<emu>/`, named by `SEED=(<file>:<path under $HOME>)` in
    `/etc/qforge/emulators/<emu>.conf`; qforge-launch copies them before the first start, never
