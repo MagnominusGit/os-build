@@ -137,5 +137,79 @@ for row in usr/lib/systemd/user/systemd-sysext-updater.service \
   grep -qx "glob $row" "$TRIM" && ok "trimmed: $row" || bad "not trimmed: $row"
 done
 
+# =================================================================================================
+# Behaviour: run the real qforge-session with a fake gamescope and a fake shell client.
+# PAMName= puts the session in the logind scope, so systemd's stop reaches ONLY this script. With
+# the client in the foreground, sh held the TERM trap until the client returned, nothing told the
+# client to quit, and every `systemctl restart qforge-session` waited out the 90 s stop timeout
+# (HW 2026-10-03). The client must get SIGTERM from the script and the session must end promptly.
+CASE="session stop"
+T="$(mktemp -d)" && [ -d "$T" ] || { echo "mktemp -d failed" >&2; exit 1; }
+spids=()
+cleanup_t() { [ ${#spids[@]} -gt 0 ] && kill -KILL "${spids[@]}" 2>/dev/null; [ -n "${T:-}" ] && rm -rf "$T"; }
+trap cleanup_t EXIT
+mkdir -p "$T/bin" "$T/run" "$T/home"
+# gamescope: answer the startup handshake on the -R fifo, then run until SIGTERM.
+cat > "$T/bin/gamescope" <<EOF
+#!/bin/bash
+trap 'echo gamescope-term >> "$T/log"; exit 0' TERM
+while [ \$# -gt 0 ]; do [ "\$1" = -R ] && { r=\$2; shift; }; shift; done
+echo ":1 gamescope-0" > "\$r"
+while :; do sleep 0.05; done
+EOF
+# The shell client: logs its stdin, exits 5 when $T/client-exit appears, or 0 on SIGTERM.
+cat > "$T/client" <<EOF
+#!/bin/bash
+echo "stdin=\$(readlink /proc/\$\$/fd/0)" >> "$T/log"
+trap 'echo client-term >> "$T/log"; exit 0' TERM
+echo client-up >> "$T/log"
+while [ ! -e "$T/client-exit" ]; do sleep 0.05; done
+exit 5
+EOF
+chmod +x "$T/bin/gamescope" "$T/client"
+run_session() {
+  : > "$T/log"; rm -f "$T/client-exit"
+  PATH="$T/bin:$PATH" XDG_RUNTIME_DIR="$T/run" HOME="$T/home" QFORGE_SESSION_CMD="$T/client" \
+    sh "$SESSION" < "$T/stdin" > "$T/session.out" 2>&1 &
+  spid=$!; spids+=("$spid")
+}
+waitfor() { for _ in $(seq 100); do eval "$1" && return 0; sleep 0.05; done; return 1; }
+: > "$T/stdin"
+if [ -e /etc/qforge/session.conf ] || [ -e /usr/lib/qforge/device-env ]; then
+  ok "skipped: this host has QForge's session.conf/device-env, which would override the fakes"
+else
+  run_session
+  if waitfor 'grep -qx client-up "$T/log"'; then
+    grep -qx "stdin=$T/stdin" "$T/log" \
+      && ok "the client keeps the session's stdin (tty1 on the device), not /dev/null" \
+      || bad "the client's stdin is $(sed -n 's/^stdin=//p' "$T/log"), not the session's"
+    t0=$(date +%s%N); kill -TERM "$spid"
+    if waitfor "! kill -0 $spid 2>/dev/null"; then
+      ms=$(( ($(date +%s%N) - t0) / 1000000 ))
+      wait "$spid"; rc=$?
+      ok "SIGTERM to the session ends it in ${ms} ms (was: hung until systemd's 90 s SIGKILL)"
+      [ "$rc" = 143 ] && ok "exit status 143 after SIGTERM" || bad "exit status $rc after SIGTERM, not 143"
+    else
+      bad "the session ignored SIGTERM for 5 s: systemctl stop would wait out TimeoutStopSec"
+    fi
+    grep -qx client-term "$T/log" && ok "the shell client was sent SIGTERM" || bad "the shell client never got SIGTERM"
+    waitfor 'grep -qx gamescope-term "$T/log"' && ok "gamescope was stopped" || bad "gamescope was left running"
+    ls -d "$T"/run/gamescope.* >/dev/null 2>&1 && bad "the gamescope rundir was left behind" || ok "the gamescope rundir was removed"
+  else
+    bad "the fake client never started: $(tail -3 "$T/session.out")"
+  fi
+
+  run_session
+  if waitfor 'grep -qx client-up "$T/log"'; then
+    touch "$T/client-exit"
+    waitfor "! kill -0 $spid 2>/dev/null" || { bad "the session did not end after the client exited"; kill -KILL "$spid"; }
+    wait "$spid"; rc=$?
+    [ "$rc" = 5 ] && ok "a client that exits on its own: the session exits with its status (5)" || bad "session exited $rc, the client 5"
+    waitfor 'grep -qx gamescope-term "$T/log"' && ok "...and gamescope is stopped" || bad "gamescope survived the client's exit"
+  else
+    bad "the fake client never started (second run)"
+  fi
+fi
+
 printf '\ntest-session.sh: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

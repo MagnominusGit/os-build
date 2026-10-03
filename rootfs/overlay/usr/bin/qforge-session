@@ -216,10 +216,31 @@ fi
 
 # Attach the client to gamescope's nested displays. When it returns, the EXIT trap stops gamescope
 # and the session ends (qforge-session.service restarts it). Propagate the client's exit status.
+#
+# The client runs in the BACKGROUND and we `wait` for it, so a stop reaches it. PAMName= puts this
+# whole session in the logind session scope, not the service's cgroup, so systemd's stop signals
+# only this script (the main PID) — never the client or gamescope. sh holds a trapped signal until a
+# FOREGROUND command returns, so with the client in the foreground the TERM trap never ran, nothing
+# told the shell to quit, and every `systemctl stop/restart qforge-session` sat out TimeoutStopSec
+# (90 s) before a SIGKILL (HW 2026-10-03). `wait` returns as soon as a trapped signal arrives.
+# `<&0`: an sh background job otherwise gets /dev/null as stdin instead of the session's tty1.
+CLIENT_PID=""
+stop_session() {
+  trap - HUP INT TERM
+  if [ -n "$CLIENT_PID" ]; then
+    kill -TERM "$CLIENT_PID" 2>/dev/null || true
+    wait "$CLIENT_PID" 2>/dev/null || true
+  fi
+  exit 143   # 128 + SIGTERM; the EXIT trap then stops gamescope
+}
+trap stop_session HUP INT TERM
 set +e
-$QFORGE_SESSION_CMD
+$QFORGE_SESSION_CMD <&0 &
+CLIENT_PID=$!
+wait "$CLIENT_PID"
 status=$?
 set -e
+trap cleanup HUP INT TERM
 
 # The client asked for a power action on its way out. It did NOT call logind — it touched a sentinel
 # and exited cleanly precisely so the host could finish tearing the session down first, which is the

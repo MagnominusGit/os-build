@@ -324,9 +324,16 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
   The FUSE type is named after the file `current` points to (`fuse.0.1-12070.AppImage`), as the
   stale sweep assumes; only the mount dir takes the link's name.
   Not yet: per-game CPU pinning and per-device defaults (both go in qforge-launch).
-- **Open: `systemctl restart qforge-session` takes 90 s** on the 20261003T153817Z dev card: the
-  stop hits TimeoutStopSec and systemd SIGKILLs (first seen at uptime 107 s, before any game
-  launch, so not qforge-launch). Something in the session ignores SIGTERM; find what.
+- ✅ **`systemctl restart qforge-session` took 90 s** (fixed 2026-10-03). PAMName= moves the
+  session into the logind session scope, so the service cgroup is empty and systemd's stop only
+  signals the main PID, qforge-session (sh). It ran OGUI in the FOREGROUND, and sh holds a trapped
+  SIGTERM until the foreground command returns: nothing ever told OGUI to quit, so every stop sat
+  out TimeoutStopSec and ended in SIGKILL. Not new (every restart was 90 s), just unmeasured. Now
+  the client runs in the background and the script `wait`s, forwards SIGTERM to it, then stops
+  gamescope; `<&0` keeps tty1 as its stdin; `SuccessExitStatus=143` so a requested stop is not
+  logged as a failure. HW (bind-mounted script + runtime drop-in): restart 0.9-2.3 s (stop
+  ~0.1 s + RestartSec), OGUI stdin still /dev/tty1. tests/test-session.sh runs the real script
+  with a fake gamescope and client; it fails on the old script.
 - ROM cards show in All Games as well as in their system tab.
 
 **Open questions for review**

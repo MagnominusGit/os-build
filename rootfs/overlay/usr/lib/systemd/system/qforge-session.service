@@ -67,6 +67,9 @@ Environment=XDG_SESSION_TYPE=wayland XDG_SESSION_CLASS=user XDG_SESSION_DESKTOP=
 # will not start is a brick.
 ExecStartPre=-+/bin/sh -c 'mkdir -p /run/qforge/splash && echo qforge-session >/run/qforge/splash/takeover'
 ExecStart=/bin/bash --login -c 'exec /usr/bin/qforge-session'
+# A stop is SIGTERM to qforge-session, which stops the shell and gamescope and exits 128+15; that is
+# the requested outcome, not a failure.
+SuccessExitStatus=143
 Restart=always
 RestartSec=1
 
