@@ -196,7 +196,26 @@ Remaining OS-side (found in OGUI source):
   device-specific value from `/usr/lib/qforge/devices/<device>.conf` only when an emulator needs it --
   likely first: Azahar's screen layout on the dual-screen Pocket DS, or resolution scaling once a heavy
   emulator shows a real gap between SoCs.
-- Layout `/home/player/{roms/<system>,bios,saves,states}`; ROMs also from SD via automount.
+- ✅ **Player folder layout** (2026-10-03): `~/{roms/<system>,bios,saves/<system>,states/<system>,
+  emulators}` from `/usr/share/user-tmpfiles.d/qforge-home.conf`, created by player's own user
+  manager at every login (system tmpfiles is not ordered after /home, which is `nofail`), so OTA'd
+  devices, which keep /home, gain new folders too. The user `systemd-tmpfiles-setup.service` must be
+  linked into `/etc/systemd/user/basic.target.wants` -- user presets are only applied at package
+  install, which an image build never runs (HW: the folders were missing until that link). Every
+  launch.conf system needs its rows (test). DuckStation's seed puts memory cards in `~/saves/psx`
+  and states in `~/states/psx`. ROMs from a second SD card stay with Phase 5's automount decision.
+- ✅ **Network shares** (decided + built 2026-10-03): ksmbd (in-kernel SMB3, `CONFIG_SMB_SERVER=m`)
+  + ksmbd-tools 3.5.7 (overlay PKGBUILD, not in the snapshot; Samba was ~110 MiB+ with deps),
+  `/etc/ksmbd/ksmbd.conf`: shares roms, bios, saves, states only; GUEST read-write mapped to
+  `player`; ON by default (preset + .wants), avahi-daemon enabled for `qforge.local` and an
+  `_smb._tcp` record. `[ipc$] guest ok = yes` is needed: ksmbd-tools adds [ipc$] without it, so a
+  guest could not list shares. HW (Pocket Max, 20261003T175813Z): direct share URLs work as guest
+  (anonymous or any name) from Linux; Windows 10/11 refuse SMB guest logins by default.
+  - Open: listing the shares at the server root (`smb://qforge.local/`) fails for every user, guest
+    or authenticated, with stock or our [ipc$]: kernel 7.2's `smb2_ioctl()` looks the RPC pipe id up
+    as an open file and returns -ENOENT before `fsctl_pipe_transceive()` runs. Upstream regression
+    from "ksmbd: add SMB3 request replay support", fixed by "ksmbd: exempt FSCTL_PIPE_TRANSCEIVE ..."
+    (linux-cifs, 2026-07): add it to the no_fileid_ioctl exemption. Backport into kernel/patches.
 - Licence check: never ship BIOS. DuckStation is CC BY-NC-ND (no commercial use, no modified
   versions) -- confirm shipping its unmodified AppImage fits how QForge is distributed.
 

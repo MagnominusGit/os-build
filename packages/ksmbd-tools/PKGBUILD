@@ -1,0 +1,33 @@
+# ksmbd-tools — userspace for ksmbd, the in-kernel SMB3 server (see source.pin for why ksmbd).
+#
+# ksmbd.mountd answers the kernel's share/user queries over generic netlink (libnl) and reads
+# /etc/ksmbd/ksmbd.conf; ksmbd.control / ksmbd.adduser / ksmbd.addshare manage it. The upstream
+# ksmbd.service (installed here) loads the module through modprobe@ksmbd.service.
+#
+# --sbindir=bin: Arch has no separate sbin. Kerberos stays off (upstream's default): the shares
+# are guest-only, see rootfs/overlay/etc/ksmbd/ksmbd.conf.
+
+pkgname=ksmbd-tools
+pkgver=3.5.7
+pkgrel=1
+pkgdesc='Userspace tools for ksmbd, the in-kernel SMB3 server'
+arch=('aarch64')
+url='https://github.com/cifsd-team/ksmbd-tools'
+license=('GPL-2.0-or-later')
+depends=('glib2' 'libnl')
+makedepends=('meson')
+source=("${pkgname}-${pkgver}.tar.gz::${url}/archive/refs/tags/${pkgver}.tar.gz")
+sha256sums=('43f18da02499f3dd2c021255b95aa127e83254997502fcdcccb34053461effd1')
+
+build() {
+  arch-meson "${pkgname}-${pkgver}" build \
+    --sbindir=bin \
+    -Drundir=/run \
+    -Dsystemdsystemunitdir=/usr/lib/systemd/system \
+    -Dkrb5=disabled
+  meson compile -C build
+}
+
+package() {
+  meson install -C build --destdir "${pkgdir}" --no-rebuild
+}

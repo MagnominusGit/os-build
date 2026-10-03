@@ -143,7 +143,15 @@ BOOTSTRAP_PKGS=(base)
 #                       and, without it, aborts ("Cannot mount AppImage, please check your FUSE
 #                       setup", HW 2026-10-03, DuckStation). Emulators are not in the image; the
 #                       QForge OGUI plugin downloads them into /home (plan Phase 3/4).
-PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-tools mesa gamescope seatd mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit e2fsprogs xorg-xwayland noto-fonts noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl opengamepadui powerstation which fuse3)
+#   ksmbd-tools         userspace for ksmbd, the in-kernel SMB3 server (CONFIG_SMB_SERVER=m) behind the
+#                       player's network shares (/etc/ksmbd/ksmbd.conf: roms, bios, saves, states;
+#                       guest read-write, on by default). Overlay (packages/ksmbd-tools): not in the
+#                       holo snapshot. Chosen over Samba, ~110 MiB+ with its dependencies.
+#   avahi               mDNS: announces qforge.local and the SMB shares (/etc/avahi/services/
+#                       smb.service). Already pulled in as a dependency; listed because the image
+#                       now ENABLES avahi-daemon (60-qforge-shares.preset), which must not depend on
+#                       some other package keeping it around.
+PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-tools mesa gamescope seatd mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit e2fsprogs xorg-xwayland noto-fonts noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl opengamepadui powerstation which fuse3 ksmbd-tools avahi)
 
 # Dev-only packages — installed ONLY under QFORGE_DEV=1, NEVER in a release base.
 # On-device bring-up tools: evtest reads raw /dev/input events; usbutils provides lsusb.

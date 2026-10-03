@@ -24,12 +24,13 @@ LAUNCH_CONF="$ROOT/rootfs/overlay/etc/qforge/launch.conf"
 EMU_CONF="$ROOT/rootfs/overlay/etc/qforge/emulators/duckstation.conf"
 SEED_DIR="$ROOT/rootfs/overlay/usr/share/qforge/emulators"
 DS_SEED="$SEED_DIR/duckstation/settings.ini"
+LAYOUT="$ROOT/rootfs/overlay/usr/share/user-tmpfiles.d/qforge-home.conf"
 
 PASS=0; FAIL=0; CASE=""
 ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
 
-for f in "$LAUNCH" "$LAUNCH_CONF" "$EMU_CONF" "$DS_SEED"; do
+for f in "$LAUNCH" "$LAUNCH_CONF" "$EMU_CONF" "$DS_SEED" "$LAYOUT"; do
   [ -f "$f" ] || { echo "missing input: $f" >&2; exit 1; }
 done
 command -v setsid >/dev/null || { echo "setsid (util-linux) is required" >&2; exit 1; }
@@ -169,6 +170,20 @@ ini() { awk -v sec="[$1]" -v key="$2" '$0 == sec {in_s=1; next} /^\[/ {in_s=0}
   && ok "duckstation seed: Select+Start opens the pause menu (default is keyboard Escape only)" \
   || bad "duckstation seed: no controller binding for OpenPauseMenu, so Exit is unreachable with a pad"
 grep -q 'SDL-0/Guide' "$DS_SEED" && bad "duckstation seed binds Guide, which OpenGamepadUI owns" || ok "duckstation seed leaves Guide to OGUI"
+
+# The player folder layout (user tmpfiles): every system an emulator serves has its folders, and
+# the seed points DuckStation at them (the player home is /home/player).
+layout_has() { grep -Eq "^d[[:space:]]+%h/$1[[:space:]]" "$LAYOUT"; }
+for sys in $(sed -n 's/^\([a-z0-9_]*\)=.*/\1/p' "$LAUNCH_CONF"); do
+  missing=""
+  for top in roms saves states; do layout_has "$top/$sys" || missing="$missing $top/$sys"; done
+  [ -z "$missing" ] && ok "layout has roms/saves/states for system '$sys'" || bad "layout lacks:$missing (system '$sys' is in launch.conf)"
+done
+for d in bios emulators; do layout_has "$d" && ok "layout has ~/$d" || bad "layout lacks ~/$d"; done
+[ "$(ini BIOS SearchDirectory)" = /home/player/bios ] && [ "$(ini GameList RecursivePaths)" = /home/player/roms/psx ] \
+  && [ "$(ini MemoryCards Directory)" = /home/player/saves/psx ] && [ "$(ini Folders SaveStates)" = /home/player/states/psx ] \
+  && ok "duckstation seed: BIOS, ROMs, memory cards and states in the shared layout" \
+  || bad "duckstation seed folders do not match the layout"
 
 # =================================================================================================
 CASE="first-run settings (SEED)"

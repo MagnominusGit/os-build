@@ -1,0 +1,17 @@
+# ksmbd-tools — built FROM SOURCE via a qforge-owned PKGBUILD (packages/ksmbd-tools/PKGBUILD).
+# The userspace half of ksmbd, the in-kernel SMB3 server (CONFIG_SMB_SERVER=m in kernel/kernel.config)
+# behind the player's network shares (roms, bios, saves, states). Not in the pinned holo aarch64
+# snapshot, so there is no repo row to resolve; same "local PKGBUILD" form as packages/brightnessctl.
+#
+# Chosen over Samba (2026-10-03): Samba is ~110 MiB+ installed with smbclient and its cups/ldap/python
+# dependencies; ksmbd-tools is about 1 MiB and needs only glib2 + libnl, both already in the image.
+#
+# Version: 3.5.7, upstream's latest release (2026-08-16).
+#
+# Fields (see packages/README.md):
+#   name           pkgname (must match the PKGBUILD); also the work/ build-dir + repo entry
+#   pkgbuild_local path (relative to this dir) to the checked-in PKGBUILD to build
+#   pkgrel_suffix  numeric suffix appended to the PKGBUILD's pkgrel so pacman prefers our build
+name: ksmbd-tools
+pkgbuild_local: PKGBUILD
+pkgrel_suffix: 1

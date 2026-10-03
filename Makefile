@@ -407,6 +407,7 @@ test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-units.sh
 	bash $(TESTS_DIR)/test-session.sh
 	bash $(TESTS_DIR)/test-launch.sh
+	bash $(TESTS_DIR)/test-shares.sh
 	bash $(TESTS_DIR)/test-coredump-limit.sh
 	bash $(TESTS_DIR)/test-fan-curve.sh
 	bash $(TESTS_DIR)/test-cpu-scheduler.sh
