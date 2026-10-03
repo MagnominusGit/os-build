@@ -273,6 +273,55 @@ kill -0 "$lpid" 2>/dev/null && ok "the launcher keeps waiting for the emulator a
 touch "$T/stop-emu"; reap_launcher "$lpid"
 
 # =================================================================================================
+CASE="CPU pinning (--cpus big)"
+# A fake /sys/devices/system/cpu: online list + per-CPU cpu_capacity (offline CPUs have none).
+mkcpus() {  # mkcpus <online> <cpu:capacity>...
+  rm -rf "$T/cpu"; mkdir -p "$T/cpu"; echo "$1" > "$T/cpu/online"; shift
+  local e; for e in "$@"; do mkdir -p "$T/cpu/cpu${e%%:*}"; echo "${e#*:}" > "$T/cpu/cpu${e%%:*}/cpu_capacity"; done
+}
+# taskset: record the CPU list, then run the rest like the real one (exec keeps the PID).
+cat > "$T/bin/taskset" <<EOF
+#!/bin/bash
+[ "\$1" = -c ] || { echo "taskset: unexpected \$*" >> "$T/taskset.log"; exit 1; }
+echo "cpus=\$2" >> "$T/taskset.log"; shift 2; exec "\$@"
+EOF
+chmod +x "$T/bin/taskset"
+pinned_run() {  # one launch with --cpus big and the fake topology; prints the taskset list or "none"
+  rm -f "$T/taskset.log"; reset_logs
+  QFORGE_CPU_ROOT="$T/cpu" "$LAUNCH" --cpus big psx "$ROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+  wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+  touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
+  sed -n 's/^cpus=//p' "$T/taskset.log" 2>/dev/null | grep . || echo none
+}
+# SM8250 (MANGMI Pocket Max, measured): 4 little 284, 3 big 871, 1 prime 1024.
+mkcpus 0-7 0:284 1:284 2:284 3:284 4:871 5:871 6:871 7:1024
+[ "$(pinned_run)" = "4,5,6,7" ] && ok "SM8250: pinned to cpu4-7 (big + prime, not the prime core alone)" || bad "SM8250 pinned to '$(sed -n 's/^cpus=//p' "$T/taskset.log")'"
+[ "$(field pid)" = "$(field sid)" ] && ok "pinned, the emulator still leads its own session (taskset execs)" || bad "taskset broke the emulator's session"
+# Fast cores numbered first (not every SoC numbers slowest-first): capacity decides, not the index.
+mkcpus 0-5 0:1024 1:1024 2:512 3:512 4:512 5:512
+[ "$(pinned_run)" = "0,1" ] && ok "fast cores numbered first are still found (by capacity, not CPU number)" || bad "pinned to the wrong cores when fast ones come first"
+# PowerStation's core count of 4 offlines the fast cores first: nothing fast is online.
+mkcpus 0-3 0:284 1:284 2:284 3:284
+[ "$(pinned_run)" = none ] && grep -q "not pinning" "$T/launch.err" \
+  && ok "core-count limit left only little cores: not pinned, and says why" || bad "pinned with no fast core online"
+# Partly limited: online list with gaps.
+mkcpus 0-3,7 0:284 1:284 2:284 3:284 7:1024
+[ "$(pinned_run)" = "7" ] && ok "online list with gaps (0-3,7) is parsed" || bad "gap in the online list mis-parsed"
+# Homogeneous SoC: nothing to prefer.
+mkcpus 0-3 0:1024 1:1024 2:1024 3:1024
+[ "$(pinned_run)" = none ] && ok "all cores alike: not pinned" || bad "pinned on a homogeneous SoC"
+# Without --cpus (and nothing in the image can ask for it) nothing is pinned.
+mkcpus 0-7 0:284 1:284 2:284 3:284 4:871 5:871 6:871 7:1024
+rm -f "$T/taskset.log"; reset_logs
+QFORGE_CPU_ROOT="$T/cpu" start_launcher; wait_for emu_up; touch "$T/stop-emu"; reap_launcher "$lpid"
+[ ! -e "$T/taskset.log" ] && ok "no --cpus: no taskset (pinning is never the default)" || bad "pinned without --cpus"
+[ "$(code --cpus fast psx "$ROM")" = 2 ] && ok "--cpus fast (unknown value) is refused: exit 2" || bad "accepted --cpus fast"
+[ "$(code --cpus)" = 2 ] && ok "--cpus with no value: exit 2" || bad "accepted a bare --cpus"
+[ "$(code --cpus big psx)" = 2 ] && ok "--cpus big with a missing ROM argument: exit 2" || bad "accepted --cpus big psx"
+grep -rqs '^CPUS=' "$(dirname "$EMU_CONF")" && bad "an emulator conf in the image sets CPUS: pinning must stay the player's choice" \
+  || ok "no emulator conf in the image pins anything"
+
+# =================================================================================================
 CASE="stale mounts"
 reset_logs
 printf '%s\n' \

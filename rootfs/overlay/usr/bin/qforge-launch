@@ -1,13 +1,23 @@
 #!/bin/bash
 # qforge-launch — start a ROM in its system's emulator, from an OpenGamepadUI library card.
 #
-#   qforge-launch <system> <rom>
+#   qforge-launch [--cpus big|all] <system> <rom>
 #
 # Emulators are not in the image: the QForge OGUI plugin downloads each one as an upstream AppImage
 # into /home/player/emulators/<emulator>/ and points `current` at the version to run (plan Phase
 # 3/4). This script is what every ROM card runs. /etc/qforge/launch.conf maps a system to its
 # emulator; /etc/qforge/emulators/<emulator>.conf says which binary inside the AppImage to run,
 # with what arguments, and which first-run settings to seed.
+#
+# CPU pinning (--cpus big): the emulator is started on the device's fast cores,
+# so its threads stay off the little cluster and do not migrate across clusters; background work
+# (audio, input, Wi-Fi) keeps the little cores. "Fast" is every ONLINE CPU whose cpu_capacity is
+# above the smallest online one — never a CPU number (Qualcomm numbers slowest-first, other SoCs do
+# not), and never only the top tier (one prime core is no home for a multi-threaded emulator).
+# PowerStation's core-count slider is the POWER control and offlines the fast cores first, so with
+# none of them online, or on a homogeneous SoC, nothing is pinned. sched_ext schedulers (scx_lavd)
+# honour the affinity mask (HW 2026-10-03). It is the PLAYER's choice, per game: the QForge plugin
+# offers it and puts --cpus on that game's command line; nothing ships pinned (default all).
 #
 # First-run settings (SEED) live in the image, /usr/share/qforge/emulators/<emulator>/, and are
 # copied into $HOME before the emulator's first start — never over an existing file, so whatever the
@@ -42,12 +52,20 @@ EMU_CONF_DIR=${QFORGE_EMU_CONF_DIR:-/etc/qforge/emulators}
 EMU_DIR=${QFORGE_EMU_DIR:-/home/player/emulators}
 SEED_DIR=${QFORGE_EMU_SEED_DIR:-/usr/share/qforge/emulators}
 MOUNTS=${QFORGE_MOUNTS:-/proc/mounts}
+CPU_ROOT=${QFORGE_CPU_ROOT:-/sys/devices/system/cpu}
 UNMOUNT_TRIES=50   # x 0.1 s for the runtime to let go of the mount after SIGHUP
 MOUNT_TIMEOUT=30   # s for the AppImage runtime to print its mount point
 
 die() { echo "qforge-launch: $2" >&2; exit "$1"; }
 
-[ $# -eq 2 ] || die 2 "usage: qforge-launch <system> <rom>"
+usage="usage: qforge-launch [--cpus big|all] <system> <rom>"
+CPUS=all
+if [ "${1-}" = --cpus ]; then
+  [ $# -ge 2 ] || die 2 "$usage"
+  CPUS=$2; shift 2
+fi
+case $CPUS in big|all) ;; *) die 2 "--cpus must be 'big' or 'all', not '$CPUS'" ;; esac
+[ $# -eq 2 ] || die 2 "$usage"
 system=$1 rom=$2
 [[ $system =~ ^[a-z0-9_]+$ ]] || die 2 "bad system name '$system'"
 [ -f "$rom" ] || die 2 "no such ROM: $rom"
@@ -76,6 +94,30 @@ for entry in "${SEED[@]}"; do
   echo "qforge-launch: first run of $emulator: seeded $HOME/$dst" >&2
 done
 
+# Online CPUs above the smallest online capacity, as a taskset list; empty when there are none.
+fast_cpus() {
+  local online c cap min= list=() caps=()
+  online=$(cat "$CPU_ROOT/online" 2>/dev/null) || return 0
+  for c in $(echo "$online" | tr ',' '\n' | awk -F- '{for (i = $1; i <= ($2 == "" ? $1 : $2); i++) print i}'); do
+    cap=$(cat "$CPU_ROOT/cpu$c/cpu_capacity" 2>/dev/null) || continue
+    [[ $cap =~ ^[0-9]+$ ]] || continue
+    caps+=("$c:$cap")
+    [ -z "$min" ] || [ "$cap" -lt "$min" ] && min=$cap
+  done
+  for c in "${caps[@]}"; do [ "${c#*:}" -gt "$min" ] && list+=("${c%%:*}"); done
+  (IFS=,; echo "${list[*]}")
+}
+pin=()
+if [ "$CPUS" = big ]; then
+  cpus=$(fast_cpus)
+  if [ -n "$cpus" ]; then
+    pin=(taskset -c "$cpus")
+    echo "qforge-launch: pinning $emulator to fast cores $cpus" >&2
+  else
+    echo "qforge-launch: no fast core online (core-count limit, or one core type): not pinning" >&2
+  fi
+fi
+
 # The runtime names its FUSE filesystem after the AppImage file `current` points at.
 fstype="fuse.$(basename "$(readlink -f "$img")")"
 awk -v t="$fstype" '$3 == t {print $2}' "$MOUNTS" | while read -r stale; do
@@ -93,7 +135,8 @@ fi
 trap : TERM INT HUP
 
 echo "qforge-launch: $system -> $emulator: $mnt/$BINARY ${ARGS[*]} $rom" >&2
-setsid "$mnt/$BINARY" "${ARGS[@]}" "$rom" &
+# setsid and taskset both exec, so the emulator keeps this PID and leads its own session.
+setsid "${pin[@]}" "$mnt/$BINARY" "${ARGS[@]}" "$rom" &
 emu_pid=$!
 # wait returns early when a trapped signal arrives; keep waiting until the emulator is gone.
 while kill -0 "$emu_pid" 2>/dev/null; do wait "$emu_pid"; done

@@ -186,8 +186,8 @@ Remaining OS-side (found in OGUI source):
   (no migration across clusters) is done per game instead: the launcher sets the emulator's CPU
   affinity to the big cores, so background work (audio, input, Wi-Fi) keeps the little ones.
   - Pick the big cores from `/sys/devices/system/cpu/cpuN/cpu_capacity`, not by CPU number.
-  - Per-emulator setting with a per-device default; rpcs3 and Cemu are the likely beneficiaries.
-  - Check against sched_ext: scx_lavd does its own big.LITTLE placement when it is selected.
+  - Per game, the player's choice through the plugin (decided 2026-10-03; done, see above).
+  - sched_ext: scx_lavd honours the affinity mask (HW-checked).
 - PowerStation follow-up for upstream: order SetCoresEnabled by `cpu_capacity` instead of CPU
   number (Qualcomm numbers cores slowest-first; other SoCs do not).
 - Per-device defaults from the device profiles; InputPlumber hotkeys (exit to shell, save states).
@@ -229,8 +229,9 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
    member cue/chd so a multi-disc game is one card).
 2. Library provider `qforge-roms`: one item per ROM, `name` from the file name (strip region /
    tags later), `tags [<system>]`, `metadata {system, rom, emulator}`, `installed true`.
-   `command` = `qforge-launch` (below), `args [<system>, <rom path>]`. Rescan on OGUI start and
-   via a refresh action; inotify later.
+   `command` = `qforge-launch` (below), `args [<system>, <rom path>]`, prefixed with
+   `--cpus big` when the player turned "fast cores" on for that game (per-game setting the plugin
+   stores and offers; off by default). Rescan on OGUI start and via a refresh action; inotify later.
 3. Tabs: one tab per system that has at least one ROM, populated from the provider's items.
    Check first whether OGUI's library grid can be reused for a tab or the plugin builds its own.
 4. Emulator manager: QForge-published manifest (JSON over HTTPS on the QForge update server)
@@ -323,7 +324,17 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
   from DuckStation's own pause menu returns to OGUI (`-batch`); no core dump, process or mount left.
   The FUSE type is named after the file `current` points to (`fuse.0.1-12070.AppImage`), as the
   stale sweep assumes; only the mount dir takes the link's name.
-  Not yet: per-game CPU pinning and per-device defaults (both go in qforge-launch).
+  Not yet: per-device defaults (would go in qforge-launch).
+- ✅ **Per-game CPU pinning** (2026-10-03): `qforge-launch --cpus big <system> <rom>` starts the
+  emulator under `taskset -c <fast cores>`: every ONLINE CPU whose cpu_capacity is above the
+  smallest online one (SM8250 cpu4-7, SM8550 cpu3-7, SM8650 cpu2-7), never by number, never the
+  prime core alone; nothing pinned when no fast core is online (PowerStation core-count limit) or
+  the SoC is homogeneous. Decided: it is the PLAYER's choice, per game -- the plugin offers it and
+  puts `--cpus big` on that game's command line; no emulator conf in the image pins anything (a
+  test enforces it). HW (Pocket Max, DuckStation): affinity 4-7, every working thread stays there;
+  Mesa's 4 idle shader-disk-cache threads reset themselves to all CPUs (Mesa util_queue,
+  harmless); scx_lavd honours the mask (320 samples, 0 on cpu0-3). CoreThread ~10% of a big core
+  at 825 MHz -- PS1 gains nothing; it matters for rpcs3 / Cemu / ARMSX2.
 - ✅ **`systemctl restart qforge-session` took 90 s** (fixed 2026-10-03). PAMName= moves the
   session into the logind session scope, so the service cgroup is empty and systemd's stop only
   signals the main PID, qforge-session (sh). It ran OGUI in the FOREGROUND, and sh holds a trapped
