@@ -273,11 +273,18 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
    fresh; the state is still loadable from the emulator's pause menu.
 3. Tabs: one tab per system that has at least one ROM, populated from the provider's items.
    Check first whether OGUI's library grid can be reused for a tab or the plugin builds its own.
-4. Emulator manager: QForge-published manifest (JSON over HTTPS on the QForge update server)
-   `emulator -> {version, url (our mirror), sha256, arch, binary (inside the AppImage), default
-   args}`. Install = download to
-   `/home/player/emulators/<emu>/<version>.AppImage`, verify sha256, chmod +x, flip a `current`
-   symlink (rollback = previous AppImage kept until the new one has launched once).
+4. Emulator manager, modelled on armada's Decky store (armada-os/armada, `decky/armada-store`;
+   decided 2026-10-03): NO mirror -- AppImages come straight from each emulator's own releases.
+   A catalog (`catalog.json`, in the plugin) lists per emulator: the releases API URL (GitHub /
+   GitLab), an asset regex (e.g. `^DuckStation-arm64\.AppImage$`), the binary inside the AppImage
+   and default args. Install: resolve the release (armada: newest non-draft, prereleases only if
+   nothing else; ordered by publication date, not tag string), download over HTTPS only (refuse a
+   redirect to http), verify the asset's sha256 against the API's `digest` field (GitHub publishes
+   one per asset; matched our tested DuckStation AppImage) -- armada does not verify, we do --
+   then stage and rename atomically to `/home/player/emulators/<emu>/<tag>.AppImage`, chmod +x,
+   flip `current` (previous AppImage kept until the new one has launched once). Open: pin a tested
+   tag per emulator in the catalog, or follow upstream's newest like armada (DuckStation's `latest`
+   is a rolling tag whose asset is replaced in place).
    PRE_LAUNCH hook installs it when missing (progress shown). Updates: NOT via OGUI's
    `has_update` -- in v0.46.1 no UI calls it, and it is per library item, so one DuckStation
    update would flag every PSX card. Proposed: a plugin "Emulators" page (installed vs published
@@ -315,9 +322,9 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
   (and anything else we publish). OGUI then gives us, unchanged: periodic store check
   (`on_update_timeout`), "update available" when `plugin.version` is greater and the API is
   compatible, install with sha256 verification into `user://plugins/<id>.zip`.
-- Same server can host the emulator manifest (part 4), so one QForge endpoint serves plugin and
-  emulator updates. Trust (decided 2026-10-03): HTTPS to the QForge host is enough; the index
-  and manifest carry sha256 per archive, no separate signature. Downloads must refuse plain
+- The QForge server only hosts the plugin store (`plugins.json` + plugin zips); emulators come
+  from upstream (part 4). Trust (decided 2026-10-03): HTTPS to the QForge host is enough; the plugin
+  index carries a sha256 per archive (emulators: GitHub's per-asset digest), no separate signature. Downloads must refuse plain
   http and invalid certificates.
 
 **Delivery of the plugin itself**
@@ -327,8 +334,9 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
   versions come from the QForge store; the session never downgrades a store-updated copy.
 
 **Decided 2026-10-03**
-- Download source: the QForge server MIRRORS pinned upstream AppImages (we pick the version,
-  sha256 in the manifest); no direct upstream GitHub downloads.
+- Download source: ~~QForge mirror~~ REVERSED 2026-10-03 -- straight from upstream releases,
+  armada-store style (see part 4). We redistribute nothing, so no LGPL source hosting for the
+  libraries the AppImages bundle.
 - FUSE: `fuse3` in the image (fusermount3 setuid, already on the guard permit list), AppImages
   stay packed. Install = download + verify + chmod + `current` symlink.
   HW ✅ 2026-10-03 (Pocket Max, dev build 20261003T135813Z): AppImage mounts as player; CTR runs,
@@ -399,13 +407,14 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
 - ROM cards show in All Games as well as in their system tab.
 
 **Open questions for review**
-- Licences: we mirror unmodified AppImages, which redistributes them. Check each emulator's
-  licence AND its author's stated terms before adding it to the manifest.
+- Licences: the plugin downloads from upstream, so QForge redistributes no emulator; still check
+  each emulator's licence AND its author's stated terms (configuration, packaging) before adding it
+  to the catalog.
   DuckStation (checked 2026-10-03): CC BY-NC-ND 4.0. The README allows redistributing
   "unmodified releases", prefers a link to duckstation.org, and states "pre-configured settings and
   packages are considered modifications" -- so the author would count our seed settings.ini and the
-  plugin's packaging as modifications. Decided 2026-10-03: proceed anyway (mirror + seed), the
-  risk is accepted. Still owed whatever we do: attribution (name, link, licence) in the plugin, and
+  plugin's packaging as modifications. Decided 2026-10-03: proceed anyway (seed; the mirror is
+  gone, see Download source), the risk is accepted. Still owed whatever we do: attribution (name, link, licence) in the plugin, and
   QForge staying non-commercial.
 - BIOS: the plugin can tell the user which BIOS a system needs and where to drop it; never ships it.
 - Artwork scraping later (ScreenScraper needs credentials).
@@ -422,9 +431,6 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
   exists to mount once QForge runs from internal UFS), inherited from the Steam library requirement that no longer
   applies; ROM cards are usually exfat. Decide whether to automount exfat/vfat too.
 
-- Emulator mirror: the AppImages bundle LGPL libraries (Qt6, GTK3, glib, ...) with no licence
-  texts or source offer; redistributing them obliges us to provide or offer the matching source, so
-  host those sources (or a written offer) next to each mirrored AppImage.
 - Update server via `ota/setup-server.sh`; replace the `updates.qforge.invalid` placeholder in
   `qforge-update`, `installer/release-info`, `installer/netcfg`.
 - CI release secrets `RAUC_CERT_PEM` / `RAUC_KEY_PEM` from `~/qforge-pki`.
