@@ -1,0 +1,75 @@
+# qforge: boot straight into the gamescope shell as the unprivileged session user. No display
+# manager — systemd logs player in itself.
+#
+# WHAT A DISPLAY MANAGER WAS FOR, and how this unit replaces each part (SDDM did this job until
+# 2026-10-03; it was dropped because it carried qt6-declarative, 122 MiB, for a greeter that was
+# never shown):
+#
+#   - an ACTIVE seat0 logind session. PAMName= runs the qforge-session PAM stack, whose session
+#     phase includes pam_systemd, so logind registers a real session for player on the VT below.
+#     gamescope then takes the seat through logind (libseat auto-picks its logind backend, see
+#     /usr/bin/qforge-session), which makes the session ACTIVE, which is what stock polkit's
+#     allow_active (Wi-Fi) and subject.active && wheel (timezone, storage) rules check.
+#   - autologin. No auth phase runs: systemd calls pam_acct_mgmt + pam_open_session, never
+#     pam_authenticate.
+#   - Relogin=true. Restart=always: when the shell or gamescope exits, the session is started
+#     again instead of leaving a dead screen. StartLimitIntervalSec=0 keeps that unbounded, exactly
+#     as SDDM's relogin was; qforge-boot-good.service's 30s re-check is what stops a session that
+#     dies in a loop from marking the slot good.
+#   - the login shell environment. SDDM ran the session through `$SHELL --login`, so /etc/profile
+#     and /etc/profile.d (LANG from locale.sh, PATH) applied. bash --login keeps that.
+#   - XDG_* session variables. pam_systemd reads XDG_SESSION_TYPE/CLASS from the PAM environment,
+#     which systemd seeds from Environment=; the desktop names match the old qforge.desktop.
+#
+# The VT block (TTYPath + StandardInput=tty-fail + Utmp*) is the documented pattern for a kiosk
+# compositor started from systemd: it makes tty1 this session's controlling terminal so logind
+# ties the session to VT1 on seat0, and Conflicts= keeps a getty from fighting over it.
+[Unit]
+Description=qforge gamescope session
+Documentation=file:///usr/bin/qforge-session
+Conflicts=getty@tty1.service
+After=systemd-user-sessions.service getty@tty1.service systemd-logind.service dbus.socket
+Wants=dbus.socket systemd-logind.service
+PartOf=graphical.target
+StartLimitIntervalSec=0
+
+[Service]
+User=player
+PAMName=qforge-session
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+Environment=XDG_SESSION_TYPE=wayland XDG_SESSION_CLASS=user XDG_SESSION_DESKTOP=gamescope XDG_CURRENT_DESKTOP=gamescope DESKTOP_SESSION=qforge
+
+# Hand the display from the boot splash to the session, in that order.
+#
+# DRM master is exclusive. The splash drawer takes it in the initramfs and holds it — it has to,
+# because a masterless process cannot keep the kernel's own fbdev console from stealing the
+# scanout. gamescope needs master before it can put up a single frame, and never retries once it
+# has lost it ("seatd: Could not make device fd drm master: Device or resource busy", then a black
+# panel for the whole session). So the splash must be gone BEFORE the session opens the DRM
+# device, and the only thing that knows when that is about to happen is this unit's own start.
+#
+# ExecStartPre runs before the session, so writing the takeover file here is strictly ordered
+# ahead of anything gamescope does. The drawer sees a value that is not its own pid, drops master,
+# waits until the CRTC provably names a different framebuffer, and only then lets go of its own.
+# It exits on its own; nothing needs to kill it. On a Restart= the drawer is long gone and the
+# rewrite is a no-op.
+#
+# `+`: runs as root, outside User=/PAM (player cannot write /run/qforge). `-`: a failure to write
+# the file cannot stop the session. A splash that will not yield is a bad boot; a session that
+# will not start is a brick.
+ExecStartPre=-+/bin/sh -c 'mkdir -p /run/qforge/splash && echo qforge-session >/run/qforge/splash/takeover'
+ExecStart=/bin/bash --login -c 'exec /usr/bin/qforge-session'
+Restart=always
+RestartSec=1
+
+[Install]
+Alias=display-manager.service
+WantedBy=graphical.target

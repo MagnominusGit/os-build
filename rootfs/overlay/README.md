@@ -24,8 +24,8 @@ from nowhere and no composite device is built. Enabled by a shipped
 
 **Session — gamescope-session plumbing**
 The boot-to-compositor path: launcher `/usr/bin/qforge-session` + its `/etc/qforge/session.conf`,
-SDDM autologin wiring, PAM drop-ins, and `default.target -> graphical.target`. The device boots
-through SDDM autologin, giving a REAL active `seat0` logind session (so stock polkit authorizes
+`qforge-session.service` (systemd logs `player` in through its own PAM stack — no display
+manager), and `default.target -> graphical.target`. The device boots straight into it, giving a REAL active `seat0` logind session (so stock polkit authorizes
 Wi-Fi/timezone). `seatd.service` stays enabled as an unused fallback; gamescope takes the seat
 through logind. The shell gamescope hosts is `QFORGE_SESSION_CMD` in `session.conf` (a `vkcube`
 liveness placeholder until OpenGamepadUI lands), plus `QFORGE_GAMESCOPE_SHELL_ARGS` for the

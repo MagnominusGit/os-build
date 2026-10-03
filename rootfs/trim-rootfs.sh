@@ -12,7 +12,7 @@
 # this script is only the mechanism.
 #
 # WHY IT MATTERS under A/B: every megabyte on the release root is paid twice once Phase 4b lands
-# — once in each of the two 4G slots, and again in every RAUC bundle that has to be downloaded
+# — once in each of the two root slots, and again in every RAUC bundle that has to be downloaded
 # onto a handheld over Wi-Fi. Headers, static libraries and man pages are not reachable from a
 # read-only root that has no compiler and no terminal.
 #

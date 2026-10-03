@@ -15,7 +15,7 @@
 #
 # PEER OF rootfs/customize-base.sh, and deliberately a separate script rather than a mode of it.
 # The shipped bootstrap carries five things this one has no analogue for -- the UID/GID pin (there
-# is no persistent /home here to keep uids stable for), the `player` and `sddm` accounts, auto-
+# is no persistent /home here to keep uids stable for), the `player` account, auto-
 # discovery of every packages/*/prebuilt.pin, the dev-tooling branch, and a seal that strips pacman
 # back out. Folding an installer mode into it would have made each of those a conditional in the
 # one file whose value is that a reviewer can read it top to bottom and know what is on a device.

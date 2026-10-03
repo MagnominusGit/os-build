@@ -43,7 +43,7 @@
 # /etc/fstab — bit 63 disables the competing generator without touching the type GUID the
 # firmware scans by.
 #
-# Root slots are 4G. They carry the OS (gamescope session, shell, emulators, firmware, modules).
+# Root slots are 2G. They carry the OS (gamescope session, shell, emulators, firmware, modules).
 # The root is sealed read-only and baked with zstd (assemble-rootfs.sh), so content compresses well.
 #
 # Size against the image's APPARENT size, not its content. mkfs.btrfs --shrink cannot pack
@@ -56,12 +56,17 @@
 # `du --apparent-size out/images/rootfs.img` whenever a large package lands and keep at least
 # ~1G of headroom under the slot: 4b needs room for a bundle to land next to a running system.
 #
+# 4G -> 2G on 2026-10-03, after dropping sddm/Qt6, ffmpeg and noto-fonts-cjk took the image to
+# ~1.0G apparent (from ~3.1G). Emulators ship as AppImages that bundle their own Qt/ffmpeg, so
+# that runtime does not come back as root packages. Devices flashed with 4G slots keep them: RAUC
+# writes a smaller image into a larger slot fine, so this only changes newly flashed/installed cards.
+#
 # Emulators and the shell are versioned OS components and stay INSIDE the root slot rather than
 # on a shared partition: sharing them across slots would let an update mutate the running
 # system and break rollback.
 #
-# 'rest' expands to fill the target device. Fixed partitions total ~9.0G, so the minimum
-# usable card is 16G (leaving ~6G of /home); 64G+ is the sane target for ROMs.
+# 'rest' expands to fill the target device. Fixed partitions total ~5.0G, so the minimum
+# usable card is 16G (leaving ~10G of /home); 64G+ is the sane target for ROMs.
 #
 # 'attrs' is a comma-separated list of GPT attribute bits to set, or '-' for none. Only bit 63
 # ("no-auto") is used today, on home and on the ESP — each for its own reason, both above.
@@ -111,8 +116,8 @@
 esp         256M  ef00      vfat      QFORGE-ESP     63
 efi-a       128M  0700      vfat      qforge-efi-A   -
 efi-b       128M  0700      vfat      qforge-efi-B   -
-rootfs-a    4G    8300      btrfs     qforge-root-A  -
-rootfs-b    4G    8300      btrfs     qforge-root-B  -
+rootfs-a    2G    8300      btrfs     qforge-root-A  -
+rootfs-b    2G    8300      btrfs     qforge-root-B  -
 var-a       256M  8300      ext4      qforge-var-A   -
 var-b       256M  8300      ext4      qforge-var-B   -
 home        rest  8302      ext4      qforge-home    63

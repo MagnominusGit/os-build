@@ -625,7 +625,7 @@ $(KERNEL): $(KERNEL_SRC_HASH) $(FW_LINUX) $(FW_QCOM) | $(BUILD_STAMP)
 #
 # The overlay repo IS a prerequisite even though the base stamp is not. Dropping $(BASE_STAMP)
 # dropped its transitive overlay dependency with it, and without a built work/repo/aarch64 the
-# resolve would satisfy mesa/gamescope/sddm from the snapshot instead of from our patched builds
+# resolve would satisfy mesa/gamescope/rauc from the snapshot instead of from our patched builds
 # — locking upstream binaries under a `snapshot` class. That is a silently WRONG lock, which is
 # worse than a failed one, so declare the overlay directly.
 relock: $(if $(OVERLAY_PINS),$(OVERLAY_STAMP)) ## Re-resolve from PKGS and regenerate rootfs/manifest.lock (host; release only)

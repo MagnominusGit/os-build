@@ -1,0 +1,7 @@
+# qforge: enable the gamescope session on release — qforge-session.service logs the session user
+# straight into the shell (it replaces a display manager). /etc/machine-id is empty on a fresh image
+# so systemd runs preset-all on first boot, where the stock 99-default.preset is "disable *"; this
+# higher-priority preset (60 < 99) keeps it enabled. The build-time display-manager.service and
+# graphical.target.wants symlinks ship alongside as a fallback (cf. seatd's 60-qforge-seatd), and
+# the overlay points default.target at graphical.target, so the device boots straight into the shell.
+enable qforge-session.service

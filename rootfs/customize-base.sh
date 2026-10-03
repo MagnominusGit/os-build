@@ -97,12 +97,15 @@ BOOTSTRAP_PKGS=(base)
 #                       (an RLIMIT_RTPRIO grant was tried on HW and does not work). D-Bus activated.
 #   libinput-tools      the `libinput` CLI that qforge-powerbuttond and qforge-suspend read the
 #                       power key through. Our GUI-less build (packages/libinput/), from the overlay.
-#   ffmpeg              media decode for emulators and the shell.
 #   e2fsprogs           /home is an ext4 partition grown to fill the card on first boot (resize2fs).
-#   noto-fonts(+cjk+emoji)  the base only carries Latin adwaita-fonts; non-Latin UI text is tofu
-#                       without these.
-#   sddm                autologins the session user into gamescope with an ACTIVE seat0 logind
-#                       session, so stock polkit (allow_active) authorizes Wi-Fi + timezone. Overlay.
+#   noto-fonts(+emoji)  the base only carries Latin adwaita-fonts; non-Latin UI text is tofu
+#                       without these. noto-fonts-cjk is deliberately NOT here: 299 MiB, a fifth
+#                       of the root, so CJK text renders as tofu (2026-10-03 disk-space trim).
+# No display manager. qforge-session.service (rootfs/overlay) logs player in through PAM itself,
+# which gives the ACTIVE seat0 logind session stock polkit (allow_active) authorizes Wi-Fi +
+# timezone against. SDDM did the same job and dragged in qt6-declarative (122 MiB) for a greeter
+# that was never shown. No ffmpeg either (190 MiB with its codec libs, nothing in PKGS needs it):
+# an emulator that wants it pulls it in as its own dependency.
 #   mangohud            the performance overlay gamescope spawns with --mangoapp. Overlay build with
 #                       the Qualcomm/Adreno GPU + battery patches (packages/mangohud).
 #   python + python-gobject  the interpreter and D-Bus bindings behind qforge-powerd and the other
@@ -132,7 +135,7 @@ BOOTSTRAP_PKGS=(base)
 #                       feature silently disappears (HW 2026-10-02: no brightness slider).
 #   opengamepadui       the shell. Overlay (packages/opengamepadui): upstream's aarch64 release with
 #                       the pck rebuilt from source + patches (it crash-loops on DT boards otherwise).
-PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-tools mesa gamescope seatd sddm mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit ffmpeg e2fsprogs xorg-xwayland noto-fonts noto-fonts-cjk noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl opengamepadui which)
+PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-tools mesa gamescope seatd mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit e2fsprogs xorg-xwayland noto-fonts noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl opengamepadui which)
 
 # Dev-only packages — installed ONLY under QFORGE_DEV=1, NEVER in a release base.
 # On-device bring-up tools: evtest reads raw /dev/input events; usbutils provides lsusb.
@@ -150,7 +153,9 @@ PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno v
 # every control query print nothing, which reads exactly like "the control does not exist" and
 # sent that investigation down a wrong path (see docs/worklog/DONE.md). The card is a handheld whose audio
 # routing is per-board UCM; not being able to inspect it is a permanent tax.
-DEV_PKGS=(evtest usbutils xorg-xprop xorg-xwininfo alsa-utils)
+# ffmpeg: dropped from the release root for space (2026-10-03), kept here because the iris/venus
+# hardware video decode bring-up is validated with `ffmpeg -c:v h264_v4l2m2m` (kernel/SOURCE.pin).
+DEV_PKGS=(evtest usbutils xorg-xprop xorg-xwininfo alsa-utils ffmpeg)
 
 # Precompiled external packages: every packages/<name>/prebuilt.pin (url + sha256 + strip)
 # is fetched on the host and extracted into the base. PREBUILT_DIR stages the verified
@@ -382,7 +387,7 @@ if [ "${QFORGE_DEV:-}" = "1" ]; then
 fi
 
 # The from-source overlay repo is REQUIRED, not optional. PKGS names packages that exist in no
-# holo repo at all (mangohud, sddm, scx-scheds, libinput-tools, rauc), so a bootstrap without it cannot
+# holo repo at all (mangohud, scx-scheds, libinput-tools, rauc), so a bootstrap without it cannot
 # resolve, and a locked build cannot install the /novarepo paths the lock names. Refuse here,
 # on the host, rather than 20 emulated minutes in — and refuse for BOTH modes, since the
 # pre-4c "mount it only if it happens to exist" made a missing overlay look like a lock problem.
@@ -637,17 +642,6 @@ docker run --rm --platform linux/arm64 -v "$PREBUILT_DIR":/prebuilt:ro \
     if chroot /target getent group "$g" >/dev/null 2>&1; then chroot /target usermod -aG "$g" player; fi
   done
 
-  # sddm system user + its state dir. sddm ships /usr/lib/sysusers.d/sddm.conf and expects the
-  # `sddm` user/group to exist, but the RO root cannot run systemd-sysusers at boot to persist it
-  # (same reason player is baked above). Materialize it now from the shipped sysusers config (falls
-  # back to a plain system account if the file name ever changes upstream), and pre-create the
-  # state dir the tmpfiles.d entry would otherwise make on a writable root.
-  if ! chroot /target getent passwd sddm >/dev/null 2>&1; then
-    chroot /target systemd-sysusers /usr/lib/sysusers.d/sddm.conf 2>/dev/null \
-      || chroot /target useradd -r -U -M -d /var/lib/sddm -s /usr/bin/nologin -c "Simple Desktop Display Manager" sddm
-  fi
-  chroot /target install -d -o sddm -g sddm -m 1770 /var/lib/sddm 2>/dev/null || true
-
   # Materialize tmpfiles.d. pacman`s post-transaction hook tries this and FAILS in the bootstrap
   # ("/proc/ is not mounted, but required ... consider using the --root= switch"), because it runs
   # chrooted with no /proc -- and pacman treats a failed hook as a warning, so the build stayed
@@ -657,7 +651,7 @@ docker run --rm --platform linux/arm64 -v "$PREBUILT_DIR":/prebuilt:ro \
   #
   # --root= is the documented offline mode and what the error itself suggests; builder and target
   # ship the identical systemd (258.2-2-arch, both from the pinned snapshot). It runs HERE, after
-  # the accounts above, because entries name owners (sddm, player) that must resolve in the target`s
+  # the accounts above, because entries name owners (player, service accounts) that must resolve in the target`s
   # own /etc/passwd -- and after the prebuilts, which ship tmpfiles.d snippets of their own.
   #
   # NOT fatal on a non-zero exit: an offline run legitimately cannot satisfy every line (anything

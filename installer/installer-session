@@ -4,8 +4,8 @@
 #
 #   installer-session          (started by qforge-installer.service)
 #
-# THIS IS NOT qforge-session. That one is the main image's shell session: it runs inside SDDM's
-# logind session as the `player` user, and it runs gamescope in the background with the shell as
+# THIS IS NOT qforge-session. That one is the main image's shell session: it runs inside the logind session
+# qforge-session.service opens as the `player` user, and it runs gamescope in the background with the shell as
 # its SIBLING so the two can share control files and the stats channel. None of that applies here.
 # There is no user, no logind session and nothing to hand a control channel to, so this is the
 # plain shape:
@@ -16,8 +16,8 @@
 # gamescope AS ROOT via seatd-launch, no logind session and no display manager at all, opening
 # /dev/dri/card0 with the panel at its native mode and scanning out on the first modeset commit;
 # gate 1c is a Vulkan client rendering upright under it. The installer's situation is that one,
-# not the main image's -- which is why the installer needs no SDDM: SDDM is a login manager, its
-# greeter is never even started here, and what it contributes to the main image (an ACTIVE seat0
+# not the main image's -- which is why the installer needs no qforge-session.service: what that
+# login unit contributes to the main image (an ACTIVE seat0
 # logind session so stock polkit's allow_active authorizes Wi-Fi) is meaningless for a tool that
 # runs as root.
 #

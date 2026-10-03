@@ -113,7 +113,7 @@ rather than deleted — the next focus mystery should not have to re-derive it.
 To use it: add it back to `source.pin`, rebuild, and `export GAMESCOPE_DEBUG_FOCUS=1` in
 `/etc/qforge/session.conf` (the only way to catch a defect at boot, before SSH is up), or
 `gamescopectl debug_focus_candidates 1` live once a session is reachable. Output goes to
-`~/.local/share/sddm/wayland-session.log` — NOT the journal — so grep that for `cand:`.
+the journal (`journalctl -b -u qforge-session`) — grep that for `cand:`.
 
 `0007` — declares a `subprojects/wayland-protocols.wrap` so meson vendors wayland-protocols. Needed
 by the 3.16.28 bump: it moved the wlroots submodule to 0.20, which requires

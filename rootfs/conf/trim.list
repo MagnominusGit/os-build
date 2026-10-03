@@ -104,7 +104,8 @@ glob usr/lib/libgfortran.so.*
 glob usr/lib/lib@(a|t|l|ub)san.so.*
 #
 # libgomp is deliberately NOT here despite looking like the same kind of thing: it is OpenMP, and
-# it IS linked — by libb2, libsoxr, libvidstab and the fftw *_omp variants that ffmpeg pulls in.
+# it IS linked — by libb2, libsoxr, libvidstab and the fftw *_omp variants (whatever is left of them now that ffmpeg is gone —
+# re-measure before adding a row).
 # libgcc_s / libstdc++ / libatomic are linked essentially everywhere. libitm and libobjc are
 # unreferenced too, but together they are 1.4M and not worth a row.
 

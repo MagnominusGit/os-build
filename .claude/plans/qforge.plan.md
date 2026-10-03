@@ -23,7 +23,7 @@ and standalone emulators.
 | Removed | Steam client + seed, Decky, FEX, Proton, lsfg-vk, Android container (Lepton, Play, podman, adb), gtk2, vpower, steamos-* entry points |
 | Kept | qforge-pairingd (always on until the shell has a switch), userspace fake-suspend (qforge-suspend / qforge-rest) |
 | Names | Display QForge, os-release ID `qforge`, D-Bus `org.qforge`, session user `player` (uid 1000) |
-| Root slots | 4G each (was 7G with the x86 payloads) |
+| Root slots | 2G each (was 4G until 2026-10-03 trim, 7G with the x86 payloads) |
 | Firmware | Still fetched from Nova-Deck/qcom-firmwares (pinned); move to a QForge repo later |
 | OTA signing | New QForge CA; private keys in `~/qforge-pki`, never in the repo |
 | Emulators | Native PKGBUILDs (not Flatpak) so they use our patched Mesa/Turnip |
@@ -51,7 +51,7 @@ and standalone emulators.
 
 | Task | Why |
 |---|---|
-| Build `make sdcard`, check `du --apparent-size out/images/rootfs.img` | Confirm the 4G slot has ≥1G headroom; `make-sdcard.sh`'s `fits` check is the backstop |
+| Build `make sdcard`, check `du --apparent-size out/images/rootfs.img` | Confirm the 2G slot has ≥1G headroom; `make-sdcard.sh`'s `fits` check is the backstop |
 | Boot on one SM8250, one SM8550, one SM8650 board | Gate: gamescope + vkcube on the panel, A/B confirm via qforge-boot-good |
 | Back up `~/qforge-pki/ca.key.pem` off this machine | Losing it means no device can ever accept another update |
 

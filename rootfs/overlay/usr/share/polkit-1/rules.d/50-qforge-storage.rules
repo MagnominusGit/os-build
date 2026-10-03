@@ -8,7 +8,7 @@
 // ONLY THE VERBS STOCK POLICY LEAVES AT auth_admin ARE LISTED. udisks2 already ships
 // allow_active=yes for the common ones — filesystem-mount on a removable device is authorized for
 // an active session with no rule at all, and our shell is a real active seat0 session because it
-// boots through SDDM autologin (the same property 50-qforge-timezone.rules relies on). Granting
+// boots through qforge-session.service (the same property 50-qforge-timezone.rules relies on). Granting
 // what is already granted would only make this file lie about what it is for.
 //
 // The `-other-seat` variants are here even on a single-seat device:

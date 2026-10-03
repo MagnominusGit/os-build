@@ -4,13 +4,13 @@
 #
 # Reaching that handshake proves, in one shot: drm/msm bound and took DRM master, the panel
 # modeset, mesa initialised, both nested Xwaylands came up, libseat got an active seat through
-# logind, and SDDM's PAM autologin worked. It is the earliest instant at which "the screen is
+# logind, and qforge-session.service's PAM login worked. It is the earliest instant at which "the screen is
 # showing something" is actually true. The weaker candidates all mark a black screen good:
-# graphical.target reached only proves sddm.service was STARTED, and an active logind session is
+# graphical.target reached only proves qforge-session.service was STARTED, and an active logind session is
 # the same problem one layer up. The stricter one -- waiting for the shell's UI -- would roll back
 # a healthy OS over first-boot setup, an offline first boot, or a shell-side failure.
 #
-# The 30s re-check is not padding. sddm.conf.d autologin sets Relogin=true, so a session that
+# The 30s re-check is not padding. qforge-session.service sets Restart=always, so a session that
 # dies immediately is restarted forever; without the delay a boot stuck in that loop would mark
 # itself good on its first iteration. --require-marker re-tests the marker after the sleep, and
 # qforge-session's EXIT trap removes it, so "still there" means "the same session stayed up".

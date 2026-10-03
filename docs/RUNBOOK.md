@@ -44,8 +44,8 @@ dead card. That is a setting, not a fault.
 | 1 | `esp` | 256M | vfat | `QFORGE-ESP` |
 | 2 | `efi-a` | 128M | vfat | `qforge-efi-A` |
 | 3 | `efi-b` | 128M | vfat | `qforge-efi-B` |
-| 4 | `rootfs-a` | 4G | btrfs | `qforge-root-A` |
-| 5 | `rootfs-b` | 4G | btrfs | `qforge-root-B` |
+| 4 | `rootfs-a` | 2G | btrfs | `qforge-root-A` |
+| 5 | `rootfs-b` | 2G | btrfs | `qforge-root-B` |
 | 6 | `var-a` | 256M | ext4 | `qforge-var-A` |
 | 7 | `var-b` | 256M | ext4 | `qforge-var-B` |
 | 8 | `home` | rest | ext4 | `qforge-home` |

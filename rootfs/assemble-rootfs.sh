@@ -313,8 +313,8 @@ echo "  dropped /etc/machine-id (first-boot identity is generated per device)"
 # and every injected file end up player-owned — a real bug (HW journal 2026-07-01: systemd-tmpfiles
 # "unsafe path transition /etc (owned by player)"). Nothing in the read-only root legitimately belongs
 # to the build user, so reclaim every such file to root:root. Match the build uid dynamically off
-# this script (repo-owned) rather than hardcoding 1000. The sddm state dir (/var/lib/sddm, uid 965)
-# and other service-owned paths are a different uid and stay untouched. -h: fix symlinks too.
+# this script (repo-owned) rather than hardcoding 1000. Service-owned paths (other uids)
+# are a different uid and stay untouched. -h: fix symlinks too.
 ov_uid="$(stat -c %u "$0")"
 if [ "$ov_uid" != "0" ]; then
   echo "  normalizing overlay ownership: uid $ov_uid -> root ($(find "$stage" -uid "$ov_uid" | wc -l) paths)"
@@ -524,9 +524,10 @@ cp "$release_file" "$IMGDIR/rootfs.release"
 
 # Report the APPARENT size, not the allocated one. `mkfs.btrfs --shrink` leaves the image sparse
 # (~2 GiB of holes), so a bare `du -h` understates it by that much -- and this number is what
-# anyone sizing the slot reads. rootfs-a is 4G (image/partition-table.txt), so the honest figure
-# is a ~0.9G margin, where the allocated one implies ~2.9G. Both are printed: the allocated size
+# anyone sizing the slot reads. the slot size is read from image/partition-table.txt
+# (rootfs-a's row) so this line cannot drift from the layout again. Both are printed: the allocated size
 # is what the file costs on the build host, which is worth knowing too, just not on its own.
-echo "  ok   rootfs -> ${IMG#"$ROOT"/}  ($(du -h --apparent-size "$IMG" | cut -f1) in a 4G slot," \
+slot_size="$(awk '$1 == "rootfs-a" { print $2; exit }' "$ROOT/image/partition-table.txt")"
+echo "  ok   rootfs -> ${IMG#"$ROOT"/}  ($(du -h --apparent-size "$IMG" | cut -f1) in a ${slot_size:-?} slot," \
      "$(du -h "$IMG" | cut -f1) allocated, from $(du -sh "$stage" 2>/dev/null | cut -f1) staged)"
 echo "Done. Read-only root ready for slot install / RAUC bundling (ota/genbundle.sh)."

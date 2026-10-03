@@ -26,7 +26,7 @@ STALL="${QFORGE_SPLASH_STALL_SECS:-15}"     # seconds of silence before naming a
 MAXWAIT="${QFORGE_SPLASH_STALL_MAX:-600}"   # absolute cap, so this can never outlive a boot
 
 # The splash owns the display until a successor claims it. The drawer writes its own PID into the
-# takeover file at startup, and a successor (sddm, via its ExecStartPre drop-in) writes a NAME —
+# takeover file at startup, and a successor (qforge-session.service, via its ExecStartPre) writes a NAME —
 # so "the content is no longer a number" is precisely "the handover has begun", with nothing
 # hardcoded about who the successor is. Once the display is being handed over there is no one
 # left to narrate to.
