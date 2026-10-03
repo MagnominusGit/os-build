@@ -1,6 +1,6 @@
 # shellcheck shell=sh
 # power-ops.sh — sourced shared library of reversible userspace power-lowering primitives for the
-# qforge SteamOS layer-C suspend stack. Used by BOTH qforge-rest (fake "rest mode") and
+# qforge userspace suspend stack (layer C of the SteamOS-style split). Used by BOTH qforge-rest (fake "rest mode") and
 # qforge-suspend (cgroup-freeze suspend), so the two stay in lock-step instead of drifting copies.
 #
 # The primitives: offline every CPU but the boot CPU, soft-block all radios, switch every cpufreq

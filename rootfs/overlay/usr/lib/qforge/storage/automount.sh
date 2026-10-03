@@ -1,5 +1,5 @@
 #!/bin/bash
-# Mount an inserted card for the Steam shell — the other half of Settings > Storage.
+# Mount an inserted SD card for the session user (ROMs, saves) — the other half of the storage path.
 #
 # CALLED BY TWO THINGS AND FILTERS FOR NEITHER: block-event.sh (the udev entry point, which has
 # already decided this event deserves a mount) and format-device.sh (which has just made the
@@ -65,15 +65,11 @@ if findmnt -rn -o SOURCE 2>/dev/null | grep -Fxq "$DEVICE"; then
     exit 0
 fi
 
-# EXT4 ONLY, as upstream does, and for upstream's stated reason: "We need symlinks for Steam for
-# now, so only automount ext4 as that's what Steam will format". A library needs symlinks and
-# case-folding; vfat and exfat have neither, so a card carrying one cannot host games no matter how
-# cleanly it mounts.
-#
-# The reason this is a REFUSAL and not a convenience: a mounted card with no Steam library on it is
-# what the client turns into a drive row that OFFERS to be formatted. Mounting a foreign card gives
-# the user a mount they cannot use for the one purpose this whole path exists for, in the place
-# where the client is trying to tell them the card needs formatting.
+# EXT4 ONLY — INHERITED, AND ITS REASON IS GONE. Upstream's stated reason was the Steam library:
+# "We need symlinks for Steam for now, so only automount ext4 as that's what Steam will format".
+# There is no Steam client here, and emulators read ROMs fine from exfat/vfat, which is what most
+# people's ROM cards are. Widening this is an open decision (it also needs the matching udisks
+# options and a test), not an oversight; until then a non-ext4 card is left unmounted.
 #
 # EXIT 0, where upstream exits 2. Inserting a card from another system is a normal thing for a
 # person to do, not a fault, and this runs as a templated systemd unit — a non-zero exit leaves a
@@ -81,7 +77,7 @@ fi
 # branch three rounds of chasing failed units that meant nothing.
 FSTYPE="$(lsblk -no FSTYPE "$DEVICE" 2>/dev/null | head -n1 | tr -d '[:space:]')"
 if [ "$FSTYPE" != ext4 ]; then
-    log "skipping $DEVICE: ${FSTYPE:-no filesystem}, not ext4 — a Steam library needs symlinks and casefolding"
+    log "skipping $DEVICE: ${FSTYPE:-no filesystem}, not ext4 (only ext4 cards are automounted)"
     exit 0
 fi
 
@@ -99,9 +95,9 @@ fi
 # REPAIR BEFORE MOUNTING, and mount read-only if the repair could not finish. `fsck.ext4 -y` returns
 # 0 when the filesystem was clean and 1 when it corrected errors; anything else means it could not
 # be made consistent, and mounting such a card read-write is how a card with a damaged journal
-# becomes a card with damaged games. Upstream does this and reports the failure to the client with
-# a code it calls ABI (steam://system/devicemountresult, FSCK_ERROR=1) — we do not send that URL;
-# see the note at the end of this file.
+# becomes a card with damaged games. Upstream also reported the failure to the Steam client
+# (steam://system/devicemountresult); there is no client to tell here, so the read-only mount and
+# the journal line are the whole answer.
 OPTS="noatime"
 fsck_rc=0
 fsck.ext4 -y "$DEVICE" || fsck_rc=$?
@@ -161,42 +157,7 @@ else
 fi
 [ -d "$link" ] || ln -sfn "$mountpoint" "$link" 2>/dev/null || true
 
-# --- WE DO NOT TELL THE CLIENT, and that is a decision, not an omission ---------------------------
-#
-# This used to hand the client `steam://addlibraryfolder/<percent-encoded mountpoint>` after every
-# successful mount. It worked — HW-proven 2026-09-03, the folder landed in libraryfolders.vdf within
-# seconds — and it is gone anyway, for two reasons.
-#
-# It is not needed. The client enumerates drives over UDisks2 itself; `GetPotentialFolders()`
-# returns this card with its path, capacity and removable flag unaided, and the format path adopts
-# it through the client's own "Creating steam library for storage mount". Every step of the
-# Settings > Storage story was exercised on hardware with this code not running (it is skipped at
-# boot, when the client is not up yet) and none of it needed the announce.
-#
-# And it does more than announce: adding a library folder CREATES a SteamLibrary directory on the
-# card. That made every card ever inserted into a Steam library, including cards that belong to
-# another system entirely. Upstream does not do this — a mounted card without a library is supposed
-# to show up as a drive that OFFERS to be formatted, which is exactly the surface this branch went
-# looking for. Announcing it silently converted that case into the other one.
-#
-# It was added while the missing Format action was still unexplained, as one more thing to try. The
-# explanation turned out to be two environment variables (usr/bin/qforge-steam), and this was left
-# behind — along with the `systemd-escape` bug it carried, which spent an evening making the client
-# look guilty. Recorded here rather than quietly deleted, because "the client already knows" is the
-# claim a future reader will want the evidence for.
-#
-# THE FAILED-FSCK REPORT IS NOT PORTED BECAUSE THIS CLIENT DOES NOT HAVE IT. Upstream tells the
-# client about an unrepairable card with steam://system/devicemountresult/<dev>/1 and calls that
-# code ABI. Measured in the baked seed:
-#
-#   steamrtarm64/steamui.so   addlibraryfolder = 1   devicemountresult = 0
-#   linuxarm64/steamclient.so addlibraryfolder = 0   devicemountresult = 0
-#   grep -rl devicemount <whole seed>  ->  nothing
-#
-# addlibraryfolder is the control: a steam:// URL this client demonstrably acts on (HW-proven), and
-# it appears exactly once, in steamui.so. devicemountresult appears nowhere. Sending it would be a
-# no-op, so the read-only mount and the journal line above are the whole answer: the card is usable,
-# the reason is findable, and the user is not told in the UI.
-#
-# If a future client build gains the handler — check it the same way, the control matters — this is
-# where the call goes.
+# --- NOBODY IS TOLD ABOUT THE MOUNT beyond udisks itself ----------------------------------------
+# The Steam-era announcements (steam://addlibraryfolder after a mount, devicemountresult on a
+# failed fsck) went with the client; the reasoning behind dropping them is in git history.
+# OpenGamepadUI sees the card through UDisks2 on its own.

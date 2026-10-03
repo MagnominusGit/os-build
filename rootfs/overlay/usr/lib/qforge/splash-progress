@@ -1,7 +1,7 @@
 #!/bin/sh
 # Publish one status line to the boot splash.
 #
-#   /usr/lib/qforge/splash-progress Installing Steam
+#   /usr/lib/qforge/splash-progress Applying update
 #   /usr/lib/qforge/splash-progress --error Update failed
 #
 # Every phase of boot that can take long enough to look like a hang should say so through here.

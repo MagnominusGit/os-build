@@ -3,5 +3,5 @@
 # 99-default.preset is "disable *"; this higher-priority preset (60 < 99) keeps it enabled. A
 # build-time multi-user.target.wants symlink ships alongside as a fallback (cf.
 # 60-qforge-powerbuttond.preset).
-# qforge-powerd owns the fan, so it must run from boot even before SteamUI touches a slider.
+# qforge-powerd owns the fan, so it must run from boot whether or not the shell ever touches it.
 enable qforge-powerd.service

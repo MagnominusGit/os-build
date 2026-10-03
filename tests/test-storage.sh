@@ -372,7 +372,7 @@ code "$AUTO" | grep -q '"\$FSTYPE" != ext4' \
   || bad "the ext4 restriction is not applied"
 # EXIT 0, where upstream exits 2: inserting a foreign card is normal, and a non-zero exit here
 # leaves a failed unit for the rest of the boot.
-sed -n '/not ext4 — a Steam library/,+1p' "$AUTO" | grep -q 'exit 0' \
+sed -n '/only ext4 cards are automounted/,+1p' "$AUTO" | grep -q 'exit 0' \
   && ok "and stands down with exit 0 rather than leaving a failed unit" \
   || bad "a foreign card leaves a failed unit — that is a fault report for a normal action"
 

@@ -23,7 +23,7 @@
 #                     nobody is looking at.
 #
 #                     Both rows are load-bearing, and each for a different reason. KEY_BACK's
-#                     default is keyboard KeyBack, which is not a Steam control at all. BTN_MODE's
+#                     default is keyboard KeyBack, which is not a gamepad control at all. BTN_MODE's
 #                     default IS correct in isolation -- evdev.rs already translates it to Guide --
 #                     so on its own that row would be exactly the dead weight this header warns
 #                     about. It earns its place only as the other half of the swap: claim one

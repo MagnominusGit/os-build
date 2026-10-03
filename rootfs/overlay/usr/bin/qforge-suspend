@@ -4,9 +4,8 @@
 # running session so the game actually halts, lowers power, then BLOCKS until the power key wakes it.
 #
 # Invoked as systemd-suspend.service's ExecStart (via a drop-in), so EVERY logind-mediated Suspend()
-# lands here — the Steam power menu, an idle timeout, or the power key (forwarded to Steam by
-# qforge-powerbuttond, which turns it into a logind Suspend()). logind's sleep lifecycle — and
-# Steam's own blank — lasts exactly as long as this one blocking call, just as an in-kernel suspend
+# lands here — the shell's power menu, an idle timeout, or the power key (qforge-powerbuttond
+# turns a short press into a logind Suspend()). logind's sleep lifecycle lasts exactly as long as this one blocking call, just as an in-kernel suspend
 # would. Resume is OURS: this engine grabs the power key and wakes on it; there is no wake daemon.
 #
 # Only user.slice is frozen: this engine, journald, logind and the SYSTEM bus all live in system.slice
@@ -31,8 +30,8 @@ CONF=/etc/qforge/rest.conf
 [ -r "$CONF" ] && . "$CONF"
 : "${QFORGE_REST_SCREEN:=internal}"
 # Freeze the player's LOGIN SCOPE, not all of user.slice. Measured on HW: session-<n>.scope holds
-# gamescope, both Xwaylands, the session scripts, mangoapp, the Steam client AND the game, while the
-# user session bus, `systemd --user` and steamos-manager sit outside it under user@1000.service — so
+# gamescope, both Xwaylands, the session scripts, mangoapp, the shell AND the game, while the
+# user session bus and `systemd --user` sit outside it under user@1000.service — so
 # this halts the workload while leaving the session bus answerable. GLOB, not session-1: the scope
 # number is per-login. Expanded (split + globbed) in freeze(), so keep it unquoted there.
 : "${QFORGE_SUSPEND_FREEZE_CGROUPS:=/sys/fs/cgroup/user.slice/user-1000.slice/session-*.scope}"
@@ -101,12 +100,12 @@ panel() {
 }
 
 # THE FALLBACK, and the reason this file needs one. HW 2026-07-26: a cycle entered via
-# `systemctl suspend` — i.e. any path that is not Steam's own sleep flow — left the panel LIT for the
+# `systemctl suspend` — i.e. any path that was not the Steam client's own sleep flow — left the panel LIT for the
 # whole ~70s frozen window. qforge-suspend runs as systemd-suspend.service (root, system.slice) and
 # cannot resolve the live gamescope socket from there, so the KMS blank above never happens: the
-# recorder read `panel=enabled` on all 43 frozen samples. Steam's client blank was the only thing
-# turning the screen off, which means idle timeout, a direct Suspend(), and every non-Steam entry
-# point slept with the backlight on.
+# recorder read `panel=enabled` on all 43 frozen samples. The Steam client's own blank was the only thing
+# turning the screen off. There is no Steam client any more, so EVERY entry point (the shell's power
+# menu, idle timeout, the power key) now depends on this fallback.
 #
 # bl_power is the one lever reachable from system.slice with no session, no bus and no compositor:
 # 4 is FB_BLANK_POWERDOWN, 0 is FB_BLANK_UNBLANK. It does NOT disable the connector, so the DRM

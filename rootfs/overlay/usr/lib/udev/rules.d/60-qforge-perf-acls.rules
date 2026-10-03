@@ -1,5 +1,5 @@
 # qforge HW-access ACLs — grant the gamescope session (player user, member of `wheel`)
-# write access to the sysfs knobs SteamUI's Quick Access drives. The root is read-only, so
+# write access to the sysfs knobs the shell's performance controls drive. The root is read-only, so
 # these can't be chmod'd at build time on a live device; a udev rule re-applies them each
 # time the device appears (player is in wheel, see rootfs/customize-base.sh) — covers CPU/GPU
 # perf sliders AND the panel-backlight brightness.

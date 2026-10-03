@@ -41,8 +41,8 @@
 # WHAT CHANGES ON HARDWARE versus the sm8250-retroid-controller.yaml this replaces, i.e. what to
 # check when a Thor Lite is next up:
 #
-#   * The `...` button (BTN_BACK) becomes gamepad QuickAccess -- it opens Steam's quick-access
-#     panel -- where our map emitted keyboard F1. This is the only row where ret1 and the
+#   * The `...` button (BTN_BACK) becomes gamepad QuickAccess -- it opens the shell's quick-access
+#     menu -- where our map emitted keyboard F1. This is the only row where ret1 and the
 #     deleted sm8250_retroid_mcu disagreed on something the hardware can actually produce.
 #   * The emitted pad becomes an X-Box One Elite 2 rather than a Series S|X. Only the Elite
 #     model carries paddle capabilities (src/input/target/xpad.rs), and this board has none, so

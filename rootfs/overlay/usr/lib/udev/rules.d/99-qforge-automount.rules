@@ -1,4 +1,4 @@
-# Automount an inserted SD card for the Steam shell. The match half of
+# Automount an inserted SD card for the session user. The match half of
 # usr/lib/qforge/storage/automount.sh; ported from the reference platform's
 # 99-steamos-automount.rules, narrowed.
 #

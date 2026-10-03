@@ -48,7 +48,8 @@ fi
 # Physical output size for gamescope's DPI/scale, from device-env (e.g. "177x100"); exported only
 # when the board declares one. Consumed by our gamescope fake-output-mm patch
 # (packages/gamescope/patches/0003), which reports it as the wl_output physical size instead of the
-# connector/EDID mm — this, NOT the panel DTS mm, is what SteamUI auto-scale reads. WIDTHxHEIGHT in
+# connector/EDID mm — this, NOT the panel DTS mm, is what the shell's UI auto-scale reads
+# (measured with SteamUI; see usr/lib/qforge/devices/defaults.conf). WIDTHxHEIGHT in
 # the LANDSCAPE (logical) orientation, aspect-matched to -W/-H. Board declares none -> real panel mm.
 if [ -n "${QFORGE_GAMESCOPE_FAKE_OUTPUT_MM:-}" ]; then
   export GAMESCOPE_FAKE_OUTPUT_MM="$QFORGE_GAMESCOPE_FAKE_OUTPUT_MM"
@@ -61,8 +62,8 @@ unset WAYLAND_DISPLAY DISPLAY
 # created /run/user/1000 (player-owned, 0700) and set XDG_RUNTIME_DIR + the user D-Bus session bus at
 # /run/user/1000/bus in our environment already. Default them defensively (e.g. for a manual `sudo -u
 # player` run) but do NOT mkdir /run/user/1000 — the player user can't create dirs under /run; it must
-# already exist (logind/pam_systemd makes it). gamescope drops its Wayland socket here, and Steam/CEF
-# reach the session bus via DBUS_SESSION_BUS_ADDRESS.
+# already exist (logind/pam_systemd makes it). gamescope drops its Wayland socket here, and the shell
+# and emulators reach the session bus via DBUS_SESSION_BUS_ADDRESS.
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${XDG_RUNTIME_DIR}/bus}"
 if [ ! -d "$XDG_RUNTIME_DIR" ]; then
@@ -119,7 +120,8 @@ fi
 # gamescope runs STANDALONE in the background, reports its nested displays over the startup socket
 # (-R), and we then attach the shell to those displays. -T is the stats pipe (GAMESCOPE_STATS)
 # mangoapp reads. QFORGE_GAMESCOPE_SHELL_ARGS carries the flags the chosen shell needs on top
-# (session.conf sets it alongside QFORGE_SESSION_CMD): a Steam-protocol shell wants `--steam`,
+# (session.conf sets it alongside QFORGE_SESSION_CMD): OpenGamepadUI drives gamescope through
+# its Steam-mode X atoms, so it wants `--steam`,
 # and two nested Xwaylands (UI + game) are the gamepad-shell layout gamescope sessions use.
 : "${QFORGE_GAMESCOPE_SHELL_ARGS:=--xwayland-count 2}"
 GS_RUNDIR="$(mktemp -d "${XDG_RUNTIME_DIR}/gamescope.XXXXXX")"

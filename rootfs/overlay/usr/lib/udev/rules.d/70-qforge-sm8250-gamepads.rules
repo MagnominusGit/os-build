@@ -3,7 +3,7 @@
 # Both boards' pads are MCU parts on a serdev/SPI bus rather than USB HID, so udev's
 # input_id builtin has no bus-level hint to work from and never sets ID_INPUT_JOYSTICK.
 # Without that, the evdev node is not tagged as a game controller: InputPlumber skips
-# it, SDL does not enumerate it, and the device boots to a Steam UI nothing can drive.
+# it, SDL does not enumerate it, and the device boots to a shell nothing can drive.
 #
 # Set GROUP=input MODE=0660 rather than the 0666 the reference rules used — the player
 # user is already in `input` (see 70-qforge-uinput.rules), so a world-writable input

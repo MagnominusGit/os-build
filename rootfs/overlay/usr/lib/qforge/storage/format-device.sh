@@ -1,7 +1,8 @@
 #!/bin/bash
-# Format a removable card as a Steam library — the privileged half of the Settings > Storage
-# button. Ported from the reference platform's usr/lib/hwsupport/format-device.sh; the filesystem
-# recipe is theirs verbatim because the client and Proton depend on it, the refusals are ours.
+# Format a removable card — the privileged half of the storage path, reached through
+# qforge-format-sdcard / qforge-format-device (pkexec). Ported from the reference platform's
+# usr/lib/hwsupport/format-device.sh; the filesystem recipe is theirs verbatim (it was shaped by the
+# Steam client and Proton, which no longer ship here), the refusals are ours.
 #
 #   /usr/lib/qforge/storage/format-device.sh --device /dev/mmcblk0 [--label L] [--owner uid:gid]
 #
@@ -48,9 +49,8 @@ VERSION_NUMBER=1
 
 # TO THE JOURNAL AND TO STDERR, one line at a time, synchronously.
 #
-# This script is exec'd by the CLIENT through pkexec, so its stderr belongs to steamui: it lands in
-# ~/.local/share/Steam/logs/steamui_system.txt prefixed "adopt-drive:", which is a file you must
-# already know about, on a machine where Steam is running. Everything this script says is a refusal
+# This script is exec'd through pkexec, so its stderr belongs to whoever called it (a shell's log
+# file, or an SSH terminal) — not somewhere anyone looks after the fact. Everything this script says is a refusal
 # or a verdict on a card — what someone goes looking for after something went wrong, i.e. exactly
 # when the journal is where they look. So each line goes to both.
 #
@@ -106,7 +106,7 @@ while [ $# -gt 0 ]; do
 done
 
 
-[ "$(id -u)" = 0 ] || die "must run as root (reach it through /usr/bin/steamos-polkit-helpers/)" 13
+[ "$(id -u)" = 0 ] || die "must run as root (reach it through qforge-format-sdcard or qforge-format-device)" 13
 
 [ -n "$DEVICE" ] || die "--device is required" 22
 [ -b "$DEVICE" ] || die "not a block device: $DEVICE" 19

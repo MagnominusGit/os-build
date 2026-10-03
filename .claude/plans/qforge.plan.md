@@ -53,7 +53,7 @@ and standalone emulators.
 |---|---|
 | Build `make sdcard`, check `du --apparent-size out/images/rootfs.img` | Confirm the 2G slot has ≥1G headroom; `make-sdcard.sh`'s `fits` check is the backstop |
 | Boot on one SM8250, one SM8550, one SM8650 board | Gate: gamescope + vkcube on the panel, A/B confirm via qforge-boot-good |
-| Back up `~/qforge-pki/ca.key.pem` off this machine | Losing it means no device can ever accept another update |
+| ✅ Back up `~/qforge-pki/ca.key.pem` off this machine (done 2026-10-03) | Losing it means no device can ever accept another update |
 
 ### Phase 1 — OpenGamepadUI as the shell (built, HW validation pending)
 
@@ -123,10 +123,21 @@ Remaining OS-side (found in OGUI source):
 - OGUI power menu / idle suspend run `systemctl suspend|poweroff|reboot` as `player` — confirm
   logind/polkit allows it from the gamescope session (and that suspend routes to qforge-suspend).
 - PowerStation shim (above) — or accept a dead performance menu for now.
-- Clean remaining Steam wording in `automount.sh`, `qforge-suspend`, `qforge-scheduler`,
-  `power-ops.sh`, `qforge-session`.
-- `kernel/kernel.config` comment still names qforge_perf as CONFIG_PROC_CHILDREN's consumer; fix
-  with the next real kernel change (any edit there forces a ~25 min kernel rebuild).
+- HW 2026-10-03, MANGMI Pocket Max (SM8250), dev build 20261003T094820Z (`29a24b7`): first
+  SM8250 boot. qforge-session.service (no sddm) gives an Active wayland session on seat0/VT1,
+  boot-good confirmed slot A, polkit grants NM / timezone / power / udisks to the session with no
+  prompt, OGUI up without crashes (only the known glxinfo / GPU-id errors), backlight controllable.
+  Still to check: session restart after a gamescope kill, OGUI power menu, a game's launch menu.
+- ✅ Steam wording cleaned (2026-10-03) across the overlay; what remains names a measurement
+  taken under the Steam client or the boot chain (steamcl, steamos-bootconf), on purpose.
+- ✅ `kernel/kernel.config` CONFIG_PROC_CHILDREN comment fixed (2026-10-03; next card build
+  rebuilds the kernel).
+- **OGUI's storage screen is dead**: its removable-media manager calls
+  `/usr/bin/steamos-polkit-helpers/steamos-{format-sdcard,retrigger-automounts,trim-devices}`,
+  which Phase 0 removed (guard-forbidden). Decide: ship those three paths as thin wrappers over
+  qforge-format-sdcard / block-event, or accept no Format button.
+- **SD automount is ext4-only**, inherited from the Steam library requirement that no longer
+  applies; ROM cards are usually exfat. Decide whether to automount exfat/vfat too.
 - qforge-pairingd stays always-on (no shell switch).
 
 ### Phase 3 — Emulators (High)
