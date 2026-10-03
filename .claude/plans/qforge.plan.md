@@ -26,7 +26,7 @@ and standalone emulators.
 | Root slots | 2G each (was 4G until 2026-10-03 trim, 7G with the x86 payloads) |
 | Firmware | Still fetched from Nova-Deck/qcom-firmwares (pinned); move to a QForge repo later |
 | OTA signing | New QForge CA; private keys in `~/qforge-pki`, never in the repo |
-| Emulators | Native PKGBUILDs (not Flatpak) so they use our patched Mesa/Turnip |
+| Emulators | Upstream AppImages, downloaded on demand by an OGUI plugin (not in the image); must use our patched Mesa/Turnip, not a bundled one |
 
 ## Phases
 
@@ -155,6 +155,31 @@ Remaining OS-side (found in OGUI source):
   Packaging: probably AppImages (they bundle their own Qt / ffmpeg, which is why the root dropped
   both). Check per AppImage whether it uses the system's patched Mesa/Turnip or a bundled one --
   that decides GPU support on these SoCs. (Earlier plan: native PKGBUILDs, RetroArch + cores.)
+- **Distribution (decided 2026-10-03, design in Phase 4): not in the image.** An OGUI plugin downloads an
+  emulator's AppImage the first time a ROM needs it, and offers updates when QForge publishes a
+  new one. This reverses the Phase 2 "no OGUI plugin" decision for this purpose. Until it exists,
+  AppImages are pushed to `/home/player/emulators` by hand for testing.
+- **DuckStation first** (2026-10-03). Upstream `latest` DuckStation-arm64.AppImage (86 MB,
+  218 MB unpacked): bundles Qt6 / SDL3 / GTK3 but NO Mesa, libvulkan, libGL/EGL, gbm or drm, so
+  it uses our Mesa/Turnip. Needs glibc >= 2.35 (root has 2.43) and host libX11/xcb/wayland/
+  fontconfig, all present; only unused Qt plugins (eglfs, wl-shell) miss libs. Static type-2
+  runtime: root has no `fusermount`, so either ship fuse3 or extract on download
+  (`--appimage-extract`, what the test does). Launched from OGUI via a `Categories=Game` .desktop
+  in `~/.local/share/applications` with `-bigpicture -fullscreen`.
+  HW ✅ 2026-10-03, MANGMI Pocket Max (SM8250): Crash Team Racing (CHD, SCPH-550x BIOS set) runs
+  full speed on Vulkan/Turnip through the gamescope WSI layer (60 Hz swapchain, Adreno idling at
+  305 MHz); sound, picture and orientation OK; OGUI overlay works over it; OGUI's Exit (reaper
+  SIGTERM to the process group) quits it cleanly. With cpu4-7 offline it ran on the little
+  cluster alone, CPU thread ~44% of one 1.8 GHz core: PS1 needs no pinning. Lessons for the
+  plugin / launcher:
+  - Exec the real binary (`usr/bin/duckstation-qt`), never the extracted `AppRun` symlink: Qt
+    takes applicationDirPath from the symlink, misses `qt.conf`, finds no platform plugin, aborts.
+  - Seeding settings.ini to skip the setup wizard also skips its controller auto-map: write
+    `[InputSources] SDL = true` + a `[Pad1]` SDL-0 mapping. InputPlumber exposes a single
+    virtual Xbox Elite 2 pad (real joypad is root-only), so `SDL-0` is stable. Leave Guide
+    unbound (OGUI owns it).
+  - No xdg-desktop-portal: harmless Qt warning, it falls back to its own theme.
+  - Exit is OGUI Guide -> running-game card -> Exit; an emulator hotkey can come later.
 - **Per-game CPU pinning at launch** (decided 2026-10-03). The performance menu's core-count
   slider stays a POWER control: PowerStation offlines the fastest cores first, so "4 cores" on
   SM8250/SM8550/SM8650 is the little cluster only. Keeping a game's threads on the fast cores
@@ -170,9 +195,102 @@ Remaining OS-side (found in OGUI source):
 - Licence check: never ship BIOS. DuckStation is CC BY-NC-ND (no commercial use, no modified
   versions) -- confirm shipping its unmodified AppImage fits how QForge is distributed.
 
-### Phase 4 — ROM library in OGUI (Medium)
+### Phase 4 — QForge OGUI plugin: ROM library + emulator manager (High)
 
-- Library plugin scanning ROM dirs, mapping systems → emulator launch commands.
+Decided 2026-10-03: one OGUI card per ROM, grouped in one library tab per system (PSX, PS2, ...),
+and emulators fetched on demand. Both live in ONE plugin (`qforge`), since the ROM card is what
+needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to review before code.
+
+**What OGUI gives us (verified in source)**
+- Plugins: `user://plugins/<id>.zip` = `~player/.local/share/opengamepadui/plugins/`, loaded with
+  `ProjectSettings.load_resource_pack`; the zip holds `plugins/<id>/plugin.json` + `plugin.gd`
+  (GDScript source, no export needed). Enabled by default (`settings.cfg [plugins.enabled]`).
+  Only the user dir is scanned, so the image can not ship it read-only: seed the zip into /home
+  (see Delivery).
+- `Library` subclass = a library provider: `get_library_launch_items()` returns
+  `LibraryLaunchItem`s (`name, command, args[], env{}, cwd, tags[], categories[], installed,
+  metadata{}`); args are an array, so ROM paths with spaces need no quoting (unlike `.desktop`
+  Exec, which OGUI splits on spaces).
+- `get_app_lifecycle_hooks()` -> `AppLifecycleHook` PRE_LAUNCH / LAUNCH / EXIT;
+  `LaunchManager` AWAITS pre-launch hooks before starting the app, and a hook can emit
+  `progressed(percent)` / `notified(text)`. That is the "download on first launch" point.
+- `Library.install/update/has_update/uninstall` + `install_progressed`: OGUI's install flow.
+  The launch menu only shows Install / Launch / Uninstall; nothing in the UI calls `has_update`
+  or `InstallManager.update`, so there is no built-in update badge.
+- Library tabs: `res://core/ui/card_ui/library/library_tabs_state.tres` (`TabContainerState`)
+  has `add_tab(text, ScrollContainer)` / `remove_tab`; the menu itself only builds Installed and
+  All Games. A plugin adds the per-system tabs and fills their grids.
+- `BoxArtProvider` (GRID_PORTRAIT / GRID_LANDSCAPE / BANNER / LOGO): artwork per item, later.
+
+**Plugin parts**
+1. Systems table (in the plugin): `psx -> {name "PlayStation", exts [chd, cue, pbp, m3u, iso],
+   emulator duckstation}`, `ps2 -> armsx2`, `gc/wii -> dolphin`, `3ds -> azahar`, `ps3 -> rpcs3`,
+   `wiiu -> cemu`. ROM dirs `/home/player/roms/<system>/` (one level deep; m3u wins over its
+   member cue/chd so a multi-disc game is one card).
+2. Library provider `qforge-roms`: one item per ROM, `name` from the file name (strip region /
+   tags later), `tags [<system>]`, `metadata {system, rom, emulator}`, `installed true`.
+   `command` = `qforge-launch` (below), `args [<system>, <rom path>]`. Rescan on OGUI start and
+   via a refresh action; inotify later.
+3. Tabs: one tab per system that has at least one ROM, populated from the provider's items.
+   Check first whether OGUI's library grid can be reused for a tab or the plugin builds its own.
+4. Emulator manager: QForge-published manifest (JSON over HTTPS on the QForge update server)
+   `emulator -> {version, url (our mirror), sha256, arch, default args}`. Install = download to
+   `/home/player/emulators/<emu>/<version>.AppImage`, verify sha256, chmod +x, flip a `current`
+   symlink (rollback = previous AppImage kept until the new one has launched once).
+   PRE_LAUNCH hook installs it when missing (progress shown). Updates: NOT via OGUI's
+   `has_update` -- in v0.46.1 no UI calls it, and it is per library item, so one DuckStation
+   update would flag every PSX card. Proposed: a plugin "Emulators" page (installed vs published
+   version, Update / Roll back buttons) + an OGUI notification when the manifest has a newer
+   version. Never auto-update at launch.
+5. Per-emulator first-run config: write the emulator's own config before its first start
+   (DuckStation: settings.ini with wizard off, BIOS/ROM dirs, Vulkan, `[Pad1]` SDL-0 mapping,
+   auto-updater off). Never overwrite a user-changed config after that.
+
+**Launcher `qforge-launch <system> <rom>`** (in the image, `/usr/bin`, shell, unit-tested)
+- Resolves the emulator from the system, execs
+  `/home/player/emulators/<emu>/current <per-emu args> <rom>` (DuckStation:
+  `-batch -fullscreen -- <rom>`; `-batch` returns to OGUI when the game closes).
+- The one place for per-game CPU pinning (Phase 3) and per-device defaults.
+- Keeps the plugin free of emulator details beyond the manifest; testable over SSH without OGUI.
+
+**Plugin store: QForge's own, upstream's masked** (decided 2026-10-03)
+- OGUI hard-codes `PLUGIN_STORE_URL` = ShadowBlip/OpenGamepadUI-plugins `plugins.json`
+  (`core/global/plugin_loader.gd:20`). Its 7 entries (steam, flathub, steamgriddb, recapture,
+  lutris, sunshine, ayaneo-modules) are Steam/x86/desktop oriented, and the request is the
+  "plugin store request failing" noise seen on first boot. Mask it.
+- OGUI patch 0004: read the store URL from a ProjectSettings key next to the existing
+  `OpenGamepadUI/plugin/directory` (upstreamable; default stays upstream's), and set it to the
+  QForge store in our build. Placeholder host until Phase 5 replaces `updates.qforge.invalid`.
+- QForge store = a `plugins.json` in the same format (`plugin.id/name/version/min-api-version`,
+  `archive.url`, `archive.sha256`, `versions[]`) on the QForge update server, listing `qforge`
+  (and anything else we publish). OGUI then gives us, unchanged: periodic store check
+  (`on_update_timeout`), "update available" when `plugin.version` is greater and the API is
+  compatible, install with sha256 verification into `user://plugins/<id>.zip`.
+- Same server can host the emulator manifest (part 4), so one QForge endpoint serves plugin and
+  emulator updates. Trust (decided 2026-10-03): HTTPS to the QForge host is enough; the index
+  and manifest carry sha256 per archive, no separate signature. Downloads must refuse plain
+  http and invalid certificates.
+
+**Delivery of the plugin itself**
+- Built in-repo (`apps/ogui-qforge-plugin/` -> zip), shipped in the image at a read-only path and
+  copied into `~player/.local/share/opengamepadui/plugins/` by the session when missing or older
+  than the image's copy (compare `plugin.version`), so a fresh card works offline. Later
+  versions come from the QForge store; the session never downgrades a store-updated copy.
+
+**Decided 2026-10-03**
+- Download source: the QForge server MIRRORS pinned upstream AppImages (we pick the version,
+  sha256 in the manifest); no direct upstream GitHub downloads.
+- FUSE: add `fuse3` to the image (fusermount3 setuid) and run AppImages directly, no extraction.
+  Re-check DuckStation then: launched as the AppImage, Qt's applicationDirPath is inside the
+  mount, so the `AppRun` symlink problem from the extracted test should not apply. Install
+  becomes download + verify + chmod + `current` symlink.
+- ROM cards show in All Games as well as in their system tab.
+
+**Open questions for review**
+- Licences: we mirror unmodified AppImages, which redistributes them. DuckStation is
+  CC BY-NC-ND (unmodified + non-commercial: mirroring fits if QForge stays non-commercial and
+  credits it). Check each emulator's licence before adding it to the manifest.
+- BIOS: the plugin can tell the user which BIOS a system needs and where to drop it; never ships it.
 - Artwork scraping later (ScreenScraper needs credentials).
 
 ### Phase 5 — Release infrastructure (Medium)
