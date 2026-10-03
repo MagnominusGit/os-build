@@ -399,9 +399,14 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
 - ROM cards show in All Games as well as in their system tab.
 
 **Open questions for review**
-- Licences: we mirror unmodified AppImages, which redistributes them. DuckStation is
-  CC BY-NC-ND (unmodified + non-commercial: mirroring fits if QForge stays non-commercial and
-  credits it). Check each emulator's licence before adding it to the manifest.
+- Licences: we mirror unmodified AppImages, which redistributes them. Check each emulator's
+  licence AND its author's stated terms before adding it to the manifest.
+  DuckStation (checked 2026-10-03): CC BY-NC-ND 4.0. The README allows redistributing
+  "unmodified releases", prefers a link to duckstation.org, and states "pre-configured settings and
+  packages are considered modifications" -- so the author would count our seed settings.ini and the
+  plugin's packaging as modifications. Decided 2026-10-03: proceed anyway (mirror + seed), the
+  risk is accepted. Still owed whatever we do: attribution (name, link, licence) in the plugin, and
+  QForge staying non-commercial.
 - BIOS: the plugin can tell the user which BIOS a system needs and where to drop it; never ships it.
 - Artwork scraping later (ScreenScraper needs credentials).
 
@@ -417,6 +422,9 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
   exists to mount once QForge runs from internal UFS), inherited from the Steam library requirement that no longer
   applies; ROM cards are usually exfat. Decide whether to automount exfat/vfat too.
 
+- Emulator mirror: the AppImages bundle LGPL libraries (Qt6, GTK3, glib, ...) with no licence
+  texts or source offer; redistributing them obliges us to provide or offer the matching source, so
+  host those sources (or a written offer) next to each mirrored AppImage.
 - Update server via `ota/setup-server.sh`; replace the `updates.qforge.invalid` placeholder in
   `qforge-update`, `installer/release-info`, `installer/netcfg`.
 - CI release secrets `RAUC_CERT_PEM` / `RAUC_KEY_PEM` from `~/qforge-pki`.
