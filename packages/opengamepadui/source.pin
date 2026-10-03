@@ -6,7 +6,8 @@
 #   0001  upstream #542: HardwareManager reads /sys/devices/virtual/dmi/id/product_name, which does
 #         not exist on a devicetree board (no SMBIOS from the ABL UEFI), and calls a method on the
 #         null FileAccess -- a SIGSEGV in a release build, ~10s into every start, so the session
-#         crash-loops behind a black panel. Also falls back to the devicetree model for the name.
+#         crash-loops behind a black panel. On ARM the name comes from the devicetree model
+#         instead ("Unknown" if empty), as asked in review of upstream PR #559.
 #   0002  upstream #540: Godot 4.7 added a native Control.custom_maximum_size, so the two install
 #         dialogs that declare their own fail to compile, and game_launch_menu.gd (which depends on
 #         them) never loads -- picking a game does nothing, on every platform.
