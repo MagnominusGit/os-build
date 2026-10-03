@@ -394,8 +394,8 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
   Found on the way: DuckStation's `ConfirmPowerOff` IS needed. Its menu Exit never asks, but a
   SIGTERM does, and the dialog waited out the 10 s timeout (game killed, stale mount). Restored
   in the seed, with a test.
-- Open (low): gamescope SIGABRT core dump when a game is SIGKILLed during the session stop
-  (only seen on the timeout path, 17:04:34 2026-10-03). Not seen on a clean stop.
+- Not pursued (decided 2026-10-03): a one-off gamescope SIGABRT core dump when a game was
+  SIGKILLed during the session stop (timeout/kill path only; never seen on a clean stop).
 - ROM cards show in All Games as well as in their system tab.
 
 **Open questions for review**
