@@ -2,9 +2,9 @@
 
 **Complexity**: Large
 **Status** (2026-10-03): Phases 0-2 done -- HW-validated on SM8550 (AYANEO Pocket ACE) and SM8250
-(MANGMI Pocket Max); SM8650 not booted since the OGUI crash fix. Phase 3 in progress (DuckStation,
-qforge-launch, folder layout, SMB shares done; more emulators and hotkeys later). Phase 4 designed
-(QForge OGUI plugin). Phase 5 not started.
+(MANGMI Pocket Max); SM8650 not booted since the OGUI crash fix. Phase 3 done (emulator platform,
+DuckStation end to end). Phase 4 designed (QForge OGUI plugin), next. Phase 4b (more emulators)
+after it. Phase 5 not started.
 
 ## Summary
 
@@ -154,9 +154,19 @@ Remaining OS-side (found in OGUI source):
   rebuilds the kernel).
 - qforge-pairingd stays always-on (no shell switch).
 
-### Phase 3 — Emulators (High)
+### Phase 3 — Emulator platform (High) — done (closed 2026-10-03)
+
+Closed with DuckStation running end to end on the SM8250 Pocket Max: upstream AppImage on our
+Mesa/Turnip (fuse3), `qforge-launch` with clean exits on every path, first-run settings from the
+image, per-game CPU pinning (`--cpus big`), the player folder layout, guest SMB shares (with the
+ksmbd backport), and the qforge-session stop fixes (fast restart, games stopped first). What was
+left moved: the other five emulators and the DuckStation hotkeys to Phase 4b (they reach players
+through the plugin catalog); DuckStation's pinned-tag re-test to Phase 4 (first catalog); the
+upstream reports to the Backlog; the SM8650 boot stays a Phase 0/1 item.
+
 
 - Emulators to ship (decided 2026-10-03): Dolphin, ARMSX2, DuckStation, Azahar, rpcs3, Cemu.
+  DuckStation done here; the other five moved to Phase 4b.
   Packaging: probably AppImages (they bundle their own Qt / ffmpeg, which is why the root dropped
   both). Check per AppImage whether it uses the system's patched Mesa/Turnip or a bundled one --
   that decides GPU support on these SoCs. (Earlier plan: native PKGBUILDs, RetroArch + cores.)
@@ -193,9 +203,9 @@ Remaining OS-side (found in OGUI source):
   - Pick the big cores from `/sys/devices/system/cpu/cpuN/cpu_capacity`, not by CPU number.
   - Per game, the player's choice through the plugin (decided 2026-10-03; done, see above).
   - sched_ext: scx_lavd honours the affinity mask (HW-checked).
-- PowerStation follow-up for upstream: order SetCoresEnabled by `cpu_capacity` instead of CPU
-  number (Qualcomm numbers cores slowest-first; other SoCs do not).
-- InputPlumber hotkeys (exit to shell, save states).
+- PowerStation follow-up for upstream: moved to the Backlog.
+- InputPlumber hotkeys: exit to shell works through OGUI's Guide menu; emulator save/load-state
+  hotkeys moved to Phase 4b.
 - Per-device defaults: DROPPED as a standalone item (2026-10-03). Nothing needs one today (DuckStation's
   seed is the same on every device; per-device pinning went with the per-game player choice). Add a
   device-specific value from `/usr/lib/qforge/devices/<device>.conf` only when an emulator needs it --
@@ -228,10 +238,15 @@ Remaining OS-side (found in OGUI source):
     share; with SaveStateOnExit (now in the seed) OGUI's Exit wrote ~/states/psx/
     SCUS-94426_resume.sav. Not yet checked: what DuckStation does with that resume state on the next
     launch; two short runs right after enabling it wrote no state (likely exited during boot).
-- Licence check: never ship BIOS. DuckStation is CC BY-NC-ND (no commercial use, no modified
-  versions) -- confirm shipping its unmodified AppImage fits how QForge is distributed.
+- ✅ Licence check: never ship BIOS. DuckStation checked 2026-10-03 (see Phase 4, Licences);
+  emulators come from upstream, so QForge redistributes none.
 
 ### Phase 4 — QForge OGUI plugin: ROM library + emulator manager (High)
+
+First steps (next session), host-testable before any GDScript: `qforge-launch --gui <emulator>`
+(no-ROM mode for the store's Open), and a first `catalog.json` with DuckStation pinned to a
+numbered release (v0.1-11894 or newer), re-tested on HW (launch, pad, every exit path, memory card,
+resume state). Then the tab prototype: can a plugin add a PSX tab that reuses OGUI's game grid.
 
 Decided 2026-10-03: one OGUI card per ROM, grouped in one library tab per system (PSX, PS2, ...),
 and emulators fetched on demand. Both live in ONE plugin (`qforge`), since the ROM card is what
@@ -438,6 +453,17 @@ plus the ROM library that launches them)
 - BIOS: the plugin can tell the user which BIOS a system needs and where to drop it; never ships it.
 - Artwork scraping later (ScreenScraper needs credentials).
 
+### Phase 4b — Grow the emulator catalog (after Phase 4)
+
+- The other five: ARMSX2 (PS2), Azahar (3DS), Dolphin (GC/Wii), rpcs3 (PS3, needs firmware),
+  Cemu (Wii U). Recipe from DuckStation, per emulator: an aarch64 AppImage that uses our
+  Mesa/Turnip (armada's catalog has working asset patterns for all five); `.conf` + minimal seed;
+  `launch.conf` system + folder-layout rows; every exit path (SIGTERM vs menu: ConfirmPowerOff-style
+  dialogs, save state on exit); licence and author's stated terms; pinned tag in the hosted catalog.
+- Emulator save/load-state hotkeys (DuckStation first: seed bindings that avoid in-game combos).
+- Device-specific values only when needed (Azahar's dual-screen layout on the Pocket DS is the
+  likely first).
+
 ### Phase 5 — Release infrastructure (Medium)
 
 - **OGUI's storage screen is dead** (deferred 2026-10-03: only matters once QForge runs from
@@ -455,6 +481,14 @@ plus the ROM library that launches them)
 - CI release secrets `RAUC_CERT_PEM` / `RAUC_KEY_PEM` from `~/qforge-pki`.
 - Card / bundle / installer release workflows, runbook.
 - Optionally move firmware to a QForge-owned repo.
+
+## Backlog (outward-facing: send only when decided)
+
+- PowerStation: order SetCoresEnabled by `cpu_capacity` instead of CPU number (Qualcomm numbers
+  cores slowest-first; other SoCs do not); plus our patches 0001/0002 (`_ref/PowerStation` qforge-arm).
+- OpenGamepadUI: patch 0003 and the #542/#540 fixes (`_ref/OpenGamepadUI` qforge-perf-menu).
+- DuckStation: AppRun is a symlink, so on a system without Qt, Qt's applicationDirPath misses
+  `usr/bin/qt.conf` and no platform plugin loads.
 
 ## Risks
 
