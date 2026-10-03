@@ -263,6 +263,14 @@ needs the emulator. Design from OGUI v0.46.1 source (`_ref/OpenGamepadUI`); to r
    `command` = `qforge-launch` (below), `args [<system>, <rom path>]`, prefixed with
    `--cpus big` when the player turned "fast cores" on for that game (per-game setting the plugin
    stores and offers; off by default). Rescan on OGUI start and via a refresh action; inotify later.
+   **Resume (decided 2026-10-03): the plugin asks.** When a game has a resume state, its card offers
+   Resume / Start fresh before launching. Emulators cannot ask themselves: DuckStation's "Resume
+   Game -- load this state, or start from a fresh boot?" dialog only exists in its own game list
+   (`FullscreenUI::HandleGameListActivate`), which a ROM card on the command line bypasses. Needs a
+   `qforge-launch --resume` mapped per emulator (DuckStation: `-resume`, from the emulator conf) and
+   a per-emulator way to tell whether a resume state exists (DuckStation names it
+   `~/states/psx/<serial>_resume.sav`, so the plugin needs the game's serial). Until then games boot
+   fresh; the state is still loadable from the emulator's pause menu.
 3. Tabs: one tab per system that has at least one ROM, populated from the provider's items.
    Check first whether OGUI's library grid can be reused for a tab or the plugin builds its own.
 4. Emulator manager: QForge-published manifest (JSON over HTTPS on the QForge update server)
