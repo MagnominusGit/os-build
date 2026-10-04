@@ -63,12 +63,13 @@ func _refresh_system(system: String) -> void:
 	if not system in _tabs:
 		_tabs[system] = _make_tab()
 		tabs_state.add_tab(_tab_text(system), _tabs[system]["tab"])
+	var started := Time.get_ticks_msec()
 	var grid: HFlowContainer = _tabs[system]["grid"]
 	for child in grid.get_children():
 		child.queue_free()
 	for item in items:
 		grid.add_child(await _build_card(item))
-	logger.info("%s tab: %d game(s)" % [_tab_text(system), items.size()])
+	logger.info("%s tab: %d game(s), cards built in %d ms" % [_tab_text(system), items.size(), Time.get_ticks_msec() - started])
 
 
 func _tab_text(system: String) -> String:

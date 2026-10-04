@@ -504,6 +504,22 @@ plus the ROM library that launches them)
 - Device-specific values only when needed (Azahar's dual-screen layout on the Pocket DS is the
   likely first).
 
+### Phase 4c — Library scaling polish (later, decided 2026-10-04)
+
+Measured 2026-10-04 on the Pocket ACE (plugin timing logs, 2,000 empty `.chd` in `~/roms/psx`):
+the ROM scan takes 9 ms, so a scan cache would not help. The cost is OGUI's card UI: its library
+menu queues a full refresh per added item (2,001 refreshes, ~24 s of rebuilding after start, each
+up to 27 ms), every ROM gets three cards (our tab, All Games, Installed: ~6,000), and OGUI's RSS
+goes from 0.4 GB to 1.8 GB (+~240 KB per card, ACE has 7.5 GB). Our tab (0.8 s for 2,000 cards)
+is only built after that churn (28 s) and three times. Options, to pick when polishing:
+- A. Keep ROMs out of OGUI's lists: register the library (hooks, launch menu) but hand OGUI no
+  items; the plugin keeps its own ROM list and builds cards only in its tabs. Loses All Games and
+  OGUI search for ROMs (own search needed); reverses "ROM cards show in All Games too".
+- B. Lazy cards in our tabs (only what is on screen / page by page).
+- C. OGUI patch, upstreamable: coalesce library refreshes (one per batch of adds).
+A metadata cache (titles, serials, resume) keyed by path + size + mtime comes with the per-ROM
+work that needs it, not before.
+
 ### Phase 5 — Release infrastructure (Medium)
 
 - **OGUI's storage screen is dead** (deferred 2026-10-03: only matters once QForge runs from
@@ -527,6 +543,8 @@ plus the ROM library that launches them)
 - PowerStation: order SetCoresEnabled by `cpu_capacity` instead of CPU number (Qualcomm numbers
   cores slowest-first; other SoCs do not); plus our patches 0001/0002 (`_ref/PowerStation` qforge-arm).
 - OpenGamepadUI: SENT 2026-10-03 as #559 / #560 / #561.
+- OpenGamepadUI: the library menu queues one full refresh per library_item_added (2,000 items =
+  2,001 refreshes, ~24 s); coalesce them (Phase 4c option C).
 - DuckStation: AppRun is a symlink, so on a system without Qt, Qt's applicationDirPath misses
   `usr/bin/qt.conf` and no platform plugin loads.
 

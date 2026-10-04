@@ -35,11 +35,12 @@ func roms_dir() -> String:
 
 
 func get_library_launch_items() -> Array[LibraryLaunchItem]:
+	var started := Time.get_ticks_msec()
 	var items: Array[LibraryLaunchItem] = []
 	for system in SYSTEMS:
 		for path in _scan_system(system):
 			items.append(_launch_item(system, path))
-	logger.info("Found %d ROM(s)" % items.size())
+	logger.info("Found %d ROM(s) in %d ms" % [items.size(), Time.get_ticks_msec() - started])
 	return items
 
 
