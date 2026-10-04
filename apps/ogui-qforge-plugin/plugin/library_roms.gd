@@ -9,9 +9,9 @@ const LAUNCHER := "/usr/bin/qforge-launch"
 const RomNames := preload("rom_names.gd")
 const LaunchArgs := preload("launch_args.gd")
 
-## OGUI settings section of the per-game "Run on fast cores" choice: key = ROM id
-## (launch_args.gd), value true. Absent = off, the default (nothing ships pinned).
-const FAST_CORES_SECTION := "qforge.fast_cores"
+## OGUI settings section of a game's "Run on fast cores" override: key = ROM id (launch_args.gd),
+## value "big" (on) or "all" (off). Absent = the emulator's default (Settings > Emulators).
+const CPUS_SECTION := "qforge.cpus"
 
 var settings_manager := load("res://core/global/settings_manager.tres") as SettingsManager
 
@@ -119,7 +119,7 @@ func _launch_item(name: String, system: String, path: String) -> LibraryLaunchIt
 	item.name = name
 	item.provider_app_id = LaunchArgs.rom_id(system, path)
 	item.command = LAUNCHER
-	item.args = LaunchArgs.for_rom(system, path, _fast_cores_saved(item.provider_app_id))
+	item.args = LaunchArgs.for_rom(system, path, _cpus_saved(item.provider_app_id))
 	item.tags = PackedStringArray(["qforge", system])
 	item.categories = PackedStringArray(["game"])
 	item.installed = true
@@ -127,32 +127,39 @@ func _launch_item(name: String, system: String, path: String) -> LibraryLaunchIt
 	return item
 
 
-func _fast_cores_saved(rom_id: String) -> bool:
-	return settings_manager.get_value(FAST_CORES_SECTION, rom_id, false) == true
+func _cpus_saved(rom_id: String) -> String:
+	var value = settings_manager.get_value(CPUS_SECTION, rom_id, "")
+	return value if value in LaunchArgs.CPUS_VALUES else ""
 
 
-## Whether this ROM runs on the fast cores (Game settings > QForge).
-func get_fast_cores(item: LibraryLaunchItem) -> bool:
-	return _fast_cores_saved(item.provider_app_id)
+## A game's fast-cores override: "" (the emulator's default), "big" or "all".
+func get_cpus(item: LibraryLaunchItem) -> String:
+	return _cpus_saved(item.provider_app_id)
 
 
-## Save the choice and rewrite the item's arguments: OGUI builds the command line from them at
+## Whether the emulator this game runs in defaults to the fast cores (Settings > Emulators).
+func emulator_fast_cores(item: LibraryLaunchItem) -> bool:
+	var emulator := LaunchArgs.emulator_for(item.metadata["system"], LaunchArgs.read_text(LaunchArgs.LAUNCH_CONF))
+	return emulator != "" and LaunchArgs.emulator_fast_cores(emulator)
+
+
+## Save a game's override and rewrite its arguments: OGUI builds the command line from them at
 ## each launch, so the next launch follows without a rescan.
-func set_fast_cores(item: LibraryLaunchItem, on: bool) -> void:
-	if on:
-		settings_manager.set_value(FAST_CORES_SECTION, item.provider_app_id, true)
-	elif settings_manager.get_value(FAST_CORES_SECTION, item.provider_app_id) != null:
+func set_cpus(item: LibraryLaunchItem, cpus: String) -> void:
+	if cpus in LaunchArgs.CPUS_VALUES:
+		settings_manager.set_value(CPUS_SECTION, item.provider_app_id, cpus)
+	elif settings_manager.get_value(CPUS_SECTION, item.provider_app_id) != null:
 		# ConfigFile logs an error when erasing a key that is not there.
-		settings_manager.erase_section_key(FAST_CORES_SECTION, item.provider_app_id)
+		settings_manager.erase_section_key(CPUS_SECTION, item.provider_app_id)
 	# A rescan may have replaced the item the settings page holds: update the library's live one
 	# too, by ROM id (its name can have changed).
-	var args := LaunchArgs.for_rom(item.metadata["system"], item.metadata["rom"], on)
+	var args := LaunchArgs.for_rom(item.metadata["system"], item.metadata["rom"], cpus)
 	item.args = args
 	for app in library_manager.get_library_items([]):
 		var live := app.get_launch_item(library_id)
 		if live and live != item and live.provider_app_id == item.provider_app_id:
 			live.args = args
-	logger.info("%s: fast cores %s" % [item.name, "on" if on else "off"])
+	logger.info("%s: fast cores %s" % [item.name, {"big": "on", "all": "off"}.get(cpus, "emulator default")])
 
 
 class LaunchFailure extends AppLifecycleHook:

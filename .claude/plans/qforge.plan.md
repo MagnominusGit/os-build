@@ -308,6 +308,13 @@ only) holds "Run on fast cores". Saved in OGUI's settings.cfg `[qforge.fast_core
 launch item's args (`--cpus big` first), which OGUI reads at each launch. HW ✅ Pocket FIT
 (SM8650): on -> `qforge-launch --cpus big`, DuckStation affinity 2-7; off -> 0-7, key erased;
 on survives a session restart (toggle shown on, pinned 2-7).
+Emulator-level default done 2026-10-04 (plugin 0.1.4 + qforge-launch): the per-game toggle became an
+override. Settings > Emulators has "Run on fast cores" per emulator, written to the player's
+`~/.config/qforge/emulators/<emu>.conf` as `CPUS=big|all`, which qforge-launch reads itself (read,
+never sourced; also applies to Open / --gui). Game settings > QForge is a dropdown: "Emulator
+default (On|Off)" (no --cpus) / On (`--cpus big`) / Off (`--cpus all`), saved in OGUI's settings.cfg
+`[qforge.cpus]` (replaces `[qforge.fast_cores]`). The image still pins nothing (test). HW ✅ Pocket FIT:
+default on -> plain launch pinned 2-7; game Off -> `--cpus all`, 0-7; Open -> 2-7.
 Still to handle: OGUI's search only covers Installed / All Games;
 the tab refreshes twice at start (two library loads); upstream `remove_tab` resets `current_tab`
 on the wrong condition (`size > current_tab`).

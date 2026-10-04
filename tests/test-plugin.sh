@@ -126,17 +126,41 @@ func _init() -> void:
 		RomNames.stale({"A": "/r/A.chd", "B": "/r/B.chd"}, {"A": "/r/A.chd"}), PackedStringArray(["B"]))
 	check("a name now meaning another file is dropped (re-added with the new ROM)",
 		RomNames.stale({"A": "/r/A.cue"}, {"A": "/r/A.chd"}), PackedStringArray(["A"]))
-	# Game settings > QForge > Run on fast cores = qforge-launch --cpus big, saved per ROM file.
+	# Run on fast cores: per game "" (emulator default) / "big" / "all" -> qforge-launch --cpus.
 	var rom := "/home/player/roms/psx/Crash Team Racing (USA).chd"
-	check("launch args: plain launch pins nothing",
-		LaunchArgs.for_rom("psx", rom, false), PackedStringArray(["psx", rom]))
-	check("launch args: fast cores put --cpus big first (qforge-launch reads it there)",
-		LaunchArgs.for_rom("psx", rom, true), PackedStringArray(["--cpus", "big", "psx", rom]))
+	check("launch args: the emulator default adds no --cpus",
+		LaunchArgs.for_rom("psx", rom, ""), PackedStringArray(["psx", rom]))
+	check("launch args: On puts --cpus big first (qforge-launch reads it there)",
+		LaunchArgs.for_rom("psx", rom, "big"), PackedStringArray(["--cpus", "big", "psx", rom]))
+	check("launch args: Off is --cpus all (beats an emulator default of On)",
+		LaunchArgs.for_rom("psx", rom, "all"), PackedStringArray(["--cpus", "all", "psx", rom]))
+	check("launch args: an unknown value adds nothing",
+		LaunchArgs.for_rom("psx", rom, "fast"), PackedStringArray(["psx", rom]))
 	check("options are saved per system + file, not per card name",
 		LaunchArgs.rom_id("psx", rom), "psx/Crash Team Racing (USA).chd")
+	var launch_conf := "# system=emulator\npsx=duckstation\nps2=armsx2\npsx=other  \npsxx=nope\n"
+	check("launch.conf: last system=emulator line wins, like qforge-launch",
+		LaunchArgs.emulator_for("psx", launch_conf), "other")
+	check("launch.conf: an unmapped system has no emulator",
+		LaunchArgs.emulator_for("gc", launch_conf), "")
+	check("player conf: CPUS read like qforge-launch (last line)",
+		LaunchArgs.conf_cpus("CPUS=all\n# x\nCPUS=big\n"), "big")
+	check("player conf: an unknown CPUS value reads as unset",
+		LaunchArgs.conf_cpus("CPUS=fast\n"), "")
+	check("player conf: CPUS rewritten once, other lines kept",
+		LaunchArgs.conf_with_cpus("# mine\nCPUS=all\nFOO=1\nCPUS=all\n", "big"), "# mine\nFOO=1\nCPUS=big\n")
+	check("player conf: written under XDG_CONFIG_HOME, where qforge-launch looks",
+		LaunchArgs.player_conf_path("duckstation"), OS.get_environment("XDG_CONFIG_HOME") + "/qforge/emulators/duckstation.conf")
+	check("emulator default: off before anything is saved", LaunchArgs.emulator_fast_cores("duckstation"), false)
+	check("emulator default: saving On succeeds", LaunchArgs.set_emulator_fast_cores("duckstation", true), true)
+	check("emulator default: reads back On", LaunchArgs.emulator_fast_cores("duckstation"), true)
+	check("emulator default: the file holds CPUS=big",
+		FileAccess.get_file_as_string(LaunchArgs.player_conf_path("duckstation")), "CPUS=big\n")
+	LaunchArgs.set_emulator_fast_cores("duckstation", false)
+	check("emulator default: Off reads back off", LaunchArgs.emulator_fast_cores("duckstation"), false)
 	quit(1 if failed else 0)
 GD
-  out="$("$GODOT" --headless --script "$T/names_test.gd" 2>&1)"; rc=$?
+  out="$(XDG_CONFIG_HOME="$T/config" "$GODOT" --headless --script "$T/names_test.gd" 2>&1)"; rc=$?
   printf '%s\n' "$out" | grep -E '^  (ok|FAIL) '
   n_ok="$(printf '%s\n' "$out" | grep -c '^  ok ')"; n_bad="$(printf '%s\n' "$out" | grep -c '^  FAIL ')"
   PASS=$((PASS + n_ok)); FAIL=$((FAIL + n_bad))

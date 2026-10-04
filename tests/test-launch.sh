@@ -105,6 +105,7 @@ export QFORGE_LAUNCH_CONF="$LAUNCH_CONF" QFORGE_EMU_CONF_DIR="$(dirname "$EMU_CO
 export QFORGE_EMU_DIR="$T/emus" QFORGE_MOUNTS="$T/mounts" QFORGE_EMU_SEED_DIR="$SEED_DIR"
 # The launcher seeds first-run settings into $HOME: never let a test run reach the real one.
 export HOME="$T/home"
+unset XDG_CONFIG_HOME  # the player conf must be found under $HOME/.config
 export QFORGE_LAUNCH_STATUS="$T/launch.status.default"
 mkdir -p "$HOME"
 
@@ -356,6 +357,38 @@ QFORGE_CPU_ROOT="$T/cpu" start_launcher; wait_for emu_up; touch "$T/stop-emu"; r
 [ "$(code --cpus big psx)" = 2 ] && ok "--cpus big with a missing ROM argument: exit 2" || bad "accepted --cpus big psx"
 grep -rqs '^CPUS=' "$(dirname "$EMU_CONF")" && bad "an emulator conf in the image sets CPUS: pinning must stay the player's choice" \
   || ok "no emulator conf in the image pins anything"
+
+# =================================================================================================
+CASE="player's emulator default (CPUS=)"
+# Settings > Emulators writes ~/.config/qforge/emulators/<emu>.conf; a game's --cpus overrides it
+# (Game settings > QForge: emulator default / on = --cpus big / off = --cpus all).
+PCONF="$HOME/.config/qforge/emulators/duckstation.conf"
+cpus_run() {  # one launch with the given arguments and the fake topology; prints the taskset list or "none"
+  rm -f "$T/taskset.log"; reset_logs
+  QFORGE_CPU_ROOT="$T/cpu" "$LAUNCH" "$@" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+  wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+  touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
+  sed -n 's/^cpus=//p' "$T/taskset.log" 2>/dev/null | grep . || echo none
+}
+mkcpus 0-7 0:284 1:284 2:284 3:284 4:871 5:871 6:871 7:1024
+mkdir -p "$(dirname "$PCONF")"
+rm -f "$PCONF"
+[ "$(cpus_run psx "$ROM")" = none ] && ok "no player conf: not pinned" || bad "pinned with no player conf"
+echo "CPUS=all" > "$PCONF"
+[ "$(cpus_run psx "$ROM")" = none ] && ok "CPUS=all: not pinned" || bad "pinned with CPUS=all"
+printf '# set by Settings > Emulators\nCPUS=big\n' > "$PCONF"
+[ "$(cpus_run psx "$ROM")" = "4,5,6,7" ] && ok "CPUS=big: a game with no override is pinned" || bad "CPUS=big did not pin a ROM launch"
+[ "$(cpus_run --gui duckstation)" = "4,5,6,7" ] && ok "CPUS=big: Open (--gui) is pinned too" || bad "CPUS=big did not pin --gui"
+[ "$(cpus_run --cpus all psx "$ROM")" = none ] && ok "a game's --cpus all beats the emulator's CPUS=big" || bad "--cpus all did not override CPUS=big"
+echo "CPUS=all" > "$PCONF"
+[ "$(cpus_run --cpus big psx "$ROM")" = "4,5,6,7" ] && ok "a game's --cpus big beats the emulator's CPUS=all" || bad "--cpus big did not override CPUS=all"
+printf 'CPUS=fast\n' > "$PCONF"
+[ "$(cpus_run psx "$ROM")" = none ] && grep -q "ignoring" "$T/launch.err" \
+  && ok "an unknown CPUS value is ignored (not pinned) and reported" || bad "a bad CPUS value was not ignored with a warning"
+printf 'CPUS=big\n$(touch %s/pwned)\n' "$T" > "$PCONF"
+cpus_run psx "$ROM" >/dev/null
+[ ! -e "$T/pwned" ] && ok "the player conf is read, never run as shell" || bad "the player conf was executed"
+rm -f "$PCONF"
 
 # =================================================================================================
 CASE="emulator GUI (--gui)"

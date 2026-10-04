@@ -4,7 +4,8 @@ extends ScrollContainer
 ##
 ## One block per catalog emulator: its name, installed vs pinned version, size and licence, and
 ## a button that is Download, Update or Open (the emulator's own UI, `qforge-launch --gui`), plus
-## Delete once installed. Everything goes through /usr/bin/qforge-emu (list / install / remove);
+## Delete once installed, and the player's "Run on fast cores" default for that emulator (every
+## launch of it, Open included, unless a game overrides it). Everything else goes through /usr/bin/qforge-emu (list / install / remove);
 ## the page never downloads or verifies anything itself.
 ##
 ## Built in code on the pattern of OGUI's own settings pages (library_settings_menu.tscn): a
@@ -13,6 +14,7 @@ extends ScrollContainer
 
 const EMU_TOOL := "/usr/bin/qforge-emu"
 const LAUNCHER := "/usr/bin/qforge-launch"
+const LaunchArgs := preload("launch_args.gd")
 const PROGRESS_POLL := 0.5  # s between download progress samples
 const EXIT_TEXT := {
 	3: "Download failed: check the network connection.",
@@ -25,6 +27,7 @@ var launch_manager := load("res://core/global/launch_manager.tres") as LaunchMan
 var notification_manager := load("res://core/global/notification_manager.tres")
 var section_scene := load("res://core/ui/components/section_label.tscn") as PackedScene
 var row_scene := load("res://core/ui/components/card_button_setting.tscn") as PackedScene
+var toggle_scene := load("res://core/ui/components/toggle.tscn") as PackedScene
 var focus_group_scene := load("res://core/systems/input/focus_group.tscn") as PackedScene
 var input_watcher_scene := load("res://core/systems/input/input_watcher.tscn") as PackedScene
 var state_updater_scene := load("res://core/systems/state/state_updater.tscn") as PackedScene
@@ -153,6 +156,13 @@ func _add_emulator(id: String, emu: Dictionary) -> void:
 	if _busy.has(id):
 		main.disabled = true
 
+	var fast = toggle_scene.instantiate()
+	fast.text = "Run on fast cores"
+	fast.description = "Keep %s on the fast CPU cores. Games can override this in their own settings." % name_text
+	fast.button_pressed = LaunchArgs.emulator_fast_cores(id)
+	fast.toggled.connect(_set_fast_cores.bind(id, name_text))
+	_rows.add_child(fast)
+
 	if installed != null:
 		var remove = row_scene.instantiate()
 		remove.text = "Delete " + name_text
@@ -216,6 +226,15 @@ func _remove(id: String, name_text: String, row: Control) -> void:
 	_busy.erase(id)
 	_notify(name_text + (" deleted" if code == 0 else " could not be deleted"))
 	refresh()
+
+
+## The Toggle only emits on the player's input: this never fires while the rows are built.
+func _set_fast_cores(on: bool, id: String, name_text: String) -> void:
+	if LaunchArgs.set_emulator_fast_cores(id, on):
+		logger.info("%s: fast cores by default %s" % [id, "on" if on else "off"])
+	else:
+		logger.warn("could not write " + LaunchArgs.player_conf_path(id))
+		_notify("Could not save the fast cores setting of " + name_text)
 
 
 ## The emulator's own UI, launched like a game so OGUI's overlay and Exit work.

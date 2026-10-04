@@ -1,7 +1,8 @@
 extends ScrollContainer
 
 ## Game settings > QForge: per-ROM options, in the screen the gear on OGUI's launch menu opens.
-## For now one toggle, "Run on fast cores" (qforge-launch --cpus big).
+## For now "Run on fast cores": the emulator's default (Settings > Emulators), On or Off for this
+## game (qforge-launch --cpus big / all on its command line).
 ##
 ## Wired like that screen's own sections (game_settings.tscn): the button replaces the
 ## game-settings state with this page's State on focus and hands the focus to the page when
@@ -14,7 +15,7 @@ const TITLE := "QForge"
 var game_settings_state := load("res://assets/state/states/game_settings.tres") as State
 var settings_state_machine := load("res://assets/state/state_machines/game_settings_state_machine.tres") as StateMachine
 var focus_stack := load("res://core/ui/card_ui/launch/game_settings_focus.tres")
-var toggle_scene := load("res://core/ui/components/toggle.tscn") as PackedScene
+var dropdown_scene := load("res://core/ui/components/dropdown.tscn") as PackedScene
 var button_scene := load("res://core/ui/components/card_button.tscn") as PackedScene
 var focus_group_scene := load("res://core/systems/input/focus_group.tscn") as PackedScene
 var state_updater_scene := load("res://core/systems/state/state_updater.tscn") as PackedScene
@@ -25,10 +26,12 @@ var roms  # the plugin's ROM library (library_roms.gd)
 var button: Control
 var _state := State.new()
 var _focus_group: FocusGroup
-var _fast_cores: Control  # OGUI Toggle
+## Dropdown entries, in order: the game override each one saves.
+const CPUS_CHOICES := ["", "big", "all"]
+
+var _fast_cores: Control  # OGUI Dropdown
 var _section_label: Label
 var _item: LibraryLaunchItem  # the QForge launch item of the game being configured
-var _loading := false  # setting the toggle from the saved value, not from the player
 
 
 ## Add the page and its button to OGUI's game settings screen. False when its layout is not
@@ -87,10 +90,10 @@ func _build_page() -> void:
 	var rows := VBoxContainer.new()
 	margin.add_child(rows)
 
-	_fast_cores = toggle_scene.instantiate()
-	_fast_cores.text = "Run on fast cores"
-	_fast_cores.description = "Keep the emulator on the fast CPU cores. Helps demanding systems (PS2, PS3, Wii U); PS1 does not need it."
-	_fast_cores.toggled.connect(_on_fast_cores_toggled)
+	_fast_cores = dropdown_scene.instantiate()
+	_fast_cores.title = "Run on fast cores"
+	_fast_cores.description = "Keep the emulator on the fast CPU cores. Helps demanding systems (PS2, PS3, Wii U); PS1 does not need it. The default is set per emulator in Settings > Emulators."
+	_fast_cores.item_selected.connect(_on_fast_cores_selected)
 	_focus_group = focus_group_scene.instantiate() as FocusGroup
 	_focus_group.focus_stack = focus_stack
 	rows.add_child(_focus_group)
@@ -131,15 +134,18 @@ func _on_game_settings_entered(_from: State) -> void:
 		button.visible = show
 		_recalculate(button.get_parent())
 	if show:
-		_loading = true
-		_fast_cores.button_pressed = roms.get_fast_cores(_item)
-		_loading = false
+		# Filled on each visit: the default's label follows the emulator's current setting.
+		# select() does not emit item_selected, so loading never saves.
+		_fast_cores.clear()
+		_fast_cores.add_item("Emulator default (%s)" % ("On" if roms.emulator_fast_cores(_item) else "Off"))
+		_fast_cores.add_item("On")
+		_fast_cores.add_item("Off")
+		_fast_cores.select(CPUS_CHOICES.find(roms.get_cpus(_item)))
 
 
-func _on_fast_cores_toggled(on: bool) -> void:
-	if _loading or not _item:
-		return
-	roms.set_fast_cores(_item, on)
+func _on_fast_cores_selected(index: int) -> void:
+	if _item and index >= 0 and index < CPUS_CHOICES.size():
+		roms.set_cpus(_item, CPUS_CHOICES[index])
 
 
 func _on_section_changed(_from: State, to: State) -> void:
