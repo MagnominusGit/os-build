@@ -20,7 +20,8 @@ It publishes nothing and needs no secrets. Triggered by a change to any overlay 
 | job | runner | what it runs |
 |---|---|---|
 | `plan` | x86 | `verify-lock-rows.sh`, then a `git diff` against the base ref → the build matrix |
-| `build` | `ubuntu-24.04-arm` | one job per *changed* package: `build-overlay.sh --only <pkg> --no-index` |
+| `build` | `ubuntu-24.04-arm` | one job per *changed* package: `build-overlay.sh --only <pkg> --no-index` (PRs and dispatches only) |
+| `warm` | `ubuntu-24.04-arm` | on `main` only: restore the overlay cache, `build-overlay.sh --prune-retired`, save it back |
 
 Three properties this leans on:
 
@@ -31,9 +32,13 @@ Three properties this leans on:
 - **Unknown scope widens the check.** A dispatch with no diff base, or a change to the builder
   itself, selects every package rather than none.
 
-Not triggered by a push to `main`: a PR already built what it changed, and a direct-to-`main` package
-edit is caught by the next release build. `workflow_dispatch` forces a pass over a branch that never
-saw a PR.
+**A push to `main` runs `warm`, not the matrix.** `warm` keeps the overlay cache the release builds
+restore (`actions/cache`, key `overlay-aarch64-<hash of every overlay input>`, falling back to the
+previous `main` entry). `build-overlay.sh`'s per-package stamps then rebuild only what moved, as they
+do on a dev box. It has to be `main`: caches are scoped by ref, and a release runs on a **tag**, which
+can read `main`'s caches but saves into a scope no later tag can see. PR caches, fork PRs included,
+are never visible to a release. `workflow_dispatch` on `main` with no package list re-warms by hand;
+on any other branch it forces a proof pass over a branch that never saw a PR.
 
 ### What used to be here
 
@@ -48,8 +53,12 @@ emulation on a workstation, and the store existed so nothing paid that twice. CI
 `ubuntu-24.04-arm` the packages measured `sddm 5m, mesa 5m, gamescope 4m, scx-scheds 4m,
 mangohud 3m, rauc 1m` — well under half an hour for the set (the larger set the tree started from
 took ~34 minutes), against a release card build that already ran 33–41 minutes. Both PAT secrets can
-be deleted; nothing reads them. If reintroducing a cache is ever proposed, re-measure those figures
-first.
+be deleted; nothing reads them.
+
+That half hour is still paid by every release build job, rebuilding identical sources almost every
+time, which is what brought back the `warm` cache. It keeps none of the store's machinery: no registry, no secret,
+no pin, no bot. The stamps decide freshness, and `fetchlock.sh` checks the lock rows against the
+commit's sources the same as ever.
 
 The signing job checks the committed keyring (`ota/rauc/qforge-ca.pem`) against the committed
 release certificate (`ota/rauc/release.cert.pem`). Both are public, so it runs on a fork's PR
@@ -60,7 +69,8 @@ itself as skipped there and runs wherever a PKI is mounted:
 
 ## Today: the release image builds
 
-`.github/workflows/image.yml` is a `workflow_call`-only builder: `make overlay` (compiled in-run) →
+`.github/workflows/image.yml` is a `workflow_call`-only builder: restore the overlay cache `warm`
+saved on `main` → `build-overlay.sh --prune-retired` (a re-index when nothing moved, ~30 min cold) →
 `make toolchain` → `make sdcard`, `make bundle` or `make installer`, with `df -h` into the step
 summary.
 work/ peaks near 30 GB and out/ near 21 GB against ~109 G free on the runner, measured by
@@ -94,8 +104,9 @@ The blocker that once made a release build impossible on a clean runner is worth
 runner has no `work/`, so it rebuilt the overlay, and because our builds are not bit-reproducible
 `rootfs/fetchlock.sh` failed every run — the lock pinned those rows to artifact bytes only the last
 `make relock` machine could reproduce. The lock now pins them to their **sources**, which is the
-claim that survives crossing a machine. A release image's overlay is compiled in the same run that
-publishes it, so those source pins are also its byte provenance. See `packages/README.md`.
+claim that survives crossing a machine. A release image's overlay is built from those same sources —
+in the run itself, or by `main`'s `warm` job under stamps that hash them — so the source pins are also
+its byte provenance. See `packages/README.md`.
 
 ## Not here yet, and why
 

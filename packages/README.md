@@ -37,8 +37,9 @@ Current pins: `inputplumber/` (InputPlumber input daemon; `deps: libiio`).
 ## What CI does with these packages
 
 Nothing is published anywhere. `.github/workflows/overlay.yml` builds the packages a pull request
-touches, purely to prove they still compile, and a release build (`.github/workflows/image.yml`)
-compiles the whole set in the same run that produces the image.
+touches, purely to prove they still compile. On a push to `main` its `warm` job builds the whole set
+into an `actions/cache` entry, and a release build (`.github/workflows/image.yml`) restores that and
+rebuilds only the packages whose stamps no longer match — see `docs/ci.md`.
 
 There used to be more: a GHCR **artifact store** that each package was published to, keyed by
 `packages/inputhash.sh`, plus a per-package `artifact.pin` recording the sha256 of the published
@@ -49,8 +50,8 @@ All of it was sized against the cost of an overlay build **on a dev box**, where
 makes the set take hours. CI does not pay that. On the native `ubuntu-24.04-arm` runners it uses,
 the packages measured `sddm 5m, mesa 5m, gamescope 4m, scx-scheds 4m, mangohud 3m, rauc 1m` —
 **well under 30 minutes for everything**, against a release build
-that already runs 33–41 minutes. It was retired on 2026-08-04. If you are thinking of reintroducing a
-cache, re-measure those numbers first; they are what the decision rests on.
+that already runs 33–41 minutes. It was retired on 2026-08-04. The `warm` cache that replaced it on
+CI is just this directory and its stamps in `actions/cache` — no registry, pin or bot.
 
 **Locally, the cache is the stamps.** `build-overlay.sh` records each package's input hash under
 `work/repo/<arch>/.stamps/<name>.hash` and rebuilds only what moved, so a one-line gamescope patch
@@ -151,6 +152,7 @@ a one-line patch to one package costs one package's build.
 ```
 make overlay                                # rebuild whatever moved, index the repo
 packages/build-overlay.sh --only mesa       # force one package, skip re-examining the rest
+packages/build-overlay.sh --prune-retired   # also purge packages no source.pin names any more
 packages/inputhash.sh packages/mesa         # the digest that decides
 ```
 
@@ -167,7 +169,8 @@ packages/inputhash.sh packages/mesa         # what the tree says now
 to the several artifacts it emitted (`mesa` emits five), and both `genmanifest.sh` and `fetchlock.sh`
 hard-fail without it.
 
-**There is no shared artifact cache.** A GHCR store keyed by the same input hash existed until
+**There is no shared artifact store.** (CI's `warm` cache is a copy of this directory and its stamps,
+not a store: nothing is published or pinned.) A GHCR store keyed by the same input hash existed until
 2026-08-04 — with `oras`, an `artifact.pin` per package, and a bot PR carrying published shas — and
 it was retired because it was built for the emulated cost and CI never paid it. See *What CI does
 with these packages* above for the measurements. `work/repo/<arch>/` is a plain pacman repo, so if
