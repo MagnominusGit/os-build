@@ -303,5 +303,69 @@ else
   rm -f "$T/with-game" "$T/game-stubborn"
 fi
 
+# -------------------------------------------------------------------------------------------------
+# cleanup() must WAIT for gamescope to exit, not just signal it. SDDM's autologin starts the next
+# session the moment the script returns; a gamescope still alive holds /dev/dri/card0, the new one's
+# logind TakeDevice fails EBUSY, the handshake times out and SDDM does not relogin: one client crash
+# becomes a permanently black screen (upstream HW 2026-10-04, the old gamescope took ~0.7 s to go).
+#
+# cleanup() and gs_running() are extracted from the SHIPPED script by name and run in /bin/sh
+# against a fake gamescope started as a CHILD of the same shell -- an exited child stays a zombie
+# until reaped, and a zombie still answers `kill -0`, which is what gs_running() has to see through.
+CASE="gamescope teardown"
+extract() { sed -n "/^$1() {/,/^}/p" "$SESSION"; }
+{ extract gs_running; extract cleanup; } > "$T/cleanup.sh"
+if [ -z "$(extract gs_running)" ] || [ -z "$(extract cleanup)" ]; then
+  bad "could not extract gs_running() and cleanup() from qforge-session"
+else
+  # Prints "<elapsed ms> <fake state>", the state read BEFORE anything reaps the child: "gone" or
+  # "Z" means its fds are closed (DRM released); anything else means it is still running.
+  run_cleanup() {
+    /bin/sh -c '
+      . "$1"
+      GS_RUNDIR="$2/td-rundir"; mkdir -p "$GS_RUNDIR"
+      QFORGE_GAMESCOPE_STOP_TIMEOUT="$4"
+      /bin/sh -c "$3" &
+      GS_PID=$!
+      fake=$GS_PID   # cleanup() clears GS_PID once it is done with it
+      sleep 0.3      # let the fake install its trap
+      t0=$(date +%s%N)
+      cleanup 2>/dev/null
+      t1=$(date +%s%N)
+      st=gone
+      [ -e "/proc/$fake" ] && st=$(sed -n "s/^State:[[:space:]]*\([A-Z]\).*/\1/p" "/proc/$fake/status")
+      echo "$(( (t1 - t0) / 1000000 )) $st"
+      kill -KILL "$fake" 2>/dev/null; wait "$fake" 2>/dev/null
+      exit 0
+    ' sh "$T/cleanup.sh" "$T" "$1" "$2"
+  }
+
+  # A gamescope that takes 1 s to wind down after SIGTERM must be gone when cleanup() returns.
+  read -r ms st < <(run_cleanup 'trap "sleep 1; exit 0" TERM; while :; do sleep 0.1; done' 10)
+  case "$st" in
+    gone|Z) ok "a slow gamescope had exited when cleanup() returned (${ms} ms, state $st)" ;;
+    *)      bad "cleanup() returned after ${ms} ms with gamescope still running (state $st): the next session gets EBUSY on card0" ;;
+  esac
+
+  # gamescope can ignore SIGTERM outright; the script must still exit so SDDM can relogin, and it
+  # must not escalate to SIGKILL. Bound 1 s here.
+  read -r ms st < <(run_cleanup 'trap "" TERM; while :; do sleep 0.1; done' 1)
+  [ "$ms" -ge 900 ] && [ "$ms" -lt 3000 ] \
+    && ok "a gamescope ignoring SIGTERM: gave up after ${ms} ms with the 1 s bound" \
+    || bad "returned after ${ms} ms with a 1 s bound, expected ~1000"
+  case "$st" in
+    gone|Z) bad "the TERM-ignoring fake is gone (state $st): cleanup() escalated, which it must not" ;;
+    *)      ok "...and did not escalate past SIGTERM (state $st)" ;;
+  esac
+
+  # The EXIT trap can run cleanup() after an explicit call; the second must be a clean no-op.
+  out="$(/bin/sh -c '
+    . "$1"; GS_RUNDIR="$2/td-rundir2"; mkdir -p "$GS_RUNDIR"; QFORGE_GAMESCOPE_STOP_TIMEOUT=10
+    /bin/sh -c "exit 0" & GS_PID=$!
+    cleanup && cleanup && echo twice-ok
+  ' sh "$T/cleanup.sh" "$T" 2>&1)"
+  [ "$out" = "twice-ok" ] && ok "a second cleanup() is a clean no-op" || bad "second call misbehaved: '${out:-<nothing>}'"
+fi
+
 printf '\ntest-session.sh: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
