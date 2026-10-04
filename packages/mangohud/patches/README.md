@@ -15,9 +15,10 @@ qforge patches applied on top of the local mangohud PKGBUILD source (MangoHud `0
 0004-Qualcomm-battery-power-now.patch
 0005-RAM-name.patch
 0006-SM8750-Battery.patch
+0007-gpu-fdinfo-catch-unreadable-fdinfo.patch
 ```
 
-These are an upstream Qualcomm / SM85xx patch set, each taken at a pinned upstream revision.
+`0001`-`0006` are an upstream Qualcomm / SM85xx patch set, each taken at a pinned upstream revision.
 Stock MangoHud only knows how to read desktop GPUs (amdgpu/i915/nvidia) and generic
 `BAT*` power supplies, so on an Adreno part the GPU/battery/RAM fields are blank or wrong. The set:
 
@@ -36,6 +37,11 @@ Stock MangoHud only knows how to read desktop GPUs (amdgpu/i915/nvidia) and gene
   wattage, fall back to `power_now`.
 - `0005` — **RAM label.** Show `RAM` instead of `PMEM` for the process-memory HUD element.
 - `0006` — **SM8750 battery remaining-time.** Use `time_to_empty_avg` (seconds) when present.
+- `0007` — **ours: don't abort on an unreadable fdinfo.** `find_fd()` lists the game's
+  `/proc/<pid>/fdinfo`; when the game holds a capability mangoapp lacks, the kernel denies it and
+  the uncaught `ghc::filesystem` error aborted mangoapp every few seconds (blinking, frozen
+  overlay; HW 2026-10-04). Caught now, as the `mangohud-next` code on upstream master already does,
+  so no upstream PR. Made on branch `qforge-0.8.4` in `_ref/MangoHud` (v0.8.4 + 0001-0006).
 
 **SM8650 tuning note:** we ship on SM8650 (Adreno 750), while `0006` was authored for SM8750 and
 `0002` was originally SM8550-only. We take all six anyway — SM8650 shares the Adreno kgsl/devfreq +

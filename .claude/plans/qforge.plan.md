@@ -334,8 +334,10 @@ CAP_WAKE_ALARM in every login session's ambient set, OGUI passed it on to the ga
 (gamescope's child, which drops ambient caps) then got EACCES on the game's /proc/<pid>/fdinfo, an
 uncaught ghc::filesystem error that aborted it every ~4 s. qforge-session now starts the shell under
 `setpriv --inh-caps=-all --ambient-caps=-all` (test). HW ✅ Pocket FIT: overlay steady and updating,
-no mangoapp abort. Possible follow-up: MangoHud patch to catch that error (any game with capabilities
-would still crash it), worth upstreaming.
+no mangoapp abort. Also MangoHud patch 0007 (ours): find_fd() catches the filesystem error, so a
+game holding capabilities can no longer crash mangoapp (upstream master already does this in
+mangohud-next, no PR). HW ✅: with the old session (game has CAP_WAKE_ALARM) the overlay stays up,
+0 aborts.
 Still to handle: OGUI's search only covers Installed / All Games;
 the tab refreshes twice at start (two library loads); upstream `remove_tab` resets `current_tab`
 on the wrong condition (`size > current_tab`).

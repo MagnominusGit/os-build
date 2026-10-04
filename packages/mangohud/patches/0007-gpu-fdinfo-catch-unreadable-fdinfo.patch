@@ -1,0 +1,148 @@
+From a1284f8dc6aff1254ca110732634280fa1a1398f Mon Sep 17 00:00:00 2001
+From: Philippe Simons <simons.philippe@gmail.com>
+Date: Sun, 4 Oct 2026 22:29:47 +0200
+Subject: [PATCH] gpu_fdinfo: don't abort when the game's fdinfo cannot be
+ listed
+
+find_fd() lists /proc/<pid>/fdinfo of the game gamescope reports. When
+the game holds a capability mangoapp lacks (e.g. the CAP_WAKE_ALARM that
+pam_systemd puts in a login session's ambient set, which gamescope's own
+file capability drops for mangoapp), the kernel denies that listing and
+ghc::filesystem throws EACCES. Nothing caught it, so mangoapp aborted,
+gamescope respawned it, and the overlay blinked with frozen numbers.
+Catch the error and carry on without fdinfo for that game, as the
+mangohud-next implementation on master already does.
+---
+ src/gpu_fdinfo.cpp | 98 ++++++++++++++++++++++++----------------------
+ 1 file changed, 52 insertions(+), 46 deletions(-)
+
+diff --git a/src/gpu_fdinfo.cpp b/src/gpu_fdinfo.cpp
+index 4816786..4b5c521 100644
+--- a/src/gpu_fdinfo.cpp
++++ b/src/gpu_fdinfo.cpp
+@@ -26,51 +26,39 @@ void GPU_fdinfo::find_fd()
+     std::set<std::string> client_ids;
+     int total = 0;
+ 
+-    for (const auto& entry : fs::directory_iterator(path)) {
+-        auto fd_path = entry.path().string();
+-        auto file = std::ifstream(fd_path);
++    // The game may hold capabilities mangohud lacks (or exit meanwhile): its
++    // fdinfo is then unreadable, which must not abort the whole process.
++    try {
++        for (const auto& entry : fs::directory_iterator(path)) {
++            auto fd_path = entry.path().string();
++            auto file = std::ifstream(fd_path);
+ 
+-        if (!file.is_open())
+-            continue;
++            if (!file.is_open())
++                continue;
+ 
+-        std::string driver, pdev, client_id;
++            std::string driver, pdev, client_id;
+ 
+-        for (std::string line; std::getline(file, line);) {
+-            size_t colon = line.find(":");
++            for (std::string line; std::getline(file, line);) {
++                size_t colon = line.find(":");
+ 
+-            if (line[0] == ' ' || line[0] == '\t')
+-                continue;
++                if (line[0] == ' ' || line[0] == '\t')
++                    continue;
+ 
+-            if (colon == std::string::npos || colon + 2 >= line.length())
+-                continue;
++                if (colon == std::string::npos || colon + 2 >= line.length())
++                    continue;
+ 
+-            auto key = line.substr(0, colon);
+-            auto val = line.substr(key.length() + 2);
+-
+-            if (key == "drm-driver")
+-                driver = val;
+-            else if (key == "drm-pdev")
+-                pdev = val;
+-            else if (key == "drm-client-id")
+-                client_id = val;
+-        }
++                auto key = line.substr(0, colon);
++                auto val = line.substr(key.length() + 2);
+ 
+-        if ((module == "msm_dpu" || module == "msm_drm") && driver == "msm") {
+-            total++;
+-            SPDLOG_TRACE(
+-                "driver = \"{}\", pdev = \"{}\", "
+-                "client_id = \"{}\", client_id_exists = \"{}\"",
+-                driver, pdev,
+-                client_id, client_ids.find(client_id) != client_ids.end()
+-            );
++                if (key == "drm-driver")
++                    driver = val;
++                else if (key == "drm-pdev")
++                    pdev = val;
++                else if (key == "drm-client-id")
++                    client_id = val;
++            }
+ 
+-            if (
+-                driver.empty() || client_id.empty() ||
+-                client_ids.find(client_id) != client_ids.end()
+-            )
+-                continue;
+-        } else {
+-            if (!driver.empty() && driver == module) {
++            if ((module == "msm_dpu" || module == "msm_drm") && driver == "msm") {
+                 total++;
+                 SPDLOG_TRACE(
+                     "driver = \"{}\", pdev = \"{}\", "
+@@ -78,18 +66,36 @@ void GPU_fdinfo::find_fd()
+                     driver, pdev,
+                     client_id, client_ids.find(client_id) != client_ids.end()
+                 );
++
++                if (
++                    driver.empty() || client_id.empty() ||
++                    client_ids.find(client_id) != client_ids.end()
++                )
++                    continue;
++            } else {
++                if (!driver.empty() && driver == module) {
++                    total++;
++                    SPDLOG_TRACE(
++                        "driver = \"{}\", pdev = \"{}\", "
++                        "client_id = \"{}\", client_id_exists = \"{}\"",
++                        driver, pdev,
++                        client_id, client_ids.find(client_id) != client_ids.end()
++                    );
++                }
++
++                if (
++                    driver.empty() || client_id.empty() ||
++                    driver != module || pdev != pci_dev ||
++                    client_ids.find(client_id) != client_ids.end()
++                )
++                    continue;
+             }
+ 
+-            if (
+-                driver.empty() || client_id.empty() ||
+-                driver != module || pdev != pci_dev ||
+-                client_ids.find(client_id) != client_ids.end()
+-            )
+-                continue;
++            client_ids.insert(client_id);
++            open_fdinfo_fd(fd_path);
+         }
+-
+-        client_ids.insert(client_id);
+-        open_fdinfo_fd(fd_path);
++    } catch (const fs::filesystem_error& ex) {
++        SPDLOG_DEBUG("failed to iterate {}: {}", path.string(), ex.what());
+     }
+ 
+     SPDLOG_TRACE(
+-- 
+2.55.0
+
