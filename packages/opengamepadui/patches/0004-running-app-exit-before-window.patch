@@ -1,4 +1,4 @@
-From 1b407d8cda2c11e724162e8d803de7ab6ad09de0 Mon Sep 17 00:00:00 2001
+From ec3eb81757520387d1f22e71cdbbaae74e2e6f4b Mon Sep 17 00:00:00 2001
 From: Philippe Simons <simons.philippe@gmail.com>
 Date: Sun, 4 Oct 2026 14:45:20 +0200
 Subject: [PATCH] fix(RunningApp): detect apps that exit before creating a
@@ -9,29 +9,29 @@ and the is_running() checks that move an app to STOPPED only run for a
 known type. An app that exits before creating any window, such as a
 launcher script that fails at once, therefore stays in the running list
 forever: the loading screen never goes away and EXIT lifecycle hooks
-never run. Count failed is_running() checks while the type is still
-unknown too, as the X11 and Wayland paths do.
+never run. While the type is still unknown, mark the app stopped as soon
+as is_running() fails; no grace period is needed, as the tracked process
+(the reaper) only exits once all of the app's processes have.
 
 (cherry picked from commit e5c0bd4d7b52616502981f8e9d295abfabaadb12)
 ---
- core/systems/launcher/running_app.gd | 9 +++++++++
- 1 file changed, 9 insertions(+)
+ core/systems/launcher/running_app.gd | 8 ++++++++
+ 1 file changed, 8 insertions(+)
 
 diff --git a/core/systems/launcher/running_app.gd b/core/systems/launcher/running_app.gd
-index 6684ba0a..fefd22ca 100644
+index 6684ba0a..82581320 100644
 --- a/core/systems/launcher/running_app.gd
 +++ b/core/systems/launcher/running_app.gd
-@@ -178,6 +178,15 @@ func update(all_windows: PackedInt64Array, app_pids: PackedInt64Array) -> void:
+@@ -178,6 +178,14 @@ func update(all_windows: PackedInt64Array, app_pids: PackedInt64Array) -> void:
  			if self.app_type != APP_TYPE.UNKNOWN:
  				app_type_detected.emit()
  				self.update(all_windows, app_pids)
 +				return
 +			# The app may exit before it ever creates a window (e.g. a launcher
 +			# that fails). Without this check its type stays unknown and the app
-+			# is never detected as stopped.
++			# is never detected as stopped. No grace period: the tracked process
++			# (the reaper) only exits once all of the app's processes have.
 +			if not is_running():
-+				not_running_count += 1
-+			if not_running_count > 3:
 +				state = STATE.STOPPED
 +				app_killed.emit()
  		APP_TYPE.X11:

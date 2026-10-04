@@ -18,7 +18,8 @@
 #   0004  ours, for upstream: an app that exits before creating a window never left the running
 #         list (its type stays unknown, and only X11/Wayland apps get the is_running() checks), so
 #         a ROM whose emulator is not installed hung on the loading screen and the plugin's EXIT
-#         hook never ran. Count failed is_running() checks for unknown-type apps too.
+#         hook never ran. While the type is unknown, mark the app stopped on the first failed
+#         is_running() check (the reaper it tracks outlives every process of the app), ~1 s.
 #
 # So the PKGBUILD keeps upstream's aarch64 engine binary, Rust core and reaper from the release
 # tarball, and rebuilds only opengamepad-ui.pck from the tagged source plus these patches. Drop a

@@ -136,6 +136,10 @@ class LaunchFailure extends AppLifecycleHook:
 		dialog.cancel_visible = false
 		dialog.open(null, msg, "OK")
 		await dialog.choice_selected
+		# The dialog is shared: put its Cancel button back, but only once it has faded out, or
+		# the button reappears on screen while it closes.
+		if dialog.visible:
+			await dialog.visibility_changed
 		dialog.cancel_visible = cancel_was_visible
 
 	## The catalog's display name for an emulator id (qforge-emu list), or the id itself.
