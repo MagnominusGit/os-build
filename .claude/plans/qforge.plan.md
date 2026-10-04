@@ -246,14 +246,21 @@ upstream reports to the Backlog; the SM8650 boot stays a Phase 0/1 item.
 
 First steps, host-testable before any GDScript: `qforge-launch --gui <emulator>` (no-ROM mode
 for the store's Open; done 2026-10-04, `GUI_ARGS` in the emulator conf, DuckStation
-`-bigpicture -fullscreen`; host-tested, HW check of the Big Picture UI still to do), and a first
+`-bigpicture -fullscreen`; HW ✅ 2026-10-04 on the Pocket ACE: Big Picture opens with no ROM, its
+own Exit returns to OGUI, mount released), and a first
 `catalog.json` with DuckStation pinned to a
 numbered release (v0.1-11894 or newer), re-tested on HW (launch, pad, every exit path, memory card,
 resume state). Catalog done 2026-10-04: `apps/ogui-qforge-plugin/catalog.json` (schema 1: name,
 systems, github owner/repo, tag, anchored asset regex, sha256, size, homepage, licence; launch
 details stay in the image's emulator conf), DuckStation pinned to v0.1-11894 (sha256 = GitHub's
 digest), checked by `tests/test-catalog.sh` (`QFORGE_NET_TEST=1` also re-checks every pin against
-GitHub). The pinned AppImage is in `out/emulators/`; its HW re-test is still to do. Then the tab prototype: can a plugin add a PSX tab that reuses OGUI's game grid.
+GitHub). HW 2026-10-04, Pocket ACE, v0.1-11894 from a card: first-run seed, launch, OGUI Exit
+(double SIGTERM, clean, mount released); DuckStation keeps every seeded value when it rewrites
+settings.ini (drops our comments, adds [UI] geometry). Memory card and resume state not checked
+(game left during the intro).
+OGUI only reloads its library at start and from Settings > Library > Refresh Library: no D-Bus
+service, signal or file watch. The plugin runs in-process, so it calls
+`library_manager.reload_library()` itself after a rescan or a download. Then the tab prototype: can a plugin add a PSX tab that reuses OGUI's game grid.
 
 Decided 2026-10-03: one OGUI card per ROM, grouped in one library tab per system (PSX, PS2, ...),
 and emulators fetched on demand. Both live in ONE plugin (`qforge`), since the ROM card is what
