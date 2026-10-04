@@ -24,7 +24,7 @@ func _ready() -> void:
 ## When a ROM's launch fails because its emulator is not installed (or its AppImage did not
 ## mount), tell the player. OGUI never sees qforge-launch's exit code (games run through its
 ## reaper), so qforge-launch leaves the reason in a status file this EXIT hook reads. The launch
-## itself is never held back: downloads happen in the QForge store, not on a card.
+## itself is never held back: downloads happen in Settings > Emulators, not on a card.
 func get_app_lifecycle_hooks() -> Array[AppLifecycleHook]:
 	var hooks: Array[AppLifecycleHook] = [LaunchFailure.new()]
 	return hooks
@@ -122,9 +122,9 @@ class LaunchFailure extends AppLifecycleHook:
 		var msg: String
 		match words[0]:
 			"not-installed":
-				msg = "%s is not installed.\nDownload it from the QForge store first." % name
+				msg = "%s is not installed.\nDownload it in Settings > Emulators first." % name
 			"mount-failed":
-				msg = "%s could not be started.\nTry downloading it again from the QForge store." % name
+				msg = "%s could not be started.\nDelete it and download it again in Settings > Emulators." % name
 			_:
 				return
 		logger.info("%s: %s %s" % [item.name, words[0], words[1]])
