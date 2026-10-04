@@ -19,6 +19,8 @@ var scroller_scene := load("res://core/systems/input/scroller_joystick.tscn") as
 var roms  # our Library subclass; untyped so roms.SYSTEMS resolves at runtime
 ## system -> {"tab": ScrollContainer, "grid": HFlowContainer}
 var _tabs := {}
+var _emulators_button: Control
+var _emulators_page: Control
 
 
 # No _init override: Plugin._init adds the node to the "plugin" group.
@@ -28,12 +30,71 @@ func _ready() -> void:
 	add_library(roms)
 	library_manager.library_loaded.connect(_on_library_loaded)
 	logger.info("ROM library registered: %s" % library_manager.has_library(LIBRARY_ID))
+	# The settings menu is not ready yet when plugins initialise: add our page a frame later.
+	await get_tree().process_frame
+	_add_emulators_page()
 
 
 func unload() -> void:
 	for system in _tabs.keys():
 		tabs_state.remove_tab(_tab_text(system))
 	_tabs.clear()
+	for node in [_emulators_button, _emulators_page]:
+		if is_instance_valid(node):
+			node.queue_free()
+
+
+## Settings > Emulators: a button in OGUI's settings list (after Library) and its page, wired
+## like the built-in ones in settings_menu.tscn -- pressing the button replaces the settings
+## state with the page's own (focus moves into the page), focusing it shows the page's tab and
+## sets the section title.
+func _add_emulators_page() -> void:
+	var settings: Node = get_tree().get_first_node_in_group("settings_menu")
+	if not settings:
+		logger.warn("OGUI settings menu not found; no Emulators page")
+		return
+	var buttons: Node = settings.find_child("SettingButtonsContainer", true, false)
+	var tabs: TabContainer = settings.find_child("TabContainer", true, false) as TabContainer
+	var title_box: Node = settings.find_child("TitleContainer", true, false)
+	var title: Label = title_box.find_child("SectionLabel", true, false) as Label if title_box else null
+	if not (buttons and tabs and title):
+		logger.warn("OGUI settings menu layout not found; no Emulators page")
+		return
+
+	var page_state := State.new()
+	page_state.name = "settings_qforge_emulators"
+	_emulators_page = load(plugin_base.path_join("emulators_page.gd")).new()
+	_emulators_page.setup(page_state)
+	tabs.add_child(_emulators_page)
+
+	_emulators_button = load("res://core/ui/components/card_button.tscn").instantiate()
+	_emulators_button.name = "QForgeEmulatorsButton"
+	_emulators_button.text = "Emulators"
+	var push = load("res://core/systems/state/state_updater.tscn").instantiate()
+	push.state_machine = load("res://assets/state/state_machines/settings_state_machine.tres")
+	push.state = page_state
+	push.action = 3  # StateUpdater.ACTION.REPLACE, as the built-in buttons
+	push.on_signal = "button_up"
+	_emulators_button.add_child(push)
+	var tab_setter := TabSetter.new()
+	tab_setter.target = tabs
+	tab_setter.tab_number = _emulators_page.get_index()
+	tab_setter.on_signal = "focus_entered"
+	_emulators_button.add_child(tab_setter)
+	var text_setter := TextSetter.new()
+	text_setter.target = title
+	text_setter.text = "Emulators"
+	text_setter.on_signal = "focus_entered"
+	_emulators_button.add_child(text_setter)
+
+	var library_button := buttons.find_child("LibraryButton", false, false)
+	buttons.add_child(_emulators_button)
+	if library_button:
+		buttons.move_child(_emulators_button, library_button.get_index() + 1)
+	var focus_group := buttons.find_child("FocusGroup", false, false)
+	if focus_group:
+		focus_group.recalculate_focus()
+	logger.info("Settings > Emulators added")
 
 
 func _on_library_loaded(library_id: String) -> void:
@@ -101,7 +162,7 @@ func _make_tab() -> Dictionary:
 
 ## As library_menu.gd's _build_card: pressing the card opens OGUI's game launch menu.
 func _build_card(item: LibraryItem) -> Control:
-	var card := card_scene.instantiate()
+	var card = card_scene.instantiate()
 	await card.set_library_item(item)
 	var on_button_up := func():
 		launcher_state.data = {"item": item}

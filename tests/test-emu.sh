@@ -137,6 +137,8 @@ grep -q 'Dummy-x86_64' "$W/curl.log" && bad "fetched the asset the pattern does 
 api_line="$(grep 'api.github.com' "$W/curl.log" | head -1)"
 [[ $api_line == *"--proto =https"* ]] && ok "the API call is https only" || bad "API curl lacks --proto =https"
 [[ $dl == *"--fail"* ]] && ok "curl --fail: an HTTP error is not saved as the AppImage" || bad "download curl lacks --fail"
+[[ $api_line == *"--retry-all-errors"* && $dl == *"--retry-all-errors"* ]] \
+  && ok "both calls retry every transient error (Wi-Fi drops: curl 55 on HW)" || bad "a curl call lacks --retry-all-errors"
 
 CASE="install again (already current)"
 rm -f "$W/curl.log"

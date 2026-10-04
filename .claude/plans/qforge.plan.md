@@ -87,6 +87,7 @@ Remaining:
 Decisions (2026-10-02, from reading OGUI v0.46.1 source in `_ref/OpenGamepadUI`):
 - **No OGUI plugin for now** (superseded 2026-10-03: the Phase 4 QForge plugin). Only OGUI's built-in screens; QForge-only controls (fan curve,
   scheduler, update channel) stay CLI/SSH (`qforge-scheduler`, `qforge-update`, powerd D-Bus).
+  Update channel / OS updates: superseded 2026-10-04 by a QForge OSPlatform in OGUI (Phase 5).
 - **No per-game (per-ROM) layer.** The upstream tweaks layer (game-tweaks.json, qforge_perf, the
   per-game `scheduler` override) existed for x86 titles under FEX/Proton; emulators carry their own
   per-game settings (Phase 3). Profile, GPU clock, CPU scheduler, fan curve stay system-wide.
@@ -262,7 +263,23 @@ Part 2 started 2026-10-04: `/usr/bin/qforge-emu list | install <emu> | remove <e
 asset's digest + size equal the catalog's and the URL is https; curl `--proto =https
 --proto-redir =https` into a .part; sha256 + size again; rename to `<tag>.AppImage`, flip
 `current` atomically, keep the previous AppImage, delete older ones. Real install from GitHub
-verified on the host (DuckStation, 86 MB, 9 s). Plugin side (pre-launch popup, store screen) next.
+verified on the host (DuckStation, 86 MB, 9 s).
+Plugin side done 2026-10-04 (HW ✅ Pocket ACE):
+- No pre-launch check (decided): a ROM card always launches; when qforge-launch exits 3 it leaves
+  `not-installed|mount-failed <emu>` in `$XDG_RUNTIME_DIR/qforge-launch.status`, and the plugin's
+  EXIT hook shows OGUI's shared dialog ("DuckStation is not installed. Download it from the QForge
+  store first."). Needed OGUI patch 0004 (#562): an app that exits before any window was never
+  seen as stopped (loading screen hung); now stopped on the first failed check, ~0.6 s.
+- Store = Settings > Emulators (decided: not OGUI's dormant Store button, which is meant for game
+  stores): the plugin injects a button after Library + a page into OGUI's settings menu at runtime
+  (`emulators_page.gd`, built like library_settings_menu.tscn: own State, StateUpdater REPLACE,
+  TabSetter, TextSetter). Per emulator: Download / Update / Open (`qforge-launch --gui` via
+  LaunchManager) and Delete (confirm dialog); progress from the .part size; rows rebuilt after
+  each action with the focus handed back.
+- qforge-emu retries every transient curl error (`--retry-all-errors`): a curl 55 (Wi-Fi drop)
+  failed the first in-UI download on the ACE.
+Still open in part 2/3: an OGUI notification when the hosted catalog offers an update (needs the
+hosted catalog, Phase 5); the plugin fetching that catalog into `~/.cache/qforge/`.
 HW 2026-10-04, Pocket ACE, v0.1-11894 from a card: first-run seed, launch, OGUI Exit
 (double SIGTERM, clean, mount released); DuckStation keeps every seeded value when it rewrites
 settings.ini (drops our comments, adds [UI] geometry). Memory card and resume state not checked
@@ -532,6 +549,17 @@ work that needs it, not before.
   exists to mount once QForge runs from internal UFS), inherited from the Steam library requirement that no longer
   applies; ROM cards are usually exfat. Decide whether to automount exfat/vfat too.
 
+- **OS update UI = a QForge OSPlatform in OGUI** (noted 2026-10-04, to design with the update
+  server). OGUI picks an OS platform from `/etc/os-release` `ID` (hard-coded list in
+  `core/global/platform.gd`: steamos, chimeraos, manjaro, nixos, bazzite); its `ready(root)` may
+  change the scene tree. The NixOS one (`core/platform/os/nixos.gd`) is the model: it removes OGUI's
+  own updater (which on QForge only knows the x86 `update.zip`, hence `--skip-update-pack`) and,
+  when its `os-updater` script exists, adds an update section to Settings > General: check, apply
+  (progress), auto-update toggle and a branch dropdown, all via `Command` on that script.
+  For QForge: OGUI patch adding `core/platform/os/qforge.{gd,tres}` + `ID=qforge` detection,
+  driving `qforge-update` (`check` / apply with `N%` / `channels` / `set-channel`; its contract is
+  already OGUI-shaped). Upstreamable like the other distro platforms, and the natural home for
+  other QForge defaults (theme, startup actions). Replaces "update channel stays CLI/SSH" (Phase 2).
 - Update server via `ota/setup-server.sh`; replace the `updates.qforge.invalid` placeholder in
   `qforge-update`, `installer/release-info`, `installer/netcfg`.
 - CI release secrets `RAUC_CERT_PEM` / `RAUC_KEY_PEM` from `~/qforge-pki`.
@@ -542,7 +570,8 @@ work that needs it, not before.
 
 - PowerStation: order SetCoresEnabled by `cpu_capacity` instead of CPU number (Qualcomm numbers
   cores slowest-first; other SoCs do not); plus our patches 0001/0002 (`_ref/PowerStation` qforge-arm).
-- OpenGamepadUI: SENT 2026-10-03 as #559 / #560 / #561.
+- OpenGamepadUI: SENT 2026-10-03 as #559 / #560 / #561; #562 (our patch 0004, apps that exit
+  before creating a window) sent 2026-10-04.
 - OpenGamepadUI: the library menu queues one full refresh per library_item_added (2,000 items =
   2,001 refreshes, ~24 s); coalesce them (Phase 4c option C).
 - DuckStation: AppRun is a symlink, so on a system without Qt, Qt's applicationDirPath misses

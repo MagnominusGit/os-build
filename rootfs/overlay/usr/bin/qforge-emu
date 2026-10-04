@@ -95,8 +95,12 @@ def installed_tag(emu):
 
 
 def curl_base():
+    # --retry-all-errors: handheld Wi-Fi drops connections (curl 55 seen on HW, 2026-10-04), and
+    # plain --retry only covers timeouts and HTTP 408/429/5xx. Retrying is safe: nothing is
+    # trusted until the sha256 check, and the download restarts its .part from zero.
     return [CURL, "--fail", "--silent", "--show-error", "--location",
-            "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "20"]
+            "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "20",
+            "--retry", "3", "--retry-all-errors", "--retry-delay", "2"]
 
 
 def release_asset(e):
@@ -126,7 +130,7 @@ def download(url, part, size):
     """curl into `part`, printing forward-only N% (capped at 99 until verified)."""
     shown = -1
     try:
-        proc = subprocess.Popen(curl_base() + ["--retry", "2", "-o", part, url],
+        proc = subprocess.Popen(curl_base() + ["-o", part, url],
                                 stdout=subprocess.DEVNULL)
     except OSError as err:
         raise Fail(EXIT_NET, f"cannot run curl: {err}")
