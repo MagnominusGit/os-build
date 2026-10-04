@@ -301,7 +301,14 @@ all providers, so two same-named ROMs merged into one item (the second was lost)
 now names a colliding ROM "Tetris (PlayStation)" (other system) or "Tetris (CUE)" (same system),
 compared without case; and each scan first removes our launch items whose ROM is gone or whose
 name now means another file (`load_library` only adds). Tested in a stock headless Godot
-(`QFORGE_GODOT=<godot 4.7 x86_64>`, skipped without). Still to handle: OGUI's search only covers Installed / All Games;
+(`QFORGE_GODOT=<godot 4.7 x86_64>`, skipped without). Per-game fast cores done 2026-10-04 (plugin 0.1.3): Game settings > QForge (the gear on a ROM's
+launch menu; button + page injected at runtime like Settings > Emulators, shown for QForge ROMs
+only) holds "Run on fast cores". Saved in OGUI's settings.cfg `[qforge.fast_cores]`, key
+`<system>/<file>` (not the card name, which can change), absent = off; flipping it rewrites the
+launch item's args (`--cpus big` first), which OGUI reads at each launch. HW ✅ Pocket FIT
+(SM8650): on -> `qforge-launch --cpus big`, DuckStation affinity 2-7; off -> 0-7, key erased;
+on survives a session restart (toggle shown on, pinned 2-7).
+Still to handle: OGUI's search only covers Installed / All Games;
 the tab refreshes twice at start (two library loads); upstream `remove_tab` resets `current_tab`
 on the wrong condition (`size > current_tab`).
 OGUI only reloads its library at start and from Settings > Library > Refresh Library: no D-Bus

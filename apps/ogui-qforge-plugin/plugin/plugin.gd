@@ -21,6 +21,7 @@ var roms  # our Library subclass; untyped so roms.SYSTEMS resolves at runtime
 var _tabs := {}
 var _emulators_button: Control
 var _emulators_page: Control
+var _game_settings_page: Control
 
 
 # No _init override: Plugin._init adds the node to the "plugin" group.
@@ -33,6 +34,7 @@ func _ready() -> void:
 	# The settings menu is not ready yet when plugins initialise: add our page a frame later.
 	await get_tree().process_frame
 	_add_emulators_page()
+	_add_game_settings_page()
 
 
 func unload() -> void:
@@ -42,6 +44,20 @@ func unload() -> void:
 	for node in [_emulators_button, _emulators_page]:
 		if is_instance_valid(node):
 			node.queue_free()
+	if is_instance_valid(_game_settings_page):
+		_game_settings_page.detach()
+
+
+## Game settings > QForge (the gear on a ROM's launch menu): per-game options.
+func _add_game_settings_page() -> void:
+	var menu: Node = get_tree().root.find_child("GameSettingsMenu", true, false)
+	var page = load(plugin_base.path_join("game_settings_page.gd")).new()
+	if not menu or not page.attach(menu, roms):
+		page.free()
+		logger.warn("OGUI game settings layout not found; no per-game QForge options")
+		return
+	_game_settings_page = page
+	logger.info("Game settings > QForge added")
 
 
 ## Settings > Emulators: a button in OGUI's settings list (after Library) and its page, wired

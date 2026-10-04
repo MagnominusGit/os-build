@@ -75,7 +75,7 @@ want=(); for f in "$SRC"/*; do want+=("plugins/qforge/$(basename "$f")"); done
 # OGUI keys its library by item name across every provider: two ROMs with the same name became one
 # card and the second ROM was lost; a rescan never dropped a deleted ROM. rom_names.gd has no OGUI
 # types, so a stock Godot runs it (QFORGE_GODOT=<godot 4 binary>, or godot on PATH; skipped without).
-CASE="rom names"
+CASE="rom helpers"
 GODOT="${QFORGE_GODOT:-$(command -v godot || true)}"
 if [ -z "$GODOT" ]; then
   printf '  skip %s -- no Godot (set QFORGE_GODOT to a Godot 4 binary)\n' "$CASE"
@@ -84,6 +84,7 @@ else
 extends SceneTree
 
 const RomNames := preload("$SRC/rom_names.gd")
+const LaunchArgs := preload("$SRC/launch_args.gd")
 const SYSTEMS := {"psx": "PlayStation", "ps2": "PlayStation 2"}
 var failed := 0
 
@@ -125,6 +126,14 @@ func _init() -> void:
 		RomNames.stale({"A": "/r/A.chd", "B": "/r/B.chd"}, {"A": "/r/A.chd"}), PackedStringArray(["B"]))
 	check("a name now meaning another file is dropped (re-added with the new ROM)",
 		RomNames.stale({"A": "/r/A.cue"}, {"A": "/r/A.chd"}), PackedStringArray(["A"]))
+	# Game settings > QForge > Run on fast cores = qforge-launch --cpus big, saved per ROM file.
+	var rom := "/home/player/roms/psx/Crash Team Racing (USA).chd"
+	check("launch args: plain launch pins nothing",
+		LaunchArgs.for_rom("psx", rom, false), PackedStringArray(["psx", rom]))
+	check("launch args: fast cores put --cpus big first (qforge-launch reads it there)",
+		LaunchArgs.for_rom("psx", rom, true), PackedStringArray(["--cpus", "big", "psx", rom]))
+	check("options are saved per system + file, not per card name",
+		LaunchArgs.rom_id("psx", rom), "psx/Crash Team Racing (USA).chd")
 	quit(1 if failed else 0)
 GD
   out="$("$GODOT" --headless --script "$T/names_test.gd" 2>&1)"; rc=$?

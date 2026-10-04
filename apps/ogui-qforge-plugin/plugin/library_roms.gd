@@ -7,6 +7,13 @@ const LAUNCHER := "/usr/bin/qforge-launch"
 
 # Relative to this script, so it resolves under res://plugins/qforge/ once the zip is loaded.
 const RomNames := preload("rom_names.gd")
+const LaunchArgs := preload("launch_args.gd")
+
+## OGUI settings section of the per-game "Run on fast cores" choice: key = ROM id
+## (launch_args.gd), value true. Absent = off, the default (nothing ships pinned).
+const FAST_CORES_SECTION := "qforge.fast_cores"
+
+var settings_manager := load("res://core/global/settings_manager.tres") as SettingsManager
 
 ## Systems the image can launch. Tab label, and the file extensions that are a game. An .m3u
 ## playlist wins over the disc images it lists, so a multi-disc game is one card.
@@ -110,15 +117,42 @@ func _m3u_members(path: String) -> PackedStringArray:
 func _launch_item(name: String, system: String, path: String) -> LibraryLaunchItem:
 	var item := LibraryLaunchItem.new()
 	item.name = name
-	item.provider_app_id = system + "/" + path.get_file()
+	item.provider_app_id = LaunchArgs.rom_id(system, path)
 	item.command = LAUNCHER
-	# An array, not a command line: a ROM path with spaces stays one argument.
-	item.args = PackedStringArray([system, path])
+	item.args = LaunchArgs.for_rom(system, path, _fast_cores_saved(item.provider_app_id))
 	item.tags = PackedStringArray(["qforge", system])
 	item.categories = PackedStringArray(["game"])
 	item.installed = true
 	item.metadata = {"system": system, "rom": path}
 	return item
+
+
+func _fast_cores_saved(rom_id: String) -> bool:
+	return settings_manager.get_value(FAST_CORES_SECTION, rom_id, false) == true
+
+
+## Whether this ROM runs on the fast cores (Game settings > QForge).
+func get_fast_cores(item: LibraryLaunchItem) -> bool:
+	return _fast_cores_saved(item.provider_app_id)
+
+
+## Save the choice and rewrite the item's arguments: OGUI builds the command line from them at
+## each launch, so the next launch follows without a rescan.
+func set_fast_cores(item: LibraryLaunchItem, on: bool) -> void:
+	if on:
+		settings_manager.set_value(FAST_CORES_SECTION, item.provider_app_id, true)
+	elif settings_manager.get_value(FAST_CORES_SECTION, item.provider_app_id) != null:
+		# ConfigFile logs an error when erasing a key that is not there.
+		settings_manager.erase_section_key(FAST_CORES_SECTION, item.provider_app_id)
+	# A rescan may have replaced the item the settings page holds: update the library's live one
+	# too, by ROM id (its name can have changed).
+	var args := LaunchArgs.for_rom(item.metadata["system"], item.metadata["rom"], on)
+	item.args = args
+	for app in library_manager.get_library_items([]):
+		var live := app.get_launch_item(library_id)
+		if live and live != item and live.provider_app_id == item.provider_app_id:
+			live.args = args
+	logger.info("%s: fast cores %s" % [item.name, "on" if on else "off"])
 
 
 class LaunchFailure extends AppLifecycleHook:
