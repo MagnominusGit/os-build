@@ -5,6 +5,9 @@ extends Library
 
 const LAUNCHER := "/usr/bin/qforge-launch"
 
+# Relative to this script, so it resolves under res://plugins/qforge/ once the zip is loaded.
+const RomNames := preload("rom_names.gd")
+
 ## Systems the image can launch. Tab label, and the file extensions that are a game. An .m3u
 ## playlist wins over the disc images it lists, so a multi-disc game is one card.
 const SYSTEMS := {
@@ -36,12 +39,35 @@ func roms_dir() -> String:
 
 func get_library_launch_items() -> Array[LibraryLaunchItem]:
 	var started := Time.get_ticks_msec()
-	var items: Array[LibraryLaunchItem] = []
+	var roms: Array[Dictionary] = []
+	var system_names := {}
 	for system in SYSTEMS:
+		system_names[system] = SYSTEMS[system]["name"]
 		for path in _scan_system(system):
-			items.append(_launch_item(system, path))
+			roms.append({"system": system, "path": path})
+	var names := RomNames.names_for(roms, system_names)
+	var items: Array[LibraryLaunchItem] = []
+	for i in roms.size():
+		items.append(_launch_item(names[i], roms[i]["system"], roms[i]["path"]))
+	_drop_stale(items)
 	logger.info("Found %d ROM(s) in %d ms" % [items.size(), Time.get_ticks_msec() - started])
 	return items
+
+
+## OGUI's load_library only ever adds: remove our cards whose ROM is gone, or whose name now
+## stands for another file, before LibraryManager adds this scan's items (deferred).
+func _drop_stale(items: Array[LibraryLaunchItem]) -> void:
+	var wanted := {}
+	for item in items:
+		wanted[item.name] = item.metadata["rom"]
+	var current := {}
+	for app in library_manager.get_library_items([]):
+		var launch := app.get_launch_item(library_id)
+		if launch:
+			current[app.name] = launch.metadata.get("rom", "")
+	for name in RomNames.stale(current, wanted):
+		logger.info("ROM gone or renamed: " + name)
+		library_manager.remove_library_launch_item(library_id, name)
 
 
 ## ROM files of one system, one level deep, minus the members of any .m3u playlist.
@@ -81,9 +107,9 @@ func _m3u_members(path: String) -> PackedStringArray:
 	return members
 
 
-func _launch_item(system: String, path: String) -> LibraryLaunchItem:
+func _launch_item(name: String, system: String, path: String) -> LibraryLaunchItem:
 	var item := LibraryLaunchItem.new()
-	item.name = path.get_file().get_basename()
+	item.name = name
 	item.provider_app_id = system + "/" + path.get_file()
 	item.command = LAUNCHER
 	# An array, not a command line: a ROM path with spaces stays one argument.

@@ -296,9 +296,12 @@ launch menu and runs `qforge-launch psx <rom>` (path with spaces as one argument
   tabs are added from `library_manager.library_loaded`, never in the plugin's `_ready`.
 - Never override `_init()` in a plugin script: it replaces the base constructor, and
   `Library._init` is what registers the library on ready (first try loaded, never registered).
-Still to handle: library items are keyed by NAME across all providers, so two systems with a
-same-named ROM merge into one item (the second ROM is lost) -- disambiguate names; rescans must
-remove vanished ROMs (`load_library` only adds); OGUI's search only covers Installed / All Games;
+Done 2026-10-04 (plugin 0.1.2; HW ✅ Pocket ACE: 4 colliding ROMs = 4 cards, Refresh Library after deleting two dropped the stale cards and renamed the rest): library items are keyed by NAME across
+all providers, so two same-named ROMs merged into one item (the second was lost). `rom_names.gd`
+now names a colliding ROM "Tetris (PlayStation)" (other system) or "Tetris (CUE)" (same system),
+compared without case; and each scan first removes our launch items whose ROM is gone or whose
+name now means another file (`load_library` only adds). Tested in a stock headless Godot
+(`QFORGE_GODOT=<godot 4.7 x86_64>`, skipped without). Still to handle: OGUI's search only covers Installed / All Games;
 the tab refreshes twice at start (two library loads); upstream `remove_tab` resets `current_tab`
 on the wrong condition (`size > current_tab`).
 OGUI only reloads its library at start and from Settings > Library > Refresh Library: no D-Bus

@@ -71,6 +71,71 @@ want=(); for f in "$SRC"/*; do want+=("plugins/qforge/$(basename "$f")"); done
 [ "$(sha256sum "$T/qforge.zip" | cut -d' ' -f1)" = "$sum1" ] \
   && ok "rebuilding gives the same bytes (store sha256 stays valid)" || bad "the zip changes between builds"
 
+# =================================================================================================
+# OGUI keys its library by item name across every provider: two ROMs with the same name became one
+# card and the second ROM was lost; a rescan never dropped a deleted ROM. rom_names.gd has no OGUI
+# types, so a stock Godot runs it (QFORGE_GODOT=<godot 4 binary>, or godot on PATH; skipped without).
+CASE="rom names"
+GODOT="${QFORGE_GODOT:-$(command -v godot || true)}"
+if [ -z "$GODOT" ]; then
+  printf '  skip %s -- no Godot (set QFORGE_GODOT to a Godot 4 binary)\n' "$CASE"
+else
+  cat >"$T/names_test.gd" <<GD
+extends SceneTree
+
+const RomNames := preload("$SRC/rom_names.gd")
+const SYSTEMS := {"psx": "PlayStation", "ps2": "PlayStation 2"}
+var failed := 0
+
+func check(what: String, got, want) -> void:
+	if got == want:
+		print("  ok   $CASE -- ", what)
+	else:
+		failed += 1
+		print("  FAIL $CASE -- ", what, ": got ", got, ", want ", want)
+
+func names(roms: Array) -> PackedStringArray:
+	var list := []
+	for r in roms:
+		list.append({"system": r[0], "path": "/home/player/roms/%s/%s" % r})
+	return RomNames.names_for(list, SYSTEMS)
+
+func _init() -> void:
+	check("a unique ROM keeps its file name",
+		names([["psx", "Crash Bandicoot.chd"], ["ps2", "Jak.iso"]]),
+		PackedStringArray(["Crash Bandicoot", "Jak"]))
+	check("the same name on two systems gets the system",
+		names([["psx", "Tetris.chd"], ["ps2", "Tetris.iso"]]),
+		PackedStringArray(["Tetris (PlayStation)", "Tetris (PlayStation 2)"]))
+	check("the same name in one system gets the extension",
+		names([["psx", "Tetris.cue"], ["psx", "Tetris.chd"]]),
+		PackedStringArray(["Tetris (CUE)", "Tetris (CHD)"]))
+	check("names differing only in case collide (OGUI settings are lower-cased)",
+		names([["psx", "tetris.chd"], ["ps2", "TETRIS.iso"]]),
+		PackedStringArray(["tetris (PlayStation)", "TETRIS (PlayStation 2)"]))
+	check("both rules together stay unique",
+		names([["psx", "T.cue"], ["psx", "T.chd"], ["ps2", "T.iso"]]),
+		PackedStringArray(["T (PlayStation) (CUE)", "T (PlayStation) (CHD)", "T (PlayStation 2)"]))
+	check("names still equal after both rules are numbered",
+		names([["psx", "A.chd"], ["psx", "a.chd"], ["psx", "B (CUE).chd"], ["psx", "B.cue"], ["psx", "B.chd"]]),
+		PackedStringArray(["A (CHD)", "a (CHD) (2)", "B (CUE)", "B (CUE) (2)", "B (CHD)"]))
+	check("a ROM still there is kept",
+		RomNames.stale({"A": "/r/A.chd"}, {"A": "/r/A.chd", "B": "/r/B.chd"}), PackedStringArray())
+	check("a deleted ROM is dropped",
+		RomNames.stale({"A": "/r/A.chd", "B": "/r/B.chd"}, {"A": "/r/A.chd"}), PackedStringArray(["B"]))
+	check("a name now meaning another file is dropped (re-added with the new ROM)",
+		RomNames.stale({"A": "/r/A.cue"}, {"A": "/r/A.chd"}), PackedStringArray(["A"]))
+	quit(1 if failed else 0)
+GD
+  out="$("$GODOT" --headless --script "$T/names_test.gd" 2>&1)"; rc=$?
+  printf '%s\n' "$out" | grep -E '^  (ok|FAIL) '
+  n_ok="$(printf '%s\n' "$out" | grep -c '^  ok ')"; n_bad="$(printf '%s\n' "$out" | grep -c '^  FAIL ')"
+  PASS=$((PASS + n_ok)); FAIL=$((FAIL + n_bad))
+  if [ "$rc" -ne 0 ] && [ "$n_bad" -eq 0 ]; then
+    bad "Godot failed: $(printf '%s\n' "$out" | grep -E 'ERROR|error' | head -3)"
+  fi
+fi
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
