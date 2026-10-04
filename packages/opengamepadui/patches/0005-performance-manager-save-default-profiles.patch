@@ -1,0 +1,62 @@
+From 5ce4ace63d611f9f85f5f9c0dfc9daf06523cab7 Mon Sep 17 00:00:00 2001
+From: Philippe Simons <simons.philippe@gmail.com>
+Date: Sun, 4 Oct 2026 22:03:49 +0200
+Subject: [PATCH] fix(PerformanceManager): save the default profiles at startup
+
+A default performance profile that does not exist yet is created from
+the settings applied at that moment. On a fresh install that moment is
+when the last game stops (or the dock state changes while one runs), so
+a game's settings become the default: set a game to 4 CPU cores before
+ever touching the performance menu outside a game, and after the game
+exits the system stays on 4 cores, now saved as the default.
+
+Save the settings applied at startup, before any game has run, as the
+default profile of every profile state (docked, undocked) that has none.
+
+(cherry picked from commit c35a54908062bc3e4b7a4c133dbdc1b82ac58276)
+---
+ .../performance/performance_manager.gd        | 21 +++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/core/systems/performance/performance_manager.gd b/core/systems/performance/performance_manager.gd
+index 590e4af7..16e44f13 100644
+--- a/core/systems/performance/performance_manager.gd
++++ b/core/systems/performance/performance_manager.gd
+@@ -50,6 +50,14 @@ func _init() -> void:
+ 	if not _power_station.is_running():
+ 		return
+ 	
++	# A default profile that does not exist yet is created from the settings
++	# applied at that moment. Without this, that moment is when the last game
++	# stops or the dock state changes, so a game's settings (e.g. its CPU core
++	# count) became the default and stayed applied outside of it. Save the
++	# settings at startup, before any game has run, as the default for every
++	# profile state that has none.
++	_save_missing_default_profiles()
++
+ 	# Load and apply the default profile
+ 	var profile_state := get_profile_state()
+ 	var path := get_profile_filename(profile_state)
+@@ -95,6 +103,19 @@ func save_profile(profile: PerformanceProfile, profile_path: String, library_ite
+ 	profile_saved.emit(profile, profile_path)
+ 
+ 
++## Saves the currently applied performance settings as the default profile of
++## each profile state (docked, undocked) that does not have one yet.
++func _save_missing_default_profiles() -> void:
++	var profile: PerformanceProfile
++	for profile_state in PROFILE_STATE.values():
++		var path := "/".join([USER_PROFILES, get_profile_filename(profile_state)])
++		if FileAccess.file_exists(path):
++			continue
++		if not profile:
++			profile = create_profile()
++		save_profile(profile, path)
++
++
+ ## Create a new [PerformanceProfile] from the current performance settings. If
+ ## a library item is passed, the profile will be named after the library item.
+ func create_profile(library_item: LibraryLaunchItem = null) -> PerformanceProfile:
+-- 
+2.55.0
+

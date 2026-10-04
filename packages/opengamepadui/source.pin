@@ -20,6 +20,11 @@
 #         a ROM whose emulator is not installed hung on the loading screen and the plugin's EXIT
 #         hook never ran. While the type is unknown, mark the app stopped on the first failed
 #         is_running() check (the reaper it tracks outlives every process of the app), ~1 s.
+#   0005  ours, for upstream (to confirm with the authors first): a missing default performance
+#         profile is created from the settings applied at that moment, which on a fresh install
+#         is when the last game stops -- a game's CPU core count became the default and stayed
+#         applied after it exited (HW, Pocket FIT, 2026-10-04). Save the startup settings as the
+#         default of each profile state (docked = charging, undocked) that has none.
 #
 # So the PKGBUILD keeps upstream's aarch64 engine binary, Rust core and reaper from the release
 # tarball, and rebuilds only opengamepad-ui.pck from the tagged source plus these patches. Drop a
@@ -33,4 +38,4 @@
 name: opengamepadui
 pkgbuild_local: PKGBUILD
 pkgrel_suffix: 1
-patches: 0001-hardware-manager-no-dmi.patch 0002-install-dialogs-rename-custom-maximum-size.patch 0003-performance-menu-hide-unsupported-controls.patch 0004-running-app-exit-before-window.patch
+patches: 0001-hardware-manager-no-dmi.patch 0002-install-dialogs-rename-custom-maximum-size.patch 0003-performance-menu-hide-unsupported-controls.patch 0004-running-app-exit-before-window.patch 0005-performance-manager-save-default-profiles.patch

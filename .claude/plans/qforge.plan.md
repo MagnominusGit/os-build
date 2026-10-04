@@ -315,6 +315,18 @@ never sourced; also applies to Open / --gui). Game settings > QForge is a dropdo
 default (On|Off)" (no --cpus) / On (`--cpus big`) / Off (`--cpus all`), saved in OGUI's settings.cfg
 `[qforge.cpus]` (replaces `[qforge.fast_cores]`). The image still pins nothing (test). HW ✅ Pocket FIT:
 default on -> plain launch pinned 2-7; game Off -> `--cpus all`, 0-7; Open -> 2-7.
+OGUI per-game performance profiles checked 2026-10-04 (Pocket FIT): the quick-bar core count is saved
+per game (`~/.local/share/opengamepadui/data/performance/profiles/<device>_<docked|undocked>_<sha256
+of card name>.tres`), applied when the game starts, the default restored when it stops. Bug found:
+OGUI ships no default profile for any device; a missing default is created from the settings
+applied at that moment, so on a fresh card a game's core count stayed applied after it exited.
+OGUI patch 0005 (branch fix/perf-default-profile on upstream main, cherry-picked to
+qforge-perf-menu) saves the startup settings as the docked + undocked defaults when missing; HW ✅
+(defaults saved at start with 8 cores; CTR set to 4 -> back to 8 on exit). Upstream PR waits for the
+authors' confirmation (user asks on their Discord). Notes: turning Advanced mode on resets the
+profile to all cores (upstream design); per-game profiles are keyed by card name (a renamed card
+loses its profile); with fast cores On and a 4-core profile the emulator ends up on the online fast
+cores (2,3 on SM8650), whatever the order of pinning and profile apply.
 Still to handle: OGUI's search only covers Installed / All Games;
 the tab refreshes twice at start (two library loads); upstream `remove_tab` resets `current_tab`
 on the wrong condition (`size > current_tab`).
