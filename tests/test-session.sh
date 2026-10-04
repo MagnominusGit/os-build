@@ -54,6 +54,12 @@ case " $cmd " in
   *) bad "QFORGE_SESSION_CMD '$cmd' lacks --skip-update-pack — a downloaded x86_64 update.zip would replace the shell" ;;
 esac
 sh -n "$CONF" 2>/dev/null && ok "session.conf parses as sh" || bad "session.conf is not valid sh"
+# pam_systemd gives every login session an ambient CAP_WAKE_ALARM; inherited by the shell and its
+# games, it made the game's /proc/<pid>/fdinfo unreadable to mangoapp, which aborted every few seconds
+# (blinking, frozen Performance Overlay, HW 2026-10-04).
+grep -Eq '^setpriv --inh-caps=-all --ambient-caps=-all \$QFORGE_SESSION_CMD ' "$SESSION" \
+  && ok "the shell starts with no inherited/ambient capabilities (setpriv)" \
+  || bad "the shell is not started under setpriv --ambient-caps=-all: games inherit CAP_WAKE_ALARM again"
 
 # =================================================================================================
 CASE="gamescope flags for OGUI"

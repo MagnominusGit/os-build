@@ -293,7 +293,13 @@ fi
 
 set +e
 exec 3<&0
-$QFORGE_SESSION_CMD <&3 3<&- &
+# Without the CAP_WAKE_ALARM pam_systemd puts in every login session's ambient set (systemd >= 254).
+# The shell passes it on to every game, and the kernel lets a process read another's
+# /proc/<pid>/fdinfo only if it holds all of that process's capabilities: mangoapp (started by
+# gamescope, whose own file capability drops ambient ones) then got EACCES on the game's GPU fdinfo
+# and aborted every few seconds -- a blinking, frozen Performance Overlay (HW 2026-10-04). Nothing in
+# the session sets wake alarms.
+setpriv --inh-caps=-all --ambient-caps=-all $QFORGE_SESSION_CMD <&3 3<&- &
 CLIENT_PID=$!
 exec 3<&-
 wait "$CLIENT_PID"

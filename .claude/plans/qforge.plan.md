@@ -327,6 +327,15 @@ authors' confirmation (user asks on their Discord). Notes: turning Advanced mode
 profile to all cores (upstream design); per-game profiles are keyed by card name (a renamed card
 loses its profile); with fast cores On and a 4-core profile the emulator ends up on the online fast
 cores (2,3 on SM8650), whatever the order of pinning and profile apply.
+Performance Overlay (quick bar slider) fixed 2026-10-04: OGUI writes $MANGOHUD_CONFIGFILE and
+mangoapp reloads it; mangoapp only shows once gamescope sends it a game frame time, so it never
+shows over the library (by design). In games it blinked and froze: pam_systemd (systemd >= 254) puts
+CAP_WAKE_ALARM in every login session's ambient set, OGUI passed it on to the games, and mangoapp
+(gamescope's child, which drops ambient caps) then got EACCES on the game's /proc/<pid>/fdinfo, an
+uncaught ghc::filesystem error that aborted it every ~4 s. qforge-session now starts the shell under
+`setpriv --inh-caps=-all --ambient-caps=-all` (test). HW ✅ Pocket FIT: overlay steady and updating,
+no mangoapp abort. Possible follow-up: MangoHud patch to catch that error (any game with capabilities
+would still crash it), worth upstreaming.
 Still to handle: OGUI's search only covers Installed / All Games;
 the tab refreshes twice at start (two library loads); upstream `remove_tab` resets `current_tab`
 on the wrong condition (`size > current_tab`).
