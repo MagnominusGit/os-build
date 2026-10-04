@@ -48,7 +48,10 @@
 #   - Exit pressed twice is SIGKILL for everything, which leaves a dead mount: sweep ours first.
 #
 # Exit status: the emulator's, or 2 for a bad invocation, 3 when the emulator is not installed or
-# its AppImage does not mount.
+# its AppImage does not mount. OGUI runs games through its reaper and never sees this status, so an
+# exit 3 is also written to $QFORGE_LAUNCH_STATUS (`not-installed <emulator>` or
+# `mount-failed <emulator>`), cleared at every start: the QForge plugin's EXIT hook reads it and
+# tells the player to download the emulator from the store.
 
 set -uo pipefail
 
@@ -60,8 +63,12 @@ MOUNTS=${QFORGE_MOUNTS:-/proc/mounts}
 CPU_ROOT=${QFORGE_CPU_ROOT:-/sys/devices/system/cpu}
 UNMOUNT_TRIES=50   # x 0.1 s for the runtime to let go of the mount after SIGHUP
 MOUNT_TIMEOUT=30   # s for the AppImage runtime to print its mount point
+STATUS=${QFORGE_LAUNCH_STATUS:-${XDG_RUNTIME_DIR:-/tmp}/qforge-launch.status}
 
 die() { echo "qforge-launch: $2" >&2; exit "$1"; }
+# fail <reason>: an exit-3 failure the plugin reports to the player.
+fail() { echo "$1 $emulator" > "$STATUS" 2>/dev/null; die 3 "$2"; }
+rm -f "$STATUS"
 
 usage="usage: qforge-launch [--cpus big|all] <system> <rom> | [--cpus big|all] --gui <emulator>"
 CPUS=all
@@ -91,7 +98,7 @@ BINARY= ARGS=() GUI_ARGS=() SEED=()
 if [ -n "$rom" ]; then run_args=("${ARGS[@]}" "$rom"); else run_args=("${GUI_ARGS[@]}"); fi
 
 img="$EMU_DIR/$emulator/current"
-[ -x "$img" ] || die 3 "$emulator is not installed ($img missing or not executable)"
+[ -x "$img" ] || fail not-installed "$emulator is not installed ($img missing or not executable)"
 
 for entry in "${SEED[@]}"; do
   src="$SEED_DIR/$emulator/${entry%%:*}" dst=${entry#*:}
@@ -140,7 +147,7 @@ exec {mount_fd}< <(exec "$img" --appimage-mount)
 mount_pid=$!
 if ! read -r -t "$MOUNT_TIMEOUT" -u "$mount_fd" mnt || [ ! -d "$mnt" ]; then
   kill -KILL "$mount_pid" 2>/dev/null
-  die 3 "$img did not mount"
+  fail mount-failed "$img did not mount"
 fi
 trap : TERM INT HUP
 

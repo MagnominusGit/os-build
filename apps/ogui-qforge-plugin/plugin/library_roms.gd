@@ -21,6 +21,15 @@ func _ready() -> void:
 	logger = Log.get_logger("QForgeRoms", Log.LEVEL.INFO)
 
 
+## When a ROM's launch fails because its emulator is not installed (or its AppImage did not
+## mount), tell the player. OGUI never sees qforge-launch's exit code (games run through its
+## reaper), so qforge-launch leaves the reason in a status file this EXIT hook reads. The launch
+## itself is never held back: downloads happen in the QForge store, not on a card.
+func get_app_lifecycle_hooks() -> Array[AppLifecycleHook]:
+	var hooks: Array[AppLifecycleHook] = [LaunchFailure.new()]
+	return hooks
+
+
 func roms_dir() -> String:
 	return OS.get_environment("HOME").path_join("roms")
 
@@ -83,3 +92,56 @@ func _launch_item(system: String, path: String) -> LibraryLaunchItem:
 	item.installed = true
 	item.metadata = {"system": system, "rom": path}
 	return item
+
+
+class LaunchFailure extends AppLifecycleHook:
+	const EMU_TOOL := "/usr/bin/qforge-emu"
+	var logger := Log.get_logger("QForgeRoms", Log.LEVEL.INFO)
+
+	func _init() -> void:
+		super(AppLifecycleHook.TYPE.EXIT)
+
+	func get_name() -> String:
+		return "QForgeLaunchFailure"
+
+	## Same default as qforge-launch: $XDG_RUNTIME_DIR/qforge-launch.status.
+	static func status_path() -> String:
+		var run := OS.get_environment("XDG_RUNTIME_DIR")
+		return (run if run != "" else "/tmp").path_join("qforge-launch.status")
+
+	func execute(item: LibraryLaunchItem) -> void:
+		var path := status_path()
+		if not FileAccess.file_exists(path):
+			return
+		var words := FileAccess.get_file_as_string(path).strip_edges().split(" ")
+		DirAccess.remove_absolute(path)
+		if words.size() != 2:
+			return
+		var name := _emulator_name(words[1])
+		var msg: String
+		match words[0]:
+			"not-installed":
+				msg = "%s is not installed.\nDownload it from the QForge store first." % name
+			"mount-failed":
+				msg = "%s could not be started.\nTry downloading it again from the QForge store." % name
+			_:
+				return
+		logger.info("%s: %s %s" % [item.name, words[0], words[1]])
+		var dialog := Engine.get_main_loop().get_first_node_in_group("dialog") as Dialog
+		if not dialog:
+			logger.warn("no OGUI dialog to show: " + msg)
+			return
+		var cancel_was_visible := dialog.cancel_visible
+		dialog.cancel_visible = false
+		dialog.open(null, msg, "OK")
+		await dialog.choice_selected
+		dialog.cancel_visible = cancel_was_visible
+
+	## The catalog's display name for an emulator id (qforge-emu list), or the id itself.
+	func _emulator_name(emu_id: String) -> String:
+		var output: Array = []
+		if OS.execute(EMU_TOOL, ["list"], output) == 0 and not output.is_empty():
+			var parsed = JSON.parse_string(str(output[0]))
+			if parsed is Dictionary and emu_id in parsed.get("emulators", {}):
+				return str(parsed["emulators"][emu_id].get("name", emu_id))
+		return emu_id

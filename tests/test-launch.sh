@@ -105,6 +105,7 @@ export QFORGE_LAUNCH_CONF="$LAUNCH_CONF" QFORGE_EMU_CONF_DIR="$(dirname "$EMU_CO
 export QFORGE_EMU_DIR="$T/emus" QFORGE_MOUNTS="$T/mounts" QFORGE_EMU_SEED_DIR="$SEED_DIR"
 # The launcher seeds first-run settings into $HOME: never let a test run reach the real one.
 export HOME="$T/home"
+export QFORGE_LAUNCH_STATUS="$T/launch.status.default"
 mkdir -p "$HOME"
 
 reset_logs() { rm -f "$T"/{emu,appimage,fusermount}.log "$T/stop-emu"; }
@@ -141,6 +142,23 @@ code() { "$LAUNCH" "$@" >/dev/null 2>&1; echo $?; }
 [ "$(code nosuchsystem "$ROM")" = 2 ] && ok "a system launch.conf does not map: exit 2" || bad "an unmapped system did not exit 2"
 [ "$(QFORGE_EMU_DIR="$T/none" code psx "$ROM")" = 3 ] \
   && ok "emulator not installed (no current): exit 3" || bad "a missing emulator did not exit 3"
+
+# =================================================================================================
+CASE="launch failure status (for the plugin's popup)"
+# OGUI runs games through its reaper and never sees qforge-launch's exit code, so an exit-3 failure
+# is also written to $QFORGE_LAUNCH_STATUS; the plugin's EXIT hook reads it and shows a popup.
+ST="$T/launch.status"
+echo "stale" > "$ST"
+QFORGE_LAUNCH_STATUS="$ST" QFORGE_EMU_DIR="$T/none" "$LAUNCH" psx "$ROM" >/dev/null 2>&1
+[ "$(cat "$ST" 2>/dev/null)" = "not-installed duckstation" ] \
+  && ok "emulator not installed: status 'not-installed duckstation'" || bad "status was '$(cat "$ST" 2>/dev/null)'"
+echo "stale" > "$ST"
+QFORGE_LAUNCH_STATUS="$ST" QFORGE_EMU_DIR="$T/none" "$LAUNCH" --gui duckstation >/dev/null 2>&1
+[ "$(cat "$ST" 2>/dev/null)" = "not-installed duckstation" ] \
+  && ok "--gui of a missing emulator: same status" || bad "status was '$(cat "$ST" 2>/dev/null)'"
+echo "stale" > "$ST"
+QFORGE_LAUNCH_STATUS="$ST" "$LAUNCH" psx "$T/roms/psx/missing.chd" >/dev/null 2>&1
+[ ! -e "$ST" ] && ok "a bad invocation (exit 2) clears the status and writes none" || bad "status left: '$(cat "$ST")'"
 
 # =================================================================================================
 CASE="config shipped in the image"
@@ -242,6 +260,7 @@ ign="$(sed -n 's/^SigIgn:[[:space:]]*//p' "$T/appimage.log")"
 touch "$T/stop-emu"
 reap_launcher "$lpid"; rc=$?
 [ "$rc" = 7 ] && ok "the launcher exits with the emulator's status" || bad "launcher exited $rc, the emulator 7"
+[ ! -e "$QFORGE_LAUNCH_STATUS" ] && ok "a launch that ran leaves no failure status" || bad "status after a normal run: $(cat "$QFORGE_LAUNCH_STATUS")"
 # The fake fusermount3 succeeds at once, so the launcher may exit before the fake runtime has run
 # its HUP trap (the real fusermount3 -u fails until the runtime is gone, which the launcher waits for).
 wait_for 'grep -qx hup "$T/appimage.log"' \
