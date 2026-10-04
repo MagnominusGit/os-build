@@ -560,6 +560,15 @@ plus the ROM library that launches them)
 - Emulator save/load-state hotkeys (DuckStation first: seed bindings that avoid in-game combos).
 - Device-specific values only when needed (Azahar's dual-screen layout on the Pocket DS is the
   likely first).
+- GL on zink, NOT adopted (reviewed 2026-10-04, upstream e606f0f / merge c36dc38): drm/msm puts
+  freedreno GL and Turnip Vulkan on different drm_sched priority levels of one ring, so a Vulkan game
+  can starve GL clients; upstream moved all session GL to zink (`gallium-drivers=freedreno,zink`,
+  vulkan-icd-loader depend, session-wide `MESA_LOADER_DRIVER_OVERRIDE=zink`). Their victim was the
+  GL-heavy Steam UI; ours, OpenGamepadUI, already renders with Vulkan (Turnip), and games present
+  through the gamescope WSI, so only Xwayland's glamor and mangoapp are GL. Revisit when the UI or the
+  overlay stutters under a Vulkan game, or when a GL-rendering emulator joins the catalog -- then
+  prefer zink per emulator (its conf), not session-wide. The same change dropped Mesa's device_select
+  layer, which only matters for x86 games under FEX/pressure-vessel: not applicable, keep it.
 
 ### Phase 4c — Library scaling polish (later, decided 2026-10-04)
 
@@ -627,6 +636,7 @@ work that needs it, not before.
 | Emulator licensing / aarch64 availability | Medium | Licence allowlist; prefer emulators with arm64 JITs |
 | No upstream merges for hardware fixes | Medium | Accepted — QForge is standalone |
 | SM8250 has no sensor DSP firmware (no auto-rotate) | Certain | Documented |
+| GL clients starved by Vulkan games (freedreno GL and Turnip on different drm_sched levels) | Low (UI is Vulkan) | Watch UI/overlay under load; zink per GL emulator (Phase 4b note) |
 
 ## Validation
 
