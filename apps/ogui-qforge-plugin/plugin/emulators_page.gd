@@ -160,7 +160,7 @@ func _add_emulator(id: String, emu: Dictionary) -> void:
 	fast.text = "Run on fast cores"
 	fast.description = "Keep %s on the fast CPU cores. Games can override this in their own settings." % name_text
 	fast.button_pressed = LaunchArgs.emulator_fast_cores(id)
-	fast.toggled.connect(_set_fast_cores.bind(id, name_text))
+	fast.toggled.connect(_set_fast_cores.bind(id, name_text, fast))
 	_rows.add_child(fast)
 
 	if installed != null:
@@ -229,12 +229,13 @@ func _remove(id: String, name_text: String, row: Control) -> void:
 
 
 ## The Toggle only emits on the player's input: this never fires while the rows are built.
-func _set_fast_cores(on: bool, id: String, name_text: String) -> void:
+func _set_fast_cores(on: bool, id: String, name_text: String, toggle: Control) -> void:
 	if LaunchArgs.set_emulator_fast_cores(id, on):
 		logger.info("%s: fast cores by default %s" % [id, "on" if on else "off"])
-	else:
-		logger.warn("could not write " + LaunchArgs.player_conf_path(id))
-		_notify("Could not save the fast cores setting of " + name_text)
+		return
+	logger.warn("could not write " + LaunchArgs.player_conf_path(id))
+	_notify("Could not save the fast cores setting of " + name_text)
+	toggle.button_pressed = not on  # back to what is saved (the setter does not emit toggled)
 
 
 ## The emulator's own UI, launched like a game so OGUI's overlay and Exit work.

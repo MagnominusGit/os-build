@@ -80,13 +80,20 @@ static func emulator_fast_cores(emulator: String) -> bool:
 
 
 ## Save the player's fast-cores default for an emulator. False when the file could not be written.
+## Written to a temporary file and renamed over the conf, so a full disk or a power cut never
+## leaves it half written.
 static func set_emulator_fast_cores(emulator: String, on: bool) -> bool:
 	var path := player_conf_path(emulator)
 	if DirAccess.make_dir_recursive_absolute(path.get_base_dir()) != OK:
 		return false
 	var text := conf_with_cpus(read_text(path), "big" if on else "all")
-	var f := FileAccess.open(path, FileAccess.WRITE)
+	var tmp := path + ".part"
+	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	if not f:
 		return false
-	f.store_string(text)
+	var written := f.store_string(text)
+	f.close()
+	if not written or DirAccess.rename_absolute(tmp, path) != OK:
+		DirAccess.remove_absolute(tmp)
+		return false
 	return true
