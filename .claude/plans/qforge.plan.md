@@ -4,8 +4,9 @@
 **Status** (2026-10-04): Phases 0-3 done -- HW-validated on all three SoCs: SM8550 (AYANEO Pocket
 ACE), SM8250 (MANGMI Pocket Max), SM8650 (KONKR Pocket FIT, dev card 2026-10-04). Phase 4 (QForge
 OGUI plugin) mostly built: catalog + qforge-emu, Settings > Emulators store, per-system ROM tabs,
-fast cores per emulator / per game; open items at the end of its section, Resume next. Phase 4b
-(more emulators) and 4c (library scaling) after it. Phase 5 not started.
+fast cores per emulator / per game; open items at the end of its section, automatic rescan next.
+Phase 4b (more emulators) and 4c (library scaling) after it. Phase 5 not started. Phase 6 (final
+polish: Resume, memory-card check) last, not blocking.
 
 ## Summary
 
@@ -349,11 +350,9 @@ service, signal or file watch. The plugin runs in-process and could call
 `library_manager.reload_library()` itself, but does not yet (see open items).
 
 **Phase 4 open items** (plan check 2026-10-04)
-- Resume: Resume / Start fresh on a ROM with a resume state (part 2 below): `qforge-launch
-  --resume`, the game's serial to find `~/states/<system>/<serial>_resume.sav`. Next up.
-- HW check on the pinned DuckStation v0.1-11894: memory card and resume state (never verified).
-- Automatic rescan: ROMs copied over SMB only appear after Refresh Library or a restart (inotify on
-  `~/roms`, or rescan when the library opens), then `reload_library()` from the plugin.
+- Automatic rescan (next): ROMs copied over SMB only appear after Refresh Library or a restart
+  (inotify on `~/roms`, or rescan when the library opens), then `reload_library()` from the plugin.
+- Resume and the memory-card / resume-state HW check: moved to Phase 6 (2026-10-04, not blocking).
 - Plugin store: mask upstream's ShadowBlip store (first-boot error noise) with an OGUI patch reading
   the store URL from a ProjectSettings key (not written yet; 0004/0005 are other patches), pointed
   at the QForge store once Phase 5 has a server.
@@ -403,7 +402,8 @@ plus the ROM library that launches them)
    (`FullscreenUI::HandleGameListActivate`), which a ROM card on the command line bypasses. Needs a
    `qforge-launch --resume` mapped per emulator (DuckStation: `-resume`, from the emulator conf) and
    a per-emulator way to tell whether a resume state exists (DuckStation names it
-   `~/states/psx/<serial>_resume.sav`, so the plugin needs the game's serial). Until then games boot
+   `~/states/psx/<serial>_resume.sav`, so the plugin needs the game's serial). Moved to Phase 6
+   (2026-10-04). Until then games boot
    fresh; the state is still loadable from the emulator's pause menu.
 3. Tabs: one tab per system that has at least one ROM, populated from the provider's items (done:
    OGUI's own cards in a plugin-built grid, see the tab prototype above).
@@ -630,6 +630,16 @@ work that needs it, not before.
 - CI release secrets `RAUC_CERT_PEM` / `RAUC_KEY_PEM` from `~/qforge-pki`.
 - Card / bundle / installer release workflows, runbook.
 - Optionally move firmware to a QForge-owned repo.
+
+### Phase 6 — Final polish (last, not blocking; decided 2026-10-04)
+
+- **Resume / Start fresh** on a ROM that has a resume state (design in Phase 4 part 2, "Resume
+  (decided 2026-10-03)"): `qforge-launch --resume` mapped per emulator in its conf (DuckStation
+  `-resume`), and a per-emulator way to find the state (DuckStation: `~/states/psx/<serial>_resume.sav`,
+  so the plugin reads the game's serial from the disc image; the Phase 4c metadata cache would hold it).
+- **HW check on the pinned DuckStation v0.1-11894**: memory card saves land in `~/saves/psx` and load
+  back, and what DuckStation does with a resume state on the next launch (never verified: every test
+  quit during the intro). Do it together with Resume.
 
 ## Backlog (outward-facing: send only when decided)
 
