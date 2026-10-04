@@ -520,6 +520,7 @@ declare -A STAGE_EXPECTED=(
   [dev-wifi-ssh]="DEV-ONLY Wi-Fi credentials + root authorized_keys"
   [dev-ota-channel]="DEV-ONLY OTA channel pin"
   [boot-splash]="the splash drawer + its asset, in the sealed root"
+  [ogui-plugin]="the QForge OGUI plugin zip, copied to the player's home by the session (not on the installer medium: it runs no OGUI)"
   [debug-capture]="DEBUG-ONLY journald log capture"
   [seal]="strip the package manager from the RELEASE root"
   [trim]="delete build and documentation artefacts"

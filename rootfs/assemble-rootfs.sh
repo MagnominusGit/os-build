@@ -237,6 +237,9 @@ fi
 # boot-splash runs on EVERY build; it only has to precede debug-capture.
 . "$ROOT/rootfs/lib-assemble-splash.sh"
 
+# ogui-plugin runs on EVERY build.
+. "$ROOT/rootfs/lib-assemble-plugin.sh"
+
 # debug-capture is DEBUG-ONLY, same construction -- and independent of QFORGE_DEV.
 if [ "${QFORGE_DEBUG:-}" = "1" ]; then
   . "$ROOT/rootfs/lib-assemble-debug.sh"

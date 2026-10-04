@@ -282,6 +282,15 @@ stop_session() {
   exit 143   # 128 + SIGTERM; the EXIT trap then stops gamescope
 }
 trap stop_session HUP INT TERM
+
+# The QForge OpenGamepadUI plugin (ROM library, Settings > Emulators) ships read-only in the image;
+# OGUI only loads plugins from the player's folder, so copy it there when missing or older. Never a
+# reason not to start the shell.
+: "${QFORGE_PLUGIN_INSTALLER:=/usr/lib/qforge/install-ogui-plugin}"
+if [ -x "$QFORGE_PLUGIN_INSTALLER" ]; then
+  "$QFORGE_PLUGIN_INSTALLER" || echo "qforge-session: the QForge plugin could not be installed" >&2
+fi
+
 set +e
 exec 3<&0
 $QFORGE_SESSION_CMD <&3 3<&- &

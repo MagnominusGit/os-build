@@ -268,6 +268,10 @@ STEAMCL      := $(OUT)/boot/steamcl.efi
 # fonts/dejavu-mono.pf2 and grubenv (the pristine stage-2 env block the ESP gets).
 GRUB         := $(OUT)/boot/grubaa64.efi
 SDCARD       := $(OUT)/images/sdcard.img
+# The QForge OpenGamepadUI plugin (apps/ogui-qforge-plugin): a reproducible zip of plugin/, shipped
+# read-only in the root and copied into the player's plugins folder by qforge-session.
+PLUGIN_ZIP   := $(OUT)/plugins/qforge.zip
+PLUGIN_SRC   := apps/ogui-qforge-plugin/build.sh $(wildcard apps/ogui-qforge-plugin/plugin/*)
 
 # Repo sources the rootfs assembler reads directly (itself + the unified rootfs/overlay/ payload tree
 # it copies in wholesale). find recurses, so files added under rootfs/overlay/ are tracked
@@ -330,7 +334,7 @@ KERNEL_SRC_HASH := work/.kernel-src.hash
 # ==============================================================================
 .PHONY: help all image toolchain kernel fw-linux fw-qcom base overlay verify-lock \
         rootfs relock installer installer-root relock-installer verify-image \
-        initramfs splash steamcl grub sdcard verify-card test test-disk bundle sign-bundle publish-bundle \
+        initramfs splash plugin steamcl grub sdcard verify-card test test-disk bundle sign-bundle publish-bundle \
         deploy clean clean-base clean-overlay distclean
 
 # An always-out-of-date prerequisite, for rules that must re-evaluate their own inputs every run
@@ -359,6 +363,7 @@ base:      $(BASE_STAMP)   ## Bootstrap the aarch64 root from packages (host; do
 rootfs:    $(ROOTFS)       ## Assemble the read-only root + var images (in container)
 initramfs: $(INITRAMFS)    ## Build the initramfs that mounts ro-root + /etc overlay (in container)
 splash:    $(SPLASH_BIN) $(SPLASH_ASSET) ## Build the boot-splash drawer + flattened logo (in container)
+plugin:    $(PLUGIN_ZIP) ## Build the QForge OpenGamepadUI plugin zip (host, python3)
 steamcl:   $(STEAMCL)      ## Build the stage-1 steamcl + steamos-bootconf (in container)
 grub:      $(GRUB)         ## Build the stage-2 GRUB + per-slot grub.cfg (in container)
 sdcard:    $(SDCARD)       ## Build the flashable SD-card image (in container)
@@ -409,6 +414,7 @@ test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-launch.sh
 	bash $(TESTS_DIR)/test-catalog.sh
 	bash $(TESTS_DIR)/test-plugin.sh
+	bash $(TESTS_DIR)/test-plugin-install.sh
 	bash $(TESTS_DIR)/test-emu.sh
 	bash $(TESTS_DIR)/test-shares.sh
 	bash $(TESTS_DIR)/test-coredump-limit.sh
@@ -723,7 +729,7 @@ $(VERSION_STAMP):
 # /usr/lib/qforge/boot mirror the RAUC hook refreshes the ESP and the slot's efi partition FROM.
 # That is what makes "this root and the software that boots it came from one build" true by
 # construction. No cycle: the initramfs is built from work/base, never from the assembled root.
-$(ROOTFS): $(KERNEL) $(INITRAMFS) $(STEAMCL) $(GRUB) $(BASE_STAMP) $(FW_LINUX) $(FW_QCOM) $(ASSEMBLE_SRC) $(MODE_STAMP) $(VERSION_STAMP) | $(BUILD_STAMP)
+$(ROOTFS): $(KERNEL) $(INITRAMFS) $(STEAMCL) $(GRUB) $(BASE_STAMP) $(FW_LINUX) $(FW_QCOM) $(PLUGIN_ZIP) $(ASSEMBLE_SRC) $(MODE_STAMP) $(VERSION_STAMP) | $(BUILD_STAMP)
 	$(DOCKER) $(DEV_ENV) $(ID_ENV) -e QFORGE_DEBUG $(BUILD_IMG) \
 	  $(ROOTFS_DIR)/assemble-rootfs.sh /src/work/base
 
@@ -738,6 +744,9 @@ $(INITRAMFS): $(IMAGE_DIR)/mkinitramfs.sh $(IMAGE_DIR)/initramfs/init $(SPLASH_B
 # The boot splash: a static aarch64 drawer plus the flattened logo. Both are initramfs payload,
 # which is why they are prerequisites of it rather than of the rootfs alone — a theme or binary
 # change that did not rebuild the cpio would leave the OLD splash on the card with no sign of it.
+$(PLUGIN_ZIP): $(PLUGIN_SRC)
+	apps/ogui-qforge-plugin/build.sh $(OUT)/plugins
+
 $(SPLASH_BIN): $(SPLASH_SRC) | $(BUILD_STAMP)
 	$(INBUILD) -c 'make -C apps/qforge-splash'
 
