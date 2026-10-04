@@ -244,8 +244,10 @@ upstream reports to the Backlog; the SM8650 boot stays a Phase 0/1 item.
 
 ### Phase 4 — QForge OGUI plugin: ROM library + emulator manager (High)
 
-First steps (next session), host-testable before any GDScript: `qforge-launch --gui <emulator>`
-(no-ROM mode for the store's Open), and a first `catalog.json` with DuckStation pinned to a
+First steps, host-testable before any GDScript: `qforge-launch --gui <emulator>` (no-ROM mode
+for the store's Open; done 2026-10-04, `GUI_ARGS` in the emulator conf, DuckStation
+`-bigpicture -fullscreen`; host-tested, HW check of the Big Picture UI still to do), and a first
+`catalog.json` with DuckStation pinned to a
 numbered release (v0.1-11894 or newer), re-tested on HW (launch, pad, every exit path, memory card,
 resume state). Then the tab prototype: can a plugin add a PSX tab that reuses OGUI's game grid.
 

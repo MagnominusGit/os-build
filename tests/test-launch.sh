@@ -339,6 +339,55 @@ grep -rqs '^CPUS=' "$(dirname "$EMU_CONF")" && bad "an emulator conf in the imag
   || ok "no emulator conf in the image pins anything"
 
 # =================================================================================================
+CASE="emulator GUI (--gui)"
+# The plugin store's Open: the emulator's own UI with no ROM, for the settings OGUI does not expose.
+# Same mount / setsid / exit handling as a ROM; GUI_ARGS from the emulator conf instead of ARGS.
+[ "$(code --gui)" = 2 ] && ok "--gui with no emulator: exit 2" || bad "accepted a bare --gui"
+[ "$(code --gui 'duck;rm')" = 2 ] && ok "--gui with shell characters in the name: exit 2" || bad "accepted --gui 'duck;rm'"
+[ "$(code --gui ../duckstation)" = 2 ] && ok "--gui with a path in the name: exit 2" || bad "accepted --gui ../duckstation"
+[ "$(code --gui nosuchemu)" = 2 ] && ok "--gui with no conf for the emulator: exit 2" || bad "accepted an unknown emulator"
+[ "$(code --gui duckstation "$ROM")" = 2 ] && ok "--gui with a ROM too: exit 2" || bad "accepted --gui duckstation <rom>"
+[ "$(QFORGE_EMU_DIR="$T/none" code --gui duckstation)" = 3 ] \
+  && ok "--gui of an emulator that is not installed: exit 3" || bad "--gui of a missing emulator did not exit 3"
+( set +u; BINARY= ARGS=() GUI_ARGS=(); . "$EMU_CONF"
+  [ ${#GUI_ARGS[@]} -gt 0 ] || exit 1
+  case " ${GUI_ARGS[*]} " in *" -batch "*) exit 2 ;; esac
+  case " ${GUI_ARGS[*]} " in *" -bigpicture "*) ;; *) exit 3 ;; esac )
+case $? in
+  0) ok "duckstation.conf GUI_ARGS: Big Picture (pad-driven), no -batch" ;;
+  1) bad "duckstation.conf sets no GUI_ARGS" ;;
+  2) bad "duckstation.conf GUI_ARGS has -batch: with no game, DuckStation would quit at once" ;;
+  *) bad "duckstation.conf GUI_ARGS lacks -bigpicture: the desktop UI needs a mouse" ;;
+esac
+rm -rf "$HOME"; mkdir -p "$HOME"
+reset_logs
+"$LAUNCH" --gui duckstation 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+cmp -s "$DS_SEED" "$HOME/.local/share/duckstation/settings.ini" \
+  && ok "--gui seeds first-run settings too (the GUI may be the first start)" || bad "--gui did not seed settings.ini"
+self="$(field self)"
+case "$self" in
+  "$T"/mnt.*/usr/bin/duckstation-qt) ok "--gui runs <mount>/usr/bin/duckstation-qt, not the AppImage" ;;
+  *) bad "--gui ran '$self'" ;;
+esac
+mapfile -t args < <(sed -n 's/^arg=//p' "$T/emu.log")
+( set +u; GUI_ARGS=(); . "$EMU_CONF"; [ "${args[*]}" = "${GUI_ARGS[*]}" ] ) \
+  && ok "--gui arguments are exactly the conf's GUI_ARGS (no ROM, no -batch)" \
+  || bad "--gui arguments were: $(printf '[%s] ' "${args[@]}")"
+[ "$(field pid)" = "$(field sid)" ] && ok "--gui: the emulator leads its own session (setsid)" || bad "--gui: not a session leader"
+touch "$T/stop-emu"
+reap_launcher "$lpid"; rc=$?
+[ "$rc" = 7 ] && ok "--gui: the launcher exits with the emulator's status" || bad "--gui: launcher exited $rc, the emulator 7"
+wait_for 'grep -qx hup "$T/appimage.log"' && grep -q -- "^-u $T/mnt" "$T/fusermount.log" 2>/dev/null \
+  && ok "--gui: the mount is released after the emulator exits" || bad "--gui: the mount was not released"
+rm -f "$T/taskset.log"; reset_logs
+QFORGE_CPU_ROOT="$T/cpu" "$LAUNCH" --cpus big --gui duckstation 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+[ "$(sed -n 's/^cpus=//p' "$T/taskset.log" 2>/dev/null)" = "4,5,6,7" ] \
+  && ok "--cpus big --gui pins the GUI like a game" || bad "--cpus big --gui was not pinned"
+
+# =================================================================================================
 CASE="stale mounts"
 reset_logs
 printf '%s\n' \

@@ -2,12 +2,17 @@
 # qforge-launch — start a ROM in its system's emulator, from an OpenGamepadUI library card.
 #
 #   qforge-launch [--cpus big|all] <system> <rom>
+#   qforge-launch [--cpus big|all] --gui <emulator>
+#
+# --gui starts the emulator's own UI with no ROM: the plugin store's Open, for the settings OGUI
+# does not expose. It runs exactly like a ROM (mount, seed, setsid, exit handling below), with the
+# emulator conf's GUI_ARGS in place of ARGS + ROM.
 #
 # Emulators are not in the image: the QForge OGUI plugin downloads each one as an upstream AppImage
 # into /home/player/emulators/<emulator>/ and points `current` at the version to run (plan Phase
 # 3/4). This script is what every ROM card runs. /etc/qforge/launch.conf maps a system to its
 # emulator; /etc/qforge/emulators/<emulator>.conf says which binary inside the AppImage to run,
-# with what arguments, and which first-run settings to seed.
+# with what arguments (ARGS before a ROM, GUI_ARGS for --gui), and which first-run settings to seed.
 #
 # CPU pinning (--cpus big): the emulator is started on the device's fast cores,
 # so its threads stay off the little cluster and do not migrate across clusters; background work
@@ -58,7 +63,7 @@ MOUNT_TIMEOUT=30   # s for the AppImage runtime to print its mount point
 
 die() { echo "qforge-launch: $2" >&2; exit "$1"; }
 
-usage="usage: qforge-launch [--cpus big|all] <system> <rom>"
+usage="usage: qforge-launch [--cpus big|all] <system> <rom> | [--cpus big|all] --gui <emulator>"
 CPUS=all
 if [ "${1-}" = --cpus ]; then
   [ $# -ge 2 ] || die 2 "$usage"
@@ -66,19 +71,24 @@ if [ "${1-}" = --cpus ]; then
 fi
 case $CPUS in big|all) ;; *) die 2 "--cpus must be 'big' or 'all', not '$CPUS'" ;; esac
 [ $# -eq 2 ] || die 2 "$usage"
-system=$1 rom=$2
-[[ $system =~ ^[a-z0-9_]+$ ]] || die 2 "bad system name '$system'"
-[ -f "$rom" ] || die 2 "no such ROM: $rom"
-
-emulator=$(sed -n "s/^$system=\([a-z0-9_-]*\)[[:space:]]*$/\1/p" "$CONF" 2>/dev/null | tail -1)
-[ -n "$emulator" ] || die 2 "no emulator for system '$system' in $CONF"
+if [ "$1" = --gui ]; then
+  system= rom= emulator=$2
+  [[ $emulator =~ ^[a-z0-9_-]+$ ]] || die 2 "bad emulator name '$emulator'"
+else
+  system=$1 rom=$2
+  [[ $system =~ ^[a-z0-9_]+$ ]] || die 2 "bad system name '$system'"
+  [ -f "$rom" ] || die 2 "no such ROM: $rom"
+  emulator=$(sed -n "s/^$system=\([a-z0-9_-]*\)[[:space:]]*$/\1/p" "$CONF" 2>/dev/null | tail -1)
+  [ -n "$emulator" ] || die 2 "no emulator for system '$system' in $CONF"
+fi
 emu_conf="$EMU_CONF_DIR/$emulator.conf"
 [ -f "$emu_conf" ] || die 2 "missing $emu_conf"
 
-BINARY= ARGS=() SEED=()
+BINARY= ARGS=() GUI_ARGS=() SEED=()
 # shellcheck source=/dev/null
 . "$emu_conf"
 [ -n "$BINARY" ] || die 2 "$emu_conf sets no BINARY"
+if [ -n "$rom" ]; then run_args=("${ARGS[@]}" "$rom"); else run_args=("${GUI_ARGS[@]}"); fi
 
 img="$EMU_DIR/$emulator/current"
 [ -x "$img" ] || die 3 "$emulator is not installed ($img missing or not executable)"
@@ -134,9 +144,9 @@ if ! read -r -t "$MOUNT_TIMEOUT" -u "$mount_fd" mnt || [ ! -d "$mnt" ]; then
 fi
 trap : TERM INT HUP
 
-echo "qforge-launch: $system -> $emulator: $mnt/$BINARY ${ARGS[*]} $rom" >&2
+echo "qforge-launch: ${system:-gui} -> $emulator: $mnt/$BINARY ${run_args[*]}" >&2
 # setsid and taskset both exec, so the emulator keeps this PID and leads its own session.
-setsid "${pin[@]}" "$mnt/$BINARY" "${ARGS[@]}" "$rom" &
+setsid "${pin[@]}" "$mnt/$BINARY" "${run_args[@]}" &
 emu_pid=$!
 # wait returns early when a trapped signal arrives; keep waiting until the emulator is gone.
 while kill -0 "$emu_pid" 2>/dev/null; do wait "$emu_pid"; done
