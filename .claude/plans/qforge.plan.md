@@ -258,6 +258,23 @@ GitHub). HW 2026-10-04, Pocket ACE, v0.1-11894 from a card: first-run seed, laun
 (double SIGTERM, clean, mount released); DuckStation keeps every seeded value when it rewrites
 settings.ini (drops our comments, adds [UI] geometry). Memory card and resume state not checked
 (game left during the intro).
+Tab prototype done 2026-10-04 (`apps/ogui-qforge-plugin/`, `build.sh` -> `out/plugins/qforge.zip`,
+`tests/test-plugin.sh`): YES, a plugin can add a per-system tab. HW ✅ Pocket ACE: a "PlayStation"
+tab next to Installed / All Games with OGUI's own cards, CTR also in All Games, its card opens OGUI's
+launch menu and runs `qforge-launch psx <rom>` (path with spaces as one argument). What it took:
+- OGUI's library menu only fills Installed and All Games; a tab added via `library_tabs_state`
+  is placed in the TabContainer but the plugin fills its grid (cards from `card.tscn`, button_up ->
+  `game_launcher` state, as `library_menu.gd` does). Node layout must match AllGamesTab
+  (ScrollerJoystick, then MarginContainer > HFlowContainer): the menu focuses `get_child(1).get_child(0)`.
+- Plugins initialise BEFORE the library menu is ready (PluginManager first in card_ui.tscn), so
+  tabs are added from `library_manager.library_loaded`, never in the plugin's `_ready`.
+- Never override `_init()` in a plugin script: it replaces the base constructor, and
+  `Library._init` is what registers the library on ready (first try loaded, never registered).
+Still to handle: library items are keyed by NAME across all providers, so two systems with a
+same-named ROM merge into one item (the second ROM is lost) -- disambiguate names; rescans must
+remove vanished ROMs (`load_library` only adds); OGUI's search only covers Installed / All Games;
+the tab refreshes twice at start (two library loads); upstream `remove_tab` resets `current_tab`
+on the wrong condition (`size > current_tab`).
 OGUI only reloads its library at start and from Settings > Library > Refresh Library: no D-Bus
 service, signal or file watch. The plugin runs in-process, so it calls
 `library_manager.reload_library()` itself after a rescan or a download. Then the tab prototype: can a plugin add a PSX tab that reuses OGUI's game grid.

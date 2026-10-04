@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Offline test for the QForge OpenGamepadUI plugin's packaging (plan Phase 4).
+#
+#   tests/test-plugin.sh
+#
+# WHY THIS EXISTS. OGUI loads a plugin with no feedback when it is subtly wrong, and none of it
+# shows until a card fails to appear on a device:
+#
+#   - a zip without plugins/<id>/plugin.json, or a plugin.json missing one of the fields
+#     PluginLoader requires, is skipped with a warning nobody sees;
+#   - a min-api-version OGUI's API (2.0.0 in v0.46.1) is not feature-compatible with: skipped;
+#   - an entrypoint that is not in the zip: "Unable to load plugin";
+#   - a script that overrides _init() replaces its base class's constructor: Library._init is what
+#     registers a library on ready, so the ROM library silently never loaded (HW, 2026-10-04).
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SRC="$ROOT/apps/ogui-qforge-plugin/plugin"
+BUILD="$ROOT/apps/ogui-qforge-plugin/build.sh"
+OGUI_API="2.0.0"   # PluginLoader.PLUGIN_API_VERSION in the pinned OGUI (packages/opengamepadui)
+
+PASS=0; FAIL=0; CASE=""
+ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
+bad() { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
+
+[ -f "$SRC/plugin.json" ] && [ -x "$BUILD" ] || { echo "missing plugin sources or build.sh" >&2; exit 1; }
+command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
+T="$(mktemp -d)" && [ -d "$T" ] || { echo "mktemp -d failed" >&2; exit 1; }
+trap 'rm -rf "$T"' EXIT
+
+# =================================================================================================
+CASE="plugin.json"
+meta() { python3 -c 'import json,sys; m=json.load(open(sys.argv[1])); print(m.get(sys.argv[2], ""))' "$SRC/plugin.json" "$1"; }
+python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$SRC/plugin.json" 2>/dev/null \
+  && ok "is valid JSON" || bad "does not parse"
+for field in plugin.id plugin.name plugin.version plugin.min-api-version entrypoint; do
+  [ -n "$(meta "$field")" ] && ok "has $field (PluginLoader requires it)" || bad "lacks $field: OGUI skips the plugin"
+done
+[ "$(meta plugin.id)" = qforge ] && ok "id is qforge (the zip must be qforge.zip)" || bad "id is '$(meta plugin.id)'"
+[[ $(meta plugin.version) =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && ok "version is semver (upgrades compare it)" || bad "version '$(meta plugin.version)' is not x.y.z"
+# SemanticVersion.is_feature_compatible: same major, and min-api minor/patch not above OGUI's.
+api="$(meta plugin.min-api-version)"
+python3 - "$api" "$OGUI_API" <<'PY' && ok "min-api-version $api works with OGUI's API $OGUI_API" || bad "min-api-version $api is not compatible with OGUI's API $OGUI_API"
+import sys
+want, have = ([int(x) for x in v.split(".")] for v in sys.argv[1:3])
+sys.exit(0 if want[0] == have[0] and want[1:] <= have[1:] else 1)
+PY
+[ -f "$SRC/$(meta entrypoint)" ] && ok "entrypoint $(meta entrypoint) exists" || bad "entrypoint $(meta entrypoint) is not in plugin/"
+
+# =================================================================================================
+CASE="scripts"
+for gd in "$SRC"/*.gd; do
+  name="$(basename "$gd")"
+  head -1 "$gd" | grep -Eq '^extends ' && ok "$name starts with extends" || bad "$name has no extends line"
+  grep -Eq '^func _init\(' "$gd" \
+    && bad "$name overrides _init(): it replaces the base constructor (Library._init registers the library)" \
+    || ok "$name does not override _init()"
+done
+grep -q '^extends Plugin$' "$SRC/$(meta entrypoint)" && ok "the entrypoint extends Plugin" || bad "the entrypoint does not extend Plugin"
+
+# =================================================================================================
+CASE="zip"
+"$BUILD" "$T" >/dev/null && [ -f "$T/qforge.zip" ] && ok "build.sh writes qforge.zip" || bad "build.sh failed"
+sum1="$(sha256sum "$T/qforge.zip" | cut -d' ' -f1)"
+mapfile -t files < <(python3 -c 'import sys,zipfile; print("\n".join(zipfile.ZipFile(sys.argv[1]).namelist()))' "$T/qforge.zip")
+want=(); for f in "$SRC"/*; do want+=("plugins/qforge/$(basename "$f")"); done
+[ "$(printf '%s\n' "${files[@]}" | sort)" = "$(printf '%s\n' "${want[@]}" | sort)" ] \
+  && ok "holds exactly plugin/* under plugins/qforge/ (where PluginLoader looks)" \
+  || bad "zip contents: ${files[*]}"
+"$BUILD" "$T" >/dev/null
+[ "$(sha256sum "$T/qforge.zip" | cut -d' ' -f1)" = "$sum1" ] \
+  && ok "rebuilding gives the same bytes (store sha256 stays valid)" || bad "the zip changes between builds"
+
+echo
+echo "$PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ]

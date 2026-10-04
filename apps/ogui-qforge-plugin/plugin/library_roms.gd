@@ -1,0 +1,85 @@
+extends Library
+
+## QForge ROM library: one launch item per ROM under ~/roms/<system>/, each started by
+## qforge-launch in the emulator /etc/qforge/launch.conf maps the system to.
+
+const LAUNCHER := "/usr/bin/qforge-launch"
+
+## Systems the image can launch. Tab label, and the file extensions that are a game. An .m3u
+## playlist wins over the disc images it lists, so a multi-disc game is one card.
+const SYSTEMS := {
+	"psx": {"name": "PlayStation", "exts": ["chd", "cue", "pbp", "m3u", "iso"]},
+}
+
+
+# Set in _ready, not _init: overriding _init skips Library._init, which is what registers the
+# library with the LibraryManager (on ready). Ready handlers run before ready is emitted.
+func _ready() -> void:
+	library_id = "qforge-roms"
+	store_id = "qforge"
+	supports_uninstall = false
+	logger = Log.get_logger("QForgeRoms", Log.LEVEL.INFO)
+
+
+func roms_dir() -> String:
+	return OS.get_environment("HOME").path_join("roms")
+
+
+func get_library_launch_items() -> Array[LibraryLaunchItem]:
+	var items: Array[LibraryLaunchItem] = []
+	for system in SYSTEMS:
+		for path in _scan_system(system):
+			items.append(_launch_item(system, path))
+	logger.info("Found %d ROM(s)" % items.size())
+	return items
+
+
+## ROM files of one system, one level deep, minus the members of any .m3u playlist.
+func _scan_system(system: String) -> PackedStringArray:
+	var dir_path := roms_dir().path_join(system)
+	var dir := DirAccess.open(dir_path)
+	if not dir:
+		return PackedStringArray()
+	var exts: Array = SYSTEMS[system]["exts"]
+	var roms := PackedStringArray()
+	var in_playlist := {}
+	for file in dir.get_files():
+		var ext := file.get_extension().to_lower()
+		if not ext in exts:
+			continue
+		roms.append(dir_path.path_join(file))
+		if ext == "m3u":
+			for member in _m3u_members(dir_path.path_join(file)):
+				in_playlist[member] = true
+	var result := PackedStringArray()
+	for rom in roms:
+		if not rom.get_file() in in_playlist:
+			result.append(rom)
+	return result
+
+
+## File names an .m3u lists (comments and blank lines skipped).
+func _m3u_members(path: String) -> PackedStringArray:
+	var members := PackedStringArray()
+	var f := FileAccess.open(path, FileAccess.READ)
+	if not f:
+		return members
+	while not f.eof_reached():
+		var line := f.get_line().strip_edges()
+		if line != "" and not line.begins_with("#"):
+			members.append(line.get_file())
+	return members
+
+
+func _launch_item(system: String, path: String) -> LibraryLaunchItem:
+	var item := LibraryLaunchItem.new()
+	item.name = path.get_file().get_basename()
+	item.provider_app_id = system + "/" + path.get_file()
+	item.command = LAUNCHER
+	# An array, not a command line: a ROM path with spaces stays one argument.
+	item.args = PackedStringArray([system, path])
+	item.tags = PackedStringArray(["qforge", system])
+	item.categories = PackedStringArray(["game"])
+	item.installed = true
+	item.metadata = {"system": system, "rom": path}
+	return item
