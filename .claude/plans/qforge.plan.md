@@ -1,10 +1,11 @@
 # Plan: QForge
 
 **Complexity**: Large
-**Status** (2026-10-03): Phases 0-2 done -- HW-validated on SM8550 (AYANEO Pocket ACE) and SM8250
-(MANGMI Pocket Max); SM8650 not booted since the OGUI crash fix. Phase 3 done (emulator platform,
-DuckStation end to end). Phase 4 designed (QForge OGUI plugin), next. Phase 4b (more emulators)
-after it. Phase 5 not started.
+**Status** (2026-10-04): Phases 0-3 done -- HW-validated on all three SoCs: SM8550 (AYANEO Pocket
+ACE), SM8250 (MANGMI Pocket Max), SM8650 (KONKR Pocket FIT, dev card 2026-10-04). Phase 4 (QForge
+OGUI plugin) mostly built: catalog + qforge-emu, Settings > Emulators store, per-system ROM tabs,
+fast cores per emulator / per game; open items at the end of its section, Resume next. Phase 4b
+(more emulators) and 4c (library scaling) after it. Phase 5 not started.
 
 ## Summary
 
@@ -56,14 +57,15 @@ per ROM by `qforge-launch`.
 | Task | Why |
 |---|---|
 | ✅ Build `make sdcard`, check `du --apparent-size out/images/rootfs.img` (~1.0G in the 2G slot) | Confirm the 2G slot has ≥1G headroom; `make-sdcard.sh`'s `fits` check is the backstop |
-| Boot on one SM8250 ✅, one SM8550 ✅, one SM8650 (open: not booted since the OGUI fix) | Gate: gamescope + vkcube on the panel, A/B confirm via qforge-boot-good |
+| ✅ Boot on one SM8250, one SM8550, one SM8650 (Pocket FIT, 2026-10-04) | Gate: gamescope + vkcube on the panel, A/B confirm via qforge-boot-good |
 | ✅ Back up `~/qforge-pki/ca.key.pem` off this machine (done 2026-10-03) | Losing it means no device can ever accept another update |
 
-### Phase 1 — OpenGamepadUI as the shell — done (SM8650 still to boot)
+### Phase 1 — OpenGamepadUI as the shell — done
 
 Done:
-- `packages/opengamepadui/prebuilt.pin`: upstream's **aarch64 release tarball** (v0.46.1) — no
-  Godot/GDExtension build needed. strip 2 into `/usr`; `deps: libxinerama` (Godot's X11 backend).
+- `packages/opengamepadui`: first a prebuilt pin of upstream's aarch64 release tarball (v0.46.1);
+  since 2026-10-02 a local PKGBUILD (engine/core/reaper from that tarball, pck re-exported with our
+  patches, see Phase 2). `deps: libxinerama` (Godot's X11 backend).
 - Session profile in `session.conf`: `QFORGE_SESSION_CMD=opengamepadui`,
   `QFORGE_GAMESCOPE_SHELL_ARGS="--steam --xwayland-count 2"` (OGUI drives gamescope through the
   Steam-mode X atoms, so X11/Xwayland is required), plus `QT_QPA_PLATFORM=xcb`,
@@ -78,8 +80,9 @@ Done:
 Remaining:
 - ✅ **Hardware** (SM8550 Pocket ACE, SM8250 Pocket Max, 2026-10-02/03): boots to OGUI; pad
   navigation (InputPlumber), quick-menu overlay over a running game, mangoapp, focus switching
-  OGUI <-> game (DuckStation), panel rotation. Open: SM8650.
-- Check OGUI's in-app update setting cannot still download a user-local build.
+  OGUI <-> game (DuckStation), panel rotation. SM8650 (Pocket FIT) ✅ 2026-10-04.
+- Check OGUI's in-app update setting cannot still download a user-local build (likely moot once the
+  QForge OSPlatform removes OGUI's updater, Phase 5).
 - ✅ PowerStation: done in Phase 2 (patched upstream PowerStation, qforge-powerd stripped down).
 
 ### Phase 2 — Handheld features in OGUI (High) — done
@@ -102,14 +105,14 @@ Decisions (2026-10-02, from reading OGUI v0.46.1 source in `_ref/OpenGamepadUI`)
   boot CPU governor (ondemand; the kernel default is performance), sched_ext and the suspend clamp.
   scx_lavd no longer runs with --autopower.
 
-Done (uncommitted):
+Done:
 - qforge-update gates on the OGUI first-boot marker (was Steam's loginusers.vdf); Steam wording
   gone; `channels` / `set-channel <name>` added. `qforge-select-branch` + its test removed.
 - Per-game layer removed: `qforge_perf.py`, `tests/test-perf.sh`, powerd's perf tick and
   scheduler override (powerd keeps a 3s scheduler-reconcile tick).
 - Phase 1 card kept as `out/images/sdcard.p1.img`.
 - `brightnessctl` 0.5.1 (overlay PKGBUILD — not in the holo snapshot; logind backend, not setuid)
-  so OGUI's brightness slider exists. Relocked (+1 row). HW: check the slider moves the panel.
+  so OGUI's brightness slider exists. Relocked (+1 row). HW ✅ (slider moves the panel).
 - Session runs `opengamepadui --skip-update-pack`: OGUI's self-updater fetches the x86_64
   `update.zip`; applying it at start would black the panel and override the image's shell version.
 
@@ -129,7 +132,7 @@ Done (uncommitted):
   0 script errors, brightness slider works, volume works. Remaining log noise is harmless:
   "Could not identify active GPU" (platform DRM device has no PCI ids; glxinfo would not help —
   decided to skip it), a one-time burst of 68 "Unexpected NUL" (upstream /proc scan), plugin store
-  request failing on first boot. Still to check: power menu, a game's launch menu, SM8250/SM8650.
+  request failing on first boot. Power menu, launch menu, SM8250 and SM8650 all checked since.
 
 Remaining OS-side (found in OGUI source):
 - ✅ OGUI power menu suspend / reboot / poweroff work from the session (HW, Pocket Max 2026-10-03).
@@ -164,7 +167,7 @@ image, per-game CPU pinning (`--cpus big`), the player folder layout, guest SMB 
 ksmbd backport), and the qforge-session stop fixes (fast restart, games stopped first). What was
 left moved: the other five emulators and the DuckStation hotkeys to Phase 4b (they reach players
 through the plugin catalog); DuckStation's pinned-tag re-test to Phase 4 (first catalog); the
-upstream reports to the Backlog; the SM8650 boot stays a Phase 0/1 item.
+upstream reports to the Backlog; the SM8650 boot stayed a Phase 0/1 item (done 2026-10-04).
 
 
 - Emulators to ship (decided 2026-10-03): Dolphin, ARMSX2, DuckStation, Azahar, rpcs3, Cemu.
@@ -342,8 +345,21 @@ Still to handle: OGUI's search only covers Installed / All Games;
 the tab refreshes twice at start (two library loads); upstream `remove_tab` resets `current_tab`
 on the wrong condition (`size > current_tab`).
 OGUI only reloads its library at start and from Settings > Library > Refresh Library: no D-Bus
-service, signal or file watch. The plugin runs in-process, so it calls
-`library_manager.reload_library()` itself after a rescan or a download. Then the tab prototype: can a plugin add a PSX tab that reuses OGUI's game grid.
+service, signal or file watch. The plugin runs in-process and could call
+`library_manager.reload_library()` itself, but does not yet (see open items).
+
+**Phase 4 open items** (plan check 2026-10-04)
+- Resume: Resume / Start fresh on a ROM with a resume state (part 2 below): `qforge-launch
+  --resume`, the game's serial to find `~/states/<system>/<serial>_resume.sav`. Next up.
+- HW check on the pinned DuckStation v0.1-11894: memory card and resume state (never verified).
+- Automatic rescan: ROMs copied over SMB only appear after Refresh Library or a restart (inotify on
+  `~/roms`, or rescan when the library opens), then `reload_library()` from the plugin.
+- Plugin store: mask upstream's ShadowBlip store (first-boot error noise) with an OGUI patch reading
+  the store URL from a ProjectSettings key (not written yet; 0004/0005 are other patches), pointed
+  at the QForge store once Phase 5 has a server.
+- Attribution owed per emulator (licence check below): the Emulators page shows the licence name
+  only; add author and link.
+- Hosted catalog + update notification + plugin updates from the store: need the Phase 5 server.
 
 Decided 2026-10-03: one OGUI card per ROM, grouped in one library tab per system (PSX, PS2, ...),
 and emulators fetched on demand. Both live in ONE plugin (`qforge`), since the ROM card is what
@@ -378,9 +394,9 @@ plus the ROM library that launches them)
    member cue/chd so a multi-disc game is one card).
 2. Library provider `qforge-roms`: one item per ROM, `name` from the file name (strip region /
    tags later), `tags [<system>]`, `metadata {system, rom, emulator}`, `installed true`.
-   `command` = `qforge-launch` (below), `args [<system>, <rom path>]`, prefixed with
-   `--cpus big` when the player turned "fast cores" on for that game (per-game setting the plugin
-   stores and offers; off by default). Rescan on OGUI start and via a refresh action; inotify later.
+   `command` = `qforge-launch` (below), `args [<system>, <rom path>]`, prefixed with `--cpus big|all`
+   only when the game overrides its emulator's fast-cores default (done 2026-10-04, see above).
+   Rescan on OGUI start and via Settings > Library > Refresh Library; automatic rescan still open.
    **Resume (decided 2026-10-03): the plugin asks.** When a game has a resume state, its card offers
    Resume / Start fresh before launching. Emulators cannot ask themselves: DuckStation's "Resume
    Game -- load this state, or start from a fresh boot?" dialog only exists in its own game list
@@ -389,8 +405,8 @@ plus the ROM library that launches them)
    a per-emulator way to tell whether a resume state exists (DuckStation names it
    `~/states/psx/<serial>_resume.sav`, so the plugin needs the game's serial). Until then games boot
    fresh; the state is still loadable from the emulator's pause menu.
-3. Tabs: one tab per system that has at least one ROM, populated from the provider's items.
-   Check first whether OGUI's library grid can be reused for a tab or the plugin builds its own.
+3. Tabs: one tab per system that has at least one ROM, populated from the provider's items (done:
+   OGUI's own cards in a plugin-built grid, see the tab prototype above).
 4. Emulator manager, modelled on armada's Decky store (armada-os/armada, `decky/armada-store`;
    decided 2026-10-03): NO mirror -- AppImages come straight from each emulator's own releases.
    A catalog (`catalog.json`) lists per emulator: the releases API URL (GitHub / GitLab), the
@@ -418,9 +434,9 @@ plus the ROM library that launches them)
    `-batch`). An OGUI notification points at the store when the catalog offers an update. Updates
    are never applied at launch. Not via OGUI's `has_update`: in v0.46.1 no UI calls it, and it is
    per library item, so one DuckStation update would flag every PSX card.
-   **ROM whose emulator is not installed**: the PRE_LAUNCH hook does NOT download silently -- it
-   shows a popup offering to download the emulator (name, size from the release asset), with
-   progress, then launches the ROM; declining cancels the launch.
+   **ROM whose emulator is not installed**: SUPERSEDED 2026-10-04 -- no pre-launch check and no
+   download from a card: the launch fails fast and the EXIT hook's popup points at Settings >
+   Emulators (see "Plugin side done" above).
 5. Per-emulator first-run config -- MOVED to the image (decided 2026-10-03, done): defaults in
    `/usr/share/qforge/emulators/<emu>/`, named by `SEED=(<file>:<path under $HOME>)` in
    `/etc/qforge/emulators/<emu>.conf`; qforge-launch copies them before the first start, never
@@ -445,7 +461,7 @@ plus the ROM library that launches them)
   (`core/global/plugin_loader.gd:20`). Its 7 entries (steam, flathub, steamgriddb, recapture,
   lutris, sunshine, ayaneo-modules) are Steam/x86/desktop oriented, and the request is the
   "plugin store request failing" noise seen on first boot. Mask it.
-- OGUI patch 0004: read the store URL from a ProjectSettings key next to the existing
+- An OGUI patch (not written yet): read the store URL from a ProjectSettings key next to the existing
   `OpenGamepadUI/plugin/directory` (upstreamable; default stays upstream's), and set it to the
   QForge store in our build. Placeholder host until Phase 5 replaces `updates.qforge.invalid`.
 - QForge store = a `plugins.json` in the same format (`plugin.id/name/version/min-api-version`,
@@ -621,6 +637,9 @@ work that needs it, not before.
   cores slowest-first; other SoCs do not); plus our patches 0001/0002 (`_ref/PowerStation` qforge-arm).
 - OpenGamepadUI: SENT 2026-10-03 as #559 / #560 / #561; #562 (our patch 0004, apps that exit
   before creating a window) sent 2026-10-04.
+- OpenGamepadUI patch 0005 (save the default performance profiles at startup): branch
+  `fix/perf-default-profile` in `_ref/OpenGamepadUI`, local only; the user asks the authors on their
+  Discord whether it is a real bug before it is pushed to the fork and sent.
 - OpenGamepadUI: the library menu queues one full refresh per library_item_added (2,000 items =
   2,001 refreshes, ~24 s); coalesce them (Phase 4c option C).
 - DuckStation: AppRun is a symlink, so on a system without Qt, Qt's applicationDirPath misses
@@ -630,9 +649,10 @@ work that needs it, not before.
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
-| OGUI / Godot / GDExtension do not build or run on aarch64 | Medium | Phase 1 proof of concept before anything depends on it |
-| PowerStation has no Qualcomm backend | High | Adapter to `org.qforge.Power` first |
-| Steam-shaped contracts silently broken (update gate, per-game perf, OOBE Wi-Fi) | High | Listed above as Phase 2 tasks |
+| OGUI / Godot / GDExtension do not build or run on aarch64 | Resolved | Local PKGBUILD + patches; runs on all three SoCs |
+| PowerStation has no Qualcomm backend | Resolved | Upstream PowerStation + our patches 0001/0002 (devfreq GPU, non-SMT cores) |
+| Steam-shaped contracts silently broken (update gate, per-game perf, OOBE Wi-Fi) | Low | Phase 2 fixed the known ones; OGUI patch 0005 fixed per-game perf defaults |
+| OGUI patches never land upstream | Medium | Each patch carries its upstream branch; drop on release |
 | Emulator licensing / aarch64 availability | Medium | Licence allowlist; prefer emulators with arm64 JITs |
 | No upstream merges for hardware fixes | Medium | Accepted — QForge is standalone |
 | SM8250 has no sensor DSP firmware (no auto-rotate) | Certain | Documented |
