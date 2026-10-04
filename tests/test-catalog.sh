@@ -20,7 +20,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CATALOG="${QFORGE_CATALOG:-$ROOT/apps/ogui-qforge-plugin/catalog.json}"
+CATALOG="${QFORGE_CATALOG:-$ROOT/rootfs/overlay/usr/share/qforge/catalog.json}"
 LAUNCH_CONF="$ROOT/rootfs/overlay/etc/qforge/launch.conf"
 EMU_CONF_DIR="$ROOT/rootfs/overlay/etc/qforge/emulators"
 

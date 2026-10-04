@@ -250,11 +250,20 @@ for the store's Open; done 2026-10-04, `GUI_ARGS` in the emulator conf, DuckStat
 own Exit returns to OGUI, mount released), and a first
 `catalog.json` with DuckStation pinned to a
 numbered release (v0.1-11894 or newer), re-tested on HW (launch, pad, every exit path, memory card,
-resume state). Catalog done 2026-10-04: `apps/ogui-qforge-plugin/catalog.json` (schema 1: name,
+resume state). Catalog done 2026-10-04: `/usr/share/qforge/catalog.json` in the image (schema 1: name,
 systems, github owner/repo, tag, anchored asset regex, sha256, size, homepage, licence; launch
 details stay in the image's emulator conf), DuckStation pinned to v0.1-11894 (sha256 = GitHub's
 digest), checked by `tests/test-catalog.sh` (`QFORGE_NET_TEST=1` also re-checks every pin against
-GitHub). HW 2026-10-04, Pocket ACE, v0.1-11894 from a card: first-run seed, launch, OGUI Exit
+GitHub). The image's copy is the offline fallback; the plugin keeps the hosted one in
+`~/.cache/qforge/catalog.json`, which wins.
+Part 2 started 2026-10-04: `/usr/bin/qforge-emu list | install <emu> | remove <emu>` (Python,
+`tests/test-emu.sh`), the download half the plugin drives (stdout = `N%` lines / JSON; exit 2 usage,
+3 network, 4 verification, 5 local). Install: GitHub API for the pinned tag, refuse unless the
+asset's digest + size equal the catalog's and the URL is https; curl `--proto =https
+--proto-redir =https` into a .part; sha256 + size again; rename to `<tag>.AppImage`, flip
+`current` atomically, keep the previous AppImage, delete older ones. Real install from GitHub
+verified on the host (DuckStation, 86 MB, 9 s). Plugin side (pre-launch popup, store screen) next.
+HW 2026-10-04, Pocket ACE, v0.1-11894 from a card: first-run seed, launch, OGUI Exit
 (double SIGTERM, clean, mount released); DuckStation keeps every seeded value when it rewrites
 settings.ini (drops our comments, adds [UI] geometry). Memory card and resume state not checked
 (game left during the intro).

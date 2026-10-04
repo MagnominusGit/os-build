@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+# qforge-emu — installs, updates and removes the emulators ROM cards run (plan Phase 4, part 2).
+#
+#     qforge-emu list                 -> JSON on stdout: every catalog emulator, pinned vs installed
+#     qforge-emu install <emulator>   -> `N%` lines on stdout, forward-only, ending at 100%
+#     qforge-emu remove <emulator>
+#
+# THE CALLER IS THE QFORGE OGUI PLUGIN, which parses stdout: progress lines and JSON only;
+# everything else goes to stderr. Exit status: 0 ok, 2 bad invocation or unknown emulator,
+# 3 network (GitHub API or download failed), 4 verification (the release or the bytes are not the
+# ones QForge tested; nothing changes on disk), 5 local (no space, file system).
+#
+# Emulators are upstream AppImages, never mirrored. The catalog pins, per emulator, one tested
+# release tag and the sha256 + size of its arm64 asset. An install:
+#   1. asks the GitHub API for that tag and picks the asset the catalog's pattern matches;
+#   2. refuses (exit 4) unless GitHub's per-asset digest and size equal the catalog's -- an upstream
+#      that re-uploads under the same tag must not reach players untested -- and unless the
+#      download URL is https;
+#   3. downloads with curl locked to https, redirects included, into a hidden .part file;
+#   4. checks the bytes' sha256 and size against the catalog again (exit 4, .part deleted);
+#   5. renames it to <tag>.AppImage and flips `current` atomically (symlink + rename), keeping the
+#      previous AppImage for a rollback and deleting older ones.
+# A failure at any step leaves the working install as it was.
+#
+# Layout (what qforge-launch runs): /home/player/emulators/<emulator>/{<tag>.AppImage, current}.
+#
+# CATALOG: $QFORGE_CATALOG, else the plugin's copy of the hosted catalog
+# (~/.cache/qforge/catalog.json), else the image's (/usr/share/qforge/catalog.json, the offline
+# fallback). qforge-emu never fetches the catalog itself; the plugin does.
+#
+# TEST SEAMS (tests/test-emu.sh runs this file): QFORGE_CURL, QFORGE_EMU_DIR, QFORGE_CATALOG.
+import fcntl
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+
+EXIT_OK, EXIT_USAGE, EXIT_NET, EXIT_VERIFY, EXIT_LOCAL = 0, 2, 3, 4, 5
+
+CURL = os.environ.get("QFORGE_CURL", "curl")
+EMU_DIR = os.environ.get("QFORGE_EMU_DIR", "/home/player/emulators")
+CATALOGS = [
+    os.environ.get("QFORGE_CATALOG", ""),
+    os.path.join(os.path.expanduser("~"), ".cache/qforge/catalog.json"),
+    "/usr/share/qforge/catalog.json",
+]
+GITHUB_API = "https://api.github.com"
+EMU_ID = re.compile(r"[a-z0-9_-]+")
+SAFE_TAG = re.compile(r"[A-Za-z0-9._-]+")
+SPACE_MARGIN = 16 << 20  # bytes kept free beyond the AppImage itself
+POLL = 0.25  # s between progress samples
+
+
+class Fail(Exception):
+    def __init__(self, code, msg):
+        super().__init__(msg)
+        self.code = code
+
+
+def log(msg):
+    print(f"qforge-emu: {msg}", file=sys.stderr, flush=True)
+
+
+def load_catalog():
+    path = next((p for p in CATALOGS if p and os.path.isfile(p)), None)
+    if not path:
+        raise Fail(EXIT_LOCAL, "no emulator catalog found")
+    try:
+        with open(path) as f:
+            cat = json.load(f)
+    except (OSError, ValueError) as e:
+        raise Fail(EXIT_LOCAL, f"unreadable catalog {path}: {e}")
+    if cat.get("schema") != 1 or not isinstance(cat.get("emulators"), dict):
+        raise Fail(EXIT_LOCAL, f"{path} is not a schema 1 catalog")
+    return cat["emulators"]
+
+
+def entry(emus, emu):
+    if not EMU_ID.fullmatch(emu or "") or emu not in emus:
+        raise Fail(EXIT_USAGE, f"no emulator '{emu}' in the catalog")
+    return emus[emu]
+
+
+def installed_tag(emu):
+    """The tag `current` points at, or None when nothing (valid) is installed."""
+    current = os.path.join(EMU_DIR, emu, "current")
+    target = os.readlink(current) if os.path.islink(current) else ""
+    if not target.endswith(".AppImage") or not os.path.isfile(current):
+        return None
+    return target[: -len(".AppImage")]
+
+
+def curl_base():
+    return [CURL, "--fail", "--silent", "--show-error", "--location",
+            "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "20"]
+
+
+def release_asset(e):
+    url = f"{GITHUB_API}/repos/{e['github']}/releases/tags/{e['tag']}"
+    try:
+        out = subprocess.run(curl_base() + ["--max-time", "60",
+                                            "-H", "Accept: application/vnd.github+json", url],
+                             capture_output=True, check=True, timeout=90).stdout
+        rel = json.loads(out)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, ValueError) as err:
+        raise Fail(EXIT_NET, f"GitHub release {e['github']} {e['tag']} not readable: {err}")
+    pattern = re.compile(e["asset"])
+    assets = [a for a in rel.get("assets", []) if pattern.fullmatch(str(a.get("name", "")))]
+    if len(assets) != 1:
+        raise Fail(EXIT_VERIFY, f"{e['tag']}: the asset pattern matches {len(assets)} assets, not 1")
+    a = assets[0]
+    if a.get("digest") != f"sha256:{e['sha256']}" or a.get("size") != e["size"]:
+        raise Fail(EXIT_VERIFY, f"{e['tag']}/{a.get('name')} on GitHub is not the build QForge pinned "
+                                f"(digest {a.get('digest')}, size {a.get('size')})")
+    url = str(a.get("browser_download_url", ""))
+    if not url.startswith("https://"):
+        raise Fail(EXIT_VERIFY, f"refusing a non-https download URL: {url}")
+    return url
+
+
+def download(url, part, size):
+    """curl into `part`, printing forward-only N% (capped at 99 until verified)."""
+    shown = -1
+    try:
+        proc = subprocess.Popen(curl_base() + ["--retry", "2", "-o", part, url],
+                                stdout=subprocess.DEVNULL)
+    except OSError as err:
+        raise Fail(EXIT_NET, f"cannot run curl: {err}")
+    while True:
+        rc = proc.poll()
+        done = os.path.getsize(part) if os.path.exists(part) else 0
+        pct = min(99, done * 100 // size) if size else 0
+        if pct > shown:
+            print(f"{pct}%", flush=True)
+            shown = pct
+        if rc is not None:
+            break
+        time.sleep(POLL)
+    if rc != 0:
+        raise Fail(EXIT_NET, f"download failed (curl exit {rc}): {url}")
+
+
+def verify(part, e):
+    h = hashlib.sha256()
+    with open(part, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    if os.path.getsize(part) != e["size"] or h.hexdigest() != e["sha256"]:
+        raise Fail(EXIT_VERIFY, f"downloaded file does not match the catalog (sha256 {h.hexdigest()})")
+
+
+def activate(d, tag):
+    """Point `current` at <tag>.AppImage atomically; keep the previous one, delete the rest."""
+    current = os.path.join(d, "current")
+    previous = os.readlink(current) if os.path.islink(current) else None
+    tmp = os.path.join(d, ".current.tmp")
+    if os.path.lexists(tmp):
+        os.unlink(tmp)
+    os.symlink(f"{tag}.AppImage", tmp)
+    os.replace(tmp, current)
+    keep = {f"{tag}.AppImage", previous}
+    for name in os.listdir(d):
+        if name.endswith(".AppImage") and name not in keep:
+            os.unlink(os.path.join(d, name))
+
+
+def cmd_install(emu):
+    e = entry(load_catalog(), emu)
+    tag = e["tag"]
+    if not SAFE_TAG.fullmatch(tag):
+        raise Fail(EXIT_VERIFY, f"unsafe tag in the catalog: {tag!r}")
+    if installed_tag(emu) == tag:
+        print("100%", flush=True)
+        return EXIT_OK
+    d = os.path.join(EMU_DIR, emu)
+    try:
+        os.makedirs(d, exist_ok=True)
+        lock = os.open(d, os.O_RDONLY)
+        fcntl.flock(lock, fcntl.LOCK_EX)  # one install per emulator at a time
+    except OSError as err:
+        raise Fail(EXIT_LOCAL, f"cannot use {d}: {err}")
+    part = os.path.join(d, f".{tag}.AppImage.part")
+    try:
+        url = release_asset(e)
+        if shutil.disk_usage(d).free < e["size"] + SPACE_MARGIN:
+            raise Fail(EXIT_LOCAL, f"not enough free space in {d} for {e['size']} bytes")
+        download(url, part, e["size"])
+        verify(part, e)
+        os.chmod(part, 0o755)
+        os.replace(part, os.path.join(d, f"{tag}.AppImage"))
+        activate(d, tag)
+    except OSError as err:
+        raise Fail(EXIT_LOCAL, f"install of {emu} {tag} failed: {err}")
+    finally:
+        if os.path.exists(part):
+            os.unlink(part)
+        os.close(lock)
+    print("100%", flush=True)
+    log(f"{emu} {tag} installed")
+    return EXIT_OK
+
+
+def cmd_list():
+    out = {}
+    for emu, e in load_catalog().items():
+        if not EMU_ID.fullmatch(emu):
+            continue
+        inst = installed_tag(emu)
+        out[emu] = {
+            "name": e.get("name", emu),
+            "systems": e.get("systems", []),
+            "pinned": e.get("tag"),
+            "installed": inst,
+            "update": inst is not None and inst != e.get("tag"),
+            "size": e.get("size"),
+            "homepage": e.get("homepage"),
+            "licence": e.get("licence"),
+        }
+    print(json.dumps({"emulators": out}, sort_keys=True))
+    return EXIT_OK
+
+
+def cmd_remove(emu):
+    if not EMU_ID.fullmatch(emu or ""):
+        raise Fail(EXIT_USAGE, f"bad emulator name '{emu}'")
+    d = os.path.join(EMU_DIR, emu)
+    try:
+        shutil.rmtree(d)
+    except FileNotFoundError:
+        pass
+    except OSError as err:
+        raise Fail(EXIT_LOCAL, f"cannot remove {d}: {err}")
+    return EXIT_OK
+
+
+def main(argv):
+    usage = "usage: qforge-emu list | install <emulator> | remove <emulator>"
+    if argv == ["list"]:
+        return cmd_list()
+    if len(argv) == 2 and argv[0] == "install":
+        return cmd_install(argv[1])
+    if len(argv) == 2 and argv[0] == "remove":
+        return cmd_remove(argv[1])
+    raise Fail(EXIT_USAGE, usage)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except Fail as f:
+        log(str(f))
+        sys.exit(f.code)
+    except KeyboardInterrupt:
+        sys.exit(EXIT_LOCAL)

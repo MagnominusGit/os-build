@@ -409,6 +409,7 @@ test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-launch.sh
 	bash $(TESTS_DIR)/test-catalog.sh
 	bash $(TESTS_DIR)/test-plugin.sh
+	bash $(TESTS_DIR)/test-emu.sh
 	bash $(TESTS_DIR)/test-shares.sh
 	bash $(TESTS_DIR)/test-coredump-limit.sh
 	bash $(TESTS_DIR)/test-fan-curve.sh
