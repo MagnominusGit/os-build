@@ -582,8 +582,18 @@ plus the ROM library that launches them)
 
 ### Phase 4b — Grow the emulator catalog (after Phase 4)
 
-- The other five: ARMSX2 (PS2), Azahar (3DS), Dolphin (GC/Wii), rpcs3 (PS3, needs firmware),
-  Cemu (Wii U). Recipe from DuckStation, per emulator: an aarch64 AppImage that uses our
+- ✅ ARMSX2 (PS2), 2026-10-05, plugin 0.1.8. GPL-3.0, "The ARMSX2 team (based on PCSX2)". Numbered
+  releases are Android-only; Linux arm64 AppImages exist only in dated nightlies, so the pin is
+  `nightly-20261005` (= 2.8.1 + one microVU clamp fix; `nightly-20261004` is exactly 2.8), the
+  `Linux-arm64-4K-pages` build (our kernel is 4K pages). Old nightlies may be pruned upstream: then
+  re-pin. Settings: `~/.config/ARMSX2/inis/PCSX2.ini` (PCSX2 keys); the seed MUST carry
+  `[UI] SettingsVersion = 1` or ARMSX2 offers to reset everything to defaults. Renderer left on
+  Automatic (forcing Vulkan shows a warning each start; Auto picks Vulkan on Turnip). BIOS left on
+  Auto (user decision): ARMSX2 picks the first image in ~/bios/ps2. Args `-batch -nogui -fullscreen --`,
+  GUI `-bigpicture -fullscreen`. HW ✅ Pocket ACE: Maximo (USA) 58.7 fps avg, Turnip 26.2.4, SDL-0 pad +
+  rumble, Select+Start pause menu, OGUI Exit (SIGTERM) writes the resume state with no dialog; exiting
+  from ARMSX2's own pause menu does not (its "close" path skips SaveStateOnShutdown).
+- The other four: Azahar (3DS), Dolphin (GC/Wii), rpcs3 (PS3, needs firmware), Cemu (Wii U). Recipe from DuckStation, per emulator: an aarch64 AppImage that uses our
   Mesa/Turnip (armada's catalog has working asset patterns for all five); `.conf` + minimal seed;
   `launch.conf` system + folder-layout rows; every exit path (SIGTERM vs menu: ConfirmPowerOff-style
   dialogs, save state on exit); licence and author's stated terms; pinned tag in the hosted catalog.

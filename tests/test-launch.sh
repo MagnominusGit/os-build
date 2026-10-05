@@ -24,13 +24,14 @@ LAUNCH_CONF="$ROOT/rootfs/overlay/etc/qforge/launch.conf"
 EMU_CONF="$ROOT/rootfs/overlay/etc/qforge/emulators/duckstation.conf"
 SEED_DIR="$ROOT/rootfs/overlay/usr/share/qforge/emulators"
 DS_SEED="$SEED_DIR/duckstation/settings.ini"
+AX_SEED="$SEED_DIR/armsx2/PCSX2.ini"
 LAYOUT="$ROOT/rootfs/overlay/usr/share/user-tmpfiles.d/qforge-home.conf"
 
 PASS=0; FAIL=0; CASE=""
 ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
 
-for f in "$LAUNCH" "$LAUNCH_CONF" "$EMU_CONF" "$DS_SEED" "$LAYOUT"; do
+for f in "$LAUNCH" "$LAUNCH_CONF" "$EMU_CONF" "$DS_SEED" "$AX_SEED" "$LAYOUT"; do
   [ -f "$f" ] || { echo "missing input: $f" >&2; exit 1; }
 done
 command -v setsid >/dev/null || { echo "setsid (util-linux) is required" >&2; exit 1; }
@@ -205,6 +206,41 @@ for d in bios emulators; do layout_has "$d" && ok "layout has ~/$d" || bad "layo
   && [ "$(ini MemoryCards Directory)" = /home/player/saves/psx ] && [ "$(ini Folders SaveStates)" = /home/player/states/psx ] \
   && ok "duckstation seed: BIOS, ROMs, memory cards and states in the shared layout" \
   || bad "duckstation seed folders do not match the layout"
+
+# ARMSX2 (PCSX2's settings code): the keys its first runs on hardware needed (2026-10-05).
+axini() { awk -v sec="[$1]" -v key="$2" '$0 == sec {in_s=1; next} /^\[/ {in_s=0}
+  in_s { split($0, kv, " = "); if (kv[1] == key) { print kv[2]; exit } }' "$AX_SEED"; }
+[ "$(axini UI SettingsVersion)" = 1 ] && ok "armsx2 seed: SettingsVersion 1 (otherwise ARMSX2 offers to reset it all to defaults)" \
+  || bad "armsx2 seed lacks [UI] SettingsVersion = 1: ARMSX2 treats the file as broken and resets it"
+[ "$(axini UI SetupWizardIncomplete)" = false ] && ok "armsx2 seed: setup wizard skipped" || bad "armsx2 seed does not skip the setup wizard"
+[ "$(axini UI ConfirmShutdown)" = false ] && ok "armsx2 seed: no exit confirmation (a SIGTERM would wait on a dialog)" \
+  || bad "armsx2 seed lacks ConfirmShutdown = false: OGUI's Exit could hang on 'are you sure?'"
+[ "$(axini EmuCore SaveStateOnShutdown)" = true ] && ok "armsx2 seed: resume state saved on exit" || bad "armsx2 seed lacks SaveStateOnShutdown = true"
+[ "$(axini AutoUpdater CheckAtStartup)" = false ] && ok "armsx2 seed: self-updater off (QForge ships the version)" || bad "armsx2 seed leaves ARMSX2's auto-updater on"
+[ -z "$(axini EmuCore/GS Renderer)" ] && ok "armsx2 seed: renderer left on Automatic (forcing it shows a warning at every start)" \
+  || bad "armsx2 seed forces a renderer: ARMSX2 warns 'Graphics API is not set to Automatic' at every start"
+[ -z "$(axini Filenames BIOS)" ] && ok "armsx2 seed: no BIOS file named (Auto picks one from ~/bios/ps2)" || bad "armsx2 seed names a BIOS file the player may not have"
+[ "$(axini InputSources SDL)" = true ] && [ "$(axini Pad1 Type)" = DualShock2 ] && [ "$(axini Pad1 Cross)" = SDL-0/FaceSouth ] \
+  && [ "$(axini Pad1 Start)" = SDL-0/Start ] && ok "armsx2 seed: Port 1 is a DualShock 2 on the InputPlumber pad (SDL-0)" \
+  || bad "armsx2 seed has no SDL-0 DualShock 2 mapping for Port 1"
+[ "$(axini Hotkeys OpenPauseMenu)" = "SDL-0/Back & SDL-0/Start" ] && ok "armsx2 seed: Select+Start opens the pause menu" \
+  || bad "armsx2 seed: no controller binding for OpenPauseMenu"
+grep -q 'SDL-0/Guide' "$AX_SEED" && bad "armsx2 seed binds Guide, which OpenGamepadUI owns" || ok "armsx2 seed leaves Guide to OGUI"
+[ "$(axini Folders Bios)" = /home/player/bios/ps2 ] && [ "$(axini GameList RecursivePaths)" = /home/player/roms/ps2 ] \
+  && [ "$(axini Folders MemoryCards)" = /home/player/saves/ps2 ] && [ "$(axini Folders Savestates)" = /home/player/states/ps2 ] \
+  && ok "armsx2 seed: BIOS, ROMs, memory cards and states in the shared layout" || bad "armsx2 seed folders do not match the layout"
+( . "$(dirname "$EMU_CONF")/armsx2.conf"
+  [ "$BINARY" = usr/bin/armsx2-qt ] || exit 1
+  [[ " ${ARGS[*]} " == *" -batch "* ]] || exit 2
+  [ "${ARGS[-1]}" = "--" ] || exit 3
+  [ "${SEED[*]}" = "PCSX2.ini:.config/ARMSX2/inis/PCSX2.ini" ] || exit 4 )
+case $? in
+  0) ok "armsx2.conf: real binary, -batch, options end with --, seeds ~/.config/ARMSX2/inis/PCSX2.ini" ;;
+  1) bad "armsx2.conf BINARY is not usr/bin/armsx2-qt" ;;
+  2) bad "armsx2.conf lacks -batch: closing the game would leave ARMSX2's UI, not OGUI" ;;
+  3) bad "armsx2.conf ARGS do not end with --" ;;
+  *) bad "armsx2.conf SEED is not PCSX2.ini -> .config/ARMSX2/inis/PCSX2.ini (where ARMSX2 reads it)" ;;
+esac
 
 # =================================================================================================
 CASE="first-run settings (SEED)"

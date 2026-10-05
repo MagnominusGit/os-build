@@ -19,6 +19,7 @@ var settings_manager := load("res://core/global/settings_manager.tres") as Setti
 ## playlist wins over the disc images it lists, so a multi-disc game is one card.
 const SYSTEMS := {
 	"psx": {"name": "PlayStation", "exts": ["chd", "cue", "pbp", "m3u", "iso"]},
+	"ps2": {"name": "PlayStation 2", "exts": ["chd", "iso", "cso", "zso", "gz", "cue"]},
 }
 
 

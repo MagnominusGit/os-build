@@ -1,10 +1,29 @@
 {
   "schema": 1,
   "emulators": {
+    "armsx2": {
+      "name": "ARMSX2",
+      "author": "The ARMSX2 team (based on PCSX2)",
+      "systems": [
+        "ps2"
+      ],
+      "github": "ARMSX2/ARMSX2",
+      "tag": "nightly-20261005",
+      "asset": "^ARMSX2-nightly-20261005-[0-9a-f]{10}-Linux-arm64-4K-pages\\.AppImage$",
+      "sha256": "3e385af5f19881e5db70c36aba38eb50c89bd7e76d126a4ce87baaf6cbaeb800",
+      "size": 57960968,
+      "homepage": "https://armsx2.net/",
+      "licence": {
+        "name": "GPL-3.0",
+        "url": "https://github.com/ARMSX2/ARMSX2/blob/master/COPYING.GPLv3"
+      }
+    },
     "duckstation": {
       "name": "DuckStation",
       "author": "Connor McLaughlin (Stenzek)",
-      "systems": ["psx"],
+      "systems": [
+        "psx"
+      ],
       "github": "stenzek/duckstation",
       "tag": "v0.1-11894",
       "asset": "^DuckStation-arm64\\.AppImage$",
