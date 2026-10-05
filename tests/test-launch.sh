@@ -67,7 +67,7 @@ log="$T/emu.log"
 echo \$\$ >> "$T/pids"
 read -r _ _ _ _ pgid sid _< <(cut -d' ' -f1-7 /proc/\$\$/stat)
 { echo "pid=\$\$"; echo "pgid=\$pgid"; echo "sid=\$sid"; echo "self=\$0"; echo "vk=\${VK_DRIVER_FILES-}"
-  echo "sharun_sys=\${SHARUN_ALLOW_SYS_VKICD-}"; printf 'arg=%s\n' "\$@"; } >> "\$log"
+  echo "sharun_sys=\${SHARUN_ALLOW_SYS_VKICD-}"; echo "no_updates=\${DISABLE_AUTO_UPDATES-}"; printf 'arg=%s\n' "\$@"; } >> "\$log"
 on_term() {
   echo term >> "\$log"
   sleep 0.3
@@ -374,6 +374,8 @@ self="$(field self)"; mnt="${self%/usr/bin/duckstation-qt}"
 [ "$(field vk)" = /usr/share/vulkan/icd.d/freedreno_icd.aarch64.json ] && [ "$(field sharun_sys)" = 1 ] \
   && ok "appimage-sharun runs on the image's Turnip (system ICD allowed and chosen)" \
   || bad "sharun Vulkan env: VK_DRIVER_FILES='$(field vk)' SHARUN_ALLOW_SYS_VKICD='$(field sharun_sys)'"
+[ "$(field no_updates)" = 1 ] && ok "appimage-sharun turns pkgforge's self-updater off (DISABLE_AUTO_UPDATES=1): versions are pinned" \
+  || bad "the sharun format does not set DISABLE_AUTO_UPDATES=1"
 [ "$(readlink "$QFORGE_TMP_LINK_DIR/Gxbwc")" = "$mnt/share" ] \
   && ok "/tmp/<name> from the hook links to <mount>/share before the emulator starts" \
   || bad "no link to the mounted share: $(ls -l "$QFORGE_TMP_LINK_DIR" 2>&1 | tr '\n' ' ')"

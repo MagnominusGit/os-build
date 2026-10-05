@@ -397,6 +397,10 @@ class SharunAppImage(AppImage):
       access Windows-1252 fonts", HW 2026-10-05).
     - Vulkan: sharun points the loader at the bundled drivers unless SHARUN_ALLOW_SYS_VKICD=1. Every
       emulator runs on the image's Turnip (Dolphin 2609 bundles an older Mesa).
+
+    The self-updater hook never runs here (only AppRun sources hooks, and it also needs $APPIMAGE,
+    which only the runtime sets for AppRun); DISABLE_AUTO_UPDATES=1, the hook's own off switch,
+    keeps it off should a later build run its hooks some other way: QForge pins every version.
     """
 
     HOOK = "bin/01-path-mapping-hardcoded.hook"
@@ -457,7 +461,8 @@ class SharunAppImage(AppImage):
         super().release()
 
     def env(self):
-        return {"SHARUN_ALLOW_SYS_VKICD": "1", "VK_DRIVER_FILES": SYSTEM_VULKAN_ICD}
+        return {"SHARUN_ALLOW_SYS_VKICD": "1", "VK_DRIVER_FILES": SYSTEM_VULKAN_ICD,
+                "DISABLE_AUTO_UPDATES": "1"}
 
 
 FORMATS = {"appimage": AppImage, "appimage-sharun": SharunAppImage}
