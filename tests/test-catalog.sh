@@ -11,18 +11,18 @@
 #     one silently ships an untested build: pins must be numbered releases;
 #   - the sha256 is what the plugin checks the download against (and must match GitHub's per-asset
 #     digest): a malformed one would make every install fail, or, if skipped, verify nothing;
-#   - an emulator the image cannot launch (no /etc/qforge/emulators/<emu>.conf), or one serving a
+#   - an emulator the image cannot launch (no /usr/share/qforge/emulators/<emu>/emulator.json), or one serving a
 #     system launch.conf maps elsewhere, would download fine and then never start;
 #   - a plain-http URL would let anyone on the path swap the AppImage.
 #
-# Launch details (binary, args, first-run seed) live in the image's emulator conf, NOT here: the
+# Launch details (format, binary, args, first-run seed) live in the image's emulator.json, NOT here: the
 # catalog only says what to download and how to verify it.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CATALOG="${QFORGE_CATALOG:-$ROOT/rootfs/overlay/usr/share/qforge/catalog.json}"
 LAUNCH_CONF="$ROOT/rootfs/overlay/etc/qforge/launch.conf"
-EMU_CONF_DIR="$ROOT/rootfs/overlay/etc/qforge/emulators"
+EMU_DATA_DIR="$ROOT/rootfs/overlay/usr/share/qforge/emulators"
 
 for f in "$CATALOG" "$LAUNCH_CONF"; do
   [ -f "$f" ] || { echo "missing input: $f" >&2; exit 1; }
@@ -30,7 +30,7 @@ done
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
 
 # The checks are in Python (JSON + regex); each prints "ok|FAIL <TAB> case <TAB> message".
-out="$(QFORGE_NET_TEST="${QFORGE_NET_TEST:-0}" python3 - "$CATALOG" "$LAUNCH_CONF" "$EMU_CONF_DIR" <<'PY'
+out="$(QFORGE_NET_TEST="${QFORGE_NET_TEST:-0}" python3 - "$CATALOG" "$LAUNCH_CONF" "$EMU_DATA_DIR" <<'PY'
 import json, os, re, sys, urllib.request
 
 catalog_path, launch_conf, emu_conf_dir = sys.argv[1:4]
@@ -110,12 +110,12 @@ for emu, e in emus.items():
     ok(case, "has every field")
     extra = set(e) - REQUIRED
     if extra:
-        bad(case, f"unknown fields {sorted(extra)} (launch settings belong in the image's emulator conf)")
+        bad(case, f"unknown fields {sorted(extra)} (launch settings belong in the image's emulator.json)")
 
-    if os.path.isfile(os.path.join(emu_conf_dir, f"{emu}.conf")):
-        ok(case, f"the image can launch it (/etc/qforge/emulators/{emu}.conf)")
+    if os.path.isfile(os.path.join(emu_conf_dir, emu, "emulator.json")):
+        ok(case, f"the image can launch it (/usr/share/qforge/emulators/{emu}/emulator.json)")
     else:
-        bad(case, f"no /etc/qforge/emulators/{emu}.conf: it would download and never start")
+        bad(case, f"no /usr/share/qforge/emulators/{emu}/emulator.json: it would download and never start")
     systems = e["systems"]
     if isinstance(systems, list) and systems:
         wrong = [s for s in systems if launch.get(s) != emu]

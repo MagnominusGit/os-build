@@ -21,8 +21,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LAUNCH="$ROOT/rootfs/overlay/usr/bin/qforge-launch"
 LAUNCH_CONF="$ROOT/rootfs/overlay/etc/qforge/launch.conf"
-EMU_CONF="$ROOT/rootfs/overlay/etc/qforge/emulators/duckstation.conf"
 SEED_DIR="$ROOT/rootfs/overlay/usr/share/qforge/emulators"
+DS_DEF="$SEED_DIR/duckstation/emulator.json"
 DS_SEED="$SEED_DIR/duckstation/settings.ini"
 AX_SEED="$SEED_DIR/armsx2/PCSX2.ini"
 LAYOUT="$ROOT/rootfs/overlay/usr/share/user-tmpfiles.d/qforge-home.conf"
@@ -30,8 +30,10 @@ LAYOUT="$ROOT/rootfs/overlay/usr/share/user-tmpfiles.d/qforge-home.conf"
 PASS=0; FAIL=0; CASE=""
 ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
+# jget <emulator.json> <key>: the key's value as JSON (lists as ["a", "b"]).
+jget() { python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])).get(sys.argv[2])))' "$1" "$2"; }
 
-for f in "$LAUNCH" "$LAUNCH_CONF" "$EMU_CONF" "$DS_SEED" "$AX_SEED" "$LAYOUT"; do
+for f in "$LAUNCH" "$LAUNCH_CONF" "$DS_DEF" "$DS_SEED" "$AX_SEED" "$LAYOUT"; do
   [ -f "$f" ] || { echo "missing input: $f" >&2; exit 1; }
 done
 command -v setsid >/dev/null || { echo "setsid (util-linux) is required" >&2; exit 1; }
@@ -64,7 +66,8 @@ cat > "$T/fake-emu" <<EOF
 log="$T/emu.log"
 echo \$\$ >> "$T/pids"
 read -r _ _ _ _ pgid sid _< <(cut -d' ' -f1-7 /proc/\$\$/stat)
-{ echo "pid=\$\$"; echo "pgid=\$pgid"; echo "sid=\$sid"; echo "self=\$0"; printf 'arg=%s\n' "\$@"; } >> "\$log"
+{ echo "pid=\$\$"; echo "pgid=\$pgid"; echo "sid=\$sid"; echo "self=\$0"; echo "vk=\${VK_DRIVER_FILES-}"
+  echo "sharun_sys=\${SHARUN_ALLOW_SYS_VKICD-}"; printf 'arg=%s\n' "\$@"; } >> "\$log"
 on_term() {
   echo term >> "\$log"
   sleep 0.3
@@ -87,10 +90,12 @@ if [ "\${1-}" != "--appimage-mount" ]; then echo "exec-appimage \$*" >> "$T/appi
 echo \$\$ >> "$T/pids"
 mnt="$T/mnt.\$\$"; mkdir -p "\$mnt/usr/bin"; cp "$T/fake-emu" "\$mnt/usr/bin/duckstation-qt"
 ln -s usr/bin/duckstation-qt "\$mnt/AppRun"
+if [ -f "$T/sharun-hook" ]; then mkdir -p "\$mnt/bin" "\$mnt/share"; cp "$T/sharun-hook" "\$mnt/bin/01-path-mapping-hardcoded.hook"; fi
 echo "0.1-test.AppImage \$mnt fuse.0.1-test.AppImage ro,nosuid,nodev 0 0" >> "$T/mounts"
 echo "runtime=\$\$" >> "$T/appimage.log"
 grep SigIgn /proc/\$\$/status >> "$T/appimage.log"
 trap 'echo hup >> "$T/appimage.log"; rm -rf "\$mnt"; exit 0' HUP
+[ -f "$T/slow-mount" ] && { echo slow-mounting >> "$T/appimage.log"; while [ -f "$T/slow-mount" ]; do sleep 0.05; done; }
 echo "\$mnt"
 while :; do sleep 0.05; done
 EOF
@@ -102,8 +107,8 @@ ROM="$T/roms/psx/Crash Team Racing (USA).chd"
 : > "$ROM"
 
 export PATH="$T/bin:$PATH"
-export QFORGE_LAUNCH_CONF="$LAUNCH_CONF" QFORGE_EMU_CONF_DIR="$(dirname "$EMU_CONF")"
-export QFORGE_EMU_DIR="$T/emus" QFORGE_MOUNTS="$T/mounts" QFORGE_EMU_SEED_DIR="$SEED_DIR"
+export QFORGE_LAUNCH_CONF="$LAUNCH_CONF" QFORGE_EMU_DATA_DIR="$SEED_DIR"
+export QFORGE_EMU_DIR="$T/emus" QFORGE_MOUNTS="$T/mounts"
 # The launcher seeds first-run settings into $HOME: never let a test run reach the real one.
 export HOME="$T/home"
 unset XDG_CONFIG_HOME  # the player conf must be found under $HOME/.config
@@ -165,16 +170,10 @@ QFORGE_LAUNCH_STATUS="$ST" "$LAUNCH" psx "$T/roms/psx/missing.chd" >/dev/null 2>
 # =================================================================================================
 CASE="config shipped in the image"
 grep -qx 'psx=duckstation' "$LAUNCH_CONF" && ok "launch.conf maps psx to duckstation" || bad "launch.conf does not map psx=duckstation"
-( set +u; BINARY= ARGS=(); . "$EMU_CONF"
-  [ "$BINARY" = usr/bin/duckstation-qt ] || exit 1
-  case " ${ARGS[*]} " in *" -batch "*) ;; *) exit 2 ;; esac
-  [ "${ARGS[-1]}" = "--" ] || exit 3 )
-case $? in
-  0) ok "duckstation.conf: real binary (not AppRun), -batch, options end with --" ;;
-  1) bad "duckstation.conf BINARY is not usr/bin/duckstation-qt" ;;
-  2) bad "duckstation.conf lacks -batch: closing the game would leave DuckStation's UI, not OGUI" ;;
-  *) bad "duckstation.conf ARGS do not end with -- (a ROM named '-x' would be read as an option)" ;;
-esac
+[ "$(jget "$DS_DEF" format)" = '"appimage"' ] && [ "$(jget "$DS_DEF" binary)" = '"usr/bin/duckstation-qt"' ] \
+  && ok "duckstation: an AppImage, its real binary (not AppRun)" || bad "duckstation emulator.json format/binary: $(jget "$DS_DEF" format) $(jget "$DS_DEF" binary)"
+[ "$(jget "$DS_DEF" args)" = '["-batch", "-fullscreen", "--", "{rom}"]' ] \
+  && ok "duckstation args: -batch (back to OGUI on close), -- before the ROM" || bad "duckstation args: $(jget "$DS_DEF" args)"
 
 # DuckStation reads INI values as "key = value"; check the keys the hardware test needed.
 ini() { awk -v sec="[$1]" -v key="$2" '$0 == sec {in_s=1; next} /^\[/ {in_s=0}
@@ -229,18 +228,37 @@ grep -q 'SDL-0/Guide' "$AX_SEED" && bad "armsx2 seed binds Guide, which OpenGame
 [ "$(axini Folders Bios)" = /home/player/bios/ps2 ] && [ "$(axini GameList RecursivePaths)" = /home/player/roms/ps2 ] \
   && [ "$(axini Folders MemoryCards)" = /home/player/saves/ps2 ] && [ "$(axini Folders Savestates)" = /home/player/states/ps2 ] \
   && ok "armsx2 seed: BIOS, ROMs, memory cards and states in the shared layout" || bad "armsx2 seed folders do not match the layout"
-( . "$(dirname "$EMU_CONF")/armsx2.conf"
-  [ "$BINARY" = usr/bin/armsx2-qt ] || exit 1
-  [[ " ${ARGS[*]} " == *" -batch "* ]] || exit 2
-  [ "${ARGS[-1]}" = "--" ] || exit 3
-  [ "${SEED[*]}" = "PCSX2.ini:.config/ARMSX2/inis/PCSX2.ini" ] || exit 4 )
-case $? in
-  0) ok "armsx2.conf: real binary, -batch, options end with --, seeds ~/.config/ARMSX2/inis/PCSX2.ini" ;;
-  1) bad "armsx2.conf BINARY is not usr/bin/armsx2-qt" ;;
-  2) bad "armsx2.conf lacks -batch: closing the game would leave ARMSX2's UI, not OGUI" ;;
-  3) bad "armsx2.conf ARGS do not end with --" ;;
-  *) bad "armsx2.conf SEED is not PCSX2.ini -> .config/ARMSX2/inis/PCSX2.ini (where ARMSX2 reads it)" ;;
-esac
+AX_DEF="$SEED_DIR/armsx2/emulator.json"
+[ "$(jget "$AX_DEF" format)" = '"appimage"' ] && [ "$(jget "$AX_DEF" binary)" = '"usr/bin/armsx2-qt"' ] \
+  && [ "$(jget "$AX_DEF" args)" = '["-batch", "-nogui", "-fullscreen", "--", "{rom}"]' ] \
+  && ok "armsx2: real binary, -batch -nogui, -- before the ROM" || bad "armsx2 emulator.json: $(jget "$AX_DEF" binary) $(jget "$AX_DEF" args)"
+[ "$(jget "$AX_DEF" seed)" = '[{"file": "PCSX2.ini", "to": ".config/ARMSX2/inis/PCSX2.ini"}]' ] \
+  && ok "armsx2 seeds ~/.config/ARMSX2/inis/PCSX2.ini (where ARMSX2 reads it)" || bad "armsx2 seed: $(jget "$AX_DEF" seed)"
+
+# Dolphin (2026-10-05): INI keys "Key = Value" in /usr/share/qforge/emulators/dolphin/*.ini.
+DL_DIR="$SEED_DIR/dolphin"
+dlini() { awk -v sec="[$2]" -v key="$3" '$0 == sec {in_s=1; next} /^\[/ {in_s=0}
+  in_s { i = index($0, " = "); if (i && substr($0, 1, i - 1) == key) { print substr($0, i + 3); exit } }' "$DL_DIR/$1"; }
+[ "$(dlini Dolphin.ini Interface ConfirmStop)" = False ] && ok "dolphin seed: no stop confirmation (a SIGTERM would wait on a dialog)" \
+  || bad "dolphin seed lacks ConfirmStop = False"
+[ "$(dlini Dolphin.ini Core GFXBackend)" = Vulkan ] && ok "dolphin seed: Vulkan (Dolphin's Linux default is OpenGL)" || bad "dolphin seed is not on Vulkan"
+[ "$(dlini Dolphin.ini Analytics PermissionAsked)" = True ] && [ "$(dlini Dolphin.ini Analytics Enabled)" = False ] \
+  && ok "dolphin seed: analytics asked and off (no opt-in dialog)" || bad "dolphin seed would open the analytics dialog"
+[ "$(dlini Dolphin.ini General ISOPath0)" = /home/player/roms/gc ] && [ "$(dlini Dolphin.ini General ISOPath1)" = /home/player/roms/wii ] \
+  && [ "$(dlini Dolphin.ini General NANDRootPath)" = /home/player/saves/wii ] && [ "$(dlini Dolphin.ini Core GCIFolderAPath)" = /home/player/saves/gc ] \
+  && ok "dolphin seed: games, Wii NAND and GameCube cards in the shared layout" || bad "dolphin seed folders do not match the layout"
+dev="$(dlini GCPadNew.ini GCPad1 Device)"
+[ "$dev" = "SDL/0/Xbox One Elite 2 Controller" ] && [ "$(dlini WiimoteNew.ini Wiimote1 Device)" = "$dev" ] && [ "$(dlini Hotkeys.ini Hotkeys Device)" = "$dev" ] \
+  && ok "dolphin seed: pad, Wii Remote and hotkeys on the InputPlumber pad (SDL)" || bad "dolphin seed devices differ or are not the SDL pad: '$dev'"
+[ "$(dlini Hotkeys.ini Hotkeys General/Stop)" = "@(Back+Start)" ] && ok "dolphin seed: Select+Start stops the game" || bad "dolphin seed has no pad Stop hotkey"
+grep -qE '^[^;].*= .*Guide' "$DL_DIR"/*.ini && bad "dolphin seed binds Guide, which OpenGamepadUI owns" || ok "dolphin seed leaves Guide to OGUI"
+DL_DEF="$DL_DIR/emulator.json"
+[ "$(jget "$DL_DEF" format)" = '"appimage-sharun"' ] && [ "$(jget "$DL_DEF" binary)" = '"bin/dolphin-emu"' ] \
+  && ok "dolphin: a pkgforge sharun AppImage, its sharun entry (not AppRun and its self-updater)" \
+  || bad "dolphin emulator.json format/binary: $(jget "$DL_DEF" format) $(jget "$DL_DEF" binary)"
+[ "$(jget "$DL_DEF" args)" = '["-b", "-e", "{rom}"]' ] && ok "dolphin args: -b (back to OGUI on stop) -e <game>" || bad "dolphin args: $(jget "$DL_DEF" args)"
+python3 -c 'import json,os,sys; d=json.load(open(sys.argv[1])); sys.exit(any(not os.path.isfile(os.path.join(sys.argv[2], s["file"])) for s in d["seed"]))' "$DL_DEF" "$DL_DIR" \
+  && ok "dolphin: every seeded file is in the image" || bad "dolphin seeds a file that is not in $DL_DIR"
 
 # =================================================================================================
 CASE="first-run settings (SEED)"
@@ -259,15 +277,33 @@ wait_for emu_up || bad "the emulator never started"
 touch "$T/stop-emu"; reap_launcher "$lpid"
 [ "$(cat "$seeded")" = "player changed this" ] && ok "an existing settings file is never overwritten" \
   || bad "a later launch overwrote the player's settings"
-mkdir -p "$T/conf-bad"; cp "$LAUNCH_CONF" "$T/conf-bad/launch.conf"
-for entry in "settings.ini:/etc/passwd" "settings.ini:../../escape" "settings.ini:" "settings.ini"; do
-  printf 'BINARY=usr/bin/duckstation-qt\nARGS=(--)\nSEED=(%q)\n' "$entry" > "$T/conf-bad/duckstation.conf"
-  [ "$(QFORGE_EMU_CONF_DIR="$T/conf-bad" code psx "$ROM")" = 2 ] \
-    && ok "SEED entry '$entry' is refused (exit 2)" || bad "SEED entry '$entry' was accepted"
-done
-printf 'BINARY=usr/bin/duckstation-qt\nARGS=(--)\nSEED=(missing.ini:.config/x.ini)\n' > "$T/conf-bad/duckstation.conf"
-[ "$(QFORGE_EMU_CONF_DIR="$T/conf-bad" code psx "$ROM")" = 2 ] && [ ! -e "$HOME/.config/x.ini" ] \
-  && ok "a seed file the image lacks is an error, not a silent skip" || bad "a missing seed file was ignored"
+# A definition is data, checked before anything runs: anything off is exit 2, never a guess.
+BAD="$T/data-bad"; mkdir -p "$BAD/duckstation"; cp "$DS_SEED" "$BAD/duckstation/"
+bad_def() {  # bad_def <what> <python edit of d>: write it, expect exit 2 and nothing seeded
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); exec(sys.argv[2]); json.dump(d, open(sys.argv[3], "w"))' \
+    "$DS_DEF" "$2" "$BAD/duckstation/emulator.json"
+  rm -f "$HOME/.config/x.ini"
+  [ "$(QFORGE_EMU_DATA_DIR="$BAD" code psx "$ROM")" = 2 ] && [ ! -e "$HOME/.config/x.ini" ] \
+    && ok "$1 is refused (exit 2)" || bad "$1 was accepted"
+}
+bad_def "a seed to an absolute path" 'd["seed"] = [{"file": "settings.ini", "to": "/etc/passwd"}]'
+bad_def "a seed out of \$HOME (..)" 'd["seed"] = [{"file": "settings.ini", "to": "../../escape"}]'
+bad_def "a seed with no destination" 'd["seed"] = [{"file": "settings.ini", "to": ""}]'
+bad_def "a seed with no file" 'd["seed"] = [{"to": ".config/x.ini"}]'
+bad_def "a seed file the image lacks" 'd["seed"] = [{"file": "missing.ini", "to": ".config/x.ini"}]'
+bad_def "an unknown key (behaviour belongs in a format)" 'd["pre_launch"] = "touch ~/pwned"'
+bad_def "an unknown format" 'd["format"] = "flatpak"'
+bad_def "args without {rom}" 'd["args"] = ["-batch", "--"]'
+bad_def "args with {rom} twice" 'd["args"] = ["{rom}", "--", "{rom}"]'
+bad_def "gui_args with {rom}" 'd["gui_args"] = ["{rom}"]'
+bad_def "a binary outside the download (..)" 'd["binary"] = "../../usr/bin/sh"'
+bad_def "an env value that is not a string" 'd["env"] = {"X": 1}'
+bad_def "a format that is not a string" 'd["format"] = ["appimage"]'
+bad_def "a binary that is '.'" 'd["binary"] = "."'
+bad_def "a seed to a directory (trailing /)" 'd["seed"] = [{"file": "settings.ini", "to": ".config/x/"}]'
+bad_def "an argument with a NUL byte" 'd["args"] = ["-batch\u0000x", "{rom}"]'
+printf '{not json' > "$BAD/duckstation/emulator.json"
+[ "$(QFORGE_EMU_DATA_DIR="$BAD" code psx "$ROM")" = 2 ] && ok "a definition that is not JSON is refused (exit 2)" || bad "broken JSON was accepted"
 
 # =================================================================================================
 CASE="normal run, game closed by the emulator"
@@ -305,6 +341,57 @@ wait_for 'grep -qx hup "$T/appimage.log"' \
 mnt="${self%/usr/bin/duckstation-qt}"
 grep -qx -- "-u $mnt" "$T/fusermount.log" 2>/dev/null \
   && ok "fusermount3 -u <mount> after the emulator exited" || bad "no fusermount3 -u $mnt (log: $(cat "$T/fusermount.log" 2>/dev/null))"
+
+# =================================================================================================
+CASE="Exit while the AppImage is still mounting"
+# OGUI's Exit can arrive before the mount is up: the launcher must not die of it (the runtime ignores
+# SIGTERM, so a dead launcher would leave runtime and mount behind), and must still clean up.
+reset_logs; touch "$T/slow-mount"
+start_launcher
+wait_for 'grep -qx slow-mounting "$T/appimage.log"' || bad "the fake runtime never started mounting"
+kill -TERM "$lpid"; sleep 0.3
+kill -0 "$lpid" 2>/dev/null && ok "SIGTERM during the mount does not kill the launcher" || bad "the launcher died of SIGTERM while mounting"
+rm -f "$T/slow-mount"
+wait_for emu_up && ok "the game still starts once the mount is up" || bad "no game after a SIGTERM during the mount"
+touch "$T/stop-emu"; reap_launcher "$lpid"; rc=$?
+[ "$rc" = 7 ] && wait_for 'grep -qx hup "$T/appimage.log"' \
+  && ok "and the mount is released after it, as usual" || bad "after a SIGTERM during the mount: rc=$rc, released=$(grep -c hup "$T/appimage.log")"
+
+# =================================================================================================
+CASE="pkgforge AppImage: hardcoded /tmp paths"
+# Dolphin's pkgforge AppImage only finds its Sys folder through /tmp/<name> -> <mount>/share, a link
+# its AppRun hook makes; qforge-launch skips AppRun, so it makes the links itself (HW 2026-10-05).
+export QFORGE_TMP_LINK_DIR="$T/tmplinks"; mkdir -p "$QFORGE_TMP_LINK_DIR" "$QFORGE_TMP_LINK_DIR/Taken"
+SHARUN="$T/data-sharun"; mkdir -p "$SHARUN/duckstation"; cp "$DS_SEED" "$SHARUN/duckstation/"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["format"] = "appimage-sharun"; json.dump(d, open(sys.argv[2], "w"))' \
+  "$DS_DEF" "$SHARUN/duckstation/emulator.json"
+printf '%s\n' '#!/bin/sh' '_tmp_bin=""' '_tmp_lib=Taken' '_tmp_share=Gxbwc' '_tmp_share=../evil' \
+  'ln -sfn "$APPDIR"/share /tmp/hostile' > "$T/sharun-hook"
+reset_logs
+QFORGE_EMU_DATA_DIR="$SHARUN" start_launcher
+wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+self="$(field self)"; mnt="${self%/usr/bin/duckstation-qt}"
+[ "$(field vk)" = /usr/share/vulkan/icd.d/freedreno_icd.aarch64.json ] && [ "$(field sharun_sys)" = 1 ] \
+  && ok "appimage-sharun runs on the image's Turnip (system ICD allowed and chosen)" \
+  || bad "sharun Vulkan env: VK_DRIVER_FILES='$(field vk)' SHARUN_ALLOW_SYS_VKICD='$(field sharun_sys)'"
+[ "$(readlink "$QFORGE_TMP_LINK_DIR/Gxbwc")" = "$mnt/share" ] \
+  && ok "/tmp/<name> from the hook links to <mount>/share before the emulator starts" \
+  || bad "no link to the mounted share: $(ls -l "$QFORGE_TMP_LINK_DIR" 2>&1 | tr '\n' ' ')"
+[ -d "$QFORGE_TMP_LINK_DIR/Taken" ] && [ ! -L "$QFORGE_TMP_LINK_DIR/Taken" ] && grep -q "Taken exists and is not a link of ours" "$T/launch.err" \
+  && ok "an existing non-link /tmp/<name> is left alone, with a warning" || bad "an existing directory was replaced or not reported"
+[ "$(ls "$QFORGE_TMP_LINK_DIR" | sort | tr '\n' ' ')" = "Gxbwc Taken " ] \
+  && ok "the hook is read as data: empty, '../' names and its commands make nothing" \
+  || bad "unexpected entries: $(ls "$QFORGE_TMP_LINK_DIR" | tr '\n' ' ')"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
+[ ! -e "$QFORGE_TMP_LINK_DIR/Gxbwc" ] && [ ! -L "$QFORGE_TMP_LINK_DIR/Gxbwc" ] \
+  && ok "the links go away with the mount (no dangling /tmp entries)" || bad "the /tmp link outlived the game"
+rm -f "$QFORGE_TMP_LINK_DIR/Gxbwc"; reset_logs
+start_launcher; wait_for emu_up
+[ ! -e "$QFORGE_TMP_LINK_DIR/Gxbwc" ] && [ -z "$(field vk)" ] \
+  && ok "a plain appimage gets neither: links and Vulkan env belong to the sharun format" \
+  || bad "the plain appimage format made sharun links or set VK_DRIVER_FILES"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
+rm -f "$T/sharun-hook"; unset QFORGE_TMP_LINK_DIR
 
 # =================================================================================================
 CASE="OGUI Exit (Reaper.reap replayed)"
@@ -391,8 +478,8 @@ QFORGE_CPU_ROOT="$T/cpu" start_launcher; wait_for emu_up; touch "$T/stop-emu"; r
 [ "$(code --cpus fast psx "$ROM")" = 2 ] && ok "--cpus fast (unknown value) is refused: exit 2" || bad "accepted --cpus fast"
 [ "$(code --cpus)" = 2 ] && ok "--cpus with no value: exit 2" || bad "accepted a bare --cpus"
 [ "$(code --cpus big psx)" = 2 ] && ok "--cpus big with a missing ROM argument: exit 2" || bad "accepted --cpus big psx"
-grep -rqs '^CPUS=' "$(dirname "$EMU_CONF")" && bad "an emulator conf in the image sets CPUS: pinning must stay the player's choice" \
-  || ok "no emulator conf in the image pins anything"
+grep -qs 'CPUS\|taskset' "$SEED_DIR"/*/emulator.json && bad "an emulator definition in the image pins CPUs: pinning must stay the player's choice" \
+  || ok "no emulator definition in the image pins anything"
 
 # =================================================================================================
 CASE="player's emulator default (CPUS=)"
@@ -429,7 +516,7 @@ rm -f "$PCONF"
 # =================================================================================================
 CASE="emulator GUI (--gui)"
 # The plugin store's Open: the emulator's own UI with no ROM, for the settings OGUI does not expose.
-# Same mount / setsid / exit handling as a ROM; GUI_ARGS from the emulator conf instead of ARGS.
+# Same mount / setsid / exit handling as a ROM; the definition's gui_args instead of args.
 [ "$(code --gui)" = 2 ] && ok "--gui with no emulator: exit 2" || bad "accepted a bare --gui"
 [ "$(code --gui 'duck;rm')" = 2 ] && ok "--gui with shell characters in the name: exit 2" || bad "accepted --gui 'duck;rm'"
 [ "$(code --gui ../duckstation)" = 2 ] && ok "--gui with a path in the name: exit 2" || bad "accepted --gui ../duckstation"
@@ -437,16 +524,8 @@ CASE="emulator GUI (--gui)"
 [ "$(code --gui duckstation "$ROM")" = 2 ] && ok "--gui with a ROM too: exit 2" || bad "accepted --gui duckstation <rom>"
 [ "$(QFORGE_EMU_DIR="$T/none" code --gui duckstation)" = 3 ] \
   && ok "--gui of an emulator that is not installed: exit 3" || bad "--gui of a missing emulator did not exit 3"
-( set +u; BINARY= ARGS=() GUI_ARGS=(); . "$EMU_CONF"
-  [ ${#GUI_ARGS[@]} -gt 0 ] || exit 1
-  case " ${GUI_ARGS[*]} " in *" -batch "*) exit 2 ;; esac
-  case " ${GUI_ARGS[*]} " in *" -bigpicture "*) ;; *) exit 3 ;; esac )
-case $? in
-  0) ok "duckstation.conf GUI_ARGS: Big Picture (pad-driven), no -batch" ;;
-  1) bad "duckstation.conf sets no GUI_ARGS" ;;
-  2) bad "duckstation.conf GUI_ARGS has -batch: with no game, DuckStation would quit at once" ;;
-  *) bad "duckstation.conf GUI_ARGS lacks -bigpicture: the desktop UI needs a mouse" ;;
-esac
+[ "$(jget "$DS_DEF" gui_args)" = '["-bigpicture", "-fullscreen"]' ] \
+  && ok "duckstation gui_args: Big Picture (pad-driven), no -batch (it would quit with no game)" || bad "duckstation gui_args: $(jget "$DS_DEF" gui_args)"
 rm -rf "$HOME"; mkdir -p "$HOME"
 reset_logs
 "$LAUNCH" --gui duckstation 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
@@ -459,8 +538,8 @@ case "$self" in
   *) bad "--gui ran '$self'" ;;
 esac
 mapfile -t args < <(sed -n 's/^arg=//p' "$T/emu.log")
-( set +u; GUI_ARGS=(); . "$EMU_CONF"; [ "${args[*]}" = "${GUI_ARGS[*]}" ] ) \
-  && ok "--gui arguments are exactly the conf's GUI_ARGS (no ROM, no -batch)" \
+[ "${args[*]}" = "-bigpicture -fullscreen" ] \
+  && ok "--gui arguments are exactly the definition's gui_args (no ROM, no -batch)" \
   || bad "--gui arguments were: $(printf '[%s] ' "${args[@]}")"
 [ "$(field pid)" = "$(field sid)" ] && ok "--gui: the emulator leads its own session (setsid)" || bad "--gui: not a session leader"
 touch "$T/stop-emu"
@@ -488,6 +567,16 @@ grep -qx -- "-uz $T/mnt.dead" "$T/fusermount.log" \
   && ok "a dead mount of this AppImage is lazily unmounted before mounting" || bad "the dead mount was not swept"
 grep -q "mnt.other" "$T/fusermount.log" \
   && bad "another AppImage's mount was touched" || ok "other AppImages' mounts are left alone"
+# pkgforge-dev's runtime (Dolphin): the mount is fuse.dwarfs, named by the AppImage's full path.
+reset_logs
+img_real="$(readlink -f "$T/emus/duckstation/current")"
+printf '%s\n' "$img_real $T/mnt.dwarfs fuse.dwarfs ro,nosuid,nodev 0 0" \
+  "/elsewhere/Other.AppImage $T/mnt.otherdw fuse.dwarfs ro,nosuid,nodev 0 0" > "$T/mounts"
+start_launcher; wait_for emu_up; touch "$T/stop-emu"; reap_launcher "$lpid"
+grep -qx -- "-uz $T/mnt.dwarfs" "$T/fusermount.log" \
+  && ok "a dead dwarfs mount of this AppImage (source = its path) is swept too" || bad "the dwarfs mount was not swept: $(cat "$T/fusermount.log" 2>/dev/null)"
+grep -q "mnt.otherdw" "$T/fusermount.log" \
+  && bad "another AppImage's dwarfs mount was touched" || ok "another AppImage's dwarfs mount is left alone"
 : > "$T/mounts"
 
 echo

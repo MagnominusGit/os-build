@@ -18,6 +18,24 @@
         "url": "https://github.com/ARMSX2/ARMSX2/blob/master/COPYING.GPLv3"
       }
     },
+    "dolphin": {
+      "name": "Dolphin",
+      "author": "The Dolphin team; AppImage by pkgforge-dev",
+      "systems": [
+        "gc",
+        "wii"
+      ],
+      "github": "pkgforge-dev/Dolphin-emu-AppImage",
+      "tag": "2609@2026-10-01_1790876487",
+      "asset": "^Dolphin_Emulator-2609-anylinux-aarch64\\.AppImage$",
+      "sha256": "9689b6fba9fc9c3be53f3703dcc29511e4b96bb2468ebb23740744c73f24ffc2",
+      "size": 62878695,
+      "homepage": "https://dolphin-emu.org/",
+      "licence": {
+        "name": "GPL-2.0-or-later",
+        "url": "https://github.com/dolphin-emu/dolphin/blob/master/COPYING"
+      }
+    },
     "duckstation": {
       "name": "DuckStation",
       "author": "Connor McLaughlin (Stenzek)",

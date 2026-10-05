@@ -593,7 +593,62 @@ plus the ROM library that launches them)
   GUI `-bigpicture -fullscreen`. HW ✅ Pocket ACE: Maximo (USA) 58.7 fps avg, Turnip 26.2.4, SDL-0 pad +
   rumble, Select+Start pause menu, OGUI Exit (SIGTERM) writes the resume state with no dialog; exiting
   from ARMSX2's own pause menu does not (its "close" path skips SaveStateOnShutdown).
-- The other four: Azahar (3DS), Dolphin (GC/Wii), rpcs3 (PS3, needs firmware), Cemu (Wii U). Recipe from DuckStation, per emulator: an aarch64 AppImage that uses our
+- **Launcher redesign (decided 2026-10-05, before more emulators):** `qforge-launch` mixed HOW an
+  emulator is packaged with HOW a game is run, so each packaging quirk became another special case
+  (Dolphin's pkgforge AppImage needed /tmp links and a Vulkan env in its sourced bash conf). User
+  decisions: keep the FUSE mount (no unpacking at install), rewrite in Python, Flatpak only if an
+  emulator ever needs it.
+  - **Data, not code, per emulator:** `/usr/share/qforge/emulators/<emu>/emulator.json` next to its
+    seed files, replacing the sourced `/etc/qforge/emulators/<emu>.conf`:
+    `{"format": "appimage" | "appimage-sharun", "binary": "<path in the image>",
+      "args": [..., "{rom}", ...], "gui_args": [...], "env": {..}, "seed": [{"file", "to"}]}`.
+    `{rom}` appears exactly once in `args` (DuckStation `-- {rom}`, Dolphin `-e {rom}`), no
+    "append the ROM" convention. Unknown keys and a bad format are refused at launch (exit 2).
+    The catalog stays "where to get it" (hostable later); emulator.json is "how to run it" and
+    ships in the image, tested with its seeds. `launch.conf` (system -> emulator) and the player's
+    `~/.config/qforge/emulators/<emu>.conf` (CPUS=) are unchanged: the plugin reads/writes them.
+  - **Format drivers** in qforge-launch, each owning everything about its format once:
+    `appimage` = today's lifecycle (stale-mount sweep, mount runtime with SIGTERM ignored, run
+    <mount>/<binary> never AppRun, SIGHUP + fusermount3 -u); `appimage-sharun` = the same plus
+    pkgforge-dev's specifics: /tmp/<name> links read (as data) from
+    bin/01-path-mapping-hardcoded.hook, and the image's Turnip (SHARUN_ALLOW_SYS_VKICD=1 +
+    VK_DRIVER_FILES = /usr/share/vulkan/icd.d/freedreno_icd.aarch64.json) instead of the bundled
+    Mesa. New formats (an archive, a Flatpak) are a new driver, never emulator-specific code.
+  - **Shared run logic, unchanged behaviour:** CLI (`[--cpus big|all] <system> <rom>`,
+    `--gui <emu>`), status file for the plugin's popup, first-run SEED, fast cores
+    (os.sched_setaffinity, same capacity rule), emulator in its own session, signal handling
+    exactly as HW-verified (Exit = 2 x SIGTERM from OGUI's reaper; double Exit = SIGKILL), exit code
+    passed through. tests/test-launch.sh is black-box (runs the executable with QFORGE_* overrides),
+    so it stays the regression suite; only its conf fixtures move to emulator.json.
+  - ✅ DONE 2026-10-05: Python qforge-launch, 3 emulator.json, formats appimage + appimage-sharun;
+    /etc/qforge/emulators/*.conf removed; QFORGE_EMU_DATA_DIR replaces QFORGE_EMU_CONF_DIR and
+    QFORGE_EMU_SEED_DIR; test-launch 130 pass. Code review fixes: SIGTERM stays ignored/handled for
+    the whole mount wait (Python had restored the default), prepare() inside the try/finally that
+    releases, raw read with deadline for the mount line, fusermount3 failures never replace the
+    emulator's status, NUL/normalised-path checks, /tmp links only replace our own symlinks and are
+    removed on release. HW ✅ Pocket ACE: CTR (OGUI Exit), Maximo (pause-menu exit), NSMBW + MKDD
+    (Turnip 26.2.4, /tmp link, fonts OK), whole-tree SIGKILL then relaunch, session stop in game,
+    --gui, fast cores (affinity 3-7). Found on HW: pkgforge's runtime serves the mount with a separate
+    `dwarfs` process (type fuse.dwarfs, source = AppImage path); the stale sweep now matches that too.
+    Known edge, not fixed: if ONLY the launcher is SIGKILLed, dwarfs keeps serving and OGUI's reaper
+    waits on it (game looks stuck) until it is unmounted; OGUI's UI cannot cause this (one Exit).
+  - Steps: (1) emulator.json for duckstation, armsx2, dolphin + schema checks in test-launch;
+    (2) Python qforge-launch passing the existing suite; (3) the sharun driver (replaces the bash
+    /tmp-link code and dolphin.conf's exports, both never committed); (4) HW re-test on the ACE:
+    CTR, Maximo, MKDD, NSMBW -- launch, OGUI Exit, emulator-menu / Select+Start exit, double
+    Exit, fast cores, Open (--gui), not-installed popup, session stop in game; (5) commit Dolphin
+    on top. Note for later: 3 curl retries 2 s apart all fell in one Wi-Fi bad patch on the ACE
+    (qforge-emu exit 3); a longer retry window would make downloads sturdier.
+- ✅ Dolphin (GameCube + Wii), 2026-10-05, plugin 0.1.9+. No official Linux arm64 build: pkgforge-dev
+  repackages each Dolphin release (pin `2609@2026-10-01_1790876487`, = Dolphin 2609; qforge-emu now
+  allows '@' in tags), format appimage-sharun. Seeds: Dolphin.ini (game paths ~/roms/gc + wii, Wii
+  NAND ~/saves/wii, GC memory card folder ~/saves/gc, Vulkan, no stop confirm, analytics declined),
+  GCPadNew/WiimoteNew (sideways Wii Remote)/Hotkeys (Select+Start = Stop). The pad's SDL name is
+  Dolphin's OWN bundled SDL's: "Xbox One Elite 2 Controller" (ARMSX2's SDL says "Microsoft Xbox One
+  Elite 2"); a wrong name leaves every binding dead -- recheck when the pin moves (Logger.ini
+  [Logs] CI = True). User decisions: save states stay in Dolphin's own folder (no setting for it);
+  no resume-on-exit (Dolphin has none). HW ✅ ACE: MKDD + NSMBW, controls, Select+Start stop.
+- The other three: Azahar (3DS), rpcs3 (PS3, needs firmware), Cemu (Wii U). Recipe from DuckStation, per emulator: an aarch64 AppImage that uses our
   Mesa/Turnip (armada's catalog has working asset patterns for all five); `.conf` + minimal seed;
   `launch.conf` system + folder-layout rows; every exit path (SIGTERM vs menu: ConfirmPowerOff-style
   dialogs, save state on exit); licence and author's stated terms; pinned tag in the hosted catalog.

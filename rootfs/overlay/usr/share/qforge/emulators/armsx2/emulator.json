@@ -1,0 +1,28 @@
+{
+  "notes": [
+    "ARMSX2 (PlayStation 2): the upstream Linux arm64 4K-pages AppImage, mounted; its real binary is run, never AppRun.",
+    "-batch quits when the game closes, so OpenGamepadUI gets the panel back; -nogui keeps the desktop main window from opening behind the game; -- ends options.",
+    "gui_args: Big Picture, the pad-driven UI; no -batch, which would quit at once with no game.",
+    "ARMSX2 keeps its settings in ~/.config/ARMSX2/inis/PCSX2.ini (the seed must carry [UI] SettingsVersion = 1)."
+  ],
+  "format": "appimage",
+  "binary": "usr/bin/armsx2-qt",
+  "args": [
+    "-batch",
+    "-nogui",
+    "-fullscreen",
+    "--",
+    "{rom}"
+  ],
+  "gui_args": [
+    "-bigpicture",
+    "-fullscreen"
+  ],
+  "env": {},
+  "seed": [
+    {
+      "file": "PCSX2.ini",
+      "to": ".config/ARMSX2/inis/PCSX2.ini"
+    }
+  ]
+}

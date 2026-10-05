@@ -1,0 +1,34 @@
+{
+  "notes": [
+    "Dolphin (GameCube and Wii): pkgforge-dev's 'anylinux' repackaging of the Dolphin release, a sharun bundle; the appimage-sharun format handles its /tmp path links and runs it on the image's Turnip.",
+    "-b quits when the game stops, so OpenGamepadUI gets the panel back; -e takes the game file.",
+    "gui_args: Dolphin's own window (touch screen; Dolphin has no pad-driven UI)."
+  ],
+  "format": "appimage-sharun",
+  "binary": "bin/dolphin-emu",
+  "args": [
+    "-b",
+    "-e",
+    "{rom}"
+  ],
+  "gui_args": [],
+  "env": {},
+  "seed": [
+    {
+      "file": "Dolphin.ini",
+      "to": ".config/dolphin-emu/Dolphin.ini"
+    },
+    {
+      "file": "GCPadNew.ini",
+      "to": ".config/dolphin-emu/GCPadNew.ini"
+    },
+    {
+      "file": "WiimoteNew.ini",
+      "to": ".config/dolphin-emu/WiimoteNew.ini"
+    },
+    {
+      "file": "Hotkeys.ini",
+      "to": ".config/dolphin-emu/Hotkeys.ini"
+    }
+  ]
+}

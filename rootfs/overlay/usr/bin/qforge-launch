@@ -1,189 +1,544 @@
-#!/bin/bash
+#!/usr/bin/env python3
 # qforge-launch — start a ROM in its system's emulator, from an OpenGamepadUI library card.
 #
 #   qforge-launch [--cpus big|all] <system> <rom>
 #   qforge-launch [--cpus big|all] --gui <emulator>
 #
-# --gui starts the emulator's own UI with no ROM: the plugin store's Open, for the settings OGUI
-# does not expose. It runs exactly like a ROM (mount, seed, setsid, exit handling below), with the
-# emulator conf's GUI_ARGS in place of ARGS + ROM.
+# --gui starts the emulator's own UI with no ROM: Settings > Emulators > Open, for the settings OGUI
+# does not expose. It runs exactly like a ROM (prepare, seed, own session, exit handling below),
+# with the definition's gui_args in place of args.
 #
-# Emulators are not in the image: the QForge OGUI plugin downloads each one as an upstream AppImage
-# into /home/player/emulators/<emulator>/ and points `current` at the version to run (plan Phase
-# 3/4). This script is what every ROM card runs. /etc/qforge/launch.conf maps a system to its
-# emulator; /etc/qforge/emulators/<emulator>.conf says which binary inside the AppImage to run,
-# with what arguments (ARGS before a ROM, GUI_ARGS for --gui), and which first-run settings to seed.
+# Emulators are not in the image: the QForge OGUI plugin downloads each one (qforge-emu) into
+# /home/player/emulators/<emulator>/ and points `current` at the version to run. This is what every
+# ROM card runs. /etc/qforge/launch.conf maps a system to its emulator (last `<system>=<emulator>`
+# line wins); /usr/share/qforge/emulators/<emulator>/emulator.json says how to run it -- DATA ONLY:
 #
-# CPU pinning (--cpus big): the emulator is started on the device's fast cores,
-# so its threads stay off the little cluster and do not migrate across clusters; background work
-# (audio, input, Wi-Fi) keeps the little cores. "Fast" is every ONLINE CPU whose cpu_capacity is
-# above the smallest online one — never a CPU number (Qualcomm numbers slowest-first, other SoCs do
-# not), and never only the top tier (one prime core is no home for a multi-threaded emulator).
-# PowerStation's core-count slider is the POWER control and offlines the fast cores first, so with
-# none of them online, or on a homogeneous SoC, nothing is pinned. sched_ext schedulers (scx_lavd)
-# honour the affinity mask (HW 2026-10-03). It is the PLAYER's choice, never the image's: a default
-# per emulator (Settings > Emulators -> ~/.config/qforge/emulators/<emulator>.conf, CPUS=big|all,
-# also used by --gui) and an override per game (the plugin puts --cpus big|all on that game's
-# command line). Nothing ships pinned: with neither, all cores.
+#   {"format": "appimage" | "appimage-sharun",   how the download is packaged (FORMATS below)
+#    "binary": "usr/bin/x",                        the program inside it (relative, no '..')
+#    "args": ["-batch", "--", "{rom}"],            a game's command line; "{rom}" exactly once
+#    "gui_args": ["-bigpicture"],                  --gui's command line (no "{rom}")
+#    "env": {"NAME": "value"},                     added to the emulator's environment
+#    "seed": [{"file": "x.ini", "to": ".config/x/x.ini"}],   first-run settings (below)
+#    "notes": ["..."]}                             why, for people; ignored here
 #
-# First-run settings (SEED) live in the image, /usr/share/qforge/emulators/<emulator>/, and are
-# copied into $HOME before the emulator's first start — never over an existing file, so whatever the
-# player changes in the emulator is kept. One set per emulator serves every device: InputPlumber
-# presents each handheld's joypad as the same virtual pad (SDL-0 to the emulators).
+# Anything else in it, or a format this script does not know, is refused (exit 2): a definition that
+# needs code is a new FORMAT here, never shell in the definition (plan Phase 4b, launcher redesign).
 #
-# The AppImage is mounted and its real binary run; every rule below was found on hardware
-# (DuckStation, MANGMI Pocket Max, 2026-10-03) and each one cost a crash:
+# CPU pinning (--cpus big): the emulator is started on the device's fast cores, so its threads stay
+# off the little cluster and do not migrate across clusters; background work (audio, input, Wi-Fi)
+# keeps the little cores. "Fast" is every ONLINE CPU whose cpu_capacity is above the smallest online
+# one — never a CPU number (Qualcomm numbers slowest-first, other SoCs do not), and never only the top
+# tier (one prime core is no home for a multi-threaded emulator). PowerStation's core-count slider is
+# the POWER control and offlines the fast cores first, so with none of them online, or on a
+# homogeneous SoC, nothing is pinned. sched_ext schedulers (scx_lavd) honour the affinity mask (HW
+# 2026-10-03). It is the PLAYER's choice, never the image's: a default per emulator (Settings >
+# Emulators -> ~/.config/qforge/emulators/<emulator>.conf, CPUS=big|all, also used by --gui) and an
+# override per game (the plugin puts --cpus big|all on that game's command line). Nothing ships
+# pinned: with neither, all cores.
+#
+# First-run settings (seed) live in the image next to emulator.json and are copied into $HOME before
+# the emulator's first start — never over an existing file, so whatever the player changes in the
+# emulator is kept. One set per emulator serves every device: InputPlumber presents each handheld's
+# joypad as the same virtual pad.
+#
+# Every AppImage format mounts the AppImage and runs its real binary; every rule below was found on
+# hardware (DuckStation, MANGMI Pocket Max, 2026-10-03) and each one cost a crash:
 #
 #   - Never exec the AppImage or its AppRun. The runtime starts AppRun, a symlink to the binary; Qt
 #     takes applicationDirPath from that path, misses usr/bin/qt.conf, finds no platform plugin and
 #     aborts. Desktops hide this with a system Qt; QForge has none.
 #   - OGUI stops a game with Reaper.reap(): every PID in the tree, leaves inward, gets
-#     `kill -TERM -- -PID` and then `kill -TERM PID`, each a separate command. The emulator runs
-#     under setsid so it leads its own process group: its two signals arrive back to back and
-#     coalesce into one, as when OGUI launches it directly. Inside our group it got a second,
-#     later SIGTERM through `-<our pid>`, which DuckStation takes as "Ctrl+C again: force quit"
-#     and abort()s — a core dump and a 14 s exit.
-#   - We never forward a signal to the emulator, for the same reason: it already has OGUI's.
+#     `kill -TERM -- -PID` and then `kill -TERM PID`, each a separate command. The emulator runs in
+#     its own session, so it leads its own process group: its two signals arrive back to back and
+#     coalesce into one, as when OGUI launches it directly. Inside our group it got a second, later
+#     SIGTERM through `-<our pid>`, which DuckStation takes as "Ctrl+C again: force quit" and
+#     abort()s — a core dump and a 14 s exit.
+#   - We never forward a signal to the emulator, for the same reason: it already has OGUI's. We
+#     only survive ours (TERM, INT, HUP) and wait for it.
 #   - The mount runtime is in the tree too. It starts with SIGTERM ignored, or OGUI's Exit pulls the
 #     files out from under an emulator that is still shutting down. After the emulator exits it is
 #     released with SIGHUP (the runtime holds the mount busy until it exits) and fusermount3 -u.
 #   - Exit pressed twice is SIGKILL for everything, which leaves a dead mount: sweep ours first.
 #
-# Exit status: the emulator's, or 2 for a bad invocation, 3 when the emulator is not installed or
-# its AppImage does not mount. OGUI runs games through its reaper and never sees this status, so an
-# exit 3 is also written to $QFORGE_LAUNCH_STATUS (`not-installed <emulator>` or
-# `mount-failed <emulator>`), cleared at every start: the QForge plugin's EXIT hook reads it and
-# tells the player to download the emulator from the store.
+# Exit status: the emulator's (128 + N when signal N ended it), or 2 for a bad invocation or
+# definition, 3 when the emulator is not installed or does not start (its AppImage does not mount).
+# OGUI runs games through its reaper and never sees this status, so an exit 3 is also written to
+# $QFORGE_LAUNCH_STATUS (`not-installed <emulator>` or `mount-failed <emulator>`), cleared at every
+# start: the QForge plugin's EXIT hook reads it and tells the player what to do.
 
-set -uo pipefail
+import json
+import secrets
+import os
+import re
+import select
+import shutil
+import signal
+import subprocess
+import sys
+import time
 
-CONF=${QFORGE_LAUNCH_CONF:-/etc/qforge/launch.conf}
-EMU_CONF_DIR=${QFORGE_EMU_CONF_DIR:-/etc/qforge/emulators}
-EMU_DIR=${QFORGE_EMU_DIR:-/home/player/emulators}
-SEED_DIR=${QFORGE_EMU_SEED_DIR:-/usr/share/qforge/emulators}
-MOUNTS=${QFORGE_MOUNTS:-/proc/mounts}
-CPU_ROOT=${QFORGE_CPU_ROOT:-/sys/devices/system/cpu}
-PLAYER_CONF_DIR=${QFORGE_PLAYER_CONF_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/qforge/emulators}
-UNMOUNT_TRIES=50   # x 0.1 s for the runtime to let go of the mount after SIGHUP
-MOUNT_TIMEOUT=30   # s for the AppImage runtime to print its mount point
-STATUS=${QFORGE_LAUNCH_STATUS:-${XDG_RUNTIME_DIR:-/tmp}/qforge-launch.status}
+ENV = os.environ
+LAUNCH_CONF = ENV.get("QFORGE_LAUNCH_CONF", "/etc/qforge/launch.conf")
+EMU_DATA_DIR = ENV.get("QFORGE_EMU_DATA_DIR", "/usr/share/qforge/emulators")
+EMU_DIR = ENV.get("QFORGE_EMU_DIR", "/home/player/emulators")
+MOUNTS = ENV.get("QFORGE_MOUNTS", "/proc/mounts")
+CPU_ROOT = ENV.get("QFORGE_CPU_ROOT", "/sys/devices/system/cpu")
+HOME = ENV.get("HOME", "/home/player")
+PLAYER_CONF_DIR = ENV.get("QFORGE_PLAYER_CONF_DIR",
+                          os.path.join(ENV.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"),
+                                       "qforge", "emulators"))
+STATUS = ENV.get("QFORGE_LAUNCH_STATUS",
+                 os.path.join(ENV.get("XDG_RUNTIME_DIR") or "/tmp", "qforge-launch.status"))
+TMP_LINK_DIR = ENV.get("QFORGE_TMP_LINK_DIR", "/tmp")
+SYSTEM_VULKAN_ICD = "/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json"
+UNMOUNT_TRIES = 50   # x 0.1 s for the runtime to let go of the mount after SIGHUP
+MOUNT_TIMEOUT = 30   # s for the AppImage runtime to print its mount point
 
-die() { echo "qforge-launch: $2" >&2; exit "$1"; }
-# fail <reason>: an exit-3 failure the plugin reports to the player.
-fail() { echo "$1 $emulator" > "$STATUS" 2>/dev/null; die 3 "$2"; }
-rm -f "$STATUS"
+USAGE = "usage: qforge-launch [--cpus big|all] <system> <rom> | [--cpus big|all] --gui <emulator>"
+SYSTEM_ID = re.compile(r"[a-z0-9_]+")
+EMU_ID = re.compile(r"[a-z0-9_-]+")
+DEFINITION_KEYS = {"format", "binary", "args", "gui_args", "env", "seed", "notes"}
+ROM = "{rom}"
 
-usage="usage: qforge-launch [--cpus big|all] <system> <rom> | [--cpus big|all] --gui <emulator>"
-CPUS=
-if [ "${1-}" = --cpus ]; then
-  [ $# -ge 2 ] || die 2 "$usage"
-  CPUS=$2; shift 2
-  case $CPUS in big|all) ;; *) die 2 "--cpus must be 'big' or 'all', not '$CPUS'" ;; esac
-fi
-[ $# -eq 2 ] || die 2 "$usage"
-if [ "$1" = --gui ]; then
-  system= rom= emulator=$2
-  [[ $emulator =~ ^[a-z0-9_-]+$ ]] || die 2 "bad emulator name '$emulator'"
-else
-  system=$1 rom=$2
-  [[ $system =~ ^[a-z0-9_]+$ ]] || die 2 "bad system name '$system'"
-  [ -f "$rom" ] || die 2 "no such ROM: $rom"
-  emulator=$(sed -n "s/^$system=\([a-z0-9_-]*\)[[:space:]]*$/\1/p" "$CONF" 2>/dev/null | tail -1)
-  [ -n "$emulator" ] || die 2 "no emulator for system '$system' in $CONF"
-fi
-emu_conf="$EMU_CONF_DIR/$emulator.conf"
-[ -f "$emu_conf" ] || die 2 "missing $emu_conf"
 
-BINARY= ARGS=() GUI_ARGS=() SEED=()
-# shellcheck source=/dev/null
-. "$emu_conf"
-[ -n "$BINARY" ] || die 2 "$emu_conf sets no BINARY"
-if [ -n "$rom" ]; then run_args=("${ARGS[@]}" "$rom"); else run_args=("${GUI_ARGS[@]}"); fi
+class Exit(Exception):
+    """Stop with this status and message (stderr)."""
 
-img="$EMU_DIR/$emulator/current"
-[ -x "$img" ] || fail not-installed "$emulator is not installed ($img missing or not executable)"
+    def __init__(self, code, msg):
+        super().__init__(msg)
+        self.code = code
 
-for entry in "${SEED[@]}"; do
-  src="$SEED_DIR/$emulator/${entry%%:*}" dst=${entry#*:}
-  [[ $entry == *:* && -n $dst && $dst != /* && /$dst/ != */../* ]] \
-    || die 2 "$emu_conf: bad SEED entry '$entry' (want <file>:<path under \$HOME>)"
-  [ -e "$HOME/$dst" ] && continue
-  [ -f "$src" ] || die 2 "$emu_conf seeds $src, which the image does not have"
-  mkdir -p "$(dirname "$HOME/$dst")" && cp "$src" "$HOME/$dst" \
-    || die 2 "could not seed $HOME/$dst"
-  echo "qforge-launch: first run of $emulator: seeded $HOME/$dst" >&2
-done
 
-# A game's --cpus wins; without one, the player's default for this emulator (Settings > Emulators
-# writes CPUS=big|all to $PLAYER_CONF_DIR/<emulator>.conf). Read, never sourced: it is the player's
-# file, and only that one key means anything in it.
-if [ -z "$CPUS" ]; then
-  CPUS=all
-  pconf="$PLAYER_CONF_DIR/$emulator.conf"
-  if [ -f "$pconf" ]; then
-    value=$(sed -n 's/^CPUS=//p' "$pconf" | tail -1)
-    case $value in
-      big|all) CPUS=$value ;;
-      "") ;;
-      *) echo "qforge-launch: $pconf: ignoring CPUS=$value (want big or all)" >&2 ;;
-    esac
-  fi
-fi
+def log(msg):
+    print(f"qforge-launch: {msg}", file=sys.stderr, flush=True)
 
-# Online CPUs above the smallest online capacity, as a taskset list; empty when there are none.
-fast_cpus() {
-  local online c cap min= list=() caps=()
-  online=$(cat "$CPU_ROOT/online" 2>/dev/null) || return 0
-  for c in $(echo "$online" | tr ',' '\n' | awk -F- '{for (i = $1; i <= ($2 == "" ? $1 : $2); i++) print i}'); do
-    cap=$(cat "$CPU_ROOT/cpu$c/cpu_capacity" 2>/dev/null) || continue
-    [[ $cap =~ ^[0-9]+$ ]] || continue
-    caps+=("$c:$cap")
-    [ -z "$min" ] || [ "$cap" -lt "$min" ] && min=$cap
-  done
-  for c in "${caps[@]}"; do [ "${c#*:}" -gt "$min" ] && list+=("${c%%:*}"); done
-  (IFS=,; echo "${list[*]}")
-}
-pin=()
-if [ "$CPUS" = big ]; then
-  cpus=$(fast_cpus)
-  if [ -n "$cpus" ]; then
-    pin=(taskset -c "$cpus")
-    echo "qforge-launch: pinning $emulator to fast cores $cpus" >&2
-  else
-    echo "qforge-launch: no fast core online (core-count limit, or one core type): not pinning" >&2
-  fi
-fi
 
-# The runtime names its FUSE filesystem after the AppImage file `current` points at.
-fstype="fuse.$(basename "$(readlink -f "$img")")"
-awk -v t="$fstype" '$3 == t {print $2}' "$MOUNTS" | while read -r stale; do
-  echo "qforge-launch: releasing stale mount $stale" >&2
-  fusermount3 -uz "$stale"
-done
+# ---------------------------------------------------------------------------------- invocation --
 
-trap '' TERM
-exec {mount_fd}< <(exec "$img" --appimage-mount)
-mount_pid=$!
-if ! read -r -t "$MOUNT_TIMEOUT" -u "$mount_fd" mnt || [ ! -d "$mnt" ]; then
-  kill -KILL "$mount_pid" 2>/dev/null
-  fail mount-failed "$img did not mount"
-fi
-trap : TERM INT HUP
+def parse_args(argv):
+    """-> (cpus or None, system or None, rom or None, emulator or None)."""
+    cpus = None
+    if argv and argv[0] == "--cpus":
+        if len(argv) < 2:
+            raise Exit(2, USAGE)
+        cpus, argv = argv[1], argv[2:]
+        if cpus not in ("big", "all"):
+            raise Exit(2, f"--cpus must be 'big' or 'all', not '{cpus}'")
+    if len(argv) != 2:
+        raise Exit(2, USAGE)
+    if argv[0] == "--gui":
+        if not EMU_ID.fullmatch(argv[1]):
+            raise Exit(2, f"bad emulator name '{argv[1]}'")
+        return cpus, None, None, argv[1]
+    system, rom = argv
+    if not SYSTEM_ID.fullmatch(system):
+        raise Exit(2, f"bad system name '{system}'")
+    if not os.path.isfile(rom):
+        raise Exit(2, f"no such ROM: {rom}")
+    return cpus, system, rom, None
 
-echo "qforge-launch: ${system:-gui} -> $emulator: $mnt/$BINARY ${run_args[*]}" >&2
-# setsid and taskset both exec, so the emulator keeps this PID and leads its own session.
-setsid "${pin[@]}" "$mnt/$BINARY" "${run_args[@]}" &
-emu_pid=$!
-# wait returns early when a trapped signal arrives; keep waiting until the emulator is gone.
-while kill -0 "$emu_pid" 2>/dev/null; do wait "$emu_pid"; done
-wait "$emu_pid"; rc=$?
 
-kill -HUP "$mount_pid" 2>/dev/null
-mounted() { awk -v m="$mnt" '$2 == m {found=1} END {exit !found}' "$MOUNTS"; }
-for _ in $(seq "$UNMOUNT_TRIES"); do
-  mounted || break
-  fusermount3 -u "$mnt" 2>/dev/null && break
-  sleep 0.1
-done
-mounted && echo "qforge-launch: $mnt still busy; the next launch sweeps it" >&2
-exit "$rc"
+def emulator_for(system):
+    """The last `<system>=<emulator>` line of launch.conf."""
+    found = None
+    try:
+        with open(LAUNCH_CONF, errors="replace") as f:
+            for line in f:
+                m = re.fullmatch(rf"{system}=([a-z0-9_-]*)\s*", line.rstrip("\n"))
+                if m:
+                    found = m.group(1)
+    except OSError:
+        pass
+    if not found:
+        raise Exit(2, f"no emulator for system '{system}' in {LAUNCH_CONF}")
+    return found
+
+
+# ---------------------------------------------------------------------------------- definition --
+
+def clean_str(value):
+    """A string a command line or environment can carry (no NUL, encodable)."""
+    if not isinstance(value, str) or "\0" in value:
+        return False
+    try:
+        value.encode()
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def safe_relative(path):
+    """A file path under some root: relative, normalised (no '..', '.', '//' or trailing '/')."""
+    return (clean_str(path) and path not in ("", ".") and not path.startswith("/")
+            and os.path.normpath(path) == path and ".." not in path.split("/"))
+
+
+def str_list(value):
+    return isinstance(value, list) and all(clean_str(v) for v in value)
+
+
+def load_definition(emulator):
+    path = os.path.join(EMU_DATA_DIR, emulator, "emulator.json")
+    try:
+        with open(path) as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        raise Exit(2, f"missing {path}") from None
+    except (OSError, ValueError) as err:
+        raise Exit(2, f"{path} is not readable JSON: {err}") from None
+
+    def bad(why):
+        return Exit(2, f"{path}: {why}")
+
+    if not isinstance(d, dict):
+        raise bad("not a JSON object")
+    unknown = set(d) - DEFINITION_KEYS
+    if unknown:
+        raise bad(f"unknown keys {sorted(unknown)} (a definition is data; new behaviour is a format)")
+    if not isinstance(d.get("format"), str) or d["format"] not in FORMATS:
+        raise bad(f"format {d.get('format')!r} is not one of {sorted(FORMATS)}")
+    if not safe_relative(d.get("binary")):
+        raise bad("binary must be a relative path inside the download, without '..'")
+    args = d.get("args")
+    if not str_list(args) or args.count(ROM) != 1:
+        raise bad(f'args must be a list of strings holding "{ROM}" exactly once')
+    gui_args = d.get("gui_args", [])
+    if not str_list(gui_args) or ROM in gui_args:
+        raise bad(f'gui_args must be a list of strings without "{ROM}"')
+    env = d.get("env", {})
+    if not (isinstance(env, dict)
+            and all(isinstance(k, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k)
+                    and clean_str(v) for k, v in env.items())):
+        raise bad("env must map variable names to strings")
+    seed = d.get("seed", [])
+    if not (isinstance(seed, list)
+            and all(isinstance(s, dict) and set(s) == {"file", "to"}
+                    and safe_relative(s["file"]) and safe_relative(s["to"]) for s in seed)):
+        raise bad('seed entries must be {"file": <in the image>, "to": <path under $HOME>}, '
+                  "both relative without '..'")
+    return {"format": d["format"], "binary": d["binary"], "args": args, "gui_args": gui_args,
+            "env": env, "seed": seed}
+
+
+def seed_first_run(emulator, seed):
+    for s in seed:
+        dst = os.path.join(HOME, s["to"])
+        if os.path.lexists(dst):
+            continue
+        src = os.path.join(EMU_DATA_DIR, emulator, s["file"])
+        if not os.path.isfile(src):
+            raise Exit(2, f"{emulator}'s emulator.json seeds {src}, which the image does not have")
+        try:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(src, dst)
+        except OSError as err:
+            raise Exit(2, f"could not seed {dst}: {err}") from None
+        log(f"first run of {emulator}: seeded {dst}")
+
+
+# -------------------------------------------------------------------------------------- CPUs --
+
+def player_cpus(emulator):
+    """The player's default for this emulator: Settings > Emulators writes CPUS=big|all. Read,
+    never sourced: it is the player's file, and only that one key means anything in it."""
+    path = os.path.join(PLAYER_CONF_DIR, f"{emulator}.conf")
+    value = ""
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                if line.startswith("CPUS="):
+                    value = line[len("CPUS="):].rstrip("\n")
+    except OSError:
+        return "all"
+    if value in ("big", "all"):
+        return value
+    if value:
+        log(f"{path}: ignoring CPUS={value} (want big or all)")
+    return "all"
+
+
+def read_text(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def fast_cpus():
+    """Online CPUs above the smallest online capacity, as a taskset list; "" when there are none."""
+    online = read_text(os.path.join(CPU_ROOT, "online"))
+    if not online:
+        return ""
+    cpus = []
+    for part in online.split(","):
+        lo, _, hi = part.partition("-")
+        if lo.isdigit() and (hi == "" or hi.isdigit()):
+            cpus.extend(range(int(lo), int(hi or lo) + 1))
+    caps = {}
+    for c in cpus:
+        cap = read_text(os.path.join(CPU_ROOT, f"cpu{c}", "cpu_capacity"))
+        if cap and cap.isdigit():
+            caps[c] = int(cap)
+    if not caps:
+        return ""
+    low = min(caps.values())
+    return ",".join(str(c) for c in sorted(caps) if caps[c] > low)
+
+
+# ----------------------------------------------------------------------------------- formats --
+
+def fusermount(*args):
+    """fusermount3 <args>: True when it succeeded. A missing or failing helper never stops us."""
+    try:
+        return subprocess.run(["fusermount3", *args], stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, check=False).returncode == 0
+    except OSError as err:
+        log(f"fusermount3 {' '.join(args)}: {err}")
+        return False
+
+
+def read_line(fd, timeout):
+    """The first line written to fd within timeout s ("" on timeout or EOF). Raw reads: a
+    buffered readline() would block past the deadline on a partial line."""
+    deadline, data = time.monotonic() + timeout, b""
+    while b"\n" not in data:
+        left = deadline - time.monotonic()
+        if left <= 0 or not select.select([fd], [], [], left)[0]:
+            return ""
+        chunk = os.read(fd, 4096)
+        if not chunk:
+            break
+        data += chunk
+    return data.split(b"\n", 1)[0].decode(errors="replace").strip()
+
+
+def mount_table():
+    try:
+        with open(MOUNTS) as f:
+            return [line.split() for line in f]
+    except OSError:
+        return []
+
+
+class AppImage:
+    """An AppImage, mounted for the run (`<image> --appimage-mount`), its binary run from the mount."""
+
+    def __init__(self, emulator, image):
+        self.emulator, self.image = emulator, image
+        self.runtime = None
+        self.mnt = None
+
+    def sweep_stale(self):
+        # A mount of OUR AppImage: the classic runtime names its FUSE filesystem after the file
+        # `current` points at (type fuse.<file>); pkgforge-dev's runtime serves it with a separate
+        # dwarfs process (type fuse.dwarfs, source = the AppImage's path), which outlives a killed
+        # launcher and runtime and keeps the mount (HW 2026-10-05).
+        real = os.path.realpath(self.image)
+        fstype = "fuse." + os.path.basename(real)
+        for fields in mount_table():
+            if len(fields) > 2 and (fields[2] == fstype or fields[0] == real):
+                log(f"releasing stale mount {fields[1]}")
+                fusermount("-uz", fields[1])
+
+    def prepare(self):
+        """Mount; -> the root the definition's binary is relative to. Exit(3) when it fails."""
+        self.sweep_stale()
+        # The runtime must start with SIGTERM ignored (it keeps that disposition across exec);
+        # the launcher's own no-op handler goes back right after, so it never dies of one either.
+        handler = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        try:
+            self.runtime = subprocess.Popen([self.image, "--appimage-mount"],
+                                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE)
+        except OSError as err:
+            raise Exit(3, f"{self.image} did not mount: {err}") from None
+        finally:
+            signal.signal(signal.SIGTERM, handler)
+        line = read_line(self.runtime.stdout.fileno(), MOUNT_TIMEOUT)
+        if not line or not os.path.isdir(line):
+            raise Exit(3, f"{self.image} did not mount")
+        self.mnt = line
+        return self.mnt
+
+    def env(self):
+        return {}
+
+    def mounted(self):
+        return any(len(fields) > 1 and fields[1] == self.mnt for fields in mount_table())
+
+    def release(self):
+        """Undo prepare(), however far it got. Never raises: the emulator's status must survive."""
+        if not self.runtime:
+            return
+        if self.mnt is None:  # the mount never came up
+            self.runtime.kill()
+            return
+        try:
+            self.runtime.send_signal(signal.SIGHUP)
+        except ProcessLookupError:
+            pass
+        for _ in range(UNMOUNT_TRIES):
+            if not self.mounted() or fusermount("-u", self.mnt):
+                break
+            time.sleep(0.1)
+        if self.mounted():
+            log(f"{self.mnt} still busy; the next launch sweeps it")
+
+
+class SharunAppImage(AppImage):
+    """pkgforge-dev's "anylinux" AppImages (Dolphin, Cemu): a sharun bundle with its own loader,
+    libraries and Mesa. Two things its AppRun would do, which we never run (one of its hooks is a
+    self-updater that would replace the pinned AppImage):
+
+    - Paths the program hardcodes (Dolphin's data dir, holding Sys: fonts, per-game settings) are
+      rewritten to random /tmp/<name> paths that bin/01-path-mapping-hardcoded.hook links to the
+      mounted bin, lib or share. We make the same links, reading the hook as data: only
+      `_tmp_<dir>=<letters>` lines. Without them Dolphin 2609 ran with no Sys folder ("Trying to
+      access Windows-1252 fonts", HW 2026-10-05).
+    - Vulkan: sharun points the loader at the bundled drivers unless SHARUN_ALLOW_SYS_VKICD=1. Every
+      emulator runs on the image's Turnip (Dolphin 2609 bundles an older Mesa).
+    """
+
+    HOOK = "bin/01-path-mapping-hardcoded.hook"
+    HOOK_LINE = re.compile(r'_tmp_(bin|lib|share)="?([A-Za-z0-9]+)"?')
+
+    def __init__(self, emulator, image):
+        super().__init__(emulator, image)
+        self.links = []
+
+    def prepare(self):
+        root = super().prepare()
+        self.link_hardcoded_paths(root)
+        return root
+
+    def link_hardcoded_paths(self, root):
+        try:
+            with open(os.path.join(root, self.HOOK), errors="replace") as f:
+                lines = f.read().splitlines()
+        except OSError:
+            return
+        for line in lines:
+            m = self.HOOK_LINE.fullmatch(line)
+            if m:
+                self.link(os.path.join(TMP_LINK_DIR, m.group(2)), os.path.join(root, m.group(1)))
+
+    def link(self, link, target):
+        # /tmp is shared: only ever replace an entry of our own, and only a symlink.
+        try:
+            st = os.lstat(link)
+        except FileNotFoundError:
+            st = None
+        except OSError as err:
+            log(f"cannot check {link}: {err}")
+            return
+        if st is not None and (not os.path.islink(link) or st.st_uid != os.getuid()):
+            log(f"{link} exists and is not a link of ours: {self.emulator} runs without "
+                f"{os.path.basename(target)} files from its download")
+            return
+        tmp = f"{link}.qforge-{secrets.token_hex(8)}"
+        try:
+            os.symlink(target, tmp)
+            os.replace(tmp, link)
+            self.links.append((link, target))
+        except OSError as err:
+            log(f"could not link {link} to {target}: {err}")
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+    def release(self):
+        for link, target in self.links:  # ours, if no later launch took it over
+            try:
+                if os.readlink(link) == target:
+                    os.unlink(link)
+            except OSError:
+                pass
+        super().release()
+
+    def env(self):
+        return {"SHARUN_ALLOW_SYS_VKICD": "1", "VK_DRIVER_FILES": SYSTEM_VULKAN_ICD}
+
+
+FORMATS = {"appimage": AppImage, "appimage-sharun": SharunAppImage}
+
+
+# ---------------------------------------------------------------------------------------- run --
+
+def fail(reason, emulator, msg):
+    """An exit-3 failure the plugin reports to the player."""
+    try:
+        with open(STATUS, "w") as f:
+            f.write(f"{reason} {emulator}\n")
+    except OSError:
+        pass
+    raise Exit(3, msg)
+
+
+def pinning(emulator, cpus):
+    """`taskset -c <fast cpus>` when this run goes on the fast cores, else []."""
+    if (cpus or player_cpus(emulator)) != "big":
+        return []
+    fast = fast_cpus()
+    if not fast:
+        log("no fast core online (core-count limit, or one core type): not pinning")
+        return []
+    log(f"pinning {emulator} to fast cores {fast}")
+    return ["taskset", "-c", fast]
+
+
+def run(argv):
+    cpus, system, rom, emulator = parse_args(argv)
+    if emulator is None:
+        emulator = emulator_for(system)
+    definition = load_definition(emulator)
+    args = ([rom if a == ROM else a for a in definition["args"]] if rom is not None
+            else definition["gui_args"])
+
+    image = os.path.join(EMU_DIR, emulator, "current")
+    if not os.access(image, os.X_OK):
+        fail("not-installed", emulator, f"{emulator} is not installed ({image} missing or not executable)")
+    seed_first_run(emulator, definition["seed"])
+    pin = pinning(emulator, cpus)
+
+    # From here on, survive our own signals (OGUI's Exit reaches us too) and wait: never forward
+    # them. Caught signals go back to default in the emulator at exec.
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, lambda *_: None)
+    package = FORMATS[definition["format"]](emulator, image)
+    try:
+        try:
+            root = package.prepare()
+        except Exit as err:
+            fail("mount-failed", emulator, str(err))
+        binary = os.path.join(root, definition["binary"])
+        env = {**ENV, **package.env(), **definition["env"]}
+        log(f"{system or 'gui'} -> {emulator}: {binary} {' '.join(args)}")
+        try:
+            # Its own session; taskset execs, so the emulator keeps this PID and leads it.
+            emu = subprocess.Popen(pin + [binary] + args, env=env, start_new_session=True)
+        except (OSError, ValueError) as err:
+            fail("mount-failed", emulator, f"could not start {binary}: {err}")
+        rc = emu.wait()
+        return 128 - rc if rc < 0 else rc
+    finally:
+        package.release()
+
+
+def main():
+    try:
+        os.unlink(STATUS)
+    except OSError:
+        pass
+    try:
+        return run(sys.argv[1:])
+    except Exit as err:
+        log(str(err))
+        return err.code
+    except Exception as err:  # a bug here must still end with a message, not a silent hang
+        log(f"internal error: {type(err).__name__}: {err}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

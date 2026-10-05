@@ -20,6 +20,8 @@ var settings_manager := load("res://core/global/settings_manager.tres") as Setti
 const SYSTEMS := {
 	"psx": {"name": "PlayStation", "exts": ["chd", "cue", "pbp", "m3u", "iso"]},
 	"ps2": {"name": "PlayStation 2", "exts": ["chd", "iso", "cso", "zso", "gz", "cue"]},
+	"gc": {"name": "GameCube", "exts": ["iso", "gcm", "gcz", "rvz", "ciso", "wia"]},
+	"wii": {"name": "Wii", "exts": ["iso", "wbfs", "rvz", "gcz", "ciso", "wia"]},
 }
 
 
