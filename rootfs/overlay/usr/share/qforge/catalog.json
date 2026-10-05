@@ -3,6 +3,7 @@
   "emulators": {
     "duckstation": {
       "name": "DuckStation",
+      "author": "Connor McLaughlin (Stenzek)",
       "systems": ["psx"],
       "github": "stenzek/duckstation",
       "tag": "v0.1-11894",

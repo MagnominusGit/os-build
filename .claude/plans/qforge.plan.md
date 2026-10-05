@@ -365,8 +365,9 @@ delete one (card goes), copy during a game (nothing until exit).
 - Plugin store: mask upstream's ShadowBlip store (first-boot error noise) with an OGUI patch reading
   the store URL from a ProjectSettings key (not written yet; 0004/0005 are other patches), pointed
   at the QForge store once Phase 5 has a server.
-- Attribution owed per emulator (licence check below): the Emulators page shows the licence name
-  only; add author and link.
+- Attribution per emulator: done 2026-10-05 (plugin 0.1.7). Catalog `author` (required by
+  tests/test-catalog.sh) + homepage + licence name/url, shown as one dimmed line under each
+  emulator on Settings > Emulators (`credits.gd`); HW ✅ Pocket ACE.
 - Hosted catalog + update notification + plugin updates from the store: need the Phase 5 server.
 
 Decided 2026-10-03: one OGUI card per ROM, grouped in one library tab per system (PSX, PS2, ...),
@@ -570,8 +571,8 @@ plus the ROM library that launches them)
   "unmodified releases", prefers a link to duckstation.org, and states "pre-configured settings and
   packages are considered modifications" -- so the author would count our seed settings.ini and the
   plugin's packaging as modifications. Decided 2026-10-03: proceed anyway (seed; the mirror is
-  gone, see Download source), the risk is accepted. Still owed whatever we do: attribution (name, link, licence) in the plugin, and
-  QForge staying non-commercial.
+  gone, see Download source), the risk is accepted. Attribution (author, link, licence) shown in the plugin since 0.1.7; still owed: QForge staying
+  non-commercial.
 - BIOS: the plugin can tell the user which BIOS a system needs and where to drop it; never ships it.
 - Artwork scraping later (ScreenScraper needs credentials).
 

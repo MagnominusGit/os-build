@@ -67,7 +67,7 @@ for line in open(launch_conf):
         launch[m.group(1)] = m.group(2)
 
 ROLLING = {"latest", "preview", "nightly", "continuous", "dev", "master", "main"}
-REQUIRED = {"name", "systems", "github", "tag", "asset", "sha256", "size", "homepage", "licence"}
+REQUIRED = {"name", "author", "systems", "github", "tag", "asset", "sha256", "size", "homepage", "licence"}
 
 def check_github(case, e, rx):
     url = f"https://api.github.com/repos/{e['github']}/releases/tags/{e['tag']}"
@@ -161,6 +161,10 @@ for emu, e in emus.items():
         ok(case, f"licence attributed ({lic['name']})")
     else:
         bad(case, "licence needs a name and an https:// url (attribution is owed)")
+    if isinstance(e["author"], str) and e["author"].strip():
+        ok(case, f"author credited ({e['author']})")
+    else:
+        bad(case, "author needs a name (the Emulators page credits it)")
     if str(e["homepage"]).startswith("https://"):
         ok(case, "homepage is https")
     else:

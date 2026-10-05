@@ -47,7 +47,7 @@ catalog() {
   local f="$W/srv/$1.AppImage"
   cat > "$W/catalog.json" <<EOF
 {"schema": 1, "emulators": {"dummy": {
-  "name": "Dummy", "systems": ["psx"], "github": "example/dummy", "tag": "$1",
+  "name": "Dummy", "author": "A. Dummy", "systems": ["psx"], "github": "example/dummy", "tag": "$1",
   "asset": "^Dummy-arm64\\\\.AppImage\$", "sha256": "${2:-$(sha "$f")}", "size": ${3:-$(size "$f")},
   "homepage": "https://example.org/", "licence": {"name": "MIT", "url": "https://example.org/LICENSE"}}}}
 EOF
@@ -200,7 +200,8 @@ run list
 [ "$(field installed)" = null ] && [ "$(field update)" = false ] && [ "$(field pinned)" = '"v2"' ] \
   && ok "not installed: installed null, pinned v2, no update" || bad "got installed=$(field installed) update=$(field update) pinned=$(field pinned)"
 [ "$(field name)" = '"Dummy"' ] && [ "$(field size)" = "$(size "$W/srv/v2.AppImage")" ] && [ "$(field licence)" != null ] \
-  && ok "carries name, size and licence for the store screen" || bad "missing store fields"
+  && [ "$(field author)" = '"A. Dummy"' ] && [ "$(field homepage)" = '"https://example.org/"' ] \
+  && ok "carries name, size, author, homepage and licence for the store screen" || bad "missing store fields"
 catalog v1; api v1; run install dummy; catalog v2
 run list
 [ "$(field installed)" = '"v1"' ] && [ "$(field update)" = true ] && ok "v1 installed, v2 pinned: update true" || bad "got installed=$(field installed) update=$(field update)"

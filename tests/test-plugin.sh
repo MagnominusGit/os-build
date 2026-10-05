@@ -86,6 +86,7 @@ extends SceneTree
 const RomNames := preload("$SRC/rom_names.gd")
 const LaunchArgs := preload("$SRC/launch_args.gd")
 const RomWatch := preload("$SRC/rom_watch.gd")
+const Credits := preload("$SRC/credits.gd")
 const SYSTEMS := {"psx": "PlayStation", "ps2": "PlayStation 2"}
 var failed := 0
 
@@ -160,7 +161,20 @@ func _init() -> void:
 	LaunchArgs.set_emulator_fast_cores("duckstation", false)
 	check("emulator default: Off reads back off", LaunchArgs.emulator_fast_cores("duckstation"), false)
 	test_rom_watch()
+	test_credits()
 	quit(1 if failed else 0)
+
+## Attribution the emulators' licences ask for (DuckStation: CC BY-NC-ND, link duckstation.org).
+func test_credits() -> void:
+	var lic := {"name": "CC BY-NC-ND 4.0", "url": "https://x.org/LICENSE"}
+	check("credits: author, homepage, licence and its link",
+		Credits.credit_text({"author": "A. Dev", "homepage": "https://x.org/", "licence": lic}),
+		"By A. Dev, https://x.org/. Licence CC BY-NC-ND 4.0: https://x.org/LICENSE")
+	check("credits: no author still shows the homepage",
+		Credits.credit_text({"homepage": "https://x.org/", "licence": lic}),
+		"https://x.org/ Licence CC BY-NC-ND 4.0: https://x.org/LICENSE")
+	check("credits: JSON nulls (qforge-emu list of an old catalog) are skipped",
+		Credits.credit_text({"author": null, "homepage": null, "licence": null}), "")
 
 func write(path: String, text: String) -> void:
 	DirAccess.make_dir_recursive_absolute(path.get_base_dir())

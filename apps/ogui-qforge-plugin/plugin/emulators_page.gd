@@ -2,7 +2,8 @@ extends ScrollContainer
 
 ## Settings > Emulators: the QForge emulator store (plan Phase 4, part 3).
 ##
-## One block per catalog emulator: its name, installed vs pinned version, size and licence, and
+## One block per catalog emulator: its name, who made it (author, homepage, licence and its link:
+## the attribution every emulator's licence asks for), installed vs pinned version and size, and
 ## a button that is Download, Update or Open (the emulator's own UI, `qforge-launch --gui`), plus
 ## Delete once installed, and the player's "Run on fast cores" default for that emulator (every
 ## launch of it, Open included, unless a game overrides it). Everything else goes through /usr/bin/qforge-emu (list / install / remove);
@@ -15,6 +16,7 @@ extends ScrollContainer
 const EMU_TOOL := "/usr/bin/qforge-emu"
 const LAUNCHER := "/usr/bin/qforge-launch"
 const LaunchArgs := preload("launch_args.gd")
+const Credits := preload("credits.gd")
 const PROGRESS_POLL := 0.5  # s between download progress samples
 const EXIT_TEXT := {
 	3: "Download failed: check the network connection.",
@@ -130,10 +132,22 @@ func _add_label(text: String) -> void:
 	_rows.add_child(label)
 
 
+func _add_credit(emu: Dictionary) -> void:
+	var text := Credits.credit_text(emu)
+	if text == "":
+		return
+	var label := Label.new()
+	label.text = text
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.modulate = Color(1, 1, 1, 0.7)
+	_rows.add_child(label)
+
+
 func _add_emulator(id: String, emu: Dictionary) -> void:
 	var name_text := str(emu.get("name", id))
 	_add_label(name_text)
-	var licence: Dictionary = emu.get("licence", {}) if emu.get("licence") is Dictionary else {}
+	_add_credit(emu)
 	var size := int(emu.get("size", 0))
 	var pinned := str(emu.get("pinned", "?"))
 	var installed = emu.get("installed")
@@ -142,7 +156,7 @@ func _add_emulator(id: String, emu: Dictionary) -> void:
 	main.text = name_text
 	_rows.add_child(main)
 	if installed == null:
-		main.description = "Not installed. %s, %d MB. %s" % [pinned, size / 1048576, licence.get("name", "")]
+		main.description = "Not installed. %s, %d MB." % [pinned, size / 1048576]
 		main.button_text = "Download"
 		main.button_up.connect(_install.bind(id, name_text, pinned, size, main))
 	elif emu.get("update", false):
@@ -150,7 +164,7 @@ func _add_emulator(id: String, emu: Dictionary) -> void:
 		main.button_text = "Update"
 		main.button_up.connect(_install.bind(id, name_text, pinned, size, main))
 	else:
-		main.description = "Installed %s. %s" % [installed, licence.get("name", "")]
+		main.description = "Installed %s." % installed
 		main.button_text = "Open"
 		main.button_up.connect(_open.bind(id, name_text))
 	if _busy.has(id):

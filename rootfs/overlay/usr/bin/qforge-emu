@@ -221,6 +221,7 @@ def cmd_list():
             "installed": inst,
             "update": inst is not None and inst != e.get("tag"),
             "size": e.get("size"),
+            "author": e.get("author"),
             "homepage": e.get("homepage"),
             "licence": e.get("licence"),
         }
