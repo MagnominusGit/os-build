@@ -648,6 +648,33 @@ plus the ROM library that launches them)
   Elite 2"); a wrong name leaves every binding dead -- recheck when the pin moves (Logger.ini
   [Logs] CI = True). User decisions: save states stay in Dolphin's own folder (no setting for it);
   no resume-on-exit (Dolphin has none). HW ✅ ACE: MKDD + NSMBW, controls, Select+Start stop.
+- **Emulator roster (decided 2026-10-06, surveyed the same day).** Added at the user's request: PPSSPP,
+  and from pkgforge-dev Flycast, mGBA, Snes9x, xemu, melonDS (on top of Azahar, rpcs3, Cemu). Every
+  one has a pinnable aarch64 AppImage; all but rpcs3 are "anylinux" sharun builds -> format
+  appimage-sharun (PPSSPP's official one is built with the same tooling: inspect before assuming).
+
+  | Emulator | Systems | Source (GitHub) | Pin candidate (2026-10-06) | Format |
+  |---|---|---|---|---|
+  | mGBA | gba, gb, gbc | pkgforge-dev/mGBA-AppImage-Enhanced | 0.10.5-5@2026-10-01_1790876690 | sharun |
+  | Snes9x | snes | pkgforge-dev/Snes9x-AppImage | 1.63-1@2026-10-01_1790876690 | sharun |
+  | PPSSPP | psp | hrydgard/ppsspp (official) | v1.20.4 | anylinux (inspect) |
+  | Flycast | dc | pkgforge-dev/Flycast-AppImage-Enhanced | 2.7@2026-10-01_1790875174 | sharun |
+  | melonDS | nds | pkgforge-dev/melonDS-AppImage | 1.1-2@2026-10-01_1790875607 | sharun |
+  | Azahar | 3ds | pkgforge-dev/Azahar-AppImage (no official arm64 Linux) | 2126.1.2@2026-10-01_1790876552 | sharun |
+  | Cemu | wiiu | pkgforge-dev/Cemu-AppImage-Enhanced | 2.6-4@2026-02-01_1769935971 | sharun |
+  | xemu | xbox | pkgforge-dev/xemu-AppImage-Enhanced | 0.8.136@2026-10-01_1790871942 | sharun |
+  | rpcs3 | ps3 | RPCS3/rpcs3-binaries-linux-arm64 (official) | build-ffc50905... (v0.0.42-19759) | appimage |
+
+  Order (simplest first): mGBA, Snes9x -> PPSSPP, Flycast (BIOS optional) -> melonDS, Azahar (two
+  screens on one panel: layout to decide) -> Cemu (game keys) -> xemu (BIOS + MCPX + HDD image),
+  rpcs3 (firmware install). Never pin a `nightly` tag (rolling; test-catalog refuses it).
+  Per emulator, the recipe: catalog pin (sha256/size from GitHub's digest, QFORGE_NET_TEST=1
+  test-catalog), licence + author's stated terms, emulator.json, minimal seed (pad as SDL sees it
+  -- check the device name in the emulator's own log, no exit confirmation, folders in the shared
+  layout ~/{roms,bios,saves,states}/<system>, Select+Start menu/stop, Guide unbound), launch.conf
+  rows, plugin SYSTEMS entry (+ version bump), test-launch checks, HW test on a dev card: launch,
+  controls, OGUI Exit, the emulator's own exit, Open. Test games go in ~/Downloads/<system> on the
+  host (user provides them; never ship BIOS or games).
 - The other three: Azahar (3DS), rpcs3 (PS3, needs firmware), Cemu (Wii U). Recipe from DuckStation, per emulator: an aarch64 AppImage that uses our
   Mesa/Turnip (armada's catalog has working asset patterns for all five); `.conf` + minimal seed;
   `launch.conf` system + folder-layout rows; every exit path (SIGTERM vs menu: ConfirmPowerOff-style
