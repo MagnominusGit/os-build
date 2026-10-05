@@ -24,7 +24,7 @@ root (the `gamescope/` checkout inside makepkg's `$srcdir`) by
 0019-rendervulkan-fragment-shader-composite.patch   (--composite-graphics, passed by default from etc/qforge/session.conf)
 0020-libliftoff-treat-enodev-as-no-fit.patch        (patches the libliftoff SUBMODULE; only with 0021)
 0021-libliftoff-give-planes-the-layer-zpos.patch    (patches the libliftoff SUBMODULE)
-0024-vblankmanager-account-for-scanout-rotation-time.patch   (GAMESCOPE_SCANOUT_ROTATION_TIME_US; set for the S2 and S 2K via their device confs)
+0024-vblankmanager-account-for-scanout-rotation-time.patch   (GAMESCOPE_SCANOUT_ROTATION_TIME_US; 1000 for every board via devices/defaults.conf)
 ```
 
 `0008`-`0013` are **retired** (see below). The numbering is kept as-is rather than compacted, so
@@ -367,13 +367,13 @@ have; here the planes rotate EVERY frame whenever the composite carries no outpu
 just `g_bRotated && !g_uOutputRotation`, and the VRR wakeup offset gets the same reserve. **Carried
 for the S2 black-frame blink (TRIAL):** a DPU underrun follows every commit that lands under ~0.3 ms
 before vblank (traced 2026-10-04: 6/6 underruns over 51,623 frames; a 48,678-frame A/B with the patch
-had zero, ~1.25 ms extra latency). Only the floor acts there, since those flips are not late, so the
-S2 gets a fixed 1 ms: `QFORGE_SCANOUT_ROTATION_TIME_US=1000` in
-`rootfs/overlay/usr/lib/qforge/devices/ayaneo-pocket-s2.conf`, exported by `qforge-session`. The
-Pocket S 2K (same panel, SM8550) carries the same value on the S2's evidence; it was not traced. Per
-board on purpose: the tree this came from keyed it on "panel wider than the inline rotator's 1088
-lines", which would hand the latency to any future wide-panel board without evidence. Applies at fuzz 0 on our stack, which does not
-carry the patch numbered `0023` in the tree this was taken from.
+had zero, ~1.25 ms extra latency). Only the floor acts there, since those flips are not late, so
+every board gets a fixed 1 ms: `QFORGE_SCANOUT_ROTATION_TIME_US=1000` in
+`rootfs/overlay/usr/lib/qforge/devices/defaults.conf`, exported by `qforge-session`. First set for
+the S2 (and the S 2K, same panel) alone; made the default after the same blink was seen on the
+Pocket ACE (2026-10-05, by eye, not traced). It costs only on frames the planes rotate, so a
+landscape-scanout board pays nothing, and a board conf can set it empty to opt out. Applies at fuzz 0
+on our stack, which does not carry the patch numbered `0023` in the tree this was taken from.
 
 Drop the patch files here with those exact names (or rename and update `source.pin`'s
 `patches:` line). **Until a declared patch is present, `make overlay` / `make base` fail fast**
