@@ -8,8 +8,12 @@ extends Plugin
 ## tabs are added from library_loaded, which fires after the UI's first reload_library().
 
 const LIBRARY_ID := "qforge-roms"
+## Seconds between two looks at ~/roms (rom_watch.gd): a copied ROM shows up 5-10 s after the
+## copy ends.
+const RESCAN_INTERVAL := 5.0
 
 var library_manager := load("res://core/global/library_manager.tres") as LibraryManager
+var launch_manager := load("res://core/global/launch_manager.tres") as LaunchManager
 var tabs_state := load("res://core/ui/card_ui/library/library_tabs_state.tres") as TabContainerState
 var menu_state_machine := load("res://assets/state/state_machines/menu_state_machine.tres") as StateMachine
 var launcher_state := load("res://assets/state/states/game_launcher.tres") as State
@@ -22,6 +26,9 @@ var _tabs := {}
 var _emulators_button: Control
 var _emulators_page: Control
 var _game_settings_page: Control
+var _watch: RefCounted  # rom_watch.gd
+var _rescan_timer: Timer
+var _rescanning := false
 
 
 # No _init override: Plugin._init adds the node to the "plugin" group.
@@ -31,6 +38,12 @@ func _ready() -> void:
 	add_library(roms)
 	library_manager.library_loaded.connect(_on_library_loaded)
 	logger.info("ROM library registered: %s" % library_manager.has_library(LIBRARY_ID))
+	_watch = load(plugin_base.path_join("rom_watch.gd")).new().setup(roms.roms_dir(), roms.SYSTEMS.keys())
+	_rescan_timer = Timer.new()
+	_rescan_timer.wait_time = RESCAN_INTERVAL
+	_rescan_timer.timeout.connect(_on_rescan_timer)
+	add_child(_rescan_timer)
+	_rescan_timer.start()
 	# The settings menu is not ready yet when plugins initialise: add our page a frame later.
 	await get_tree().process_frame
 	_add_emulators_page()
@@ -38,6 +51,8 @@ func _ready() -> void:
 
 
 func unload() -> void:
+	if is_instance_valid(_rescan_timer):
+		_rescan_timer.stop()
 	for system in _tabs.keys():
 		tabs_state.remove_tab(_tab_text(system))
 	_tabs.clear()
@@ -113,9 +128,23 @@ func _add_emulators_page() -> void:
 	logger.info("Settings > Emulators added")
 
 
+## Automatic rescan: reload our library once ~/roms changed and settled (rom_watch.gd). Never
+## while a game runs, nor while our own reload is still going.
+func _on_rescan_timer() -> void:
+	var busy := _rescanning or not launch_manager.get_running().is_empty()
+	if not _watch.poll(busy):
+		return
+	logger.info("ROM folders changed: rescanning")
+	_rescanning = true
+	library_manager.load_library(LIBRARY_ID)
+
+
 func _on_library_loaded(library_id: String) -> void:
 	if library_id != LIBRARY_ID:
 		return
+	# Any load counts (start, Refresh Library, ours): it read what is on disk now.
+	_watch.mark_loaded()
+	_rescanning = false
 	for system in roms.SYSTEMS:
 		_refresh_system(system)
 

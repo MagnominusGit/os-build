@@ -85,6 +85,7 @@ extends SceneTree
 
 const RomNames := preload("$SRC/rom_names.gd")
 const LaunchArgs := preload("$SRC/launch_args.gd")
+const RomWatch := preload("$SRC/rom_watch.gd")
 const SYSTEMS := {"psx": "PlayStation", "ps2": "PlayStation 2"}
 var failed := 0
 
@@ -158,7 +159,62 @@ func _init() -> void:
 		FileAccess.get_file_as_string(LaunchArgs.player_conf_path("duckstation")), "CPUS=big\n")
 	LaunchArgs.set_emulator_fast_cores("duckstation", false)
 	check("emulator default: Off reads back off", LaunchArgs.emulator_fast_cores("duckstation"), false)
+	test_rom_watch()
 	quit(1 if failed else 0)
+
+func write(path: String, text: String) -> void:
+	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	f.store_string(text)
+	f.close()
+
+func append(path: String, text: String) -> void:
+	var f := FileAccess.open(path, FileAccess.READ_WRITE)
+	f.seek_end()
+	f.store_string(text)
+	f.close()
+
+## Automatic rescan: ROMs copied over SMB only showed after Refresh Library or a restart.
+func test_rom_watch() -> void:
+	var roms := "$T/roms"
+	write(roms + "/psx/A.chd", "aaaa")
+	var watch = RomWatch.new().setup(roms, ["psx", "ps2"])
+	check("rescan: nothing before OGUI's first library load", [watch.poll(false), watch.poll(false)], [false, false])
+	watch.mark_loaded()
+	check("rescan: nothing while the folders match the library", [watch.poll(false), watch.poll(false)], [false, false])
+	write(roms + "/psx/B.chd", "bb")
+	check("rescan: a new ROM waits one poll (copy may still run)", watch.poll(false), false)
+	check("rescan: then it is due once two polls agree", watch.poll(false), true)
+	watch.mark_loaded()
+	check("rescan: not again after the reload", watch.poll(false), false)
+	write(roms + "/psx/C.chd", "c")
+	watch.poll(false)
+	append(roms + "/psx/C.chd", "cc")
+	check("rescan: a file still growing keeps it waiting", watch.poll(false), false)
+	check("rescan: due once the file stopped growing", watch.poll(false), true)
+	watch.mark_loaded()
+	OS.execute("touch", ["-d", "@1000000000", roms + "/psx/C.chd"])
+	watch.poll(false)
+	OS.execute("touch", ["-d", "@1000000100", roms + "/psx/C.chd"])
+	check("rescan: same size but a new mtime (SMB copy into a preallocated file) keeps it waiting", watch.poll(false), false)
+	check("rescan: due once the mtime settled", watch.poll(false), true)
+	watch.mark_loaded()
+	DirAccess.remove_absolute(roms + "/psx/A.chd")
+	check("rescan: a deleted ROM is due too", [watch.poll(false), watch.poll(false)], [false, true])
+	watch.mark_loaded()
+	write(roms + "/ps2/J.iso", "j")
+	check("rescan: a system folder created later is watched", [watch.poll(false), watch.poll(false)], [false, true])
+	watch.mark_loaded()
+	write(roms + "/gc/G.iso", "g")
+	write(roms + "/psx/sub/D.chd", "d")
+	check("rescan: other folders and subfolders are not ROMs", [watch.poll(false), watch.poll(false)], [false, false])
+	write(roms + "/psx/E.chd", "e")
+	check("rescan: never while a game runs", [watch.poll(false), watch.poll(true), watch.poll(true)], [false, false, false])
+	check("rescan: after the game, two settled polls again", [watch.poll(false), watch.poll(false)], [false, true])
+	write(roms + "/psx/F.chd", "f")
+	watch.mark_loaded()
+	check("rescan: a ROM copied between our scan and library_loaded is still picked up",
+		[watch.poll(false), watch.poll(false)], [false, true])
 GD
   out="$(XDG_CONFIG_HOME="$T/config" "$GODOT" --headless --script "$T/names_test.gd" 2>&1)"; rc=$?
   printf '%s\n' "$out" | grep -E '^  (ok|FAIL) '

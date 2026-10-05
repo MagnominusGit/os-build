@@ -1,10 +1,11 @@
 # Plan: QForge
 
 **Complexity**: Large
-**Status** (2026-10-04): Phases 0-3 done -- HW-validated on all three SoCs: SM8550 (AYANEO Pocket
+**Status** (2026-10-05): Phases 0-3 done -- HW-validated on all three SoCs: SM8550 (AYANEO Pocket
 ACE), SM8250 (MANGMI Pocket Max), SM8650 (KONKR Pocket FIT, dev card 2026-10-04). Phase 4 (QForge
 OGUI plugin) mostly built: catalog + qforge-emu, Settings > Emulators store, per-system ROM tabs,
-fast cores per emulator / per game; open items at the end of its section, automatic rescan next.
+fast cores per emulator / per game, automatic ROM rescan (HW check owed); open items at the end
+of its section.
 Phase 4b (more emulators) and 4c (library scaling) after it. Phase 5 not started. Phase 6 (final
 polish: Resume, memory-card check) last, not blocking.
 
@@ -346,12 +347,20 @@ Still to handle: OGUI's search only covers Installed / All Games;
 the tab refreshes twice at start (two library loads); upstream `remove_tab` resets `current_tab`
 on the wrong condition (`size > current_tab`).
 OGUI only reloads its library at start and from Settings > Library > Refresh Library: no D-Bus
-service, signal or file watch. The plugin runs in-process and could call
-`library_manager.reload_library()` itself, but does not yet (see open items).
+service, signal or file watch. Automatic rescan (2026-10-05, plugin 0.1.6, not yet HW-checked):
+`rom_watch.gd` + a 5 s Timer in plugin.gd. Each poll lists `~/roms/<system>/*` as name, size and
+mtime; `load_library("qforge-roms")` runs once that list differs from the last library load AND two
+polls in a row agree (a copy still running waits; a ROM shows 5-10 s after its copy ends). Skipped
+while a game runs (`launch_manager.get_running()`) and while our own load is in flight; any
+`library_loaded` for our library (start, Refresh Library, ours) resets the baseline. Not a dir-mtime
+check as first proposed: Godot gives whole seconds, so a file created in the same second as a poll
+went unseen, and an SMB copy can set the final size before writing (only mtime moves). Rejected:
+inotifywait in a Pty (no inotify-tools, process lifecycle), systemd .path (OGUI has no IPC).
+HW check: copy a ROM over SMB while on the library (card appears after the copy, not during),
+delete one (card goes), copy during a game (nothing until exit).
 
 **Phase 4 open items** (plan check 2026-10-04)
-- Automatic rescan (next): ROMs copied over SMB only appear after Refresh Library or a restart
-  (inotify on `~/roms`, or rescan when the library opens), then `reload_library()` from the plugin.
+- Automatic rescan: done 2026-10-05 (plugin 0.1.6, see above); HW check owed.
 - Resume and the memory-card / resume-state HW check: moved to Phase 6 (2026-10-04, not blocking).
 - Plugin store: mask upstream's ShadowBlip store (first-boot error noise) with an OGUI patch reading
   the store URL from a ProjectSettings key (not written yet; 0004/0005 are other patches), pointed
@@ -395,7 +404,7 @@ plus the ROM library that launches them)
    tags later), `tags [<system>]`, `metadata {system, rom, emulator}`, `installed true`.
    `command` = `qforge-launch` (below), `args [<system>, <rom path>]`, prefixed with `--cpus big|all`
    only when the game overrides its emulator's fast-cores default (done 2026-10-04, see above).
-   Rescan on OGUI start and via Settings > Library > Refresh Library; automatic rescan still open.
+   Rescan on OGUI start, via Settings > Library > Refresh Library, and automatically (rom_watch.gd).
    **Resume (decided 2026-10-03): the plugin asks.** When a game has a resume state, its card offers
    Resume / Start fresh before launching. Emulators cannot ask themselves: DuckStation's "Resume
    Game -- load this state, or start from a fresh boot?" dialog only exists in its own game list
