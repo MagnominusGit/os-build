@@ -119,6 +119,19 @@ run frobnicate dummy;     [ "$RC" = 2 ] && ok "an unknown command: exit 2" || ba
 [ ! -e "$W/curl.log" ] && ok "bad invocations never touch the network" || bad "curl ran for a bad invocation"
 
 # =================================================================================================
+CASE="tags"
+# pkgforge-dev's AppImage repos (Dolphin) tag releases as <version>@<date>_<id>.
+mkasset "2609@2026-10-01_1" "dummy pkgforge-style build"
+reset; catalog "2609@2026-10-01_1"; api "2609@2026-10-01_1"
+run install dummy
+[ "$RC" = 0 ] && [ "$(readlink "$D/dummy/current")" = "2609@2026-10-01_1.AppImage" ] \
+  && ok "a tag with '@' installs as <tag>.AppImage" || bad "the '@' tag install exited $RC: $ERR"
+reset; catalog "v1/../x" "$(sha "$W/srv/v1.AppImage")" "$(size "$W/srv/v1.AppImage")"
+run install dummy
+[ "$RC" = 4 ] && [ ! -e "$W/curl.log" ] && ok "a tag with '/' is refused before any download (exit 4)" \
+  || bad "a '/' tag exited $RC (curl ran: $([ -e "$W/curl.log" ] && echo yes || echo no))"
+
+# =================================================================================================
 CASE="install"
 reset; catalog v1; api v1
 run install dummy

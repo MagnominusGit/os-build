@@ -50,7 +50,9 @@ CATALOGS = [
 ]
 GITHUB_API = "https://api.github.com"
 EMU_ID = re.compile(r"[a-z0-9_-]+")
-SAFE_TAG = re.compile(r"[A-Za-z0-9._-]+")
+# A tag names a file (<tag>.AppImage) and a URL path segment: no '/', nothing a shell or URL reads
+# specially. '@' is allowed: pkgforge-dev's AppImage repos tag releases as <version>@<date>_<id>.
+SAFE_TAG = re.compile(r"[A-Za-z0-9._@-]+")
 SPACE_MARGIN = 16 << 20  # bytes kept free beyond the AppImage itself
 POLL = 0.25  # s between progress samples
 
