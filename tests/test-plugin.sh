@@ -167,14 +167,17 @@ func _init() -> void:
 ## Attribution the emulators' licences ask for (DuckStation: CC BY-NC-ND, link duckstation.org).
 func test_credits() -> void:
 	var lic := {"name": "CC BY-NC-ND 4.0", "url": "https://x.org/LICENSE"}
-	check("credits: author, homepage, licence and its link",
-		Credits.credit_text({"author": "A. Dev", "homepage": "https://x.org/", "licence": lic}),
-		"By A. Dev, https://x.org/. Licence CC BY-NC-ND 4.0: https://x.org/LICENSE")
+	check("credits: author, homepage and licence on one short line",
+		Credits.credit_text({"author": "A. Dev", "homepage": "https://www.x.org/", "licence": lic}),
+		"By A. Dev · x.org · Licence CC BY-NC-ND 4.0")
 	check("credits: no author still shows the homepage",
-		Credits.credit_text({"homepage": "https://x.org/", "licence": lic}),
-		"https://x.org/ Licence CC BY-NC-ND 4.0: https://x.org/LICENSE")
+		Credits.credit_text({"homepage": "https://x.org/", "licence": lic}), "x.org · Licence CC BY-NC-ND 4.0")
 	check("credits: JSON nulls (qforge-emu list of an old catalog) are skipped",
 		Credits.credit_text({"author": null, "homepage": null, "licence": null}), "")
+	check("version: a pkgforge tag shows its version only",
+		Credits.version_text("2609@2026-10-01_1790876487"), "2609")
+	check("version: other tags are shown as they are",
+		[Credits.version_text("v0.1-11894"), Credits.version_text("nightly-20261005")], ["v0.1-11894", "nightly-20261005"])
 
 func write(path: String, text: String) -> void:
 	DirAccess.make_dir_recursive_absolute(path.get_base_dir())

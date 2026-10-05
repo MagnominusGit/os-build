@@ -18,6 +18,7 @@ const LAUNCHER := "/usr/bin/qforge-launch"
 const LaunchArgs := preload("launch_args.gd")
 const Credits := preload("credits.gd")
 const PROGRESS_POLL := 0.5  # s between download progress samples
+const BLOCK_GAP := 24  # px between two emulators' blocks
 const EXIT_TEXT := {
 	3: "Download failed: check the network connection.",
 	4: "The download did not match the version QForge tested; nothing was changed.",
@@ -144,44 +145,58 @@ func _add_credit(emu: Dictionary) -> void:
 	_rows.add_child(label)
 
 
+## One block per emulator: its name once (heading), who made it, then three rows -- the version
+## with Download / Update / Open, the fast-cores default, and Delete once installed. Only the last
+## row draws a separator, so a line marks where one emulator ends (OGUI's toggle draws one by
+## default, which used to split a block in two), and a gap opens before the next heading.
 func _add_emulator(id: String, emu: Dictionary) -> void:
 	var name_text := str(emu.get("name", id))
+	if _rows.get_child_count() > 1:  # the FocusGroup is always there
+		var gap := Control.new()
+		gap.custom_minimum_size = Vector2(0, BLOCK_GAP)
+		_rows.add_child(gap)
 	_add_label(name_text)
 	_add_credit(emu)
 	var size := int(emu.get("size", 0))
-	var pinned := str(emu.get("pinned", "?"))
+	var pinned := Credits.version_text(str(emu.get("pinned", "?")))
 	var installed = emu.get("installed")
+	var mb := size / 1048576
 
 	var main = row_scene.instantiate()
-	main.text = name_text
-	_rows.add_child(main)
 	if installed == null:
-		main.description = "Not installed. %s, %d MB." % [pinned, size / 1048576]
+		main.text = "Not installed"
+		main.description = "Version %s, %d MB." % [pinned, mb]
 		main.button_text = "Download"
-		main.button_up.connect(_install.bind(id, name_text, pinned, size, main))
+		main.button_up.connect(_install.bind(id, name_text, str(emu.get("pinned", "")), size, main))
 	elif emu.get("update", false):
-		main.description = "Installed %s, update to %s available (%d MB)." % [installed, pinned, size / 1048576]
+		main.text = "Version " + Credits.version_text(str(installed))
+		main.description = "Update to %s available, %d MB." % [pinned, mb]
 		main.button_text = "Update"
-		main.button_up.connect(_install.bind(id, name_text, pinned, size, main))
+		main.button_up.connect(_install.bind(id, name_text, str(emu.get("pinned", "")), size, main))
 	else:
-		main.description = "Installed %s." % installed
+		main.text = "Version " + Credits.version_text(str(installed))
+		main.description = "Installed."
 		main.button_text = "Open"
 		main.button_up.connect(_open.bind(id, name_text))
+	main.separator_visible = false
+	_rows.add_child(main)
 	if _busy.has(id):
 		main.disabled = true
 
 	var fast = toggle_scene.instantiate()
 	fast.text = "Run on fast cores"
-	fast.description = "Keep %s on the fast CPU cores. Games can override this in their own settings." % name_text
+	fast.description = "Games can override this in their own settings."
 	fast.button_pressed = LaunchArgs.emulator_fast_cores(id)
+	fast.separator_visible = installed == null  # the block's last row when there is no Delete
 	fast.toggled.connect(_set_fast_cores.bind(id, name_text, fast))
 	_rows.add_child(fast)
 
 	if installed != null:
 		var remove = row_scene.instantiate()
-		remove.text = "Delete " + name_text
+		remove.text = "Delete"
 		remove.description = "Removes the emulator. Its settings, saves and states are kept."
 		remove.button_text = "Delete"
+		remove.separator_visible = true
 		remove.button_up.connect(_remove.bind(id, name_text, remove))
 		_rows.add_child(remove)
 

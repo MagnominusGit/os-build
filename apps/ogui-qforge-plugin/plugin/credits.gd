@@ -4,18 +4,23 @@ extends RefCounted
 ## tests/test-plugin.sh runs it in a stock headless Godot.
 
 
-## "By <author>, <homepage>. Licence <name>: <url>" under the emulator's name. Plain text: there is
-## no browser to open a link in, so the address itself is what the player gets.
+## "By <author> · <homepage> · Licence <name>" under the emulator's name. Plain text: there is
+## no browser to open a link in. The homepage is the link every project asks for; the licence's
+## own URL stays in the catalog (it made the line wrap twice on a 1620 px panel).
 static func credit_text(emu: Dictionary) -> String:
 	var parts := PackedStringArray()
-	var author := str(emu.get("author", "")) if emu.get("author") != null else ""
-	var homepage := str(emu.get("homepage", "")) if emu.get("homepage") != null else ""
+	var author := str(emu["author"]) if emu.get("author") != null else ""
+	var homepage := str(emu["homepage"]) if emu.get("homepage") != null else ""
 	if author != "":
-		parts.append("By " + author + (", " + homepage if homepage != "" else "") + ".")
-	elif homepage != "":
-		parts.append(homepage)
+		parts.append("By " + author)
+	if homepage != "":
+		parts.append(homepage.trim_prefix("https://").trim_prefix("www.").trim_suffix("/"))
 	var licence: Dictionary = emu.get("licence") if emu.get("licence") is Dictionary else {}
 	if str(licence.get("name", "")) != "":
-		var url := str(licence.get("url", ""))
-		parts.append("Licence " + str(licence["name"]) + (": " + url if url != "" else ""))
-	return " ".join(parts)
+		parts.append("Licence " + str(licence["name"]))
+	return " · ".join(parts)
+
+
+## A release tag as the player reads it: pkgforge-dev's "<version>@<date>_<id>" is just <version>.
+static func version_text(tag: String) -> String:
+	return tag.get_slice("@", 0)
