@@ -4,7 +4,7 @@
 **Status** (2026-10-05): Phases 0-3 done -- HW-validated on all three SoCs: SM8550 (AYANEO Pocket
 ACE), SM8250 (MANGMI Pocket Max), SM8650 (KONKR Pocket FIT, dev card 2026-10-04). Phase 4 (QForge
 OGUI plugin) mostly built: catalog + qforge-emu, Settings > Emulators store, per-system ROM tabs,
-fast cores per emulator / per game, automatic ROM rescan (HW check owed); open items at the end
+fast cores per emulator / per game, automatic ROM rescan; open items at the end
 of its section.
 Phase 4b (more emulators) and 4c (library scaling) after it. Phase 5 not started. Phase 6 (final
 polish: Resume, memory-card check) last, not blocking.
@@ -347,7 +347,7 @@ Still to handle: OGUI's search only covers Installed / All Games;
 the tab refreshes twice at start (two library loads); upstream `remove_tab` resets `current_tab`
 on the wrong condition (`size > current_tab`).
 OGUI only reloads its library at start and from Settings > Library > Refresh Library: no D-Bus
-service, signal or file watch. Automatic rescan (2026-10-05, plugin 0.1.6, not yet HW-checked):
+service, signal or file watch. Automatic rescan (2026-10-05, plugin 0.1.6, HW ✅ Pocket ACE):
 `rom_watch.gd` + a 5 s Timer in plugin.gd. Each poll lists `~/roms/<system>/*` as name, size and
 mtime; `load_library("qforge-roms")` runs once that list differs from the last library load AND two
 polls in a row agree (a copy still running waits; a ROM shows 5-10 s after its copy ends). Skipped
@@ -360,7 +360,7 @@ HW check: copy a ROM over SMB while on the library (card appears after the copy,
 delete one (card goes), copy during a game (nothing until exit).
 
 **Phase 4 open items** (plan check 2026-10-04)
-- Automatic rescan: done 2026-10-05 (plugin 0.1.6, see above); HW check owed.
+- Automatic rescan: done 2026-10-05 (plugin 0.1.6, see above), HW ✅ Pocket ACE.
 - Resume and the memory-card / resume-state HW check: moved to Phase 6 (2026-10-04, not blocking).
 - Plugin store: mask upstream's ShadowBlip store (first-boot error noise) with an OGUI patch reading
   the store URL from a ProjectSettings key (not written yet; 0004/0005 are other patches), pointed
