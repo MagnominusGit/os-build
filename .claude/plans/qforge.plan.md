@@ -362,9 +362,12 @@ delete one (card goes), copy during a game (nothing until exit).
 **Phase 4 open items** (plan check 2026-10-04)
 - Automatic rescan: done 2026-10-05 (plugin 0.1.6, see above), HW ✅ Pocket ACE.
 - Resume and the memory-card / resume-state HW check: moved to Phase 6 (2026-10-04, not blocking).
-- Plugin store: mask upstream's ShadowBlip store (first-boot error noise) with an OGUI patch reading
-  the store URL from a ProjectSettings key (not written yet; 0004/0005 are other patches), pointed
-  at the QForge store once Phase 5 has a server.
+- Plugin store: masked 2026-10-05. OGUI patch 0006 (for upstream) reads the store URL from the
+  `OpenGamepadUI/plugin/store_url` project setting (default upstream's; empty = store off, no
+  request) and survives a failed/non-JSON store response; QForge-only 0007 sets it to "" in
+  project.godot. Branches feat/plugin-store-url + qforge-store-off in _ref/OpenGamepadUI (local;
+  PR not sent). HW ✅ Pocket ACE: no OGUI connection at start, store screen empty. Point 0007 at the
+  QForge store once Phase 5 has a server.
 - Attribution per emulator: done 2026-10-05 (plugin 0.1.7). Catalog `author` (required by
   tests/test-catalog.sh) + homepage + licence name/url, shown as one dimmed line under each
   emulator on Settings > Emulators (`credits.gd`); HW ✅ Pocket ACE.
@@ -471,9 +474,10 @@ plus the ROM library that launches them)
   (`core/global/plugin_loader.gd:20`). Its 7 entries (steam, flathub, steamgriddb, recapture,
   lutris, sunshine, ayaneo-modules) are Steam/x86/desktop oriented, and the request is the
   "plugin store request failing" noise seen on first boot. Mask it.
-- An OGUI patch (not written yet): read the store URL from a ProjectSettings key next to the existing
+- OGUI patch 0006 (written 2026-10-05): read the store URL from a ProjectSettings key next to the existing
   `OpenGamepadUI/plugin/directory` (upstreamable; default stays upstream's), and set it to the
-  QForge store in our build. Placeholder host until Phase 5 replaces `updates.qforge.invalid`.
+  QForge store in our build. Until Phase 5 our build sets it empty (patch 0007: store off), not to a
+  placeholder host, which would only fail.
 - QForge store = a `plugins.json` in the same format (`plugin.id/name/version/min-api-version`,
   `archive.url`, `archive.sha256`, `versions[]`) on the QForge update server, listing `qforge`
   (and anything else we publish). OGUI then gives us, unchanged: periodic store check
