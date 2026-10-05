@@ -218,8 +218,8 @@ upstream reports to the Backlog; the SM8650 boot stayed a Phase 0/1 item (done 2
   device-specific value from `/usr/lib/qforge/devices/<device>.conf` only when an emulator needs it --
   likely first: Azahar's screen layout on the dual-screen Pocket DS, or resolution scaling once a heavy
   emulator shows a real gap between SoCs.
-- ✅ **Player folder layout** (2026-10-03): `~/{roms/<system>,bios,saves/<system>,states/<system>,
-  emulators}` from `/usr/share/user-tmpfiles.d/qforge-home.conf`, created by player's own user
+- ✅ **Player folder layout** (2026-10-03): `~/{roms/<system>,bios/<system>,saves/<system>,
+  states/<system>,emulators}` (bios per system since 2026-10-05, before more emulators land) from `/usr/share/user-tmpfiles.d/qforge-home.conf`, created by player's own user
   manager at every login (system tmpfiles is not ordered after /home, which is `nofail`), so OTA'd
   devices, which keep /home, gain new folders too. The user `systemd-tmpfiles-setup.service` must be
   linked into `/etc/systemd/user/basic.target.wants` -- user presets are only applied at package

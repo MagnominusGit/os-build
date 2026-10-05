@@ -197,11 +197,11 @@ grep -q 'SDL-0/Guide' "$DS_SEED" && bad "duckstation seed binds Guide, which Ope
 layout_has() { grep -Eq "^d[[:space:]]+%h/$1[[:space:]]" "$LAYOUT"; }
 for sys in $(sed -n 's/^\([a-z0-9_]*\)=.*/\1/p' "$LAUNCH_CONF"); do
   missing=""
-  for top in roms saves states; do layout_has "$top/$sys" || missing="$missing $top/$sys"; done
-  [ -z "$missing" ] && ok "layout has roms/saves/states for system '$sys'" || bad "layout lacks:$missing (system '$sys' is in launch.conf)"
+  for top in roms bios saves states; do layout_has "$top/$sys" || missing="$missing $top/$sys"; done
+  [ -z "$missing" ] && ok "layout has roms/bios/saves/states for system '$sys'" || bad "layout lacks:$missing (system '$sys' is in launch.conf)"
 done
 for d in bios emulators; do layout_has "$d" && ok "layout has ~/$d" || bad "layout lacks ~/$d"; done
-[ "$(ini BIOS SearchDirectory)" = /home/player/bios ] && [ "$(ini GameList RecursivePaths)" = /home/player/roms/psx ] \
+[ "$(ini BIOS SearchDirectory)" = /home/player/bios/psx ] && [ "$(ini GameList RecursivePaths)" = /home/player/roms/psx ] \
   && [ "$(ini MemoryCards Directory)" = /home/player/saves/psx ] && [ "$(ini Folders SaveStates)" = /home/player/states/psx ] \
   && ok "duckstation seed: BIOS, ROMs, memory cards and states in the shared layout" \
   || bad "duckstation seed folders do not match the layout"
