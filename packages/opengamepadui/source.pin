@@ -25,13 +25,10 @@
 #         is when the last game stops -- a game's CPU core count became the default and stayed
 #         applied after it exited (HW, Pocket FIT, 2026-10-04). Save the startup settings as the
 #         default of each profile state (docked = charging, undocked) that has none.
-#   0006  ours, for upstream: the plugin store index URL was a constant (ShadowBlip's store). It is
-#         now the OpenGamepadUI/plugin/store_url project setting (default unchanged); empty turns
-#         the store off without a request. Also stops a failed or non-JSON store response from
-#         erroring in on_update_timeout and the store menu (the first-boot "plugin store" noise).
-#   0007  QForge only, never upstream: plugin/store_url="" in project.godot. Upstream's store lists
-#         Steam/x86/desktop plugins; QForge's own store comes with the Phase 5 update server, and
-#         this line then points at it.
+#
+# 0006/0007 (plugin store URL as a project setting, set to "" for QForge) were dropped on
+# 2026-10-06: with the store off, OGUI's first-start screen showed an empty catalog. QForge has no
+# store of its own (its one plugin ships in the image and OTAs), so upstream's store stays.
 #
 # So the PKGBUILD keeps upstream's aarch64 engine binary, Rust core and reaper from the release
 # tarball, and rebuilds only opengamepad-ui.pck from the tagged source plus these patches. Drop a
@@ -45,4 +42,4 @@
 name: opengamepadui
 pkgbuild_local: PKGBUILD
 pkgrel_suffix: 1
-patches: 0001-hardware-manager-no-dmi.patch 0002-install-dialogs-rename-custom-maximum-size.patch 0003-performance-menu-hide-unsupported-controls.patch 0004-running-app-exit-before-window.patch 0005-performance-manager-save-default-profiles.patch 0006-plugin-loader-store-url-setting.patch 0007-qforge-plugin-store-off.patch
+patches: 0001-hardware-manager-no-dmi.patch 0002-install-dialogs-rename-custom-maximum-size.patch 0003-performance-menu-hide-unsupported-controls.patch 0004-running-app-exit-before-window.patch 0005-performance-manager-save-default-profiles.patch
