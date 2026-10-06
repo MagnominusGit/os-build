@@ -1,0 +1,13 @@
+# QForge first-run controller for RPCS3: player 1 is the InputPlumber pad through RPCS3's SDL
+# handler, which names a pad "<SDL gamepad name> <n>" (n counts pads of that name) and binds by that
+# name only: a wrong name leaves the pad dead, with no first-pad fallback. RPCS3's own SDL (3.4.14)
+# calls ours "Xbox One Elite 2 Controller" (same name table as Dolphin's 3.4.16, HW-verified there);
+# recheck in ~/.cache/rpcs3/RPCS3.log ("Pad 0: device=...") when the pin moves.
+# RPCS3 merges this over the SDL handler's defaults, which already map by position (Cross = bottom,
+# Circle = right, Square = left, Triangle = top; L2/R2 analog; sticks; D-pad). The one change: the
+# PS button (home menu) is Select + Start instead of "Guide,Back&Start" -- Guide is OpenGamepadUI's.
+Player 1 Input:
+  Handler: SDL
+  Device: Xbox One Elite 2 Controller 1
+  Config:
+    PS Button: Back&Start

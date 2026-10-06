@@ -87,6 +87,7 @@ const RomNames := preload("$SRC/rom_names.gd")
 const LaunchArgs := preload("$SRC/launch_args.gd")
 const RomWatch := preload("$SRC/rom_watch.gd")
 const Credits := preload("$SRC/credits.gd")
+const GameDirs := preload("$SRC/game_dirs.gd")
 const SYSTEMS := {"psx": "PlayStation", "ps2": "PlayStation 2"}
 var failed := 0
 
@@ -161,8 +162,39 @@ func _init() -> void:
 	LaunchArgs.set_emulator_fast_cores("duckstation", false)
 	check("emulator default: Off reads back off", LaunchArgs.emulator_fast_cores("duckstation"), false)
 	test_rom_watch()
+	test_game_dirs()
 	test_credits()
 	quit(1 if failed else 0)
+
+## Games that are folders: a PS3 disc dump is PS3_GAME/USRDIR/EBOOT.BIN in a folder RPCS3 boots.
+func test_game_dirs() -> void:
+	var ps3 := "$T/dirs/roms/ps3"
+	var markers := ["PS3_GAME/USRDIR/EBOOT.BIN", "USRDIR/EBOOT.BIN"]
+	write(ps3 + "/Demon's Souls [BLUS30443]/PS3_GAME/USRDIR/EBOOT.BIN", "elf")
+	write(ps3 + "/Flower/USRDIR/EBOOT.BIN", "elf")
+	write(ps3 + "/Half copied/PS3_GAME/PARAM.SFO", "sfo")
+	write(ps3 + "/.hidden/PS3_GAME/USRDIR/EBOOT.BIN", "elf")
+	check("game folders: a disc dump and a bare PS3_GAME count; a folder with no EBOOT.BIN and a hidden one do not",
+		GameDirs.scan(ps3, markers), PackedStringArray([ps3 + "/Demon's Souls [BLUS30443]", ps3 + "/Flower"]))
+	check("game folders: a system without markers lists none", GameDirs.scan(ps3, []), PackedStringArray())
+	check("game folders: a folder keeps its whole name (no extension cut at a dot)",
+		RomNames.names_for([{"system": "ps3", "path": ps3 + "/Uncharted 2. Among Thieves", "dir": true}], {"ps3": "PlayStation 3"}),
+		PackedStringArray(["Uncharted 2. Among Thieves"]))
+	check("game folders: a folder and an .iso of one game are told apart",
+		RomNames.names_for([{"system": "ps3", "path": ps3 + "/Flower", "dir": true}, {"system": "ps3", "path": ps3 + "/Flower.iso"}],
+			{"ps3": "PlayStation 3"}),
+		PackedStringArray(["Flower (FOLDER)", "Flower (ISO)"]))
+	var watch = RomWatch.new().setup("$T/dirs/roms", ["ps3"], {"ps3": markers})
+	watch.mark_loaded()
+	write(ps3 + "/Half copied/PS3_GAME/USRDIR/EBOOT.BIN", "e")
+	check("rescan: a game folder is due once its EBOOT.BIN arrived and settled",
+		[watch.poll(false), watch.poll(false)], [false, true])
+	watch.mark_loaded()
+	append(ps3 + "/Half copied/PS3_GAME/USRDIR/EBOOT.BIN", "lf")
+	check("rescan: an EBOOT.BIN still growing keeps it waiting", [watch.poll(false), watch.poll(false)], [false, true])
+	watch.mark_loaded()
+	write(ps3 + "/Other/PS3_GAME/PARAM.SFO", "sfo")
+	check("rescan: a folder without its marker is no change", [watch.poll(false), watch.poll(false)], [false, false])
 
 ## Attribution the emulators' licences ask for (DuckStation: CC BY-NC-ND, link duckstation.org).
 func test_credits() -> void:

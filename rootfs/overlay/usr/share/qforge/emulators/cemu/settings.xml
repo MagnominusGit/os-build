@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- QForge first-run settings for Cemu. qforge-launch copies this to ~/.config/Cemu/settings.xml only
+     when it does not exist; its mere existence skips the Getting Started wizard. Cemu rewrites it
+     (without comments) when settings change. Only what QForge decides is here.
+     - mlc_path: the Wii U's internal storage (game saves; also installed updates and DLC) in
+       ~/saves/wiiu. Cemu has no save states.
+     - check_update false: QForge pins the version. use_discord_presence false (on when missing).
+     - GamePaths: Open's game list shows ~/roms/wiiu.
+     - Graphic/api 1 = Vulkan (Turnip): with the key missing Cemu picks OpenGL.
+     - Audio/api 3 = Cubeb on the "default" device: with the key missing Cemu picks api 0
+       (DirectSound), which Linux does not have, and quits as soon as a game starts.
+     - Audio/TVVolume 100: with the key missing Cemu loads 20 (%), and the game is barely audible
+       (HW 2026-10-06, Pocket FIT).
+     - Not set: fullscreen (-f does it for games; Open stays windowed) and open_pad (the separate
+       GamePad window must stay closed: a second window under gamescope). keys.txt has no setting:
+       ~/.local/share/Cemu/keys.txt is a link to ~/bios/wiiu/keys.txt (qforge-home.conf). -->
+<content>
+    <mlc_path>/home/player/saves/wiiu</mlc_path>
+    <check_update>false</check_update>
+    <use_discord_presence>false</use_discord_presence>
+    <GamePaths>
+        <Entry>/home/player/roms/wiiu</Entry>
+    </GamePaths>
+    <Graphic>
+        <api>1</api>
+    </Graphic>
+    <Audio>
+        <api>3</api>
+        <TVDevice>default</TVDevice>
+        <TVVolume>100</TVVolume>
+    </Audio>
+</content>

@@ -1,0 +1,23 @@
+{
+  "notes": [
+    "Azahar (Nintendo 3DS): pkgforge-dev's sharun repackaging of Azahar 2126.1.2 (SDL2 2.32.10 linked in).",
+    "-f: fullscreen; the last argument is the game, booted at once (no game list).",
+    "Azahar never quits when a game stops: Select + Start is its own 'Exit Azahar' shortcut (qt-config.ini), which quits cleanly with confirmClose off, so OpenGamepadUI gets the panel back. SIGTERM ends it at once, no dialog.",
+    "Only decrypted .3ds/.cci/.cxi/.3dsx (and Azahar's compressed z* forms) are listed: a .cia must be installed first (Azahar asks in a dialog).",
+    "gui_args: Azahar's own window and game list (touch screen; no pad-driven UI). Select + Start quits it too."
+  ],
+  "format": "appimage-sharun",
+  "binary": "bin/azahar",
+  "args": [
+    "-f",
+    "{rom}"
+  ],
+  "gui_args": [],
+  "env": {},
+  "seed": [
+    {
+      "file": "qt-config.ini",
+      "to": ".config/azahar-emu/qt-config.ini"
+    }
+  ]
+}

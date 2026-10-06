@@ -1,0 +1,28 @@
+{
+  "notes": [
+    "PPSSPP (PSP): the official anylinux AppImage, built with pkgforge's quick-sharun (bin/PPSSPPSDL is sharun; its assets are bin/assets, found through /proc/self/exe). Its path-mapping hook is a .src.hook; the link it makes is unused.",
+    "--fullscreen; the ROM boots straight into the game (no game list). --pause-menu-exit: Exit in the pause menu (Select + Start, controls.ini) quits PPSSPP, so OpenGamepadUI gets the panel back. SIGTERM quits cleanly, no dialog.",
+    "gui_args: PPSSPP's own pad-driven UI (no --pause-menu-exit there, or ending a game would quit the app)."
+  ],
+  "format": "appimage-sharun",
+  "binary": "bin/PPSSPPSDL",
+  "args": [
+    "--fullscreen",
+    "--pause-menu-exit",
+    "{rom}"
+  ],
+  "gui_args": [
+    "--fullscreen"
+  ],
+  "env": {},
+  "seed": [
+    {
+      "file": "ppsspp.ini",
+      "to": ".config/ppsspp/PSP/SYSTEM/ppsspp.ini"
+    },
+    {
+      "file": "controls.ini",
+      "to": ".config/ppsspp/PSP/SYSTEM/controls.ini"
+    }
+  ]
+}

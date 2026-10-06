@@ -38,7 +38,7 @@ func _ready() -> void:
 	add_library(roms)
 	library_manager.library_loaded.connect(_on_library_loaded)
 	logger.info("ROM library registered: %s" % library_manager.has_library(LIBRARY_ID))
-	_watch = load(plugin_base.path_join("rom_watch.gd")).new().setup(roms.roms_dir(), roms.SYSTEMS.keys())
+	_watch = load(plugin_base.path_join("rom_watch.gd")).new().setup(roms.roms_dir(), roms.SYSTEMS.keys(), roms.dir_markers())
 	_rescan_timer = Timer.new()
 	_rescan_timer.wait_time = RESCAN_INTERVAL
 	_rescan_timer.timeout.connect(_on_rescan_timer)

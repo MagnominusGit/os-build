@@ -674,6 +674,110 @@ plus the ROM library that launches them)
   rows, plugin SYSTEMS entry (+ version bump), test-launch checks, HW test on a dev card: launch,
   controls, OGUI Exit, the emulator's own exit, Open. Test games go in ~/Downloads/<system> on the
   host (user provides them; never ship BIOS or games).
+- **Roster written 2026-10-06, NOT HW-tested (plugin 0.1.12; tested all at once by the user).**
+  rpcs3 pinned to the newer `build-1b90d1c1...` (v0.0.43-20233, published that day) instead of the
+  surveyed v0.0.42. Every bundle inspected (work/appimages/x, gitignored) and each emulator's input
+  code read at its tag. The pad, for raw-index emulators: InputPlumber's xbox-elite target is uinput
+  045e:0b00 v1 "Microsoft X-Box One Elite 2 pad", xpad order (our capability maps put physical X on
+  BTN_X/0x133), so SDL raw b0 A, b1 B, b2 X, b3 Y, b4 LB, b5 RB, b6 Back, b7 Start, b8 Guide, b9 L3,
+  b10 R3, a0/a1 left, a2 LT, a3/a4 right, a5 RT, hat 0; SDL has no DB row for it (bus 3) and builds
+  an xpad mapping, so gamepad-API positions are right. Computed SDL GUID `030010f85e040000000b000001000000`
+  (CRC16 0xf810 of the name) -- only Cemu depends on it.
+  Launcher additions (generic, tested): sharun hook also read as `.src.hook` (PPSSPP); `{system}` in
+  args (mGBA's one save/state folder per launch); a ROM may be a folder (PS3 disc dump);
+  emulator.json `install` = one-time import of a player file with the emulator's own binary (RPCS3
+  firmware), `missing-file <emu> <path>` / `install-failed <emu>` statuses with plugin popups; an
+  Exit during the install (1 s settle: reap() signals leaves first) never starts the game.
+  Plugin: 11 new tabs (tab order now by maker then age), `dirs` markers for folder games
+  (game_dirs.gd; the watcher counts a folder by its marker file). tests/test-launch.sh checks every
+  emulator.json loads and each seed's controller lines (positions, way out, Guide unbound).
+
+  | Emulator | Pad found by | Way out from the pad | Notes |
+  |---|---|---|---|
+  | mGBA (gb/gbc/gba) | first joystick, raw idx | none: OGUI Exit (no combos; R3 quit dropped) | no exit state on SIGTERM; HW ✅ ACE buttons (Droopy's Tennis) |
+  | Snes9x | joystick 1, raw idx | none: OGUI Exit (no combos; R3 quit dropped) | hat = axes 6/7; Sound Driver index 3 = PulseAudio; Vulkan |
+  | PPSSPP | device 10, gamepad API | Select+Start = pause, Exit quits (--pause-menu-exit) | saves/states via tmpfiles links |
+  | Flycast | mapping file by SDL NAME | Select+Start = menu, Exit quits | AutoSaveState on, AutoLoadState off |
+  | melonDS | SDL index 0, raw idx | none (no quit hotkey/combos): OGUI Exit | side-by-side screens, JIT on, L3 mic, R3 swap, LT lid, RT ff |
+  | Azahar | maptype:all, gamepad API | Select+Start = Exit Azahar | large top + small bottom; L3 cycle, R3 swap; sdmc/nand in ~/saves/3ds |
+  | Cemu | exact SDL GUID (computed!) | none: OGUI Exit | screen toggle on paddle 1; audio api 3 required; keys.txt link |
+  | xemu | auto-bind, guide-less SDL env mapping | Back+Start = xemu menu, Exit | player supplies MCPX/BIOS/HDD qcow2; XISO only |
+  | RPCS3 | "<SDL name> 1" | Select+Start = PS/home menu, Exit Game | firmware install step; dev_hdd0 in ~/saves/ps3 |
+
+  HW checklist per emulator: launch from a card, every button/stick/trigger by position, the way out
+  above, OGUI Exit, Open (--gui), saves land in ~/saves/<system>. Specific: Snes9x 6 axes + sound; PPSSPP assets found (sharun /proc/self/exe) and
+  device 10; Flycast name -> mapping file (else Select alone opens its menu); melonDS speed (software
+  renderer) and JIT; Azahar gamepad mapping present, layout cycle keys, sdmc/nand used; **Cemu GUID**
+  (read the real one from xemu.toml port1 after an xemu run, or Cemu's GUI) + which button is paddle 1
+  + share/Cemu found (log.txt); xemu Guide inert, Vulkan; RPCS3 `--headless --installfw` on aarch64,
+  pad name in RPCS3.log, --big-picture under gamescope; tmpfiles links created on login.
+  Pad exit for emulators that cannot bind a combination (mGBA, Snes9x, melonDS, Cemu): decided
+  2026-10-06 = none for now, OGUI's Exit (Guide) only. R3-quit was dropped (too easy to hit).
+  InputPlumber cannot do it per game (0.81: a profile maps ONE source button; capability-map chords
+  are per board and always on; intercept activation is one chord per device and OGUI uses it for
+  Guide). Revisit later: qforge-launch watching Select + Start (held ~1 s) for those four only.
+  Still open: Cemu's screen-toggle button.
+  xemu memory (HW 2026-10-06, Pocket ACE 7.5 GB): the Vulkan renderer allocates fixed worst-case
+  scratch buffers at start (pgraph/vk/buffer.c: 2 x 800 MB compute buffers sized for 10240x10240
+  upscaling, 2 x 64 MB staging, VRAM mirror...), ~5 GB resident on Turnip's unified memory: 280 MB
+  left, swapping, and the game struggled (one TCG thread at 99% on the prime core at 2.96 GHz;
+  governor ondemand was NOT the limit). Not a leak (flat). Options: OpenGL renderer on the bundled
+  Mesa (not measured yet), or a per-device default (8 GB boards) once launch options exist. Testing
+  moved to the Pocket FIT (16 GB) for xemu, Cemu and RPCS3. On the FIT xemu stays CPU-bound (one TCG thread ~95% on the
+  3.05 GHz prime core; card I/O ~1.2 MB/s, 0% iowait): user verdict "xemu sucks anyway".
+  scx_lavd 1.1.3 PANICS when cores are offline (cpu_order.rs:678 index out of bounds; HW 2026-10-06
+  Pocket FIT): the core-count slider (our power control) hot-plugs CPUs, sched_ext exits, systemd
+  restarts lavd, it panics until all cores are back, and stops retrying (start limit). Starts fine
+  with all 8 online. To fix: check upstream scx for a fix / guard in qforge-powerd (only run lavd
+  with all cores online, restart it after the slider goes back up). Also seen: switching xemu to a
+  per-game OGUI performance profile produced cpu_core_count_current = 4 (user unsure whether set by
+  hand) -- check whether OGUI seeds a new per-game profile with a wrong core count.
+  xemu switched to the OFFICIAL xemu-project aarch64 AppImage (v0.8.136, classic linuxdeploy
+  layout -> format appimage, binary usr/bin/xemu, SDL3 3.4.10 static, no bundled Mesa; 15.5 MB vs
+  pkgforge's 37.6 MB), as armada does. User: "runs better" on the FIT (same ~5.3 GB GPU memory and
+  ~95% emulated-CPU thread; lavd was also on for this run, off for the pkgforge ones).
+  Cemu: v2.6 (the last release, Feb 2025; every pkgforge 2.6-4 build) dies with SIGILL on the first
+  instruction of recompiled code (ARM64 recompiler) ~0.2 s into the game on the FIT; pkgforge's
+  rolling nightly (master cc6fea1, 2026-10-05) runs SM3DW: pad (computed GUID confirmed by xemu's
+  port1), buttons, sound (TVVolume 100 added: missing key = 20 %), saves, clean OGUI exit. No other
+  aarch64 Cemu exists (official/Flathub are x86-64 only); armada ships pkgforge's nightly, unpinned.
+  Binary is bin/cemu (newer builds have no bin/Cemu). Pin: TO DECIDE (mirror the tested nightly in a
+  QForge repo release, or build Cemu ourselves later).
+  RPCS3 (HW 2026-10-07, Pocket FIT, Lollipop Chainsaw BLUS30917 folder dump): launcher fixes --
+  its DwarFS runtime prints the mount point BEFORE mounting (launcher now waits for the mount);
+  `rpcs3 --headless --installfw` installs FW 4.93 then aborts in a destructor (judge installs by
+  marker + our own signals, not the installer's exit; install steps run with no core file: the
+  dump held the launch 44 s); ~/saves/ps3/dev_hdd0 must exist (tmpfiles). Pad bound by name
+  ("Xbox One Elite 2 Controller 1", SDL 3.4.14, same GUID). Overlay icons missing (looks in
+  ~/.config/rpcs3/Icons and /usr/share/rpcs3; cosmetic). RPCS3 fetches its per-game config
+  database (api.rpcs3.net/config, 2,241 games; BLUS30917 = Write Color Buffers) only from its Qt
+  game list: catalog "data" files, fetched by qforge-emu after install/update (user choice).
+  Game patches (patch.yml) likewise never fetched: later, with launch options. First boot: long
+  RSX shader + PPU module compile, cores 2-7 at 100% (fast cores pinned), 94 C: suggest fast cores
+  OFF for RPCS3 (many threads).
+  RPCS3 follow-ups done the same night: its SDL3 caught SIGTERM (OGUI Exit did nothing) ->
+  SDL_NO_SIGNAL_HANDLERS=1 in its env; LimitMEMLOCK=infinity on qforge-session.service (RPCS3 then
+  raises its own to 2 GiB; "Failed to lock sudo memory" gone); with the config database applied
+  (Write Color Buffers) the Turnip GPU hang ("hangcheck ... offending task: rsx::thread", device
+  lost) did not come back. Select+Start -> Exit Game and Guide -> Exit both clean; save in
+  ~/saves/ps3/dev_hdd0/home/00000001/savedata/BLUS30917-AUTOSAVE.
+  OPEN (HW 2026-10-07, FIT, found during a long RPCS3 session): OpenGamepadUI DIMS the panel to
+  10 % after 5 min and runs `systemctl suspend` after 20 min while a game is being played.
+  core/systems/power/power_saver.gd resets its timers only in _input() (+ a gamescope
+  keyboard/mouse counter); in game OGUI sets InputPlumber intercept PASS and InputManager marks
+  joypad events handled (input_manager.gd:138-140), so PowerSaver never sees the pad. To decide:
+  OGUI patch (count joypad activity / pause the timers while a game runs) vs config.
+  melonDS screen layout (HW 2026-10-06, Pocket ACE): the user wants hotkeys for layout, single-screen
+  view and switching screen. melonDS (1.1 and master) has no layout/sizing hotkey, its bindings
+  are one button OR one axis (no combos, joystickButtonDown), no CLI option for the layout, and its
+  config is only saved on a clean window close or a ROM load (never under OGUI's SIGTERM), with the
+  menu bar hidden in fullscreen. Left as seeded for now (side by side; R3 swap, L3 mic, LT lid, RT
+  fast-forward). Later: per-emulator LAUNCH OPTIONS (plugin choice per emulator + per game, like
+  fast cores), applied by rewriting the emulator's config just before launch. User expects this to
+  need a script per emulator (several keys per choice, device-dependent values, TOML/XML/QSettings),
+  which would revisit the launcher redesign's "data, not code" rule: decide the shape then (e.g. an
+  optional per-emulator hook next to emulator.json, run by qforge-launch). Also possible: upstream
+  melonDS hotkeys for cycling layout/sizing.
 - The other three: Azahar (3DS), rpcs3 (PS3, needs firmware), Cemu (Wii U). Recipe from DuckStation, per emulator: an aarch64 AppImage that uses our
   Mesa/Turnip (armada's catalog has working asset patterns for all five); `.conf` + minimal seed;
   `launch.conf` system + folder-layout rows; every exit path (SIGTERM vs menu: ConfirmPowerOff-style

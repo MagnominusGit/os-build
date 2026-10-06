@@ -1,0 +1,23 @@
+{
+  "notes": [
+    "Snes9x (Super Nintendo): pkgforge-dev's sharun repackaging of Snes9x 1.63 (GTK frontend).",
+    "No fullscreen flag exists (FullscreenOnOpen in the seed does it) and no '--': ROM paths are absolute, so never taken for an option.",
+    "Snes9x does not quit when a game stops and cannot bind a button combination, so it has no pad exit: OpenGamepadUI's Exit (Guide) closes it, through its normal exit (SRAM written), no dialog. A launcher-side Select + Start may come later (user decision 2026-10-06: not R3, too easy to hit).",
+    "gui_args: Snes9x's own window (touch screen; no pad-driven UI).",
+    "core_dumps false: Snes9x 1.63 (master too) runs its whole exit (S9xExit) inside its SIGTERM handler and crashes there (SIGSEGV/SIGABRT, HW 2026-10-06, Pocket ACE) after saving its config; SRAM is safe through SaveSRAMEveryNSeconds = 1. No core file for that known crash (~14 MB each)."
+  ],
+  "format": "appimage-sharun",
+  "binary": "bin/snes9x-gtk",
+  "args": [
+    "{rom}"
+  ],
+  "gui_args": [],
+  "env": {},
+  "core_dumps": false,
+  "seed": [
+    {
+      "file": "snes9x.conf",
+      "to": ".config/snes9x/snes9x.conf"
+    }
+  ]
+}

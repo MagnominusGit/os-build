@@ -1,0 +1,30 @@
+{
+  "notes": [
+    "Flycast (Dreamcast): pkgforge-dev's sharun repackaging of Flycast 2.7.",
+    "-config window:fullscreen=yes (also in the seed); the ROM must be the LAST argument (Flycast ignores everything after it). Started with a game, the menu's Exit quits Flycast instead of returning to its game list.",
+    "Select + Start opens Flycast's menu (pad mapping file); SIGTERM quits cleanly (resume state saved), no dialog.",
+    "gui_args: Flycast's own pad-driven UI and game list (~/roms/dc)."
+  ],
+  "format": "appimage-sharun",
+  "binary": "bin/flycast",
+  "args": [
+    "-config",
+    "window:fullscreen=yes",
+    "{rom}"
+  ],
+  "gui_args": [
+    "-config",
+    "window:fullscreen=yes"
+  ],
+  "env": {},
+  "seed": [
+    {
+      "file": "emu.cfg",
+      "to": ".config/flycast/emu.cfg"
+    },
+    {
+      "file": "pad.cfg",
+      "to": ".config/flycast/mappings/SDL_Xbox One Elite 2 Controller.cfg"
+    }
+  ]
+}

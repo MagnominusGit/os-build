@@ -8,6 +8,7 @@ const LAUNCHER := "/usr/bin/qforge-launch"
 # Relative to this script, so it resolves under res://plugins/qforge/ once the zip is loaded.
 const RomNames := preload("rom_names.gd")
 const LaunchArgs := preload("launch_args.gd")
+const GameDirs := preload("game_dirs.gd")
 
 ## OGUI settings section of a game's "Run on fast cores" override: key = ROM id (launch_args.gd),
 ## value "big" (on) or "all" (off). Absent = the emulator's default (Settings > Emulators).
@@ -15,13 +16,26 @@ const CPUS_SECTION := "qforge.cpus"
 
 var settings_manager := load("res://core/global/settings_manager.tres") as SettingsManager
 
-## Systems the image can launch. Tab label, and the file extensions that are a game. An .m3u
-## playlist wins over the disc images it lists, so a multi-disc game is one card.
+## Systems the image can launch, in tab order (by maker, then by age). Tab label, and the file
+## extensions that are a game. An .m3u playlist wins over the disc images it lists, so a multi-disc
+## game is one card. "dirs": the files that make a subfolder a game (game_dirs.gd): a PS3 disc dump
+## is a folder, and the folder is what RPCS3 boots.
 const SYSTEMS := {
-	"psx": {"name": "PlayStation", "exts": ["chd", "cue", "pbp", "m3u", "iso"]},
-	"ps2": {"name": "PlayStation 2", "exts": ["chd", "iso", "cso", "zso", "gz", "cue"]},
+	"gb": {"name": "Game Boy", "exts": ["gb", "zip", "7z"]},
+	"gbc": {"name": "Game Boy Color", "exts": ["gbc", "gb", "zip", "7z"]},
+	"gba": {"name": "Game Boy Advance", "exts": ["gba", "zip", "7z"]},
+	"snes": {"name": "Super Nintendo", "exts": ["sfc", "smc", "zip"]},
+	"nds": {"name": "Nintendo DS", "exts": ["nds", "zip", "7z"]},
+	"3ds": {"name": "Nintendo 3DS", "exts": ["3ds", "cci", "cxi", "3dsx", "zcci", "zcxi", "z3dsx"]},
 	"gc": {"name": "GameCube", "exts": ["iso", "gcm", "gcz", "rvz", "ciso", "wia"]},
 	"wii": {"name": "Wii", "exts": ["iso", "wbfs", "rvz", "gcz", "ciso", "wia"]},
+	"wiiu": {"name": "Wii U", "exts": ["wua", "wud", "wux", "rpx"]},
+	"psx": {"name": "PlayStation", "exts": ["chd", "cue", "pbp", "m3u", "iso"]},
+	"ps2": {"name": "PlayStation 2", "exts": ["chd", "iso", "cso", "zso", "gz", "cue"]},
+	"psp": {"name": "PSP", "exts": ["iso", "cso", "chd", "pbp"]},
+	"ps3": {"name": "PlayStation 3", "exts": ["iso"], "dirs": ["PS3_GAME/USRDIR/EBOOT.BIN", "USRDIR/EBOOT.BIN"]},
+	"dc": {"name": "Dreamcast", "exts": ["chd", "gdi", "cdi", "cue"]},
+	"xbox": {"name": "Xbox", "exts": ["iso", "xiso"]},
 }
 
 
@@ -43,6 +57,15 @@ func get_app_lifecycle_hooks() -> Array[AppLifecycleHook]:
 	return hooks
 
 
+## system -> the files that make a subfolder of ~/roms/<system> a game (SYSTEMS "dirs").
+func dir_markers() -> Dictionary:
+	var markers := {}
+	for system in SYSTEMS:
+		if SYSTEMS[system].has("dirs"):
+			markers[system] = SYSTEMS[system]["dirs"]
+	return markers
+
+
 func roms_dir() -> String:
 	return OS.get_environment("HOME").path_join("roms")
 
@@ -55,6 +78,8 @@ func get_library_launch_items() -> Array[LibraryLaunchItem]:
 		system_names[system] = SYSTEMS[system]["name"]
 		for path in _scan_system(system):
 			roms.append({"system": system, "path": path})
+		for path in GameDirs.scan(roms_dir().path_join(system), SYSTEMS[system].get("dirs", [])):
+			roms.append({"system": system, "path": path, "dir": true})
 	var names := RomNames.names_for(roms, system_names)
 	var items: Array[LibraryLaunchItem] = []
 	for i in roms.size():
@@ -186,7 +211,7 @@ class LaunchFailure extends AppLifecycleHook:
 			return
 		var words := FileAccess.get_file_as_string(path).strip_edges().split(" ")
 		DirAccess.remove_absolute(path)
-		if words.size() != 2:
+		if words.size() < 2:
 			return
 		var name := _emulator_name(words[1])
 		var msg: String
@@ -195,6 +220,14 @@ class LaunchFailure extends AppLifecycleHook:
 				msg = "%s is not installed.\nDownload it in Settings > Emulators first." % name
 			"mount-failed":
 				msg = "%s could not be started.\nDelete it and download it again in Settings > Emulators." % name
+			"missing-file":
+				# qforge-launch: `missing-file <emulator> <path under the player's home>`
+				if words.size() != 3:
+					return
+				msg = "%s needs %s.\nCopy it to the %s folder (network share), then start the game again." \
+						% [name, words[2].get_file(), words[2].get_base_dir()]
+			"install-failed":
+				msg = "%s could not install its firmware or system files.\nCheck the file in the bios folder, then try again." % name
 			_:
 				return
 		logger.info("%s: %s %s" % [item.name, words[0], words[1]])

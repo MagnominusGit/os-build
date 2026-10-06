@@ -18,6 +18,40 @@
         "url": "https://github.com/ARMSX2/ARMSX2/blob/master/COPYING.GPLv3"
       }
     },
+    "azahar": {
+      "name": "Azahar",
+      "author": "The Azahar team (based on Citra); AppImage by pkgforge-dev",
+      "systems": [
+        "3ds"
+      ],
+      "github": "pkgforge-dev/Azahar-AppImage",
+      "tag": "2126.1.2@2026-10-01_1790876552",
+      "asset": "^Azahar-2126\\.1\\.2-anylinux-aarch64\\.AppImage$",
+      "sha256": "30c546f71afea3c4f510058a3d5c460247ddcbbda8ce880615e8facfde2f5b8b",
+      "size": 82871037,
+      "homepage": "https://azahar-emu.org/",
+      "licence": {
+        "name": "GPL-3.0",
+        "url": "https://github.com/azahar-emu/azahar/blob/master/LICENSE.txt"
+      }
+    },
+    "cemu": {
+      "name": "Cemu",
+      "author": "The Cemu team; AppImage by pkgforge-dev",
+      "systems": [
+        "wiiu"
+      ],
+      "github": "pkgforge-dev/Cemu-AppImage-Enhanced",
+      "tag": "2.6-4@2026-02-01_1769935971",
+      "asset": "^Cemu-2\\.6-4-anylinux-aarch64\\.AppImage$",
+      "sha256": "7f6eb4bd721759f2bddb65bd369ff52cc03085b77415154218ae3e596795e8ff",
+      "size": 63140494,
+      "homepage": "https://cemu.info/",
+      "licence": {
+        "name": "MPL-2.0",
+        "url": "https://github.com/cemu-project/Cemu/blob/main/LICENSE.txt"
+      }
+    },
     "dolphin": {
       "name": "Dolphin",
       "author": "The Dolphin team; AppImage by pkgforge-dev",
@@ -51,6 +85,133 @@
       "licence": {
         "name": "CC BY-NC-ND 4.0",
         "url": "https://github.com/stenzek/duckstation/blob/master/LICENSE"
+      }
+    },
+    "flycast": {
+      "name": "Flycast",
+      "author": "flyinghead and the Flycast team; AppImage by pkgforge-dev",
+      "systems": [
+        "dc"
+      ],
+      "github": "pkgforge-dev/Flycast-AppImage-Enhanced",
+      "tag": "2.7@2026-10-01_1790875174",
+      "asset": "^Flycast-2\\.7-anylinux-aarch64\\.AppImage$",
+      "sha256": "c6ac065f70b2b678a7605c89b7b5efb338626883270f5b242c35f3c60e60633d",
+      "size": 38674733,
+      "homepage": "https://github.com/flyinghead/flycast",
+      "licence": {
+        "name": "GPL-2.0",
+        "url": "https://github.com/flyinghead/flycast/blob/master/LICENSE"
+      }
+    },
+    "melonds": {
+      "name": "melonDS",
+      "author": "Arisotura and the melonDS team; AppImage by pkgforge-dev",
+      "systems": [
+        "nds"
+      ],
+      "github": "pkgforge-dev/melonDS-AppImage",
+      "tag": "1.1-2@2026-10-01_1790875607",
+      "asset": "^melonDS-1\\.1-2-anylinux-aarch64\\.AppImage$",
+      "sha256": "0f7aa6340c76ac3e3616d91b3cfa6ce10331f2320614199cabad005d9c6ea0a4",
+      "size": 62285203,
+      "homepage": "https://melonds.kuribo64.net/",
+      "licence": {
+        "name": "GPL-3.0",
+        "url": "https://github.com/melonDS-emu/melonDS/blob/master/LICENSE"
+      }
+    },
+    "mgba": {
+      "name": "mGBA",
+      "author": "Vicki Pfau (endrift); AppImage by pkgforge-dev",
+      "systems": [
+        "gba",
+        "gb",
+        "gbc"
+      ],
+      "github": "pkgforge-dev/mGBA-AppImage-Enhanced",
+      "tag": "0.10.5-5@2026-10-01_1790876690",
+      "asset": "^mGBA-0\\.10\\.5-5-anylinux-aarch64\\.AppImage$",
+      "sha256": "0e74d3e4163adf96d97de18ed5bc1bb5a43aa099bd63f142150a91c5faab4c2f",
+      "size": 61666625,
+      "homepage": "https://mgba.io/",
+      "licence": {
+        "name": "MPL-2.0",
+        "url": "https://github.com/mgba-emu/mgba/blob/master/LICENSE"
+      }
+    },
+    "ppsspp": {
+      "name": "PPSSPP",
+      "author": "Henrik Rydgård and the PPSSPP team",
+      "systems": [
+        "psp"
+      ],
+      "github": "hrydgard/ppsspp",
+      "tag": "v1.20.4",
+      "asset": "^PPSSPP-v1\\.20\\.4-anylinux-aarch64\\.AppImage$",
+      "sha256": "18c1d515fd99b0b10ca5fa8cbab192f6d4c9d8a10381e16f5de8fb8f9d39bbe1",
+      "size": 48581283,
+      "homepage": "https://www.ppsspp.org/",
+      "licence": {
+        "name": "GPL-2.0-or-later",
+        "url": "https://github.com/hrydgard/ppsspp/blob/master/LICENSE.TXT"
+      }
+    },
+    "rpcs3": {
+      "name": "RPCS3",
+      "author": "The RPCS3 team",
+      "systems": [
+        "ps3"
+      ],
+      "github": "RPCS3/rpcs3-binaries-linux-arm64",
+      "tag": "build-1b90d1c1496ecf9bf0f6d1487f754aed1c82cb12",
+      "asset": "^rpcs3-v0\\.0\\.43-20233-1b90d1c1_linux_aarch64\\.AppImage$",
+      "sha256": "9e2b5ad38e48a11aa83677ea079777c851e1ab25906df52a844e338338f71e93",
+      "size": 80438348,
+      "homepage": "https://rpcs3.net/",
+      "licence": {
+        "name": "GPL-2.0",
+        "url": "https://github.com/RPCS3/rpcs3/blob/master/LICENSE"
+      },
+      "data": [
+        {
+          "url": "https://api.rpcs3.net/config/?api=v1",
+          "to": ".config/rpcs3/GuiConfigs/config_database.dat"
+        }
+      ]
+    },
+    "snes9x": {
+      "name": "Snes9x",
+      "author": "The Snes9x team; AppImage by pkgforge-dev",
+      "systems": [
+        "snes"
+      ],
+      "github": "pkgforge-dev/Snes9x-AppImage",
+      "tag": "1.63-1@2026-10-01_1790876690",
+      "asset": "^Snes9x-1\\.63-1-anylinux-aarch64\\.AppImage$",
+      "sha256": "8c9406ae4166c67037c7ff65a945bbb0f3c2431623b5b93b49fae6ad6b037144",
+      "size": 40282900,
+      "homepage": "https://www.snes9x.com/",
+      "licence": {
+        "name": "Snes9x licence (non-commercial)",
+        "url": "https://github.com/snes9xgit/snes9x/blob/master/LICENSE"
+      }
+    },
+    "xemu": {
+      "name": "xemu",
+      "author": "Matt Borgerson and the xemu team",
+      "systems": [
+        "xbox"
+      ],
+      "github": "xemu-project/xemu",
+      "tag": "v0.8.136",
+      "asset": "^xemu-0\\.8\\.136-aarch64\\.AppImage$",
+      "sha256": "8d2598bab0680ddd36c2d15ecccb70523e29adb852cd75e35bc5943dc0eb4816",
+      "size": 15542792,
+      "homepage": "https://xemu.app/",
+      "licence": {
+        "name": "GPL-2.0",
+        "url": "https://github.com/xemu-project/xemu/blob/master/LICENSE"
       }
     }
   }

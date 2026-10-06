@@ -15,10 +15,15 @@
 #
 #   {"format": "appimage" | "appimage-sharun",   how the download is packaged (FORMATS below)
 #    "binary": "usr/bin/x",                        the program inside it (relative, no '..')
-#    "args": ["-batch", "--", "{rom}"],            a game's command line; "{rom}" exactly once
+#    "args": ["-batch", "--", "{rom}"],            a game's command line; "{rom}" exactly once,
+#                                                  "{system}" (the card's system) anywhere in an arg
 #    "gui_args": ["-bigpicture"],                  --gui's command line (no "{rom}")
 #    "env": {"NAME": "value"},                     added to the emulator's environment
+#    "core_dumps": false,                          no core file when it crashes (default true; below)
 #    "seed": [{"file": "x.ini", "to": ".config/x/x.ini"}],   first-run settings (below)
+#    "install": [{"from": "bios/x/fw.bin",          a one-time step with the emulator's own binary
+#                 "unless": ".config/x/fw/ok",       (below); paths under $HOME
+#                 "args": ["--installfw", "{file}"]}],
 #    "notes": ["..."]}                             why, for people; ignored here
 #
 # Anything else in it, or a format this script does not know, is refused (exit 2): a definition that
@@ -41,6 +46,14 @@
 # emulator is kept. One set per emulator serves every device: InputPlumber presents each handheld's
 # joypad as the same virtual pad.
 #
+# One-time installs (install): a file the PLAYER provides that the emulator must import before any
+# game runs (RPCS3's PS3 firmware). When `unless` is missing under $HOME, the emulator's binary is run
+# with `args` ("{file}" = $HOME/<from>) from the mounted download, before the game, and waited for;
+# `unless` must exist afterwards. A ROM launch whose `from` file is missing does not start the
+# emulator (it would wait on its own error dialog): it ends with exit 3 and `missing-file <emulator>
+# <from>` in the status file, so the plugin can tell the player where to put it. --gui still opens
+# without it.
+#
 # Every AppImage format mounts the AppImage and runs its real binary; every rule below was found on
 # hardware (DuckStation, MANGMI Pocket Max, 2026-10-03) and each one cost a crash:
 #
@@ -60,16 +73,23 @@
 #     released with SIGHUP (the runtime holds the mount busy until it exits) and fusermount3 -u.
 #   - Exit pressed twice is SIGKILL for everything, which leaves a dead mount: sweep ours first.
 #
+# core_dumps false: the emulator starts with RLIMIT_CORE 0, so systemd-coredump logs a crash in the
+# journal but stores no core. For an emulator known to crash on a normal exit (Snes9x 1.63 runs its
+# whole exit inside its SIGTERM handler and dies there, HW 2026-10-06): ~14 MB per Exit otherwise.
+#
 # Exit status: the emulator's (128 + N when signal N ended it), or 2 for a bad invocation or
-# definition, 3 when the emulator is not installed or does not start (its AppImage does not mount).
-# OGUI runs games through its reaper and never sees this status, so an exit 3 is also written to
-# $QFORGE_LAUNCH_STATUS (`not-installed <emulator>` or `mount-failed <emulator>`), cleared at every
-# start: the QForge plugin's EXIT hook reads it and tells the player what to do.
+# definition, 3 when the emulator is not installed or does not start (its AppImage does not mount),
+# or a one-time install cannot run or fails. OGUI runs games through its reaper and never sees this
+# status, so an exit 3 is also written to $QFORGE_LAUNCH_STATUS (`not-installed <emulator>`,
+# `mount-failed <emulator>`, `missing-file <emulator> <path under $HOME>` or `install-failed
+# <emulator>`), cleared at every start: the QForge plugin's EXIT hook reads it and tells the player
+# what to do.
 
 import json
 import secrets
 import os
 import re
+import resource
 import select
 import shutil
 import signal
@@ -93,12 +113,16 @@ TMP_LINK_DIR = ENV.get("QFORGE_TMP_LINK_DIR", "/tmp")
 SYSTEM_VULKAN_ICD = "/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json"
 UNMOUNT_TRIES = 50   # x 0.1 s for the runtime to let go of the mount after SIGHUP
 MOUNT_TIMEOUT = 30   # s for the AppImage runtime to print its mount point
+INSTALL_SETTLE = 1.0  # s to wait after an install step for OGUI's Exit to reach us too (below)
 
 USAGE = "usage: qforge-launch [--cpus big|all] <system> <rom> | [--cpus big|all] --gui <emulator>"
 SYSTEM_ID = re.compile(r"[a-z0-9_]+")
 EMU_ID = re.compile(r"[a-z0-9_-]+")
-DEFINITION_KEYS = {"format", "binary", "args", "gui_args", "env", "seed", "notes"}
+DEFINITION_KEYS = {"format", "binary", "args", "gui_args", "env", "seed", "install", "core_dumps",
+                   "notes"}
 ROM = "{rom}"
+FILE = "{file}"
+SYSTEM = "{system}"
 
 
 class Exit(Exception):
@@ -133,7 +157,7 @@ def parse_args(argv):
     system, rom = argv
     if not SYSTEM_ID.fullmatch(system):
         raise Exit(2, f"bad system name '{system}'")
-    if not os.path.isfile(rom):
+    if not (os.path.isfile(rom) or os.path.isdir(rom)):  # a folder: a PS3 disc dump
         raise Exit(2, f"no such ROM: {rom}")
     return cpus, system, rom, None
 
@@ -203,8 +227,8 @@ def load_definition(emulator):
     if not str_list(args) or args.count(ROM) != 1:
         raise bad(f'args must be a list of strings holding "{ROM}" exactly once')
     gui_args = d.get("gui_args", [])
-    if not str_list(gui_args) or ROM in gui_args:
-        raise bad(f'gui_args must be a list of strings without "{ROM}"')
+    if not str_list(gui_args) or ROM in gui_args or any(SYSTEM in a for a in gui_args):
+        raise bad(f'gui_args must be a list of strings without "{ROM}" or "{SYSTEM}" (no game, no system)')
     env = d.get("env", {})
     if not (isinstance(env, dict)
             and all(isinstance(k, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k)
@@ -216,8 +240,23 @@ def load_definition(emulator):
                     and safe_relative(s["file"]) and safe_relative(s["to"]) for s in seed)):
         raise bad('seed entries must be {"file": <in the image>, "to": <path under $HOME>}, '
                   "both relative without '..'")
+    install = d.get("install", [])
+    if not (isinstance(install, list)
+            and all(isinstance(i, dict) and set(i) == {"from", "unless", "args"}
+                    and safe_relative(i["from"]) and safe_relative(i["unless"])
+                    and not re.search(r"\s", i["from"] + i["unless"])
+                    and str_list(i["args"]) and i["args"].count(FILE) == 1 and ROM not in i["args"]
+                    and not any(SYSTEM in a for a in i["args"])
+                    for i in install)):
+        # No whitespace: `from` goes into the space-separated status line the plugin splits.
+        raise bad('install entries must be {"from": <path under $HOME>, "unless": <path under $HOME>, '
+                  f'"args": [... "{FILE}" once, no "{ROM}" or "{SYSTEM}" ...]}}, paths relative, '
+                  "without '..' or whitespace")
+    core_dumps = d.get("core_dumps", True)
+    if not isinstance(core_dumps, bool):
+        raise bad("core_dumps must be true or false")
     return {"format": d["format"], "binary": d["binary"], "args": args, "gui_args": gui_args,
-            "env": env, "seed": seed}
+            "env": env, "seed": seed, "install": install, "core_dumps": core_dumps}
 
 
 def seed_first_run(emulator, seed):
@@ -354,10 +393,17 @@ class AppImage:
             raise Exit(3, f"{self.image} did not mount: {err}") from None
         finally:
             signal.signal(signal.SIGTERM, handler)
+        deadline = time.monotonic() + MOUNT_TIMEOUT
         line = read_line(self.runtime.stdout.fileno(), MOUNT_TIMEOUT)
-        if not line or not os.path.isdir(line):
+        if not line:
             raise Exit(3, f"{self.image} did not mount")
         self.mnt = line
+        # RPCS3's runtime (DwarFS) prints the mount point before its filesystem is up: wait for the
+        # mount itself, not just the line (it failed 9 ms in otherwise, HW 2026-10-07 Pocket FIT).
+        while not (self.mounted() and os.path.isdir(line)):
+            if time.monotonic() > deadline or self.runtime.poll() is not None:
+                raise Exit(3, f"{self.image} did not mount at {line}")
+            time.sleep(0.05)
         return self.mnt
 
     def env(self):
@@ -386,9 +432,10 @@ class AppImage:
 
 
 class SharunAppImage(AppImage):
-    """pkgforge-dev's "anylinux" AppImages (Dolphin, Cemu): a sharun bundle with its own loader,
-    libraries and Mesa. Two things its AppRun would do, which we never run (one of its hooks is a
-    self-updater that would replace the pinned AppImage):
+    """pkgforge-dev's "anylinux" AppImages (Dolphin, mGBA, Azahar, ...; PPSSPP's official one is
+    built with the same tooling): a sharun bundle with its own loader, libraries and Mesa. Two
+    things its AppRun would do, which we never run (one of its hooks is a self-updater that would
+    replace the pinned AppImage):
 
     - Paths the program hardcodes (Dolphin's data dir, holding Sys: fonts, per-game settings) are
       rewritten to random /tmp/<name> paths that bin/01-path-mapping-hardcoded.hook links to the
@@ -403,7 +450,9 @@ class SharunAppImage(AppImage):
     keeps it off should a later build run its hooks some other way: QForge pins every version.
     """
 
-    HOOK = "bin/01-path-mapping-hardcoded.hook"
+    # The hook's name depends on the build tooling's age: PPSSPP's own anylinux build ships it as a
+    # .src.hook (sourced by AppRun), pkgforge-dev's repackagings as a plain .hook. Same content.
+    HOOKS = ("bin/01-path-mapping-hardcoded.hook", "bin/01-path-mapping-hardcoded.src.hook")
     HOOK_LINE = re.compile(r'_tmp_(bin|lib|share)="?([A-Za-z0-9]+)"?')
 
     def __init__(self, emulator, image):
@@ -416,11 +465,14 @@ class SharunAppImage(AppImage):
         return root
 
     def link_hardcoded_paths(self, root):
-        try:
-            with open(os.path.join(root, self.HOOK), errors="replace") as f:
-                lines = f.read().splitlines()
-        except OSError:
-            return
+        lines = []
+        for hook in self.HOOKS:
+            try:
+                with open(os.path.join(root, hook), errors="replace") as f:
+                    lines = f.read().splitlines()
+                break
+            except OSError:
+                continue
         for line in lines:
             m = self.HOOK_LINE.fullmatch(line)
             if m:
@@ -470,14 +522,67 @@ FORMATS = {"appimage": AppImage, "appimage-sharun": SharunAppImage}
 
 # ---------------------------------------------------------------------------------------- run --
 
-def fail(reason, emulator, msg):
+def fail(reason, emulator, msg, detail=None):
     """An exit-3 failure the plugin reports to the player."""
     try:
         with open(STATUS, "w") as f:
-            f.write(f"{reason} {emulator}\n")
+            f.write(f"{reason} {emulator}{' ' + detail if detail else ''}\n")
     except OSError:
         pass
     raise Exit(3, msg)
+
+
+def missing_installs(emulator, install, is_game):
+    """The install steps still to run; a game launch whose provided file is absent fails here."""
+    todo = []
+    for step in install:
+        if os.path.exists(os.path.join(HOME, step["unless"])):
+            continue
+        if not os.path.isfile(os.path.join(HOME, step["from"])):
+            if is_game:
+                fail("missing-file", emulator, f"{emulator} needs ~/{step['from']} (not found)",
+                     step["from"])
+            log(f"{emulator}: ~/{step['from']} not found, skipping its install")
+            continue
+        todo.append(step)
+    return todo
+
+
+def run_installs(emulator, binary, env, todo, interrupted):
+    for step in todo:
+        src = os.path.join(HOME, step["from"])
+        args = [src if a == FILE else a for a in step["args"]]
+        log(f"{emulator}: installing ~/{step['from']}: {binary} {' '.join(args)}")
+        try:
+            # No core file: a one-time helper run, and RPCS3's installer aborts in a destructor
+            # after a successful install; dumping its address space held the launch ~1 min
+            # (HW 2026-10-07, Pocket FIT).
+            rc = subprocess.run([binary] + args, env=env, start_new_session=True,
+                                preexec_fn=no_core_dumps).returncode
+        except (OSError, ValueError) as err:
+            fail("install-failed", emulator, f"could not run {binary}: {err}")
+        # OGUI's Exit reached the install (and us): the player left. Never start the game after
+        # that, and leave no status: there is nothing to tell them. reap() signals leaves first, so
+        # an install that ends on SIGTERM returns BEFORE our own signal arrives: give it a moment
+        # (once per emulator, ever). How the installer itself ended says nothing about that: it
+        # may crash on its way out after a good install, so only our own signals mean "Exit".
+        deadline = time.monotonic() + INSTALL_SETTLE
+        while not interrupted and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if interrupted:
+            raise Exit(128 + interrupted[0],
+                       f"{emulator}: install of ~/{step['from']} interrupted; not starting the game")
+        if not os.path.exists(os.path.join(HOME, step["unless"])):
+            fail("install-failed", emulator,
+                 f"installing ~/{step['from']} failed (exit {rc}, no ~/{step['unless']})")
+        if rc != 0:
+            log(f"{emulator}: the install of ~/{step['from']} ended with {rc}, but "
+                f"~/{step['unless']} is there: installed")
+
+
+def no_core_dumps():
+    """In the emulator's child, before exec: no core file (core_dumps false)."""
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
 
 def pinning(emulator, cpus):
@@ -497,19 +602,22 @@ def run(argv):
     if emulator is None:
         emulator = emulator_for(system)
     definition = load_definition(emulator)
-    args = ([rom if a == ROM else a for a in definition["args"]] if rom is not None
-            else definition["gui_args"])
+    # One emulator can serve several systems (mGBA: gb, gbc, gba) with per-system folders.
+    args = ([rom if a == ROM else a.replace(SYSTEM, system) for a in definition["args"]]
+            if rom is not None else definition["gui_args"])
 
     image = os.path.join(EMU_DIR, emulator, "current")
     if not os.access(image, os.X_OK):
         fail("not-installed", emulator, f"{emulator} is not installed ({image} missing or not executable)")
     seed_first_run(emulator, definition["seed"])
+    todo = missing_installs(emulator, definition["install"], rom is not None)
     pin = pinning(emulator, cpus)
 
     # From here on, survive our own signals (OGUI's Exit reaches us too) and wait: never forward
     # them. Caught signals go back to default in the emulator at exec.
+    interrupted = []  # signals seen: only the one-time install step acts on them
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
-        signal.signal(sig, lambda *_: None)
+        signal.signal(sig, lambda signum, _: interrupted.append(signum))
     package = FORMATS[definition["format"]](emulator, image)
     try:
         try:
@@ -518,10 +626,12 @@ def run(argv):
             fail("mount-failed", emulator, str(err))
         binary = os.path.join(root, definition["binary"])
         env = {**ENV, **package.env(), **definition["env"]}
+        run_installs(emulator, binary, env, todo, interrupted)
         log(f"{system or 'gui'} -> {emulator}: {binary} {' '.join(args)}")
         try:
             # Its own session; taskset execs, so the emulator keeps this PID and leads it.
-            emu = subprocess.Popen(pin + [binary] + args, env=env, start_new_session=True)
+            emu = subprocess.Popen(pin + [binary] + args, env=env, start_new_session=True,
+                                   preexec_fn=None if definition["core_dumps"] else no_core_dumps)
         except (OSError, ValueError) as err:
             fail("mount-failed", emulator, f"could not start {binary}: {err}")
         rc = emu.wait()

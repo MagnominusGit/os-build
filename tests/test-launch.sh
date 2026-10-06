@@ -67,7 +67,21 @@ log="$T/emu.log"
 echo \$\$ >> "$T/pids"
 read -r _ _ _ _ pgid sid _< <(cut -d' ' -f1-7 /proc/\$\$/stat)
 { echo "pid=\$\$"; echo "pgid=\$pgid"; echo "sid=\$sid"; echo "self=\$0"; echo "vk=\${VK_DRIVER_FILES-}"
-  echo "sharun_sys=\${SHARUN_ALLOW_SYS_VKICD-}"; echo "no_updates=\${DISABLE_AUTO_UPDATES-}"; printf 'arg=%s\n' "\$@"; } >> "\$log"
+  echo "sharun_sys=\${SHARUN_ALLOW_SYS_VKICD-}"; echo "no_updates=\${DISABLE_AUTO_UPDATES-}"; echo "core=\$(ulimit -c)"
+  printf 'arg=%s\n' "\$@"; } >> "\$log"
+if [ "\${1-}" = --fake-install ]; then  # an install step (emulator.json "install"), not a game
+  echo "install \$*" >> "$T/install.log"
+  echo "core-limit=\$(ulimit -c)" >> "$T/install.log"
+  if [ -f "$T/install-crash" ]; then  # RPCS3: installs, then aborts in a destructor on its way out
+    mkdir -p "\$HOME/.config/fake"; : > "\$HOME/.config/fake/fw-ok"; kill -ABRT \$\$
+  fi
+  if [ -f "$T/install-slow" ]; then  # a long install that finishes cleanly on SIGTERM (marker written)
+    trap 'mkdir -p "\$HOME/.config/fake"; : > "\$HOME/.config/fake/slow-ok"; exit 0' TERM
+    : > "$T/install-running"; while :; do sleep 0.05; done
+  fi
+  [ -f "$T/install-works" ] && mkdir -p "\$HOME/.config/fake" && : > "\$HOME/.config/fake/fw-ok"
+  exit 0  # RPCS3's --installfw exits 0 even when it failed: success is the marker file
+fi
 on_term() {
   echo term >> "\$log"
   sleep 0.3
@@ -88,9 +102,11 @@ cat > "$T/emus/duckstation/0.1-test.AppImage" <<EOF
 #!/bin/bash
 if [ "\${1-}" != "--appimage-mount" ]; then echo "exec-appimage \$*" >> "$T/appimage.log"; exit 1; fi
 echo \$\$ >> "$T/pids"
+# RPCS3's DwarFS runtime prints the mount point BEFORE the filesystem is up (HW 2026-10-07).
+[ -f "$T/print-early" ] && { echo "$T/mnt.\$\$"; sleep 0.4; }
 mnt="$T/mnt.\$\$"; mkdir -p "\$mnt/usr/bin"; cp "$T/fake-emu" "\$mnt/usr/bin/duckstation-qt"
 ln -s usr/bin/duckstation-qt "\$mnt/AppRun"
-if [ -f "$T/sharun-hook" ]; then mkdir -p "\$mnt/bin" "\$mnt/share"; cp "$T/sharun-hook" "\$mnt/bin/01-path-mapping-hardcoded.hook"; fi
+if [ -f "$T/sharun-hook" ]; then mkdir -p "\$mnt/bin" "\$mnt/share"; cp "$T/sharun-hook" "\$mnt/bin/\$(cat "$T/sharun-hook-name" 2>/dev/null || echo 01-path-mapping-hardcoded.hook)"; fi
 echo "0.1-test.AppImage \$mnt fuse.0.1-test.AppImage ro,nosuid,nodev 0 0" >> "$T/mounts"
 echo "runtime=\$\$" >> "$T/appimage.log"
 grep SigIgn /proc/\$\$/status >> "$T/appimage.log"
@@ -261,6 +277,116 @@ python3 -c 'import json,os,sys; d=json.load(open(sys.argv[1])); sys.exit(any(not
   && ok "dolphin: every seeded file is in the image" || bad "dolphin seeds a file that is not in $DL_DIR"
 
 # =================================================================================================
+CASE="every emulator definition"
+# Each emulator.json must load (a refused definition only shows when a player starts a game) and
+# seed only files the image has. With no download, --gui stops at "not installed" (exit 3) AFTER
+# the definition was validated; a bad one is exit 2.
+for def in "$SEED_DIR"/*/emulator.json; do
+  emu="$(basename "$(dirname "$def")")"
+  [ "$(QFORGE_EMU_DIR="$T/none" code --gui "$emu")" = 3 ] && ok "$emu: emulator.json is accepted" \
+    || bad "$emu: emulator.json refused: $(QFORGE_EMU_DIR="$T/none" "$LAUNCH" --gui "$emu" 2>&1 | tail -1)"
+  python3 -c 'import json,os,sys; d=json.load(open(sys.argv[1])); sys.exit(any(not os.path.isfile(os.path.join(sys.argv[2], s["file"])) for s in d["seed"]))' \
+    "$def" "$(dirname "$def")" && ok "$emu: every seeded file is in the image" || bad "$emu seeds a file that is not in the image"
+done
+for emu in $(sed -n 's/^[a-z0-9_]*=\([a-z0-9_-]*\)$/\1/p' "$LAUNCH_CONF" | sort -u); do
+  [ -f "$SEED_DIR/$emu/emulator.json" ] && ok "launch.conf's $emu has a definition" || bad "launch.conf names $emu, which has no emulator.json"
+done
+
+# =================================================================================================
+CASE="controller mappings"
+# The pad every emulator sees is InputPlumber's virtual Xbox Elite (uinput 045e:0b00, xpad button
+# order). Raw SDL joystick indices: b0 south, b1 east, b2 west, b3 north, b4 LB, b5 RB, b6 Select,
+# b7 Start, b8 GUIDE, b9 L3, b10 R3; a0/a1 left stick, a2 LT, a3/a4 right stick, a5 RT; hat 0.
+# SDL gamepad API: A0 B1 X2 Y3 Back4 Guide5 Start6. Face buttons map by POSITION (the system's
+# bottom button on south...), Guide stays OpenGamepadUI's, and each emulator gets a pad way out
+# (Select + Start where it can bind a combination). Checked line by line against the seeds, so a
+# careless edit or a bad pin bump shows here, not on a handheld.
+has() { grep -qxF -- "$2" "$SEED_DIR/$1" && ok "$1: $3" || bad "$1 lacks '$2' ($3)"; }
+lacks() { grep -qE -- "$2" "$SEED_DIR/$1" && bad "$1: $3" || ok "$1: no $3"; }
+# mGBA: raw indices, [gba.input.SDLB]; GBA A (right) east, B south.
+has mgba/config.ini keyA=1 "GBA A on the east button (b1)"
+has mgba/config.ini keyB=0 "GBA B on the south button (b0)"
+has mgba/config.ini keySelect=6 "Select on b6"; has mgba/config.ini keyStart=7 "Start on b7"
+has mgba/config.ini keyL=4 "L on LB"; has mgba/config.ini keyR=5 "R on RB"
+lacks mgba/config.ini '^key[A-Za-z]+=8$' "binding on Guide (b8)"
+# No single-button quit (R3 was too easy to hit, user 2026-10-06): mGBA and Snes9x cannot bind
+# Select + Start, so OpenGamepadUI's Exit (Guide) is their way out.
+[ ! -e "$SEED_DIR/mgba/qt.ini" ] && ! grep -q qt.ini "$SEED_DIR/mgba/emulator.json" \
+  && ok "mgba: no pad quit shortcut seeded" || bad "mgba seeds a pad shortcut file (qt.ini)"
+grep -q 'saves/{system}' "$SEED_DIR/mgba/emulator.json" && grep -q 'states/{system}' "$SEED_DIR/mgba/emulator.json" \
+  && ok "mgba: per-system save and state folders from the card's system" || bad "mgba: saves/states not per system"
+# Snes9x: raw indices; SNES B south, A east, Y west, X north.
+has snes9x/snes9x.conf 'B = Joystick 1 Button 0' "SNES B on south"
+has snes9x/snes9x.conf 'A = Joystick 1 Button 1' "SNES A on east"
+has snes9x/snes9x.conf 'Y = Joystick 1 Button 2' "SNES Y on west"
+has snes9x/snes9x.conf 'X = Joystick 1 Button 3' "SNES X on north"
+has snes9x/snes9x.conf 'Up = Joystick 1 Axis 6 + 50%' "D-pad hat = axes 6/7 after the 6 real ones"
+lacks snes9x/snes9x.conf '^b_quit' "single-button quit shortcut"
+lacks snes9x/snes9x.conf '^b_[a-z_]+ = ' "binding under an internal b_* name (Snes9x reads Up, A, ...; b_* stays Unset)"
+has snes9x/snes9x.conf 'FullscreenOnOpen = true' "fullscreen (no flag exists)"
+[ "$(jget "$SEED_DIR/snes9x/emulator.json" core_dumps)" = false ] && ok "snes9x: no core file (it crashes on every Exit, in its SIGTERM handler)" \
+  || bad "snes9x: core_dumps is not false: ~14 MB core per Exit"
+lacks snes9x/snes9x.conf 'Button 8$' "binding on Guide (b8)"
+# PPSSPP: SDL gamepad -> keycodes (A 189, B 190, X 191, Y 188, Guide 4); device 10.
+has ppsspp/controls.ini 'Cross = 10-189' "Cross on south"; has ppsspp/controls.ini 'Circle = 10-190' "Circle on east"
+has ppsspp/controls.ini 'Square = 10-191' "Square on west"; has ppsspp/controls.ini 'Triangle = 10-188' "Triangle on north"
+has ppsspp/controls.ini 'L = 10-193' "L on LB (PPSSPP's SDL default leaves it dead)"; has ppsspp/controls.ini 'R = 10-192' "R on RB"
+has ppsspp/controls.ini 'Pause = 10-196:10-197,1-111' "Select + Start opens the pause menu"
+lacks ppsspp/controls.ini '10-4(,|:|$)' "binding on Guide (keycode 4)"
+grep -q -- '--pause-menu-exit' "$SEED_DIR/ppsspp/emulator.json" && ok "ppsspp: the pause menu's Exit quits PPSSPP" || bad "ppsspp: no --pause-menu-exit"
+# Flycast: raw indices; Dreamcast A south, B east, X west, Y north; picked by the SDL name.
+has flycast/pad.cfg 'bind0 = 0:btn_a' "DC A on south"; has flycast/pad.cfg 'bind1 = 1:btn_b' "DC B on east"
+has flycast/pad.cfg 'bind2 = 2:btn_x' "DC X on west"; has flycast/pad.cfg 'bind3 = 3:btn_y' "DC Y on north"
+has flycast/pad.cfg 'bind0 = 6,7:btn_menu:0' "Select + Start opens the menu"
+has flycast/pad.cfg 'triggers = 2,5' "LT/RT rest at the axis minimum"
+lacks flycast/pad.cfg '^bind[0-9]+ = 8:' "binding on Guide (b8)"
+grep -q '"to": ".config/flycast/mappings/SDL_Xbox One Elite 2 Controller.cfg"' "$SEED_DIR/flycast/emulator.json" \
+  && ok "flycast: the mapping file is named after the pad's SDL name" || bad "flycast: mapping file name does not match the pad"
+# melonDS: raw indices; DS A east, B south, X north, Y west.
+has melonds/melonDS.toml 'A = 1' "DS A on east"; has melonds/melonDS.toml 'B = 0' "DS B on south"
+has melonds/melonDS.toml 'X = 3' "DS X on north"; has melonds/melonDS.toml 'Y = 2' "DS Y on west"
+has melonds/melonDS.toml 'Up = 17891585' "Up = hat 0 up OR left stick up"
+lacks melonds/melonDS.toml '^[A-Za-z_]+ = 8$' "binding on Guide (b8)"
+# Azahar: SDL gamepad numbers, any pad (maptype:all, no GUID); 3DS A east, B south, X north, Y west.
+has azahar/qt-config.ini 'profiles\1\button_a="engine:sdl,api:controller,maptype:all,button:1"' "3DS A on east"
+has azahar/qt-config.ini 'profiles\1\button_b="engine:sdl,api:controller,maptype:all,button:0"' "3DS B on south"
+has azahar/qt-config.ini 'profiles\1\button_x="engine:sdl,api:controller,maptype:all,button:3"' "3DS X on north"
+has azahar/qt-config.ini 'profiles\1\button_y="engine:sdl,api:controller,maptype:all,button:2"' "3DS Y on west"
+has azahar/qt-config.ini 'Shortcuts\Main%20Window\Exit%20Azahar\controller_keyseq="engine:sdl,api:controller,maptype:all,button:4||engine:sdl,api:controller,maptype:all,button:6"' "Select + Start quits Azahar"
+has azahar/qt-config.ini 'confirmClose=false' "no exit confirmation"
+has azahar/qt-config.ini 'layouts_to_cycle=2, 1, 3, 0' "L3 cycles large / single screen / side by side / stacked (no separate windows)"
+lacks azahar/qt-config.ini 'button:5[^0-9]' "binding on Guide (gamepad button 5)"
+lacks azahar/qt-config.ini 'engine:sdl,(api:controller,)?(guid|port):' "binding tied to a GUID or port"
+# Cemu: SDL gamepad numbers; Wii U A east, B south, X north, Y west; the pad is found by GUID.
+has cemu/controller0.xml '            <entry><mapping>1</mapping><button>1</button></entry>' "Wii U A on east"
+has cemu/controller0.xml '            <entry><mapping>2</mapping><button>0</button></entry>' "Wii U B on south"
+has cemu/controller0.xml '            <entry><mapping>3</mapping><button>3</button></entry>' "Wii U X on north"
+has cemu/controller0.xml '            <entry><mapping>4</mapping><button>2</button></entry>' "Wii U Y on west"
+has cemu/controller0.xml '        <uuid>0_030010f85e040000000b000001000000</uuid>' "the pad's SDL GUID (computed: recheck on hardware)"
+lacks cemu/controller0.xml '<button>5</button>' "binding on Guide (gamepad button 5)"
+has cemu/settings.xml '        <api>3</api>' "audio on Cubeb (a missing key means DirectSound: no game starts)"
+has cemu/settings.xml '        <TVVolume>100</TVVolume>' "full TV volume (a missing key means 20%)"
+# xemu: SDL gamepad, its own mapping for our pad without guide; Back + Start is xemu's menu.
+python3 -c 'import json,sys; m=json.load(open(sys.argv[1]))["env"]["SDL_GAMECONTROLLERCONFIG"]
+f=m.split(","); sys.exit(not (f[0] == "030000005e040000000b000001000000" and "a:b0" in f and "b:b1" in f and "x:b2" in f
+  and "y:b3" in f and "back:b6" in f and "start:b7" in f and not any(x.startswith("guide:") for x in f)
+  and not any(x.startswith("crc:") for x in f)))' "$SEED_DIR/xemu/emulator.json" \
+  && ok "xemu: SDL mapping by position for 045e:0b00 v1, no guide (Guide never opens xemu's menu), no crc" \
+  || bad "xemu: SDL_GAMECONTROLLERCONFIG is not our pad's guide-less mapping"
+has xemu/xemu.toml 'show_welcome = false' "no first-boot window (it would hold the game)"
+# RPCS3: SDL handler defaults by position; the pad by its SDL name; PS button = Select + Start.
+has rpcs3/Default.yml '  Device: Xbox One Elite 2 Controller 1' "the pad by RPCS3's '<SDL name> <n>'"
+has rpcs3/Default.yml '    PS Button: Back&Start' "PS button (home menu) on Select + Start, not Guide"
+has rpcs3/CurrentSettings.ini 'infoBoxEnabledWelcome=false' "no welcome dialog (it shows even with --no-gui)"
+has rpcs3/CurrentSettings.ini 'confirmationBoxExitGame=false' "no exit confirmation"
+[ "$(jget "$SEED_DIR/rpcs3/emulator.json" env)" = '{"SDL_NO_SIGNAL_HANDLERS": "1"}' ] \
+  && ok "rpcs3: SDL's signal handlers off, so OGUI's Exit (SIGTERM) ends it (its SDL3 swallowed it)" \
+  || bad "rpcs3 env: $(jget "$SEED_DIR/rpcs3/emulator.json" env)"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); i=d["install"]
+sys.exit(not (i == [{"from": "bios/ps3/PS3UPDAT.PUP", "unless": ".config/rpcs3/dev_flash/vsh/etc/version.txt", "args": ["--headless", "--installfw", "{file}"]}]))' \
+  "$SEED_DIR/rpcs3/emulator.json" && ok "rpcs3: the player's PS3UPDAT.PUP is installed headless before the first game" || bad "rpcs3: firmware install step missing or changed"
+
+# =================================================================================================
 CASE="first-run settings (SEED)"
 seeded="$HOME/.local/share/duckstation/settings.ini"
 rm -rf "$HOME"; mkdir -p "$HOME"
@@ -358,6 +484,17 @@ touch "$T/stop-emu"; reap_launcher "$lpid"; rc=$?
   && ok "and the mount is released after it, as usual" || bad "after a SIGTERM during the mount: rc=$rc, released=$(grep -c hup "$T/appimage.log")"
 
 # =================================================================================================
+CASE="runtime that prints its mount point early"
+# RPCS3's AppImage runtime (DwarFS) prints the mount point before mounting: the launcher must wait
+# for the mount itself. It gave up 9 ms in ("did not mount") on the Pocket FIT, 2026-10-07.
+touch "$T/print-early"; reset_logs
+start_launcher
+wait_for emu_up && ok "the game starts once the announced mount point is really mounted" \
+  || bad "an early-printed mount point failed the launch: $(cat "$T/launch.err")"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
+rm -f "$T/print-early"
+
+# =================================================================================================
 CASE="pkgforge AppImage: hardcoded /tmp paths"
 # Dolphin's pkgforge AppImage only finds its Sys folder through /tmp/<name> -> <mount>/share, a link
 # its AppRun hook makes; qforge-launch skips AppRun, so it makes the links itself (HW 2026-10-05).
@@ -387,13 +524,112 @@ self="$(field self)"; mnt="${self%/usr/bin/duckstation-qt}"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
 [ ! -e "$QFORGE_TMP_LINK_DIR/Gxbwc" ] && [ ! -L "$QFORGE_TMP_LINK_DIR/Gxbwc" ] \
   && ok "the links go away with the mount (no dangling /tmp entries)" || bad "the /tmp link outlived the game"
-rm -f "$QFORGE_TMP_LINK_DIR/Gxbwc"; reset_logs
+echo 01-path-mapping-hardcoded.src.hook > "$T/sharun-hook-name"; reset_logs
+QFORGE_EMU_DATA_DIR="$SHARUN" start_launcher; wait_for emu_up
+self="$(field self)"; mnt="${self%/usr/bin/duckstation-qt}"
+[ "$(readlink "$QFORGE_TMP_LINK_DIR/Gxbwc")" = "$mnt/share" ] \
+  && ok "the hook is also read under its .src.hook name (PPSSPP's own anylinux build)" \
+  || bad "no link from bin/01-path-mapping-hardcoded.src.hook: $(ls -l "$QFORGE_TMP_LINK_DIR" 2>&1 | tr '\n' ' ')"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
+rm -f "$T/sharun-hook-name" "$QFORGE_TMP_LINK_DIR/Gxbwc"; reset_logs
 start_launcher; wait_for emu_up
 [ ! -e "$QFORGE_TMP_LINK_DIR/Gxbwc" ] && [ -z "$(field vk)" ] \
   && ok "a plain appimage gets neither: links and Vulkan env belong to the sharun format" \
   || bad "the plain appimage format made sharun links or set VK_DRIVER_FILES"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
 rm -f "$T/sharun-hook"; unset QFORGE_TMP_LINK_DIR
+
+# =================================================================================================
+CASE="one-time install (emulator.json install)"
+# RPCS3 needs the player's PS3 firmware imported before any game: emulator.json "install" runs the
+# emulator's own binary once, from the mount, when its marker file is missing.
+INST="$T/data-install"; mkdir -p "$INST/duckstation"; cp "$DS_SEED" "$INST/duckstation/"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["install"] = [{"from": "bios/psx/fw.bin",
+  "unless": ".config/fake/fw-ok", "args": ["--fake-install", "{file}"]}]; json.dump(d, open(sys.argv[2], "w"))' \
+  "$DS_DEF" "$INST/duckstation/emulator.json"
+ST="$T/launch.status"; reset_logs
+rc=$(QFORGE_EMU_DATA_DIR="$INST" QFORGE_LAUNCH_STATUS="$ST" code psx "$ROM")
+[ "$rc" = 3 ] && [ "$(cat "$ST" 2>/dev/null)" = "missing-file duckstation bios/psx/fw.bin" ] && [ ! -e "$T/emu.log" ] \
+  && ok "the player's file is missing: exit 3, status 'missing-file <emu> <path>', no game started" \
+  || bad "missing install file: rc=$rc status='$(cat "$ST" 2>/dev/null)' emu ran=$([ -e "$T/emu.log" ] && echo yes || echo no)"
+QFORGE_EMU_DATA_DIR="$INST" "$LAUNCH" --gui duckstation 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up && [ ! -e "$T/install.log" ] && ok "--gui opens without it (and installs nothing)" || bad "--gui did not start without the install file"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
+mkdir -p "$HOME/bios/psx"; : > "$HOME/bios/psx/fw.bin"
+rc=$(QFORGE_EMU_DATA_DIR="$INST" QFORGE_LAUNCH_STATUS="$ST" code psx "$ROM")
+[ "$rc" = 3 ] && [ "$(cat "$ST" 2>/dev/null)" = "install-failed duckstation" ] && ! emu_up \
+  && grep -q "^install --fake-install $HOME/bios/psx/fw.bin$" "$T/install.log" \
+  && ok "the install ran (binary from the mount, {file} = ~/<from>) but left no marker: install-failed, no game" \
+  || bad "failed install: rc=$rc status='$(cat "$ST" 2>/dev/null)' log='$(cat "$T/install.log" 2>/dev/null)'"
+[ ! -s "$T/mounts" ] && ok "and the mount is released" || bad "a failed install left the mount: $(cat "$T/mounts")"
+touch "$T/install-works"; : > "$T/install.log"; reset_logs
+QFORGE_EMU_DATA_DIR="$INST" start_launcher
+wait_for emu_up && [ -f "$HOME/.config/fake/fw-ok" ] && [ "$(grep -c '^install' "$T/install.log")" = 1 ] \
+  && ok "a working install runs once before the game, which then starts" || bad "install then game: $(cat "$T/launch.err")"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
+QFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
+[ "$(grep -c '^install' "$T/install.log")" = 1 ] && ok "with the marker present it never runs again" || bad "the install ran again"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
+# RPCS3's installer installs the firmware, then aborts (SIGABRT) on its way out: the marker is
+# what counts, so the game starts; and installs never leave a core file (HW 2026-10-07).
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["install"] = [{"from": "bios/psx/fw.bin",
+  "unless": ".config/fake/fw-ok", "args": ["--fake-install", "{file}"]}]; json.dump(d, open(sys.argv[2], "w"))' \
+  "$DS_DEF" "$INST/duckstation/emulator.json"
+rm -rf "$HOME/.config/fake"; : > "$T/install.log"; touch "$T/install-crash"; reset_logs
+( ulimit -c unlimited; QFORGE_EMU_DATA_DIR="$INST" exec "$LAUNCH" psx "$ROM" 2>"$T/launch.err" ) & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up && [ -f "$HOME/.config/fake/fw-ok" ] && grep -q "but ~/.config/fake/fw-ok is there: installed" "$T/launch.err" \
+  && ok "an installer that crashes after a good install: the marker is there, the game starts" \
+  || bad "crashing installer: $(cat "$T/launch.err")"
+grep -qx "core-limit=0" "$T/install.log" && ok "install steps run with no core file" || bad "install core limit: $(grep core-limit "$T/install.log")"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs; rm -f "$T/install-crash"
+
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["args"] = ["-C", "saves=/home/player/saves/{system}", "{rom}"]
+d["install"] = []; json.dump(d, open(sys.argv[2], "w"))' "$DS_DEF" "$INST/duckstation/emulator.json"
+reset_logs; QFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
+[ "$(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' '|')" = "-C|saves=/home/player/saves/psx|$ROM|" ] \
+  && ok "{system} in args becomes the card's system (mGBA: one emulator, per-system folders)" \
+  || bad "{system} not substituted: $(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' '|')"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["gui_args"] = ["{system}"]; json.dump(d, open(sys.argv[2], "w"))' \
+  "$DS_DEF" "$INST/duckstation/emulator.json"
+[ "$(QFORGE_EMU_DATA_DIR="$INST" code --gui duckstation)" = 2 ] && ok "{system} in gui_args is refused (exit 2): Open has no system" || bad "gui_args with {system} accepted"
+# OGUI's Exit during the install: no game afterwards, no status (the player chose to leave).
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["args"] = ["{rom}"]; d["install"] = [{"from": "bios/psx/fw.bin",
+  "unless": ".config/fake/slow-ok", "args": ["--fake-install", "{file}"]}]; json.dump(d, open(sys.argv[2], "w"))' \
+  "$DS_DEF" "$INST/duckstation/emulator.json"
+touch "$T/install-slow"; rm -f "$ST" "$T/install-running"; reset_logs
+# Under a stand-in reaper, as in "OGUI Exit" below: reap() signals the launcher too.
+QFORGE_EMU_DATA_DIR="$INST" QFORGE_LAUNCH_STATUS="$ST" setsid bash -c 'echo $$ >> "$2/pids"; "$0" psx "$1"; echo "$?" > "$2/install-rc"' \
+  "$LAUNCH" "$ROM" "$T" 2>"$T/launch.err" &
+reaper=$!; echo "$reaper" >> "$T/pids"
+wait_for '[ -f "$T/install-running" ]' || bad "the slow install never started"
+ogui_reap "$reaper"
+wait_for '[ -f "$T/install-rc" ]' || bad "the launcher did not exit after reap"
+rc="$(cat "$T/install-rc" 2>/dev/null)"; rm -f "$T/install-rc"
+[ "$rc" -ge 128 ] && ! emu_up && [ ! -e "$ST" ] \
+  && ok "Exit during the install (it still finishes cleanly): the launcher stops, no game, no popup status" \
+  || bad "Exit during install: rc=$rc game=$(emu_up && echo started || echo no) status='$(cat "$ST" 2>/dev/null)'"
+rm -f "$T/install-slow" "$T/install-running"
+wait_for '[ ! -s "$T/mounts" ]' && ok "and the mount is released" || bad "an interrupted install left the mount: $(cat "$T/mounts")"
+# core_dumps false (Snes9x crashes on every Exit): the emulator gets RLIMIT_CORE 0; default unchanged.
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["install"] = []; d["core_dumps"] = False; json.dump(d, open(sys.argv[2], "w"))' \
+  "$DS_DEF" "$INST/duckstation/emulator.json"
+reset_logs; ( ulimit -c unlimited; QFORGE_EMU_DATA_DIR="$INST" exec "$LAUNCH" psx "$ROM" 2>"$T/launch.err" ) & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up; [ "$(field core)" = 0 ] && ok "core_dumps false: the emulator runs with no core file (RLIMIT_CORE 0)" || bad "core_dumps false: ulimit -c is '$(field core)'"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
+( ulimit -c unlimited; exec "$LAUNCH" psx "$ROM" 2>"$T/launch.err" ) & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up; [ "$(field core)" = unlimited ] && ok "by default the emulator keeps the session's core limit" || bad "default core limit changed: '$(field core)'"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["core_dumps"] = "no"; json.dump(d, open(sys.argv[2], "w"))' \
+  "$DS_DEF" "$INST/duckstation/emulator.json"
+[ "$(QFORGE_EMU_DATA_DIR="$INST" code psx "$ROM")" = 2 ] && ok "core_dumps must be a boolean (exit 2)" || bad "core_dumps \"no\" accepted"
+for broken in '[{"from": "a", "unless": "b", "args": ["x"]}]' '[{"from": "../a", "unless": "b", "args": ["{file}"]}]' \
+              '[{"from": "bios/a b.pup", "unless": "b", "args": ["{file}"]}]' '[{"from": "a", "unless": "b", "args": ["{file}", "{system}"]}]' \
+              '[{"from": "a", "args": ["{file}"]}]' '[{"from": "a", "unless": "b", "args": ["{file}", "{rom}"]}]'; do
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["install"] = json.loads(sys.argv[3]); json.dump(d, open(sys.argv[2], "w"))' \
+    "$DS_DEF" "$INST/duckstation/emulator.json" "$broken"
+  [ "$(QFORGE_EMU_DATA_DIR="$INST" code psx "$ROM")" = 2 ] && ok "install refused (exit 2): $broken" || bad "install accepted: $broken"
+done
 
 # =================================================================================================
 CASE="OGUI Exit (Reaper.reap replayed)"

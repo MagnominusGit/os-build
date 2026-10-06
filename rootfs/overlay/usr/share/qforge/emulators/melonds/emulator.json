@@ -1,0 +1,22 @@
+{
+  "notes": [
+    "melonDS (Nintendo DS): pkgforge-dev's sharun repackaging of melonDS 1.1.",
+    "-f: fullscreen; the ROM boots at once (--boot defaults to auto). melonDS's -b is --boot <auto|always|never>, not a batch mode.",
+    "melonDS never quits when a game stops and has no quit hotkey nor button combinations, so Select + Start cannot reach an exit: OpenGamepadUI's Exit (SIGTERM) is the way out. SIGTERM ends it at once, no dialog; the .sav is written ~2 s after the game saves.",
+    "gui_args: melonDS's own window (touch screen; no pad-driven UI)."
+  ],
+  "format": "appimage-sharun",
+  "binary": "bin/melonDS",
+  "args": [
+    "-f",
+    "{rom}"
+  ],
+  "gui_args": [],
+  "env": {},
+  "seed": [
+    {
+      "file": "melonDS.toml",
+      "to": ".config/melonDS/melonDS.toml"
+    }
+  ]
+}

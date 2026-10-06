@@ -13,9 +13,17 @@ extends RefCounted
 ## A rescan is due when the folders differ from what the library last loaded AND two polls in a
 ## row agree, so a copy in progress (a file still growing or still being written) waits for the
 ## copy to end, and a half-written .m3u is never read.
+##
+## Game FOLDERS (game_dirs.gd: PS3 disc dumps) count by their marker file: a folder copied over SMB
+## shows up once the file that makes it a game is there and has stopped changing. The rest of the
+## folder is not walked (thousands of files, every 5 s), so a game whose marker arrives before its
+## other files may be listed while the copy still runs.
+
+const GameDirs := preload("game_dirs.gd")
 
 var roms_dir: String
 var systems: Array
+var dir_markers: Dictionary  # system -> marker files of its game folders (game_dirs.gd)
 
 var _loaded = null  # snapshot the library last loaded from (null: not loaded yet)
 var _previous = null  # snapshot of the last poll
@@ -23,13 +31,15 @@ var _due = null  # snapshot a due poll reported: what our own reload is about to
 
 
 ## No _init: tests/test-plugin.sh forbids it in plugin scripts. Returns self: RomWatch.new().setup(..).
-func setup(roms_path: String, system_ids: Array) -> RefCounted:
+func setup(roms_path: String, system_ids: Array, game_dir_markers: Dictionary = {}) -> RefCounted:
 	roms_dir = roms_path
 	systems = system_ids
+	dir_markers = game_dir_markers
 	return self
 
 
-## Every file of each system folder, one level deep, as "system/name size mtime", sorted.
+## Every file of each system folder, one level deep, as "system/name size mtime", plus each game
+## folder as "system/name/ size mtime" of its marker file, sorted.
 func snapshot() -> PackedStringArray:
 	var lines := PackedStringArray()
 	for system in systems:
@@ -40,6 +50,13 @@ func snapshot() -> PackedStringArray:
 		for file in dir.get_files():
 			var path := dir_path.path_join(file)
 			lines.append("%s/%s %d %d" % [system, file, FileAccess.get_size(path), FileAccess.get_modified_time(path)])
+		var markers: Array = dir_markers.get(system, [])
+		if markers.is_empty():
+			continue
+		for sub in dir.get_directories():
+			var found := GameDirs.marker(dir_path.path_join(sub), markers)
+			if found != "":
+				lines.append("%s/%s/ %d %d" % [system, sub, FileAccess.get_size(found), FileAccess.get_modified_time(found)])
 	lines.sort()
 	return lines
 

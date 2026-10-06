@@ -1,0 +1,66 @@
+# QForge first-run settings for melonDS 1.1. qforge-launch copies this to
+# ~/.config/melonDS/melonDS.toml only when that file does not exist, so whatever the player changes
+# in melonDS afterwards is kept. Only what QForge decides is here; melonDS's defaults cover the rest.
+# - JIT.Enable: the ARM64 JIT (off by default; the interpreter is too slow on these SoCs).
+# - Emu.ExternalBIOSEnable = false: melonDS's built-in FreeBIOS and generated firmware, so games
+#   boot with no files. The DS.* paths are pre-filled for a player who drops real dumps in
+#   ~/bios/nds and turns External BIOS on (it refuses to boot when they are missing).
+# - Mouse.Hide: no cursor over the game (touch still works on the bottom screen).
+# - Mic.InputType = 2 (noise): holding L3 "blows" into the mic (Nintendogs, Spirit Tracks...).
+# - Instance0: the pad is SDL device INDEX 0 (melonDS never uses a name or GUID); cartridge saves in
+#   ~/saves/nds, save states (keyboard F-keys only) in ~/states/nds.
+# - Instance0.Joystick: melonDS ships NO pad mapping. RAW SDL joystick numbers of InputPlumber's
+#   virtual Xbox Elite pad: b0 south, b1 east, b2 west, b3 north, b4 LB, b5 RB, b6 Select,
+#   b7 Start, b9 L3, b10 R3; a0/a1 left stick (up negative), a2 LT, a5 RT; hat 0 D-pad.
+#   DS A/B/X/Y by POSITION: A east, B south, X north, Y west.
+#   Encoding (EmuInstanceInput.cpp): a button is its index; a hat is 0x100|(hat<<4)|dir (1 up,
+#   2 right, 4 down, 8 left); an axis adds 0x10000|(dir<<20)|(axis<<24), dir 0 = +, 1 = -,
+#   2 = trigger, with 0xFFFF in the low 16 bits when there is no button/hat. Directions = D-pad hat
+#   OR left stick in one value: Up 0x1110101, Down 0x1010104, Left 0x110108, Right 0x10102.
+#   Hotkeys: L3 mic, R3 swap screens, LT (0x221FFFF) close/open the lid, RT (0x521FFFF) hold to
+#   fast-forward. Guide stays unbound: OpenGamepadUI owns it.
+# - Window0: both screens side by side, same size (960x720 each on a 1920x1080 panel).
+
+[JIT]
+Enable = true
+
+[Emu]
+ExternalBIOSEnable = false
+
+[DS]
+BIOS9Path = "/home/player/bios/nds/bios9.bin"
+BIOS7Path = "/home/player/bios/nds/bios7.bin"
+FirmwarePath = "/home/player/bios/nds/firmware.bin"
+
+[Mouse]
+Hide = true
+
+[Mic]
+InputType = 2
+
+[Instance0]
+JoystickID = 0
+SaveFilePath = "/home/player/saves/nds"
+SavestatePath = "/home/player/states/nds"
+
+[Instance0.Joystick]
+A = 1
+B = 0
+X = 3
+Y = 2
+L = 4
+R = 5
+Select = 6
+Start = 7
+Up = 17891585
+Down = 16843012
+Left = 1114376
+Right = 65794
+HK_Mic = 9
+HK_SwapScreens = 10
+HK_Lid = 35782655
+HK_FastForward = 86114303
+
+[Instance0.Window0]
+ScreenLayout = 2
+ScreenSizing = 0

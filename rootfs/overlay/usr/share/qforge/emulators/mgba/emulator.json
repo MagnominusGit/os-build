@@ -1,0 +1,27 @@
+{
+  "notes": [
+    "mGBA (Game Boy, Game Boy Color, Game Boy Advance): pkgforge-dev's sharun repackaging of mGBA 0.10.5 (Qt frontend).",
+    "-f: fullscreen. -C key=value: per-launch overrides mGBA never saves; mGBA has ONE save and save-state folder, so each system's card passes its own (~/saves/<system>, ~/states/<system>). -- ends options.",
+    "mGBA does not quit when a game stops (no batch mode) and cannot bind a button combination, so it has no pad exit: OpenGamepadUI's Exit (Guide) closes it (SIGTERM ends it at once, no dialog; the .sav is written 15 frames after the game saves). A launcher-side Select + Start may come later (user decision 2026-10-06: not R3, too easy to hit).",
+    "gui_args: mGBA's own window (touch screen; the Qt frontend has no pad-driven UI)."
+  ],
+  "format": "appimage-sharun",
+  "binary": "bin/mgba-qt",
+  "args": [
+    "-f",
+    "-C",
+    "savegamePath=/home/player/saves/{system}",
+    "-C",
+    "savestatePath=/home/player/states/{system}",
+    "--",
+    "{rom}"
+  ],
+  "gui_args": [],
+  "env": {},
+  "seed": [
+    {
+      "file": "config.ini",
+      "to": ".config/mgba/config.ini"
+    }
+  ]
+}
