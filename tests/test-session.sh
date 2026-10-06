@@ -367,5 +367,12 @@ else
   [ "$out" = "twice-ok" ] && ok "a second cleanup() is a clean no-op" || bad "second call misbehaved: '${out:-<nothing>}'"
 fi
 
+# =================================================================================================
+CASE="session unit limits"
+UNIT="$ROOT/rootfs/overlay/usr/lib/systemd/system/qforge-session.service"
+grep -qx 'LimitMEMLOCK=infinity' "$UNIT" \
+  && ok "no locked-memory cap for the session and its games (RPCS3 mlocks emulated memory)" \
+  || bad "qforge-session.service lacks LimitMEMLOCK=infinity: RPCS3 fails to lock memory at 8 MiB"
+
 printf '\ntest-session.sh: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

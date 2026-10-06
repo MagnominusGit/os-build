@@ -46,6 +46,10 @@ StandardError=journal
 UtmpIdentifier=tty1
 UtmpMode=user
 Environment=XDG_SESSION_TYPE=wayland XDG_SESSION_CLASS=user XDG_SESSION_DESKTOP=gamescope XDG_CURRENT_DESKTOP=gamescope DESKTOP_SESSION=qforge
+# No cap on locked memory for the session and every game it starts (they all inherit it): RPCS3
+# locks part of its emulated memory, and with systemd's default 8 MiB it logs "Failed to lock sudo
+# memory ... Consider increasing your system limits" over and over (HW 2026-10-07, Pocket FIT).
+LimitMEMLOCK=infinity
 
 # Hand the display from the boot splash to the session, in that order.
 #
