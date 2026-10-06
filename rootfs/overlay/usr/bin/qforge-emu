@@ -22,6 +22,14 @@
 #      previous AppImage for a rollback and deleting older ones.
 # A failure at any step leaves the working install as it was.
 #
+# DATA FILES (catalog "data": [{"url": "https://...", "to": "<path under $HOME>"}], optional): files
+# an emulator needs but never fetches the way QForge runs it -- RPCS3 downloads its per-game config
+# database (api.rpcs3.net/config) only from its Qt game list, never with --no-gui (HW 2026-10-07).
+# Fetched after each successful install or update (not when the pin is already current), https
+# only, at most DATA_MAX bytes, swapped in atomically. They are living upstream files, so NOT
+# checksummed: the emulator reads them as data. A failed fetch keeps the previous file and never
+# fails the install (the emulator itself is in place): a warning on stderr.
+#
 # Layout (what qforge-launch runs): /home/player/emulators/<emulator>/{<tag>.AppImage, current}.
 #
 # CATALOG: $QFORGE_CATALOG, else the plugin's copy of the hosted catalog
@@ -54,6 +62,8 @@ EMU_ID = re.compile(r"[a-z0-9_-]+")
 # specially. '@' is allowed: pkgforge-dev's AppImage repos tag releases as <version>@<date>_<id>.
 SAFE_TAG = re.compile(r"[A-Za-z0-9._@-]+")
 SPACE_MARGIN = 16 << 20  # bytes kept free beyond the AppImage itself
+DATA_MAX = 16 << 20  # bytes, per data file
+HOME = os.path.expanduser("~")
 POLL = 0.25  # s between progress samples
 
 
@@ -174,6 +184,37 @@ def activate(d, tag):
             os.unlink(os.path.join(d, name))
 
 
+def safe_relative(path):
+    return (isinstance(path, str) and path and "\0" not in path and not os.path.isabs(path)
+            and os.path.normpath(path) == path and ".." not in path.split("/"))
+
+
+def fetch_data(emu, e):
+    """The catalog's data files for this emulator (see DATA FILES above). Never raises."""
+    for item in e.get("data", []):
+        url = item.get("url") if isinstance(item, dict) else None
+        to = item.get("to") if isinstance(item, dict) else None
+        if not (isinstance(url, str) and url.startswith("https://") and safe_relative(to)):
+            log(f"warning: {emu}: skipping a bad data entry {item!r} (https url, relative path)")
+            continue
+        dst = os.path.join(HOME, to)
+        part = dst + ".qforge-part"
+        try:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            subprocess.run(curl_base() + ["--max-time", "120", "--max-filesize", str(DATA_MAX),
+                                          "-o", part, url],
+                           stdout=subprocess.DEVNULL, check=True, timeout=180)
+            if os.path.getsize(part) == 0:
+                raise OSError("empty download")
+            os.replace(part, dst)
+            log(f"{emu}: fetched ~/{to}")
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as err:
+            log(f"warning: {emu}: could not fetch ~/{to} from {url} ({err}); keeping what was there")
+        finally:
+            if os.path.exists(part):
+                os.unlink(part)
+
+
 def cmd_install(emu):
     e = entry(load_catalog(), emu)
     tag = e["tag"]
@@ -205,6 +246,7 @@ def cmd_install(emu):
         if os.path.exists(part):
             os.unlink(part)
         os.close(lock)
+    fetch_data(emu, e)
     print("100%", flush=True)
     log(f"{emu} {tag} installed")
     return EXIT_OK

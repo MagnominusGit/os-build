@@ -87,6 +87,9 @@ case \$url in
     [ -f "\$src" ] || exit 22
     [ -f "$W/srv/fail-download" ] && exit 56
     cp "\$src" "\${out:?no -o}" ;;
+  https://data.example/db)
+    [ -f "$W/srv/fail-data" ] && exit 22
+    cp "$W/srv/data" "\${out:?no -o}" ;;
   *) exit 22 ;;
 esac
 EOF
@@ -94,12 +97,12 @@ chmod +x "$W/bin/curl"
 
 D="$W/emus"
 run() {  # run <args...>: sets OUT, ERR, RC
-  OUT="$(QFORGE_CURL="$W/bin/curl" QFORGE_EMU_DIR="$D" QFORGE_CATALOG="$W/catalog.json" \
+  OUT="$(HOME="$W/home" QFORGE_CURL="$W/bin/curl" QFORGE_EMU_DIR="$D" QFORGE_CATALOG="$W/catalog.json" \
     python3 "$EMU" "$@" 2>"$W/err")"
   RC=$?
   ERR="$(cat "$W/err")"
 }
-reset() { rm -rf "$D" "$W/curl.log" "$W/srv/override" "$W/srv/fail-download"; mkdir -p "$D"; }
+reset() { rm -rf "$D" "$W/home" "$W/curl.log" "$W/srv/override" "$W/srv/fail-download" "$W/srv/fail-data"; mkdir -p "$D" "$W/home"; }
 pct_only() {  # every stdout line is N% and they never go down, ending at 100
   awk 'BEGIN{last=-1} !/^[0-9]+%$/ {exit 1} {v=$0+0; if (v < last) exit 1; last=v} END{exit last != 100}' <<<"$OUT"
 }
@@ -203,6 +206,41 @@ catalog v3; api v3; run install dummy
 catalog v1; api v1; cp "$W/srv/v2.AppImage" "$W/srv/override"
 run install dummy
 [ "$RC" = 4 ] && [ "$(readlink "$D/dummy/current")" = v3.AppImage ] && ok "a failed update keeps current on the working version" || bad "rc=$RC current=$(readlink "$D/dummy/current")"
+
+# =================================================================================================
+CASE="data files"
+# RPCS3 fetches its per-game config database only from its Qt game list, never with --no-gui:
+# the catalog's "data" files are fetched after an install or update instead (HW 2026-10-07).
+with_data() {  # with_data <json list>: add "data" to the catalog's dummy entry
+  python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); c["emulators"]["dummy"]["data"]=json.loads(sys.argv[2]); json.dump(c, open(sys.argv[1], "w"))' \
+    "$W/catalog.json" "$1"
+}
+DB='[{"url": "https://data.example/db", "to": ".config/dummy/db.dat"}]'
+printf 'database one' > "$W/srv/data"
+reset; catalog v1; api v1; with_data "$DB"
+run install dummy
+[ "$RC" = 0 ] && [ "$(cat "$W/home/.config/dummy/db.dat" 2>/dev/null)" = "database one" ] \
+  && ok "an install fetches the catalog's data file into the player's home" || bad "data fetch: rc=$RC $ERR"
+pct_only && ok "stdout stays N% lines only" || bad "stdout: $OUT"
+grep "data.example/db" "$W/curl.log" | grep -q -- "--proto =https" && ok "data downloads are https only too" || bad "data curl args: $(grep data.example "$W/curl.log")"
+[ -z "$(find "$W/home" -name '*.qforge-part')" ] && ok "no partial file left" || bad "a .qforge-part was left"
+: > "$W/curl.log"; printf 'database two' > "$W/srv/data"
+run install dummy
+[ "$RC" = 0 ] && ! grep -q data.example "$W/curl.log" && [ "$(cat "$W/home/.config/dummy/db.dat")" = "database one" ] \
+  && ok "not fetched again while the pin is already current" || bad "refetched on a no-op install"
+catalog v2; api v2; with_data "$DB"; touch "$W/srv/fail-data"
+run install dummy
+[ "$RC" = 0 ] && [ "$(readlink "$D/dummy/current")" = "v2.AppImage" ] && [ "$(cat "$W/home/.config/dummy/db.dat")" = "database one" ] \
+  && grep -q "could not fetch ~/.config/dummy/db.dat" <<<"$ERR" \
+  && ok "a failed data fetch keeps the previous file, warns, and the update still succeeds" || bad "failed data fetch: rc=$RC $ERR"
+rm -f "$W/srv/fail-data"; catalog v3; api v3; with_data "$DB"
+run install dummy
+[ "$RC" = 0 ] && [ "$(cat "$W/home/.config/dummy/db.dat")" = "database two" ] && ok "an update refreshes it" || bad "update did not refresh: $ERR"
+reset; catalog v1; api v1
+with_data '[{"url": "http://data.example/db", "to": "a"}, {"url": "https://data.example/db", "to": "../escape"}, {"url": "https://data.example/db", "to": "/abs"}]'
+run install dummy
+[ "$RC" = 0 ] && [ "$(grep -c "skipping a bad data entry" <<<"$ERR")" = 3 ] && ! grep -q data.example "$W/curl.log" && [ ! -e "$W/escape" ] \
+  && ok "plain http, '..' and absolute targets are skipped (never fetched), the install succeeds" || bad "bad entries: rc=$RC $ERR"
 
 # =================================================================================================
 CASE="list"

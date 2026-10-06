@@ -68,6 +68,7 @@ for line in open(launch_conf):
 
 ROLLING = {"latest", "preview", "nightly", "continuous", "dev", "master", "main"}
 REQUIRED = {"name", "author", "systems", "github", "tag", "asset", "sha256", "size", "homepage", "licence"}
+OPTIONAL = {"data"}
 
 def check_github(case, e, rx):
     url = f"https://api.github.com/repos/{e['github']}/releases/tags/{e['tag']}"
@@ -108,9 +109,22 @@ for emu, e in emus.items():
         bad(case, f"lacks {sorted(missing)}")
         continue
     ok(case, "has every field")
-    extra = set(e) - REQUIRED
+    extra = set(e) - REQUIRED - OPTIONAL
     if extra:
         bad(case, f"unknown fields {sorted(extra)} (launch settings belong in the image's emulator.json)")
+    # Optional data files qforge-emu fetches after an install (RPCS3's config database): https only,
+    # a normalised path under $HOME. qforge-emu skips a bad entry; the catalog must not carry one.
+    data = e.get("data", [])
+    good = isinstance(data, list) and all(
+        isinstance(d, dict) and set(d) == {"url", "to"} and isinstance(d["url"], str)
+        and d["url"].startswith("https://") and isinstance(d["to"], str) and d["to"]
+        and not d["to"].startswith("/") and os.path.normpath(d["to"]) == d["to"]
+        and ".." not in d["to"].split("/") for d in data)
+    if good:
+        if data:
+            ok(case, f"data files: {[d['to'] for d in data]} (https, under the player's home)")
+    else:
+        bad(case, f"bad data entries {data!r}: each needs an https url and a relative path, nothing else")
 
     if os.path.isfile(os.path.join(emu_conf_dir, emu, "emulator.json")):
         ok(case, f"the image can launch it (/usr/share/qforge/emulators/{emu}/emulator.json)")
