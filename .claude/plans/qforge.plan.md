@@ -746,6 +746,29 @@ plus the ROM library that launches them)
   so no patch rescues it). qforge-emu installs the current asset as nightly-<commit> against GitHub's
   sha256 digest; plugin 0.1.13 shows "Nightly <commit>" and a "Newer nightly / Update" row (checked
   on demand, never at launch). test-catalog allows a rolling tag only with the channel.
+  **ares replaces Snes9x (2026-10-07, user decision; NOT HW-tested).** Snes9x 1.63's GTK frontend
+  (master too, gtk_s9x.cpp) runs S9xExit -- config save, sound/display/GTK teardown, exit(0) -- inside
+  its SIGTERM/SIGINT/SIGQUIT handler while its threads run, so every OGUI Exit crashed it. Options
+  surveyed: no other arm64 SNES AppImage but ares (bsnes: no arm64 build; Mesen2: a bare .NET binary
+  zip; RetroArch: no arm64 AppImage on GitHub); fixing Snes9x = upstream patch (g_unix_signal_add) or
+  an LD_PRELOAD shim, both parked. ares v148 (pkgforge-dev/ares-emu-appimage, numbered pin, sharun,
+  bin/ares, ISC) now serves snes + the new md (Mega Drive), segacd (Mega CD) and 32x tabs; plugin
+  0.1.14. Launcher gained `system_args` (system -> args put before args): `--system "<ares name>"`
+  and `--setting Paths/Saves=~/saves/<system>/` per launch (ares appends its system name; states go
+  there too, ~/states/<system> stays empty; unset = next to the ROM). Args `--pseudofullscreen --kiosk`
+  (GLX `--fullscreen` renders at monitor size into a window gamescope never resizes: off-centre and
+  cropped, HW Pocket Max). HW ✅ Pocket Max 2026-10-07: MD (Kunio no Nekketsu School Fighters) pad,
+  sound, saves in ~/saves/md/Mega Drive/, centred full height, clean OGUI Exit; ~1 core, clocks low. SNES Yoshi's Island (SuperFX 2, .zip ROM): 60 fps stable,
+  main thread ~69% of a 2.42 GHz big core, 38 C; save in ~/saves/snes/Super Famicom/.
+  Seed ~/.local/share/ares/settings.bml: SDL input, Defocus Allow, VirtualPad1 bound by the computed
+  SDL GUID (`<guid>/0/<group>/<input>[/Lo|Hi]`, groups 0 axis, 1 hat, 3 button; D-pad = hat + left
+  stick), Mega CD BIOS paths ~/bios/segacd/bios_CD_{U,E,J}.bin (ares finds firmware only via its GUI
+  Scan; kiosk errors out without it; sha256-checked). Exit: ares sets no signal handler, so SIGTERM
+  kills it cleanly but with no final save; AutoSaveMemory flushes battery saves every 30 s. Quit
+  hotkey is one button only: unbound. HW checklist: pad GUID binding works (else check the identity
+  in ~/.local/share/ares/settings.bml after binding one button in the GUI), audio (SDL), GL under
+  gamescope, speed on SM8250 (SuperFX/SA-1, 32X), Mega CD BIOS + a cue/chd, saves land in
+  ~/saves/<system>/, 6-button pad needed? (MD port default is the 3-button Control Pad).
   RPCS3 (HW 2026-10-07, Pocket FIT, Lollipop Chainsaw BLUS30917 folder dump): launcher fixes --
   its DwarFS runtime prints the mount point BEFORE mounting (launcher now waits for the mount);
   `rpcs3 --headless --installfw` installs FW 4.93 then aborts in a destructor (judge installs by

@@ -1,0 +1,52 @@
+{
+  "notes": [
+    "ares (Super Nintendo, Mega Drive, Mega CD, 32X): pkgforge-dev's sharun repackaging of ares v148 (hiro GTK frontend). Replaces Snes9x (2026-10-07), whose GTK frontend runs its whole exit inside its SIGTERM handler and crashes on every OpenGamepadUI Exit.",
+    "system_args: ares must be told the system (--system takes ares's own names; a .bin or .cue alone is ambiguous). Paths/Saves is set per launch with --setting (not saved to settings.bml): saves AND states go to ~/saves/<system>/<ares system name>/ (ares appends its system name; it has no separate state folder, so ~/states/<system> stays empty). Without it ares writes them next to the ROM.",
+    "--pseudofullscreen, never --fullscreen: ares's GLX fullscreen renders at the monitor's size and offset into a window gamescope never resizes (763x576 on a 1920x1080 output: picture off-centre, right and bottom cropped; HW 2026-10-07, Pocket Max). Pseudo fullscreen makes the GTK window itself fullscreen, which gamescope honours.",
+    "--kiosk: minimal UI, no file prompts, an error instead of a dialog (a missing Mega CD BIOS ends the launch with a message).",
+    "Exit: ares installs no signal handler, so OpenGamepadUI's Exit (SIGTERM) ends it at once: no crash, no final save. Battery saves are flushed every 30 s (General/AutoSaveMemory, on by default), so only the last 30 s after an in-game save are at risk. Its Quit hotkey binds one button only (no Select + Start): left unbound, OGUI's Exit is the way out.",
+    "Mega CD BIOS: ares finds firmware only through its GUI Scan button, so settings.bml names the files: ~/bios/segacd/bios_CD_U.bin, bios_CD_E.bin, bios_CD_J.bin (the names RetroArch's Genesis Plus GX uses); ares checks their sha256. The 32X and the Mega Drive need none.",
+    "gui_args: ares's own window (touch screen; no pad-driven UI)."
+  ],
+  "format": "appimage-sharun",
+  "binary": "bin/ares",
+  "args": [
+    "--pseudofullscreen",
+    "--kiosk",
+    "{rom}"
+  ],
+  "system_args": {
+    "snes": [
+      "--system",
+      "Super Famicom",
+      "--setting",
+      "Paths/Saves=/home/player/saves/{system}/"
+    ],
+    "md": [
+      "--system",
+      "Mega Drive",
+      "--setting",
+      "Paths/Saves=/home/player/saves/{system}/"
+    ],
+    "segacd": [
+      "--system",
+      "Mega CD",
+      "--setting",
+      "Paths/Saves=/home/player/saves/{system}/"
+    ],
+    "32x": [
+      "--system",
+      "Mega 32X",
+      "--setting",
+      "Paths/Saves=/home/player/saves/{system}/"
+    ]
+  },
+  "gui_args": [],
+  "env": {},
+  "seed": [
+    {
+      "file": "settings.bml",
+      "to": ".local/share/ares/settings.bml"
+    }
+  ]
+}

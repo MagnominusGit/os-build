@@ -309,24 +309,35 @@ has mgba/config.ini keyB=0 "GBA B on the south button (b0)"
 has mgba/config.ini keySelect=6 "Select on b6"; has mgba/config.ini keyStart=7 "Start on b7"
 has mgba/config.ini keyL=4 "L on LB"; has mgba/config.ini keyR=5 "R on RB"
 lacks mgba/config.ini '^key[A-Za-z]+=8$' "binding on Guide (b8)"
-# No single-button quit (R3 was too easy to hit, user 2026-10-06): mGBA and Snes9x cannot bind
+# No single-button quit (R3 was too easy to hit, user 2026-10-06): mGBA and ares cannot bind
 # Select + Start, so OpenGamepadUI's Exit (Guide) is their way out.
 [ ! -e "$SEED_DIR/mgba/qt.ini" ] && ! grep -q qt.ini "$SEED_DIR/mgba/emulator.json" \
   && ok "mgba: no pad quit shortcut seeded" || bad "mgba seeds a pad shortcut file (qt.ini)"
 grep -q 'saves/{system}' "$SEED_DIR/mgba/emulator.json" && grep -q 'states/{system}' "$SEED_DIR/mgba/emulator.json" \
   && ok "mgba: per-system save and state folders from the card's system" || bad "mgba: saves/states not per system"
-# Snes9x: raw indices; SNES B south, A east, Y west, X north.
-has snes9x/snes9x.conf 'B = Joystick 1 Button 0' "SNES B on south"
-has snes9x/snes9x.conf 'A = Joystick 1 Button 1' "SNES A on east"
-has snes9x/snes9x.conf 'Y = Joystick 1 Button 2' "SNES Y on west"
-has snes9x/snes9x.conf 'X = Joystick 1 Button 3' "SNES X on north"
-has snes9x/snes9x.conf 'Up = Joystick 1 Axis 6 + 50%' "D-pad hat = axes 6/7 after the 6 real ones"
-lacks snes9x/snes9x.conf '^b_quit' "single-button quit shortcut"
-lacks snes9x/snes9x.conf '^b_[a-z_]+ = ' "binding under an internal b_* name (Snes9x reads Up, A, ...; b_* stays Unset)"
-has snes9x/snes9x.conf 'FullscreenOnOpen = true' "fullscreen (no flag exists)"
-[ "$(jget "$SEED_DIR/snes9x/emulator.json" core_dumps)" = false ] && ok "snes9x: no core file (it crashes on every Exit, in its SIGTERM handler)" \
-  || bad "snes9x: core_dumps is not false: ~14 MB core per Exit"
-lacks snes9x/snes9x.conf 'Button 8$' "binding on Guide (b8)"
+# ares (snes, md, segacd, 32x): one virtual pad for every system, bound by SDL GUID + slot
+# ("<guid>/<slot>/<group>/<input>[/Lo|Hi]"; groups 0 axis, 1 hat, 3 button). Each console maps it by
+# position (SNES B / Mega Drive B on south ...).
+ARES_PAD="030010f85e040000000b000001000000/0"
+has ares/settings.bml "  A..South: $ARES_PAD/3/0" "south = b0"
+has ares/settings.bml "  B..East: $ARES_PAD/3/1" "east = b1"
+has ares/settings.bml "  X..West: $ARES_PAD/3/2" "west = b2"
+has ares/settings.bml "  Y..North: $ARES_PAD/3/3" "north = b3"
+has ares/settings.bml "  Select: $ARES_PAD/3/6" "Select = b6"; has ares/settings.bml "  Start: $ARES_PAD/3/7" "Start = b7"
+has ares/settings.bml "  Pad.Up: $ARES_PAD/1/1/Lo;$ARES_PAD/0/1/Lo" "D-pad = hat 0, and the left stick"
+has ares/settings.bml "  L-Trigger: $ARES_PAD/0/2/Hi" "LT = axis 2 pulled"
+has ares/settings.bml "  Driver: SDL" "SDL input (the GUID binding is SDL's)"
+lacks ares/settings.bml '/3/8($|;)' "binding on Guide (b8)"
+lacks ares/settings.bml '^Hotkey' "hotkey (one button each, no Select + Start: OGUI's Exit is the way out)"
+has ares/settings.bml "    BIOS.US: /home/player/bios/segacd/bios_CD_U.bin" "Mega CD BIOS named in ~/bios/segacd (no auto-scan)"
+python3 -c 'import json,sys; a=json.load(open(sys.argv[1]))["args"]; sys.exit(not ("--pseudofullscreen" in a and "--fullscreen" not in a))' \
+  "$SEED_DIR/ares/emulator.json" && ok "ares: --pseudofullscreen (GLX --fullscreen draws off-centre and cropped under gamescope)" \
+  || bad "ares: args must use --pseudofullscreen, not --fullscreen"
+for sys in snes md segacd 32x; do
+  python3 -c 'import json,sys; a=json.load(open(sys.argv[1]))["system_args"][sys.argv[2]]
+sys.exit(not (a[0] == "--system" and "--setting" in a and "Paths/Saves=/home/player/saves/{system}/" in a))' \
+    "$SEED_DIR/ares/emulator.json" "$sys" && ok "ares: $sys names its system and saves in ~/saves/$sys" || bad "ares: $sys system_args"
+done
 # PPSSPP: SDL gamepad -> keycodes (A 189, B 190, X 191, Y 188, Guide 4); device 10.
 has ppsspp/controls.ini 'Cross = 10-189' "Cross on south"; has ppsspp/controls.ini 'Circle = 10-190' "Circle on east"
 has ppsspp/controls.ini 'Square = 10-191' "Square on west"; has ppsspp/controls.ini 'Triangle = 10-188' "Triangle on north"
@@ -428,6 +439,10 @@ bad_def "a format that is not a string" 'd["format"] = ["appimage"]'
 bad_def "a binary that is '.'" 'd["binary"] = "."'
 bad_def "a seed to a directory (trailing /)" 'd["seed"] = [{"file": "settings.ini", "to": ".config/x/"}]'
 bad_def "an argument with a NUL byte" 'd["args"] = ["-batch\u0000x", "{rom}"]'
+bad_def "system_args that are not an object" 'd["system_args"] = ["--system", "x"]'
+bad_def "system_args with {rom}" 'd["system_args"] = {"psx": ["{rom}"]}'
+bad_def "system_args for a bad system name" 'd["system_args"] = {"../x": ["a"]}'
+bad_def "system_args that are not strings" 'd["system_args"] = {"psx": [1]}'
 printf '{not json' > "$BAD/duckstation/emulator.json"
 [ "$(QFORGE_EMU_DATA_DIR="$BAD" code psx "$ROM")" = 2 ] && ok "a definition that is not JSON is refused (exit 2)" || bad "broken JSON was accepted"
 
@@ -590,6 +605,21 @@ reset_logs; QFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
   && ok "{system} in args becomes the card's system (mGBA: one emulator, per-system folders)" \
   || bad "{system} not substituted: $(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' '|')"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
+# system_args: one emulator, several systems it must be told about (ares: --system "Mega Drive").
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["args"] = ["-f", "{rom}"]; d["install"] = []
+d["system_args"] = {"psx": ["--system", "Play Station", "--saves={system}"], "md": ["--system", "Mega Drive"]}
+json.dump(d, open(sys.argv[2], "w"))' "$DS_DEF" "$INST/duckstation/emulator.json"
+reset_logs; QFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
+[ "$(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' '|')" = "--system|Play Station|--saves=psx|-f|$ROM|" ] \
+  && ok "system_args: the card's system's own arguments come first, {system} substituted, other systems' not used" \
+  || bad "system_args: $(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' '|')"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["args"] = ["-f", "{rom}"]; d["install"] = []
+d["system_args"] = {"md": ["--system", "Mega Drive"]}; json.dump(d, open(sys.argv[2], "w"))' "$DS_DEF" "$INST/duckstation/emulator.json"
+reset_logs; QFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
+[ "$(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' '|')" = "-f|$ROM|" ] \
+  && ok "system_args: a system without an entry gets none" || bad "system_args (none): $(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' '|')"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["gui_args"] = ["{system}"]; json.dump(d, open(sys.argv[2], "w"))' \
   "$DS_DEF" "$INST/duckstation/emulator.json"
 [ "$(QFORGE_EMU_DATA_DIR="$INST" code --gui duckstation)" = 2 ] && ok "{system} in gui_args is refused (exit 2): Open has no system" || bad "gui_args with {system} accepted"
@@ -611,7 +641,7 @@ rc="$(cat "$T/install-rc" 2>/dev/null)"; rm -f "$T/install-rc"
   || bad "Exit during install: rc=$rc game=$(emu_up && echo started || echo no) status='$(cat "$ST" 2>/dev/null)'"
 rm -f "$T/install-slow" "$T/install-running"
 wait_for '[ ! -s "$T/mounts" ]' && ok "and the mount is released" || bad "an interrupted install left the mount: $(cat "$T/mounts")"
-# core_dumps false (Snes9x crashes on every Exit): the emulator gets RLIMIT_CORE 0; default unchanged.
+# core_dumps false (for an emulator that crashes on every Exit): RLIMIT_CORE 0; default unchanged.
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["install"] = []; d["core_dumps"] = False; json.dump(d, open(sys.argv[2], "w"))' \
   "$DS_DEF" "$INST/duckstation/emulator.json"
 reset_logs; ( ulimit -c unlimited; QFORGE_EMU_DATA_DIR="$INST" exec "$LAUNCH" psx "$ROM" 2>"$T/launch.err" ) & lpid=$!; echo "$lpid" >> "$T/pids"

@@ -18,6 +18,9 @@
 #    "args": ["-batch", "--", "{rom}"],            a game's command line; "{rom}" exactly once,
 #                                                  "{system}" (the card's system) anywhere in an arg
 #    "gui_args": ["-bigpicture"],                  --gui's command line (no "{rom}")
+#    "system_args": {"md": ["--system", "Mega Drive"]},  put before args when the card's system has
+#                                                  an entry (one emulator, several systems it must
+#                                                  be told about: ares); "{system}" allowed
 #    "env": {"NAME": "value"},                     added to the emulator's environment
 #    "core_dumps": false,                          no core file when it crashes (default true; below)
 #    "seed": [{"file": "x.ini", "to": ".config/x/x.ini"}],   first-run settings (below)
@@ -118,8 +121,8 @@ INSTALL_SETTLE = 1.0  # s to wait after an install step for OGUI's Exit to reach
 USAGE = "usage: qforge-launch [--cpus big|all] <system> <rom> | [--cpus big|all] --gui <emulator>"
 SYSTEM_ID = re.compile(r"[a-z0-9_]+")
 EMU_ID = re.compile(r"[a-z0-9_-]+")
-DEFINITION_KEYS = {"format", "binary", "args", "gui_args", "env", "seed", "install", "core_dumps",
-                   "notes"}
+DEFINITION_KEYS = {"format", "binary", "args", "gui_args", "system_args", "env", "seed", "install",
+                   "core_dumps", "notes"}
 ROM = "{rom}"
 FILE = "{file}"
 SYSTEM = "{system}"
@@ -229,6 +232,11 @@ def load_definition(emulator):
     gui_args = d.get("gui_args", [])
     if not str_list(gui_args) or ROM in gui_args or any(SYSTEM in a for a in gui_args):
         raise bad(f'gui_args must be a list of strings without "{ROM}" or "{SYSTEM}" (no game, no system)')
+    system_args = d.get("system_args", {})
+    if not (isinstance(system_args, dict)
+            and all(isinstance(k, str) and SYSTEM_ID.fullmatch(k) and str_list(v) and ROM not in v
+                    for k, v in system_args.items())):
+        raise bad(f'system_args must map system names to lists of strings without "{ROM}"')
     env = d.get("env", {})
     if not (isinstance(env, dict)
             and all(isinstance(k, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k)
@@ -256,7 +264,7 @@ def load_definition(emulator):
     if not isinstance(core_dumps, bool):
         raise bad("core_dumps must be true or false")
     return {"format": d["format"], "binary": d["binary"], "args": args, "gui_args": gui_args,
-            "env": env, "seed": seed, "install": install, "core_dumps": core_dumps}
+            "system_args": system_args, "env": env, "seed": seed, "install": install, "core_dumps": core_dumps}
 
 
 def seed_first_run(emulator, seed):
@@ -603,7 +611,8 @@ def run(argv):
         emulator = emulator_for(system)
     definition = load_definition(emulator)
     # One emulator can serve several systems (mGBA: gb, gbc, gba) with per-system folders.
-    args = ([rom if a == ROM else a.replace(SYSTEM, system) for a in definition["args"]]
+    args = ([rom if a == ROM else a.replace(SYSTEM, system)
+             for a in definition["system_args"].get(system, []) + definition["args"]]
             if rom is not None else definition["gui_args"])
 
     image = os.path.join(EMU_DIR, emulator, "current")

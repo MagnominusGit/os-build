@@ -34,6 +34,9 @@ const SYSTEMS := {
 	"ps2": {"name": "PlayStation 2", "exts": ["chd", "iso", "cso", "zso", "gz", "cue"]},
 	"psp": {"name": "PSP", "exts": ["iso", "cso", "chd", "pbp"]},
 	"ps3": {"name": "PlayStation 3", "exts": ["iso"], "dirs": ["PS3_GAME/USRDIR/EBOOT.BIN", "USRDIR/EBOOT.BIN"]},
+	"md": {"name": "Mega Drive", "exts": ["md", "gen", "bin", "zip"]},
+	"segacd": {"name": "Mega CD", "exts": ["chd", "cue"]},
+	"32x": {"name": "32X", "exts": ["32x", "zip"]},
 	"dc": {"name": "Dreamcast", "exts": ["chd", "gdi", "cdi", "cue"]},
 	"xbox": {"name": "Xbox", "exts": ["iso", "xiso"]},
 }
