@@ -24,6 +24,7 @@ root (the `gamescope/` checkout inside makepkg's `$srcdir`) by
 0019-rendervulkan-fragment-shader-composite.patch   (--composite-graphics, passed by default from etc/qforge/session.conf)
 0020-libliftoff-treat-enodev-as-no-fit.patch        (patches the libliftoff SUBMODULE; only with 0021)
 0021-libliftoff-give-planes-the-layer-zpos.patch    (patches the libliftoff SUBMODULE)
+0025-steamcompmgr-elapsed-time-fps-limiter.patch     (ConVar limiter_use_elapsed_time, default on)
 ```
 
 `0008`-`0013` are **retired** (see below). The numbering is kept as-is rather than compacted, so
@@ -362,6 +363,18 @@ workaround for the Pocket S2's one-frame black blink. That blink was a kernel bu
 interfaces' CTL flushes straddling the DPU's programmable fetch start (upstream issue #110), fixed in
 `kernel/patches/0395`. The lead cost ~1.25 ms of latency on every board, and on SM8250 its reserve
 ratcheted up on the offline rotator's late flips and took games from 60 to 40 fps (upstream, Pocket Max).
+
+`0025` — **the fixed-refresh frame limiter releases by elapsed time, not by vblank count**
+(virtudude, body unchanged; armada PR #629, their gamescope 0027; ported from upstream 4caee07). With
+a frame cap below the refresh rate and no VRR — every board we ship, DSI has no VRR — stock gamescope
+sends frame callbacks only on every Nth vblank (`vblank_idx % (refresh / cap)`). A frame that misses
+its vblank by any amount then waits a whole extra period, so a game that cannot quite hold its cap
+alternates short and double-length frames. `0025` gates on `last_commit_first_latch_time` + the
+limited period with half a refresh period of slack, the same scheme gamescope already uses for VRR.
+ConVar `limiter_use_elapsed_time` (default on) restores the divisor gate live when set to 0. Taken
+together with `kernel/patches/0390` (real vblank timestamps on command-mode panels): that one fixed
+the cap running fast, this one the stutter when a game cannot hold it. Applies at --fuzz=0 on our
+stack (we do not carry upstream's 0023).
 
 Drop the patch files here with those exact names (or rename and update `source.pin`'s
 `patches:` line). **Until a declared patch is present, `make overlay` / `make base` fail fast**
