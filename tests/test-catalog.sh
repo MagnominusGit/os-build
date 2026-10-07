@@ -8,7 +8,9 @@
 # broken game for everyone who downloads after it:
 #
 #   - a rolling tag (DuckStation's `latest` / `preview`) replaces its asset in place, so a pin on
-#     one silently ships an untested build: pins must be numbered releases;
+#     one silently ships an untested build: pins must be numbered releases -- unless the entry says
+#     so with "channel": "nightly" (Cemu, user decision 2026-10-07): then no sha256 (qforge-emu
+#     checks GitHub's own digest), "size" is an estimate, and the tag must be the rolling one;
 #   - the sha256 is what the plugin checks the download against (and must match GitHub's per-asset
 #     digest): a malformed one would make every install fail, or, if skipped, verify nothing;
 #   - an emulator the image cannot launch (no /usr/share/qforge/emulators/<emu>/emulator.json), or one serving a
@@ -69,6 +71,7 @@ for line in open(launch_conf):
 ROLLING = {"latest", "preview", "nightly", "continuous", "dev", "master", "main"}
 REQUIRED = {"name", "author", "systems", "github", "tag", "asset", "sha256", "size", "homepage", "licence"}
 OPTIONAL = {"data"}
+CHANNELS = {"nightly"}
 
 def check_github(case, e, rx):
     url = f"https://api.github.com/repos/{e['github']}/releases/tags/{e['tag']}"
@@ -86,6 +89,16 @@ def check_github(case, e, rx):
         bad(case, f"asset pattern matches {len(assets)} assets of {e['tag']}, want exactly 1")
         return
     a = assets[0]
+    if "channel" in e:
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", str(a.get("digest"))):
+            ok(case, f"GitHub publishes a sha256 digest for {a['name']} (the nightly is checked against it)")
+        else:
+            bad(case, f"no sha256 digest on {a['name']}: qforge-emu would refuse every install")
+        if isinstance(a.get("size"), int) and e["size"] / 2 <= a["size"] <= e["size"] * 2:
+            ok(case, f"size estimate {e['size']} is near today's {a['size']}")
+        else:
+            bad(case, f"size estimate {e['size']} is far from today's {a.get('size')}")
+        return
     if a.get("digest") == f"sha256:{e['sha256']}":
         ok(case, f"sha256 matches GitHub's digest for {a['name']}")
     else:
@@ -104,12 +117,14 @@ for emu, e in emus.items():
     if not re.fullmatch(r"[a-z0-9_-]+", emu):
         bad(case, "id is not [a-z0-9_-]+ (it names a folder and a conf)")
         continue
-    missing = REQUIRED - set(e)
+    channel = e.get("channel")
+    required = REQUIRED - {"sha256"} if channel is not None else REQUIRED
+    missing = required - set(e)
     if missing:
         bad(case, f"lacks {sorted(missing)}")
         continue
     ok(case, "has every field")
-    extra = set(e) - REQUIRED - OPTIONAL
+    extra = set(e) - REQUIRED - OPTIONAL - {"channel"}
     if extra:
         bad(case, f"unknown fields {sorted(extra)} (launch settings belong in the image's emulator.json)")
     # Optional data files qforge-emu fetches after an install (RPCS3's config database): https only,
@@ -141,7 +156,16 @@ for emu, e in emus.items():
         bad(case, "systems is not a non-empty list")
 
     tag = e["tag"]
-    if tag.lower() in ROLLING or not re.search(r"\d", tag):
+    if channel is not None:
+        if channel not in CHANNELS:
+            bad(case, f"unknown channel {channel!r} (qforge-emu knows {sorted(CHANNELS)})")
+        elif "sha256" in e:
+            bad(case, "a nightly entry has no sha256: its build changes, GitHub's digest is checked")
+        elif tag.lower() in ROLLING:
+            ok(case, f"follows the rolling {tag!r} release on purpose (channel {channel})")
+        else:
+            bad(case, f"channel {channel} but tag {tag!r} is not a rolling one")
+    elif tag.lower() in ROLLING or not re.search(r"\d", tag):
         bad(case, f"tag {tag!r} is rolling: its asset can change under the pin")
     else:
         ok(case, f"pinned to a numbered release ({tag})")
@@ -162,7 +186,12 @@ for emu, e in emus.items():
             ok(case, f"asset pattern {pattern} is anchored and arm64")
         else:
             bad(case, f"asset pattern {pattern!r} must be ^...$ and name arm64/aarch64")
-    if re.fullmatch(r"[0-9a-f]{64}", str(e["sha256"])):
+    if channel is not None:
+        if rx and rx.groups >= 1:
+            ok(case, "asset pattern captures the build id (installed as nightly-<id>)")
+        elif rx:
+            bad(case, "a nightly asset pattern needs a capture group for the build id")
+    elif re.fullmatch(r"[0-9a-f]{64}", str(e["sha256"])):
         ok(case, "sha256 is 64 lowercase hex")
     else:
         bad(case, f"sha256 {e['sha256']!r} is not 64 lowercase hex")

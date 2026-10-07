@@ -209,7 +209,9 @@ func test_credits() -> void:
 	check("version: a pkgforge tag shows its version only",
 		Credits.version_text("2609@2026-10-01_1790876487"), "2609")
 	check("version: other tags are shown as they are",
-		[Credits.version_text("v0.1-11894"), Credits.version_text("nightly-20261005")], ["v0.1-11894", "nightly-20261005"])
+		Credits.version_text("v0.1-11894"), "v0.1-11894")
+	check("version: a nightly build (qforge-emu's nightly-<id>) says Nightly",
+		[Credits.version_text("nightly-cc6fea125"), Credits.version_text("nightly")], ["Nightly cc6fea125", "Nightly"])
 
 func write(path: String, text: String) -> void:
 	DirAccess.make_dir_recursive_absolute(path.get_base_dir())

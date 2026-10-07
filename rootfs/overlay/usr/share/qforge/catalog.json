@@ -42,10 +42,10 @@
         "wiiu"
       ],
       "github": "pkgforge-dev/Cemu-AppImage-Enhanced",
-      "tag": "2.6-4@2026-02-01_1769935971",
-      "asset": "^Cemu-2\\.6-4-anylinux-aarch64\\.AppImage$",
-      "sha256": "7f6eb4bd721759f2bddb65bd369ff52cc03085b77415154218ae3e596795e8ff",
-      "size": 63140494,
+      "tag": "nightly",
+      "channel": "nightly",
+      "asset": "^Cemu_Nightly-([0-9a-f]+)-anylinux-aarch64\\.AppImage$",
+      "size": 69938777,
       "homepage": "https://cemu.info/",
       "licence": {
         "name": "MPL-2.0",

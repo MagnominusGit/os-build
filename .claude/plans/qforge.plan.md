@@ -741,8 +741,11 @@ plus the ROM library that launches them)
   rolling nightly (master cc6fea1, 2026-10-05) runs SM3DW: pad (computed GUID confirmed by xemu's
   port1), buttons, sound (TVVolume 100 added: missing key = 20 %), saves, clean OGUI exit. No other
   aarch64 Cemu exists (official/Flathub are x86-64 only); armada ships pkgforge's nightly, unpinned.
-  Binary is bin/cemu (newer builds have no bin/Cemu). Pin: TO DECIDE (mirror the tested nightly in a
-  QForge repo release, or build Cemu ourselves later).
+  Binary is bin/cemu (newer builds have no bin/Cemu). DECIDED 2026-10-07: Cemu follows pkgforge's
+  rolling nightly (catalog "channel": "nightly"; 2.6 predates the AArch64 recompiler #1556, May 2025,
+  so no patch rescues it). qforge-emu installs the current asset as nightly-<commit> against GitHub's
+  sha256 digest; plugin 0.1.13 shows "Nightly <commit>" and a "Newer nightly / Update" row (checked
+  on demand, never at launch). test-catalog allows a rolling tag only with the channel.
   RPCS3 (HW 2026-10-07, Pocket FIT, Lollipop Chainsaw BLUS30917 folder dump): launcher fixes --
   its DwarFS runtime prints the mount point BEFORE mounting (launcher now waits for the mount);
   `rpcs3 --headless --installfw` installs FW 4.93 then aborts in a destructor (judge installs by

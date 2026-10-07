@@ -22,6 +22,15 @@
 #      previous AppImage for a rollback and deleting older ones.
 # A failure at any step leaves the working install as it was.
 #
+# NIGHTLY CHANNEL (catalog "channel": "nightly", no "sha256"; "size" is only an estimate for the
+# page): the entry follows an upstream's rolling release instead of a pin -- Cemu, whose only
+# aarch64 release (2.6) predates its AArch64 recompiler and dies with SIGILL (user decision
+# 2026-10-07). Every install asks GitHub for the release's current asset and REQUIRES its per-asset
+# sha256 digest (exit 4 without one); the bytes must hash to it. The build is installed as
+# nightly-<id>, <id> = the asset pattern's first capture group (the commit in pkgforge-dev's file
+# names), else the digest's first 12 hex digits. Same build as `current`: nothing is downloaded and
+# stderr says "already the latest". Nobody at QForge tested that build: the page says "Nightly".
+#
 # DATA FILES (catalog "data": [{"url": "https://...", "to": "<path under $HOME>"}], optional): files
 # an emulator needs but never fetches the way QForge runs it -- RPCS3 downloads its per-game config
 # database (api.rpcs3.net/config) only from its Qt game list, never with --no-gui (HW 2026-10-07).
@@ -61,6 +70,7 @@ EMU_ID = re.compile(r"[a-z0-9_-]+")
 # A tag names a file (<tag>.AppImage) and a URL path segment: no '/', nothing a shell or URL reads
 # specially. '@' is allowed: pkgforge-dev's AppImage repos tag releases as <version>@<date>_<id>.
 SAFE_TAG = re.compile(r"[A-Za-z0-9._@-]+")
+CHANNELS = {"nightly"}
 SPACE_MARGIN = 16 << 20  # bytes kept free beyond the AppImage itself
 DATA_MAX = 16 << 20  # bytes, per data file
 HOME = os.path.expanduser("~")
@@ -116,6 +126,7 @@ def curl_base():
 
 
 def release_asset(e):
+    """The asset to fetch: {"url", "tag" (local name), "sha256", "size"}."""
     url = f"{GITHUB_API}/repos/{e['github']}/releases/tags/{e['tag']}"
     try:
         out = subprocess.run(curl_base() + ["--max-time", "60",
@@ -129,13 +140,31 @@ def release_asset(e):
     if len(assets) != 1:
         raise Fail(EXIT_VERIFY, f"{e['tag']}: the asset pattern matches {len(assets)} assets, not 1")
     a = assets[0]
-    if a.get("digest") != f"sha256:{e['sha256']}" or a.get("size") != e["size"]:
-        raise Fail(EXIT_VERIFY, f"{e['tag']}/{a.get('name')} on GitHub is not the build QForge pinned "
-                                f"(digest {a.get('digest')}, size {a.get('size')})")
     url = str(a.get("browser_download_url", ""))
     if not url.startswith("https://"):
         raise Fail(EXIT_VERIFY, f"refusing a non-https download URL: {url}")
-    return url
+    if "channel" not in e:
+        if a.get("digest") != f"sha256:{e['sha256']}" or a.get("size") != e["size"]:
+            raise Fail(EXIT_VERIFY, f"{e['tag']}/{a.get('name')} on GitHub is not the build QForge pinned "
+                                    f"(digest {a.get('digest')}, size {a.get('size')})")
+        return {"url": url, "tag": e["tag"], "sha256": e["sha256"], "size": e["size"]}
+    return nightly_build(e, pattern, a, url)
+
+
+def nightly_build(e, pattern, a, url):
+    """A rolling release's asset, named nightly-<id> and checked against GitHub's own digest."""
+    digest = str(a.get("digest") or "")
+    size = a.get("size")
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest) or not isinstance(size, int) or size <= 0:
+        raise Fail(EXIT_VERIFY, f"{a.get('name')}: GitHub gives no sha256 digest and size to check "
+                                f"the nightly against (digest {digest!r}, size {size!r})")
+    sha = digest[len("sha256:"):]
+    m = pattern.fullmatch(str(a["name"]))
+    build = m.group(1) if m.groups() and m.group(1) else sha[:12]
+    tag = f"{e['channel']}-{build}"
+    if not SAFE_TAG.fullmatch(tag):
+        raise Fail(EXIT_VERIFY, f"unsafe build name from {a.get('name')!r}: {tag!r}")
+    return {"url": url, "tag": tag, "sha256": sha, "size": size}
 
 
 def download(url, part, size):
@@ -160,13 +189,13 @@ def download(url, part, size):
         raise Fail(EXIT_NET, f"download failed (curl exit {rc}): {url}")
 
 
-def verify(part, e):
+def verify(part, build):
     h = hashlib.sha256()
     with open(part, "rb") as f:
         for block in iter(lambda: f.read(1 << 20), b""):
             h.update(block)
-    if os.path.getsize(part) != e["size"] or h.hexdigest() != e["sha256"]:
-        raise Fail(EXIT_VERIFY, f"downloaded file does not match the catalog (sha256 {h.hexdigest()})")
+    if os.path.getsize(part) != build["size"] or h.hexdigest() != build["sha256"]:
+        raise Fail(EXIT_VERIFY, f"downloaded file does not match the expected build (sha256 {h.hexdigest()})")
 
 
 def activate(d, tag):
@@ -220,7 +249,12 @@ def cmd_install(emu):
     tag = e["tag"]
     if not SAFE_TAG.fullmatch(tag):
         raise Fail(EXIT_VERIFY, f"unsafe tag in the catalog: {tag!r}")
-    if installed_tag(emu) == tag:
+    channel = e.get("channel")
+    if channel is not None and channel not in CHANNELS:
+        raise Fail(EXIT_VERIFY, f"unknown channel in the catalog: {channel!r}")
+    if channel is None and "sha256" not in e:
+        raise Fail(EXIT_VERIFY, f"{emu}: a pinned catalog entry needs a sha256")
+    if channel is None and installed_tag(emu) == tag:
         print("100%", flush=True)
         return EXIT_OK
     d = os.path.join(EMU_DIR, emu)
@@ -230,13 +264,19 @@ def cmd_install(emu):
         fcntl.flock(lock, fcntl.LOCK_EX)  # one install per emulator at a time
     except OSError as err:
         raise Fail(EXIT_LOCAL, f"cannot use {d}: {err}")
+    # Named after the catalog tag, so the plugin can follow its size for a nightly too.
     part = os.path.join(d, f".{tag}.AppImage.part")
     try:
-        url = release_asset(e)
-        if shutil.disk_usage(d).free < e["size"] + SPACE_MARGIN:
-            raise Fail(EXIT_LOCAL, f"not enough free space in {d} for {e['size']} bytes")
-        download(url, part, e["size"])
-        verify(part, e)
+        build = release_asset(e)
+        tag = build["tag"]
+        if channel is not None and installed_tag(emu) == tag:
+            print("100%", flush=True)
+            log(f"{emu} {tag} is already the latest {channel}")
+            return EXIT_OK
+        if shutil.disk_usage(d).free < build["size"] + SPACE_MARGIN:
+            raise Fail(EXIT_LOCAL, f"not enough free space in {d} for {build['size']} bytes")
+        download(build["url"], part, build["size"])
+        verify(part, build)
         os.chmod(part, 0o755)
         os.replace(part, os.path.join(d, f"{tag}.AppImage"))
         activate(d, tag)
@@ -262,8 +302,10 @@ def cmd_list():
             "name": e.get("name", emu),
             "systems": e.get("systems", []),
             "pinned": e.get("tag"),
+            "channel": e.get("channel"),
             "installed": inst,
-            "update": inst is not None and inst != e.get("tag"),
+            # A nightly's newest build is only known online: install checks it.
+            "update": inst is not None and "channel" not in e and inst != e.get("tag"),
             "size": e.get("size"),
             "author": e.get("author"),
             "homepage": e.get("homepage"),

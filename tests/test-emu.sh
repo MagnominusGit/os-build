@@ -87,6 +87,10 @@ case \$url in
     [ -f "\$src" ] || exit 22
     [ -f "$W/srv/fail-download" ] && exit 56
     cp "\$src" "\${out:?no -o}" ;;
+  https://github.com/example/dummy/releases/download/nightly/Dummy-*-arm64.AppImage)
+    src="$W/srv/nightly.AppImage"; [ -f "$W/srv/override" ] && src="$W/srv/override"
+    [ -f "\$src" ] || exit 22
+    cp "\$src" "\${out:?no -o}" ;;
   https://data.example/db)
     [ -f "$W/srv/fail-data" ] && exit 22
     cp "$W/srv/data" "\${out:?no -o}" ;;
@@ -258,6 +262,70 @@ run list
 [ "$(field installed)" = '"v1"' ] && [ "$(field update)" = true ] && ok "v1 installed, v2 pinned: update true" || bad "got installed=$(field installed) update=$(field update)"
 calls_before="$(wc -l < "$W/curl.log")"; run list
 [ "$(wc -l < "$W/curl.log")" = "$calls_before" ] && ok "list never touches the network" || bad "list called curl"
+
+# =================================================================================================
+CASE="nightly channel"
+# Cemu has no aarch64 release that runs (2.6 predates the AArch64 recompiler): its catalog entry
+# follows pkgforge-dev's rolling `nightly` release (user decision 2026-10-07). No sha256 in the
+# catalog: GitHub's per-asset digest is required instead and the bytes must match it; the build is
+# installed as nightly-<id>, <id> = the asset pattern's capture group (the commit in the file name).
+nightly_catalog() {  # nightly_catalog [asset-pattern]
+  cat > "$W/catalog.json" <<EOF
+{"schema": 1, "emulators": {"dummy": {
+  "name": "Dummy", "author": "A. Dummy", "systems": ["psx"], "github": "example/dummy", "tag": "nightly",
+  "channel": "nightly", "asset": "${1:-^Dummy-([0-9a-f]+)-arm64\\\\.AppImage\$}", "size": 1000,
+  "homepage": "https://example.org/", "licence": {"name": "MIT", "url": "https://example.org/LICENSE"}}}}
+EOF
+}
+nightly_api() {  # nightly_api <id> <content> [digest]: the nightly release now carries build <id>
+  printf '%s' "$2" > "$W/srv/nightly.AppImage"
+  local f="$W/srv/nightly.AppImage" digest
+  digest="${3-sha256:$(sha "$f")}"
+  cat > "$W/srv/api-nightly.json" <<EOF
+{"tag_name": "nightly", "assets": [
+  {"name": "Dummy-$1-x86_64.AppImage", "size": 1, "digest": "sha256:00", "browser_download_url": "https://github.com/example/dummy/releases/download/nightly/Dummy-$1-x86_64.AppImage"},
+  {"name": "Dummy-$1-arm64.AppImage", "size": $(size "$f"), "digest": "$digest",
+   "browser_download_url": "https://github.com/example/dummy/releases/download/nightly/Dummy-$1-arm64.AppImage"}]}
+EOF
+}
+reset; nightly_catalog; nightly_api abc123 "nightly build abc"
+run install dummy
+[ "$RC" = 0 ] && [ "$(readlink "$D/dummy/current")" = nightly-abc123.AppImage ] \
+  && ok "installs the current nightly as nightly-<commit>.AppImage" || bad "rc=$RC current=$(readlink "$D/dummy/current") $ERR"
+cmp -s "$D/dummy/nightly-abc123.AppImage" "$W/srv/nightly.AppImage" && ok "the AppImage is the served bytes" || bad "installed file differs"
+pct_only && ok "stdout is only forward N% lines ending at 100%" || bad "stdout was: $(tr '\n' '|' <<<"$OUT")"
+: > "$W/curl.log"; run install dummy
+[ "$RC" = 0 ] && [ "$OUT" = "100%" ] && grep -q 'api.github.com' "$W/curl.log" && ! grep -q 'download/nightly/' "$W/curl.log" \
+  && grep -q "already the latest" <<<"$ERR" \
+  && ok "same build again: asks GitHub, downloads nothing, says it is already the latest" || bad "rc=$RC out=$OUT $ERR"
+nightly_api def456 "nightly build def, newer"
+run install dummy
+[ "$RC" = 0 ] && [ "$(readlink "$D/dummy/current")" = nightly-def456.AppImage ] && [ -f "$D/dummy/nightly-abc123.AppImage" ] \
+  && ok "a newer nightly installs, the previous one is kept for a rollback" || bad "rc=$RC left: $(ls "$D/dummy" | tr '\n' ' ')"
+run list
+[ "$(field channel)" = '"nightly"' ] && [ "$(field installed)" = '"nightly-def456"' ] && [ "$(field update)" = false ] \
+  && ok "list: channel nightly, installed nightly-<commit>, update unknown offline (false)" \
+  || bad "got channel=$(field channel) installed=$(field installed) update=$(field update)"
+# Refusals: no digest to check against, bytes that do not match it.
+reset; nightly_catalog; nightly_api abc123 "nightly build abc" ""
+run install dummy
+[ "$RC" = 4 ] && ! grep -q 'download/nightly/' "$W/curl.log" && [ ! -e "$D/dummy/current" ] \
+  && ok "no GitHub digest: exit 4, nothing downloaded" || bad "rc=$RC $ERR"
+reset; nightly_catalog; nightly_api abc123 "nightly build abc"; printf 'tampered' > "$W/srv/override"
+run install dummy
+[ "$RC" = 4 ] && [ -z "$(find "$D" -type f)" ] && ok "bytes that do not hash to GitHub's digest: exit 4, nothing left" || bad "rc=$RC left: $(find "$D" -type f)"
+# No capture group: the build is named by its digest.
+reset; nightly_catalog '^Dummy-[0-9a-f]+-arm64\\.AppImage$'; nightly_api abc123 "nightly build abc"
+run install dummy
+want="nightly-$(sha "$W/srv/nightly.AppImage" | cut -c1-12).AppImage"
+[ "$RC" = 0 ] && [ "$(readlink "$D/dummy/current")" = "$want" ] && ok "no capture group: named nightly-<sha256 prefix>" || bad "current=$(readlink "$D/dummy/current") want $want: $ERR"
+# A pinned entry stays pinned: a sha256 is still required without the channel.
+reset; nightly_catalog; python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); del c["emulators"]["dummy"]["channel"]; json.dump(c, open(sys.argv[1], "w"))' "$W/catalog.json"
+nightly_api abc123 "nightly build abc"; run install dummy
+[ "$RC" = 4 ] && [ ! -e "$D/dummy/current" ] && ok "no channel and no sha256: refused (exit 4)" || bad "rc=$RC $ERR"
+reset; nightly_catalog; python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); c["emulators"]["dummy"]["channel"]="weekly"; json.dump(c, open(sys.argv[1], "w"))' "$W/catalog.json"
+run install dummy
+[ "$RC" = 4 ] && [ ! -e "$W/curl.log" ] && ok "an unknown channel is refused before any download" || bad "rc=$RC"
 
 # =================================================================================================
 CASE="remove"

@@ -21,6 +21,9 @@ static func credit_text(emu: Dictionary) -> String:
 	return " · ".join(parts)
 
 
-## A release tag as the player reads it: pkgforge-dev's "<version>@<date>_<id>" is just <version>.
+## A release tag as the player reads it: pkgforge-dev's "<version>@<date>_<id>" is just <version>;
+## a nightly (catalog tag "nightly", installed as qforge-emu's "nightly-<id>") says so.
 static func version_text(tag: String) -> String:
+	if tag == "nightly" or tag.begins_with("nightly-"):
+		return ("Nightly " + tag.trim_prefix("nightly").trim_prefix("-")).strip_edges()
 	return tag.get_slice("@", 0)

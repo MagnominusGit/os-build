@@ -5,7 +5,8 @@ extends ScrollContainer
 ## One block per catalog emulator: its name, who made it (author, homepage, licence and its link:
 ## the attribution every emulator's licence asks for), installed vs pinned version and size, and
 ## a button that is Download, Update or Open (the emulator's own UI, `qforge-launch --gui`), plus
-## Delete once installed, and the player's "Run on fast cores" default for that emulator (every
+## Delete once installed (a nightly entry -- catalog "channel": "nightly", Cemu -- adds an Update
+## row instead: whether a newer build exists is only known online, so the button asks), and the player's "Run on fast cores" default for that emulator (every
 ## launch of it, Open included, unless a game overrides it). Everything else goes through /usr/bin/qforge-emu (list / install / remove);
 ## the page never downloads or verifies anything itself.
 ##
@@ -160,19 +161,28 @@ func _add_emulator(id: String, emu: Dictionary) -> void:
 	var size := int(emu.get("size", 0))
 	var pinned := Credits.version_text(str(emu.get("pinned", "?")))
 	var installed = emu.get("installed")
+	var nightly: bool = emu.get("channel") == "nightly"
 	var mb := size / 1048576
 
 	var main = row_scene.instantiate()
 	if installed == null:
 		main.text = "Not installed"
-		main.description = "Version %s, %d MB." % [pinned, mb]
+		if nightly:
+			main.description = "Latest nightly build, about %d MB. Not tested by QForge." % mb
+		else:
+			main.description = "Version %s, %d MB." % [pinned, mb]
 		main.button_text = "Download"
-		main.button_up.connect(_install.bind(id, name_text, str(emu.get("pinned", "")), size, main))
+		main.button_up.connect(_install.bind(id, name_text, str(emu.get("pinned", "")), size, main, null))
+	elif nightly:
+		main.text = Credits.version_text(str(installed))
+		main.description = "Installed. Nightly builds come straight from upstream, untested by QForge."
+		main.button_text = "Open"
+		main.button_up.connect(_open.bind(id, name_text))
 	elif emu.get("update", false):
 		main.text = "Version " + Credits.version_text(str(installed))
 		main.description = "Update to %s available, %d MB." % [pinned, mb]
 		main.button_text = "Update"
-		main.button_up.connect(_install.bind(id, name_text, str(emu.get("pinned", "")), size, main))
+		main.button_up.connect(_install.bind(id, name_text, str(emu.get("pinned", "")), size, main, installed))
 	else:
 		main.text = "Version " + Credits.version_text(str(installed))
 		main.description = "Installed."
@@ -191,6 +201,17 @@ func _add_emulator(id: String, emu: Dictionary) -> void:
 	fast.toggled.connect(_set_fast_cores.bind(id, name_text, fast))
 	_rows.add_child(fast)
 
+	if installed != null and nightly:
+		var update = row_scene.instantiate()
+		update.text = "Newer nightly"
+		update.description = "Looks for a newer nightly build and installs it (about %d MB)." % mb
+		update.button_text = "Update"
+		update.separator_visible = false
+		update.button_up.connect(_install.bind(id, name_text, str(emu.get("pinned", "")), size, update, installed))
+		_rows.add_child(update)
+		if _busy.has(id):
+			update.disabled = true
+
 	if installed != null:
 		var remove = row_scene.instantiate()
 		remove.text = "Delete"
@@ -201,7 +222,9 @@ func _add_emulator(id: String, emu: Dictionary) -> void:
 		_rows.add_child(remove)
 
 
-func _install(id: String, name_text: String, tag: String, size: int, row: Control) -> void:
+## `previous` is the installed build (null for a first download): a nightly Update that finds the
+## same build changes nothing, and says so.
+func _install(id: String, name_text: String, tag: String, size: int, row: Control, previous: Variant) -> void:
 	if _busy.has(id):
 		return
 	_busy[id] = true
@@ -223,12 +246,19 @@ func _install(id: String, name_text: String, tag: String, size: int, row: Contro
 	var code := await cmd.finished as int
 	poll.queue_free()
 	_busy.erase(id)
-	if code == 0:
+	if code == 0 and previous != null and _installed(id) == previous:
+		_notify(name_text + " is up to date")
+	elif code == 0:
 		_notify(name_text + " installed")
 	else:
 		logger.warn("qforge-emu install %s exited %d: %s" % [id, code, cmd.stderr])
 		_notify(EXIT_TEXT.get(code, "Installing %s failed." % name_text))
 	refresh()
+
+
+## The build `qforge-emu list` reports as installed for `id`, or null.
+func _installed(id: String) -> Variant:
+	return _list().get(id, {}).get("installed")
 
 
 func _show_progress(part: String, size: int, row: Control) -> void:
