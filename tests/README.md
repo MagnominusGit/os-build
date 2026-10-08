@@ -30,7 +30,7 @@ are invoked directly there rather than through `make test-disk` — a failure na
   `test-mkimage.sh`, `test-mkroot.sh`, with `lib-gptfixture.sh` rebuilding the real captured
   boards from `docs/internal-storage.md` as sparse GPTs for the two disk suites to share.
 - **The installer medium** — `test-install.sh`, `test-ui.sh`.
-- **Device behaviour** — `test-device-quirks.sh`, `test-pairingd.sh`,
+- **Device behaviour** — `test-pairingd.sh`,
   `test-fan-curve.sh`, `test-cpu-scheduler.sh`, `test-power-led.sh`, `test-suspend.sh`,
   `test-storage.sh`, `test-session.sh` (the shell gamescope hosts), `test-launch.sh` (how a ROM
   card starts and stops an emulator AppImage), `test-shares.sh` (the player's network
