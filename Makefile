@@ -335,7 +335,7 @@ KERNEL_SRC_HASH := work/.kernel-src.hash
 .PHONY: help all image toolchain kernel fw-linux fw-qcom base overlay verify-lock \
         rootfs relock installer installer-root relock-installer verify-image \
         initramfs splash plugin steamcl grub sdcard verify-card test test-disk bundle sign-bundle publish-bundle \
-        deploy clean clean-base clean-overlay distclean
+        deploy clean clean-base clean-overlay clean-ccache distclean
 
 # An always-out-of-date prerequisite, for rules that must re-evaluate their own inputs every run
 # rather than trust a prerequisite's mtime. Only $(KERNEL_SRC_HASH) uses it; see the note there.
@@ -613,7 +613,7 @@ $(KERNEL_SRC_HASH): FORCE
 	 [ "$$(cat $@ 2>/dev/null)" = "$$new" ] || printf '%s\n' "$$new" > $@
 
 $(KERNEL): $(KERNEL_SRC_HASH) $(FW_LINUX) $(FW_QCOM) | $(BUILD_STAMP)
-	$(DOCKER) $(if $(BASE_CONFIG),-e BASE_CONFIG=/src/$(BASE_CONFIG)) \
+	$(DOCKER) $(if $(BASE_CONFIG),-e BASE_CONFIG=/src/$(BASE_CONFIG)) -e QFORGE_CCACHE \
 	  $(BUILD_IMG) kernel/build.sh
 
 # Regenerate rootfs/manifest.lock (Phase 4a). Deliberately NOT a dependency of the image build:
@@ -862,11 +862,18 @@ clean-base: ## Remove the (root-owned) bootstrapped root tree
 clean-overlay: ## Remove the built (arch-scoped) overlay pacman repo + build tree
 	rm -rf work/repo work/overlay-build
 
+# work/ccache holds the compiler caches (kernel/build.sh, packages/build-overlay.sh). The kernel
+# one is root-owned (its build runs as root in the build image), so like clean-base this removes
+# it from inside a throwaway container. Only ever costs speed: the next build is a cold one.
+clean-ccache: ## Remove the kernel + overlay compiler caches (work/ccache)
+	docker run --rm -v $(CURDIR)/work:/wb busybox rm -rf /wb/ccache
+
 # THE CACHES THIS DELIBERATELY DOES *NOT* REMOVE, all of which surprise people:
 #
 #   work/prebuilt      the pinned-download cache (customize-base.sh documents it as persistent).
 #   work/pacman-cache  the package cache.
 #   work/repo          the built overlay packages (NOT clean-overlay — this target no longer runs it).
+#   work/ccache        the kernel + overlay compiler caches (`make clean-ccache`).
 #
 # Together they are, i.e. essentially everything left under work/ after this target runs,
 # which is why "distclean left stuff behind" is a reasonable first reading. It is a CHOICE: every
