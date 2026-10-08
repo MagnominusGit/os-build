@@ -327,6 +327,13 @@ KERNEL_SRC := kernel/SOURCE.pin kernel/embed.list kernel/build.sh \
 # counts as a change. Paths are repo-relative, so the digest does not follow the checkout dir.
 KERNEL_SRC_HASH := work/.kernel-src.hash
 
+# ccache (kernel/build.sh) is a dev-box speedup only, OFF on CI (GitHub sets CI=true). A CI cache
+# only helps if it is carried across runs in actions/cache, where it would creep toward its
+# max_size and push the overlay repo + pacman caches out of the 10 GB repo quota — and losing the
+# overlay cache costs a full emulated rebuild, far more than ccache saves on the kernel.
+# The container does not see the host's CI, so the decision is made here and passed in.
+QFORGE_CCACHE ?= $(if $(CI),0,1)
+
 .DEFAULT_GOAL := help
 
 # ==============================================================================
@@ -613,7 +620,7 @@ $(KERNEL_SRC_HASH): FORCE
 	 [ "$$(cat $@ 2>/dev/null)" = "$$new" ] || printf '%s\n' "$$new" > $@
 
 $(KERNEL): $(KERNEL_SRC_HASH) $(FW_LINUX) $(FW_QCOM) | $(BUILD_STAMP)
-	$(DOCKER) $(if $(BASE_CONFIG),-e BASE_CONFIG=/src/$(BASE_CONFIG)) -e QFORGE_CCACHE \
+	$(DOCKER) $(if $(BASE_CONFIG),-e BASE_CONFIG=/src/$(BASE_CONFIG)) -e QFORGE_CCACHE=$(QFORGE_CCACHE) \
 	  $(BUILD_IMG) kernel/build.sh
 
 # Regenerate rootfs/manifest.lock (Phase 4a). Deliberately NOT a dependency of the image build:

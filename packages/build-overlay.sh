@@ -93,9 +93,10 @@ mkdir -p "$STAGE" "$REPO_DIR" "$STAMPS"
 # not go through cc for its own crates). Host-side and per-arch, beside the repo it feeds, so it
 # outlives the throwaway containers; srcdir is /stage/<pkg>/src on every run, so paths line up.
 # Not an input of inputhash.sh: the cache only decides how fast an object is produced, never
-# what it is. QFORGE_CCACHE=0 builds without it.
+# what it is. QFORGE_CCACHE=0 builds without it. OFF by default on CI (CI=true): a runner's
+# cache dies with it, and carrying one in actions/cache would crowd the repo quota (see Makefile).
 CCACHE_HOST="${QFORGE_CCACHE_DIR:-$ROOT/work/ccache/overlay-$ARCH}"
-USE_CCACHE="${QFORGE_CCACHE:-1}"
+if [ -n "${CI:-}" ]; then USE_CCACHE="${QFORGE_CCACHE:-0}"; else USE_CCACHE="${QFORGE_CCACHE:-1}"; fi
 CCACHE_MOUNT=()
 [ "$USE_CCACHE" = 0 ] || { mkdir -p "$CCACHE_HOST"; CCACHE_MOUNT=(-v "$CCACHE_HOST":/ccache); }
 
