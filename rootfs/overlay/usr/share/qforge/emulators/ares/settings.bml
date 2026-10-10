@@ -3,6 +3,8 @@ Input
   Defocus: Allow
 General
   ShowStatusBar: false
+Video
+  Overscan: false
 Paths
   Firmware: /home/player/bios/segacd/
 MegaCD

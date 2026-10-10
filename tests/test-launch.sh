@@ -329,6 +329,8 @@ has ares/settings.bml "  L-Trigger: $ARES_PAD/0/2/Hi" "LT = axis 2 pulled"
 has ares/settings.bml "  Driver: SDL" "SDL input (the GUID binding is SDL's)"
 lacks ares/settings.bml '/3/8($|;)' "binding on Guide (b8)"
 lacks ares/settings.bml '^Hotkey' "hotkey (one button each, no Select + Start: OGUI's Exit is the way out)"
+has ares/settings.bml "Video" "a Video section"
+has ares/settings.bml "  Overscan: false" "overscan cropped (on, the SNES border letterboxes the picture)"
 has ares/settings.bml "    BIOS.US: /home/player/bios/segacd/bios_CD_U.bin" "Mega CD BIOS named in ~/bios/segacd (no auto-scan)"
 python3 -c 'import json,sys; a=json.load(open(sys.argv[1]))["args"]; sys.exit(not ("--pseudofullscreen" in a and "--fullscreen" not in a))' \
   "$SEED_DIR/ares/emulator.json" && ok "ares: --pseudofullscreen (GLX --fullscreen draws off-centre and cropped under gamescope)" \

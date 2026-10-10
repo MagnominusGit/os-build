@@ -6,6 +6,7 @@
     "--kiosk: minimal UI, no file prompts, an error instead of a dialog (a missing Mega CD BIOS ends the launch with a message).",
     "Exit: ares installs no signal handler, so OpenGamepadUI's Exit (SIGTERM) ends it at once: no crash, no final save. Battery saves are flushed every 30 s (General/AutoSaveMemory, on by default), so only the last 30 s after an in-game save are at risk. Its Quit hotkey binds one button only (no Select + Start): left unbound, OGUI's Exit is the way out.",
     "Mega CD BIOS: ares finds firmware only through its GUI Scan button, so settings.bml names the files: ~/bios/segacd/bios_CD_U.bin, bios_CD_E.bin, bios_CD_J.bin (the names RetroArch's Genesis Plus GX uses); ares checks their sha256. The 32X and the Mega Drive need none.",
+    "Video/Overscan false (seed): with it on, ares shows the console's whole frame, border included; the SNES's 240 lines then fit the screen height with the game's ~222 in the middle, i.e. black bars top and bottom (HW 2026-10-10, Pocket ACE, Super Mario All-Stars). Off crops the SNES and Mega Drive borders, so the game itself fills the height.",
     "gui_args: ares's own window (touch screen; no pad-driven UI)."
   ],
   "format": "appimage-sharun",
