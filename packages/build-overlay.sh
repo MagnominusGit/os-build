@@ -98,7 +98,10 @@ mkdir -p "$STAGE" "$REPO_DIR" "$STAMPS"
 CCACHE_HOST="${QFORGE_CCACHE_DIR:-$ROOT/work/ccache/overlay-$ARCH}"
 if [ -n "${CI:-}" ]; then USE_CCACHE="${QFORGE_CCACHE:-0}"; else USE_CCACHE="${QFORGE_CCACHE:-1}"; fi
 CCACHE_MOUNT=()
-[ "$USE_CCACHE" = 0 ] || { mkdir -p "$CCACHE_HOST"; CCACHE_MOUNT=(-v "$CCACHE_HOST":/ccache); }
+# No host-side mkdir: the kernel build container creates work/ccache as root, so a host mkdir of
+# a sibling fails with EACCES. `docker -v` creates a missing source itself, and the build below
+# chowns /ccache to its builder user, so who owns the host directory never matters.
+[ "$USE_CCACHE" = 0 ] || CCACHE_MOUNT=(-v "$CCACHE_HOST":/ccache)
 
 # --- decide which packages need a (re)build ------------------------------------------------
 # A package is up-to-date when its stored input hash matches AND every artifact it last produced
