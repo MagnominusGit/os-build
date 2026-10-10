@@ -1,0 +1,48 @@
+From 2bcaaaf15f9a8ddd2e49b2c69a657467f3573cbc Mon Sep 17 00:00:00 2001
+From: Philippe Simons <simons.philippe@gmail.com>
+Date: Sat, 10 Oct 2026 13:35:27 +0200
+Subject: [PATCH] fix(CPU): return from set_online_async once the core has
+ changed state
+
+tokio's File::write_all only hands the bytes to the blocking pool; without a
+flush the write lands after the method returned. CoresEnabled therefore
+returned before the cores moved, and back-to-back calls raced: an older
+'offline' write could land after a newer 'online' one, leaving cores off
+that the last call asked for. tokio::fs::write awaits the write itself.
+---
+ src/performance/cpu/core.rs | 11 ++++-------
+ 1 file changed, 4 insertions(+), 7 deletions(-)
+
+diff --git a/src/performance/cpu/core.rs b/src/performance/cpu/core.rs
+index 8042a5f..bd2ee5c 100644
+--- a/src/performance/cpu/core.rs
++++ b/src/performance/cpu/core.rs
+@@ -3,7 +3,6 @@ use std::{
+     io::Write,
+     path::Path,
+ };
+-use tokio::io::AsyncWriteExt;
+ use zbus::fdo;
+ use zbus_macros::interface;
+ 
+@@ -66,13 +65,11 @@ impl CPUCore {
+             return Ok(());
+         }
+ 
+-        // Open the sysfs file to write to
++        // Write the value. tokio::fs::write returns once the write has landed; write_all on a
++        // tokio File only queues it, so the core would change state after this returned and a
++        // later call's writes could be overtaken by this one.
+         let path = format!("{0}/online", self.path);
+-        let mut options = tokio::fs::OpenOptions::new();
+-        let file = options.write(true).open(path);
+-
+-        // Write the value
+-        file.await?.write_all(status.as_bytes()).await?;
++        tokio::fs::write(path, status).await?;
+         if enabled {
+             self.follow_boot_cpu_governor();
+         }
+-- 
+2.55.0
+

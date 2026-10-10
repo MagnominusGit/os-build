@@ -15,16 +15,21 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 BUS_NAME = "org.qforge.Power"
 OBJECT_PATH = "/org/qforge/Power"
 IFACE = "org.qforge.Power1"
-# qforge-powerd owns what nothing else on the image does: the fan, the CPU frequency GOVERNOR (the
-# kernel default is `performance`, see kernel/kernel.config, so something has to replace it at
-# boot), the sched_ext scheduler choice, and the suspend-time clock clamp.
+# qforge-powerd owns what nothing else on the image does: the fan, the BOOT CPU frequency governor
+# (the kernel default is `performance`, see kernel/kernel.config, so something has to replace it
+# before the shell starts), the sched_ext scheduler choice, and the suspend-time clock clamp.
 #
-# It does NOT own CPU or GPU frequency LIMITS, core online state or boost any more: PowerStation
-# (packages/powerstation, org.shadowblip.PowerStation) does, because that is the service
-# OpenGamepadUI's performance menu drives. The eco/balanced/performance power profiles that used to
-# set those limits were dropped on 2026-10-03 with the Steam-era power-profiles-daemon interface
-# they were selected through; nothing on the image can select one any more.
+# It does NOT own CPU or GPU frequency LIMITS, core online state, boost or the governors after boot:
+# PowerStation (packages/powerstation, org.shadowblip.PowerStation) does, because that is the
+# service OpenGamepadUI's performance menu drives. Its power profiles are governor pairs (CPU
+# schedutil/ondemand/performance, GPU simple_ondemand/performance), so powerd writes the governor
+# ONCE per boot and never again: a restart or a config reload re-applying it would silently undo
+# the profile the player picked.
 STATE_FILE = Path("/var/lib/qforge/powerd.state")
+# On tmpfs, so it lasts exactly one boot: present once the boot governor is in, which is what keeps
+# a restarted powerd (Restart=always) off the governors PowerStation has set since.
+BOOT_GOVERNOR_MARKER = Path(os.environ.get(
+    "QFORGE_POWERD_RUN", "/run/qforge-powerd")) / "boot-governor-applied"
 # Overridable so tests/test-fan-curve.sh can drive the real parse/write paths against a
 # fabricated tree.
 FACTORY_CONFIG_FILE = Path(os.environ.get(
@@ -362,7 +367,7 @@ class QforgePower:
         if self.fan_pwm:
             current = read_text(self.fan_pwm)
             self.last_pwm = int(current) if current.isdigit() else self.fan_config["min_pwm"]
-        self.apply_cpu_governor()
+        self.apply_boot_cpu_governor()
         self.fan_tick()
         GLib.timeout_add_seconds(3, self.fan_tick)
         # There is no per-game (per-ROM) layer: emulators carry their own per-game settings.
@@ -660,10 +665,10 @@ class QforgePower:
 
     def reload_config(self):
         """Re-read every layer and re-apply. Shared by the Reload method and every curve
-        write, so a curve edit cannot drift from what an operator's `Reload` would do."""
+        write, so a curve edit cannot drift from what an operator's `Reload` would do. The
+        governor is not re-applied: after boot it is the power profile's (PowerStation)."""
         self.load_config()
         self.discover()
-        self.apply_cpu_governor()
 
     def write_fan_dropin(self, pwms):
         """Rebuild the drop-in for a custom curve, or remove it when `pwms` is None."""
@@ -736,6 +741,16 @@ class QforgePower:
         them, and the suspend clamp restores whatever was in force."""
         for policy in self.cpu_policies:
             self.write_governor(policy, self.cpu_governor)
+
+    def apply_boot_cpu_governor(self):
+        """The boot governor, once per boot. The marker is written even when a policy refused:
+        a later start would only meet the same kernel, and by then the governors are the
+        power profile's."""
+        if BOOT_GOVERNOR_MARKER.exists():
+            return
+        self.apply_cpu_governor()
+        BOOT_GOVERNOR_MARKER.parent.mkdir(parents=True, exist_ok=True)
+        BOOT_GOVERNOR_MARKER.touch()
 
     def suspend(self):
         if self.suspend_save:

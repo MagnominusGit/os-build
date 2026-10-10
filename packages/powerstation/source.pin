@@ -8,8 +8,14 @@
 #         OGUI both halved the core count; and cores were grouped by topology/core_id, which on
 #         big.LITTLE repeats per cluster. Groups by thread_siblings_list instead.
 #   0002  A devfreq backend for GPUs that are not PCI devices (Adreno under msm): clock limits,
-#         min/max range and the manual switch on /sys/class/devfreq/*.gpu.
+#         min/max range and the manual switch on /sys/class/devfreq/*.gpu; plus power profiles
+#         (power-saving / balanced / max-performance = CPU schedutil / ondemand / performance,
+#         GPU simple_ondemand / simple_ondemand / performance) on the TDP interface, and a core
+#         brought back online takes cpu0's governor (an offline policy refuses the write).
+#   0003  CoresEnabled returned before the cores moved (tokio File::write_all without a flush), so
+#         back-to-back calls raced and an older "offline" could win, and 0002's governor copy ran
+#         while the core was still offline. Awaits the write. Upstream bug, worth sending.
 name: powerstation
 pkgbuild_local: PKGBUILD
-patches: 0001-fix-CPU-do-not-halve-the-cores-of-CPUs-without-SMT.patch 0002-feat-GPU-support-devfreq-scaled-GPUs-that-are-not-PC.patch
+patches: 0001-fix-CPU-do-not-halve-the-cores-of-CPUs-without-SMT.patch 0002-feat-GPU-support-devfreq-scaled-GPUs-that-are-not-PC.patch 0003-fix-CPU-return-from-set_online_async-once-the-core-h.patch
 pkgrel_suffix: 1

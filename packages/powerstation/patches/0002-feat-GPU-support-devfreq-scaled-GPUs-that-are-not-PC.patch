@@ -1,4 +1,4 @@
-From 19b94adaad6a575c6147490177c16da34784d1df Mon Sep 17 00:00:00 2001
+From b6a18916dbb3aa2e907b7c254aaa0d1e1c393e74 Mon Sep 17 00:00:00 2001
 From: Philippe Simons <simons.philippe@gmail.com>
 Date: Sat, 3 Oct 2026 12:27:33 +0200
 Subject: [PATCH 2/2] feat(GPU): support devfreq-scaled GPUs that are not PCI
@@ -20,19 +20,99 @@ display DRM device), identifies the GPU from its devicetree compatible
                             restores the full range. Starts off: the range
                             sysfs reports includes thermal limits, so it
                             cannot tell a user's choice apart.
-- class "integrated", no TDP interface.
+- class "integrated".
+
+The TDP interface carries power profiles only (TDP, boost and the thermal
+limit answer "Unsupported feature"). A profile is a pair of governors,
+one for every cpufreq policy and one for the GPU's devfreq node; it never
+touches a frequency limit, so it composes with the clock range and the
+core count instead of undoing them:
+
+- power-saving     -> CPU schedutil,   GPU simple_ondemand
+- balanced         -> CPU ondemand,    GPU simple_ondemand
+- max-performance  -> CPU performance, GPU performance
+
+PowerProfile is read back from sysfs; a mix matching no profile is an
+error, so a client re-applies the one it wants. A policy whose CPUs are
+all offline refuses governor writes (EBUSY) and comes back on its old
+governor, so a core brought back online now takes cpu0's governor.
 ---
- src/performance/gpu/dbus/devices.rs       |  26 +-
+ src/performance/cpu/core.rs               |  30 ++
+ src/performance/gpu/dbus/devices.rs       |  39 ++-
  src/performance/gpu/dbus/gpu.rs           |  22 ++
- src/performance/gpu/devfreq/devfreqgpu.rs | 316 ++++++++++++++++++++++
- src/performance/gpu/devfreq/mod.rs        |   1 +
+ src/performance/gpu/devfreq/devfreqgpu.rs | 319 ++++++++++++++++++++++
+ src/performance/gpu/devfreq/mod.rs        |   2 +
+ src/performance/gpu/devfreq/tdp.rs        | 226 +++++++++++++++
  src/performance/gpu/mod.rs                |   1 +
- 5 files changed, 365 insertions(+), 1 deletion(-)
+ 7 files changed, 638 insertions(+), 1 deletion(-)
  create mode 100644 src/performance/gpu/devfreq/devfreqgpu.rs
  create mode 100644 src/performance/gpu/devfreq/mod.rs
+ create mode 100644 src/performance/gpu/devfreq/tdp.rs
 
+diff --git a/src/performance/cpu/core.rs b/src/performance/cpu/core.rs
+index a17fe82..8042a5f 100644
+--- a/src/performance/cpu/core.rs
++++ b/src/performance/cpu/core.rs
+@@ -1,6 +1,7 @@
+ use std::{
+     fs::{self, OpenOptions},
+     io::Write,
++    path::Path,
+ };
+ use tokio::io::AsyncWriteExt;
+ use zbus::fdo;
+@@ -33,6 +34,29 @@ impl CPUCore {
+             .min()
+     }
+ 
++    /// A cpufreq policy whose CPUs were all offline refuses governor writes and
++    /// comes back on the governor it had when it went down, so a power profile
++    /// set in between never reaches it. Once this core is back, give its policy
++    /// the governor of cpu0, which is never taken offline.
++    fn follow_boot_cpu_governor(&self) {
++        let ours = Path::new(&self.path).join("cpufreq/scaling_governor");
++        let boot = Path::new(&self.path)
++            .with_file_name("cpu0")
++            .join("cpufreq/scaling_governor");
++        let (Ok(governor), Ok(current)) = (fs::read_to_string(&boot), fs::read_to_string(&ours))
++        else {
++            return;
++        };
++        let governor = governor.trim();
++        if current.trim() == governor {
++            return;
++        }
++        log::info!("Setting core {} governor to {}", self.number, governor);
++        if let Err(err) = fs::write(&ours, governor) {
++            log::warn!("Unable to set {}: {err}", ours.display());
++        }
++    }
++
+     /// Asyncronously set the core to online
+     pub async fn set_online_async(&self, enabled: bool) -> Result<(), std::io::Error> {
+         let enabled_str = if enabled { "enabled" } else { "disabled" };
+@@ -49,6 +73,9 @@ impl CPUCore {
+ 
+         // Write the value
+         file.await?.write_all(status.as_bytes()).await?;
++        if enabled {
++            self.follow_boot_cpu_governor();
++        }
+ 
+         Ok(())
+     }
+@@ -121,6 +148,9 @@ impl CPUCore {
+             .write_all(status.as_bytes())
+             // convert the std::io::Error to a zbus::fdo::Error
+             .map_err(|err| fdo::Error::IOError(err.to_string()))?;
++        if enabled {
++            self.follow_boot_cpu_governor();
++        }
+ 
+         Ok(())
+     }
 diff --git a/src/performance/gpu/dbus/devices.rs b/src/performance/gpu/dbus/devices.rs
-index a66f44f..761580b 100644
+index a66f44f..f25817b 100644
 --- a/src/performance/gpu/dbus/devices.rs
 +++ b/src/performance/gpu/dbus/devices.rs
 @@ -3,7 +3,7 @@ use std::sync::Arc;
@@ -44,7 +124,111 @@ index a66f44f..761580b 100644
      interface::{GPUDevice, GPUResult},
      tdp::{TDPDevice, TDPResult},
  };
-@@ -104,6 +104,7 @@ impl TDPDevices {
+@@ -12,6 +12,7 @@ use crate::performance::gpu::{
+ pub enum TDPDevices {
+     Amd(amd::tdp::Tdp),
+     Intel(intel::tdp::Tdp),
++    Devfreq(devfreq::tdp::Tdp),
+ }
+ 
+ impl TDPDevices {
+@@ -19,6 +20,7 @@ impl TDPDevices {
+         match self {
+             Self::Amd(dev) => dev.tdp().await,
+             Self::Intel(dev) => dev.tdp().await,
++            Self::Devfreq(dev) => dev.tdp().await,
+         }
+     }
+ 
+@@ -26,6 +28,7 @@ impl TDPDevices {
+         match self {
+             Self::Amd(dev) => dev.min_tdp().await,
+             Self::Intel(dev) => dev.min_tdp().await,
++            Self::Devfreq(dev) => dev.min_tdp().await,
+         }
+     }
+ 
+@@ -33,6 +36,7 @@ impl TDPDevices {
+         match self {
+             Self::Amd(dev) => dev.max_tdp().await,
+             Self::Intel(dev) => dev.max_tdp().await,
++            Self::Devfreq(dev) => dev.max_tdp().await,
+         }
+     }
+ 
+@@ -40,6 +44,7 @@ impl TDPDevices {
+         match self {
+             Self::Amd(dev) => dev.set_tdp(value).await,
+             Self::Intel(dev) => dev.set_tdp(value).await,
++            Self::Devfreq(dev) => dev.set_tdp(value).await,
+         }
+     }
+ 
+@@ -47,6 +52,7 @@ impl TDPDevices {
+         match self {
+             Self::Amd(dev) => dev.boost().await,
+             Self::Intel(dev) => dev.boost().await,
++            Self::Devfreq(dev) => dev.boost().await,
+         }
+     }
+ 
+@@ -54,6 +60,7 @@ impl TDPDevices {
+         match self {
+             Self::Amd(dev) => dev.max_boost().await,
+             Self::Intel(dev) => dev.max_boost().await,
++            Self::Devfreq(dev) => dev.max_boost().await,
+         }
+     }
+ 
+@@ -61,6 +68,7 @@ impl TDPDevices {
+         match self {
+             Self::Amd(dev) => dev.set_boost(value).await,
+             Self::Intel(dev) => dev.set_boost(value).await,
++            Self::Devfreq(dev) => dev.set_boost(value).await,
+         }
+     }
+ 
+@@ -68,6 +76,7 @@ impl TDPDevices {
+         match self {
+             Self::Amd(dev) => dev.thermal_throttle_limit_c().await,
+             Self::Intel(dev) => dev.thermal_throttle_limit_c().await,
++            Self::Devfreq(dev) => dev.thermal_throttle_limit_c().await,
+         }
+     }
+ 
+@@ -75,6 +84,7 @@ impl TDPDevices {
+         match self {
+             Self::Amd(dev) => dev.set_thermal_throttle_limit_c(limit).await,
+             Self::Intel(dev) => dev.set_thermal_throttle_limit_c(limit).await,
++            Self::Devfreq(dev) => dev.set_thermal_throttle_limit_c(limit).await,
+         }
+     }
+ 
+@@ -83,6 +93,7 @@ impl TDPDevices {
+         match self {
+             Self::Amd(dev) => dev.power_profile().await,
+             Self::Intel(dev) => dev.power_profile().await,
++            Self::Devfreq(dev) => dev.power_profile().await,
+         }
+     }
+ 
+@@ -90,6 +101,7 @@ impl TDPDevices {
+         match self {
+             Self::Amd(dev) => dev.set_power_profile(profile).await,
+             Self::Intel(dev) => dev.set_power_profile(profile).await,
++            Self::Devfreq(dev) => dev.set_power_profile(profile).await,
+         }
+     }
+ 
+@@ -97,6 +109,7 @@ impl TDPDevices {
+         match self {
+             Self::Amd(dev) => dev.power_profiles_available().await,
+             Self::Intel(dev) => dev.power_profiles_available().await,
++            Self::Devfreq(dev) => dev.power_profiles_available().await,
+         }
+     }
+ }
+@@ -104,6 +117,7 @@ impl TDPDevices {
  pub enum GPUDevices {
      AmdGpu(amd::amdgpu::AmdGpu),
      IntelGpu(intel::intelgpu::IntelGPU),
@@ -52,7 +236,7 @@ index a66f44f..761580b 100644
  }
  
  impl GPUDevices {
-@@ -111,6 +112,7 @@ impl GPUDevices {
+@@ -111,6 +125,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.get_tdp_interface().await,
              Self::IntelGpu(dev) => dev.get_tdp_interface().await,
@@ -60,7 +244,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -118,6 +120,7 @@ impl GPUDevices {
+@@ -118,6 +133,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.get_gpu_path().await,
              Self::IntelGpu(dev) => dev.get_gpu_path().await,
@@ -68,7 +252,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -125,6 +128,7 @@ impl GPUDevices {
+@@ -125,6 +141,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.name().await,
              Self::IntelGpu(dev) => dev.name().await,
@@ -76,7 +260,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -132,6 +136,7 @@ impl GPUDevices {
+@@ -132,6 +149,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.path().await,
              Self::IntelGpu(dev) => dev.path().await,
@@ -84,7 +268,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -139,6 +144,7 @@ impl GPUDevices {
+@@ -139,6 +157,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.class().await,
              Self::IntelGpu(dev) => dev.class().await,
@@ -92,7 +276,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -146,6 +152,7 @@ impl GPUDevices {
+@@ -146,6 +165,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.class_id().await,
              Self::IntelGpu(dev) => dev.class_id().await,
@@ -100,7 +284,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -153,6 +160,7 @@ impl GPUDevices {
+@@ -153,6 +173,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.vendor().await,
              Self::IntelGpu(dev) => dev.vendor().await,
@@ -108,7 +292,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -160,6 +168,7 @@ impl GPUDevices {
+@@ -160,6 +181,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.vendor_id().await,
              Self::IntelGpu(dev) => dev.vendor_id().await,
@@ -116,7 +300,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -167,6 +176,7 @@ impl GPUDevices {
+@@ -167,6 +189,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.device().await,
              Self::IntelGpu(dev) => dev.device().await,
@@ -124,7 +308,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -174,6 +184,7 @@ impl GPUDevices {
+@@ -174,6 +197,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.device_id().await,
              Self::IntelGpu(dev) => dev.device_id().await,
@@ -132,7 +316,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -181,6 +192,7 @@ impl GPUDevices {
+@@ -181,6 +205,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.subdevice().await,
              Self::IntelGpu(dev) => dev.subdevice().await,
@@ -140,7 +324,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -188,6 +200,7 @@ impl GPUDevices {
+@@ -188,6 +213,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.subdevice_id().await,
              Self::IntelGpu(dev) => dev.subdevice_id().await,
@@ -148,7 +332,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -195,6 +208,7 @@ impl GPUDevices {
+@@ -195,6 +221,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.subvendor_id().await,
              Self::IntelGpu(dev) => dev.subvendor_id().await,
@@ -156,7 +340,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -202,6 +216,7 @@ impl GPUDevices {
+@@ -202,6 +229,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.revision_id().await,
              Self::IntelGpu(dev) => dev.revision_id().await,
@@ -164,7 +348,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -209,6 +224,7 @@ impl GPUDevices {
+@@ -209,6 +237,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.clock_limit_mhz_min().await,
              Self::IntelGpu(dev) => dev.clock_limit_mhz_min().await,
@@ -172,7 +356,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -216,6 +232,7 @@ impl GPUDevices {
+@@ -216,6 +245,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.clock_limit_mhz_max().await,
              Self::IntelGpu(dev) => dev.clock_limit_mhz_max().await,
@@ -180,7 +364,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -223,6 +240,7 @@ impl GPUDevices {
+@@ -223,6 +253,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.clock_value_mhz_min().await,
              Self::IntelGpu(dev) => dev.clock_value_mhz_min().await,
@@ -188,7 +372,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -230,6 +248,7 @@ impl GPUDevices {
+@@ -230,6 +261,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.set_clock_value_mhz_min(value).await,
              Self::IntelGpu(dev) => dev.set_clock_value_mhz_min(value).await,
@@ -196,7 +380,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -237,6 +256,7 @@ impl GPUDevices {
+@@ -237,6 +269,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.clock_value_mhz_max().await,
              Self::IntelGpu(dev) => dev.clock_value_mhz_max().await,
@@ -204,7 +388,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -244,6 +264,7 @@ impl GPUDevices {
+@@ -244,6 +277,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.set_clock_value_mhz_max(value).await,
              Self::IntelGpu(dev) => dev.set_clock_value_mhz_max(value).await,
@@ -212,7 +396,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -251,6 +272,7 @@ impl GPUDevices {
+@@ -251,6 +285,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.manual_clock().await,
              Self::IntelGpu(dev) => dev.manual_clock().await,
@@ -220,7 +404,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -258,6 +280,7 @@ impl GPUDevices {
+@@ -258,6 +293,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.set_manual_clock(enabled).await,
              Self::IntelGpu(dev) => dev.set_manual_clock(enabled).await,
@@ -228,7 +412,7 @@ index a66f44f..761580b 100644
          }
      }
  
-@@ -265,6 +288,7 @@ impl GPUDevices {
+@@ -265,6 +301,7 @@ impl GPUDevices {
          match self {
              Self::AmdGpu(dev) => dev.get_gpu_busy_percent().await,
              Self::IntelGpu(dev) => dev.get_gpu_busy_percent().await,
@@ -278,10 +462,10 @@ index e35aeb2..f65c099 100644
          .replace("0x", "")
 diff --git a/src/performance/gpu/devfreq/devfreqgpu.rs b/src/performance/gpu/devfreq/devfreqgpu.rs
 new file mode 100644
-index 0000000..6c6ca63
+index 0000000..5e5f0ab
 --- /dev/null
 +++ b/src/performance/gpu/devfreq/devfreqgpu.rs
-@@ -0,0 +1,316 @@
+@@ -0,0 +1,319 @@
 +//! GPUs that are not PCI devices and scale their clock through devfreq.
 +//!
 +//! On SoCs the GPU is a platform device: there is no PCI class, vendor or
@@ -309,6 +493,7 @@ index 0000000..6c6ca63
 +use crate::constants::PREFIX;
 +use crate::performance::gpu::{
 +    dbus::devices::TDPDevices,
++    devfreq::tdp::Tdp,
 +    interface::{GPUDevice, GPUError, GPUResult},
 +};
 +
@@ -429,9 +614,11 @@ index 0000000..6c6ca63
 +        format!("{0}/GPU/{1}", PREFIX, self.name().await)
 +    }
 +
-+    /// SoC GPUs expose no TDP control.
++    /// SoC GPUs have no TDP to set; the interface carries their power profiles.
 +    async fn get_tdp_interface(&self) -> Option<Arc<Mutex<TDPDevices>>> {
-+        None
++        Some(Arc::new(Mutex::new(TDPDevices::Devfreq(Tdp::new(
++            self.devfreq.clone(),
++        )))))
 +    }
 +
 +    async fn name(&self) -> String {
@@ -600,11 +787,244 @@ index 0000000..6c6ca63
 +}
 diff --git a/src/performance/gpu/devfreq/mod.rs b/src/performance/gpu/devfreq/mod.rs
 new file mode 100644
-index 0000000..72431b9
+index 0000000..2a7f34c
 --- /dev/null
 +++ b/src/performance/gpu/devfreq/mod.rs
-@@ -0,0 +1 @@
+@@ -0,0 +1,2 @@
 +pub mod devfreqgpu;
++pub mod tdp;
+diff --git a/src/performance/gpu/devfreq/tdp.rs b/src/performance/gpu/devfreq/tdp.rs
+new file mode 100644
+index 0000000..76524f2
+--- /dev/null
++++ b/src/performance/gpu/devfreq/tdp.rs
+@@ -0,0 +1,226 @@
++//! Power profiles for SoCs whose GPU scales through devfreq.
++//!
++//! An SoC has no TDP, boost or thermal limit a client can set, but its clocks are
++//! picked by governors: one per cpufreq policy and one for the GPU's devfreq
++//! node. A power profile here is a pair of governors, applied to every CPU
++//! policy and to the GPU. It never touches a frequency limit: those stay with
++//! the GPU clock range and the CPU core count, which a profile must not undo.
++//!
++//! Nothing is cached. The profile in force is read back from sysfs, so a
++//! governor someone else wrote shows up as what it is, rather than as the last
++//! profile set through this interface.
++
++use std::{
++    fs, io,
++    path::{Path, PathBuf},
++};
++
++use crate::performance::gpu::{
++    platform::hardware::Hardware,
++    tdp::{HardwareAccess, TDPDevice, TDPError, TDPResult},
++};
++
++const CPUFREQ_PATH: &str = "/sys/devices/system/cpu/cpufreq";
++
++/// A power profile: its name, the governor of every CPU policy and the GPU's.
++struct Profile {
++    name: &'static str,
++    cpu_governor: &'static str,
++    gpu_governor: &'static str,
++}
++
++/// Lowest power first. `schedutil` follows the scheduler's utilisation signal
++/// (and drives energy-aware placement on big.LITTLE); `ondemand` samples load
++/// and jumps straight to the top clock when busy, which keeps frame times
++/// steadier; `performance` holds the top of whatever range is allowed.
++const PROFILES: [Profile; 3] = [
++    Profile {
++        name: "power-saving",
++        cpu_governor: "schedutil",
++        gpu_governor: "simple_ondemand",
++    },
++    Profile {
++        name: "balanced",
++        cpu_governor: "ondemand",
++        gpu_governor: "simple_ondemand",
++    },
++    Profile {
++        name: "max-performance",
++        cpu_governor: "performance",
++        gpu_governor: "performance",
++    },
++];
++
++pub struct Tdp {
++    /// The GPU's devfreq node, e.g. /sys/class/devfreq/3d00000.gpu
++    devfreq: PathBuf,
++}
++
++impl Tdp {
++    pub fn new(devfreq: PathBuf) -> Tdp {
++        Tdp { devfreq }
++    }
++}
++
++/// The `scaling_governor` file of every cpufreq policy.
++fn cpu_governor_files() -> TDPResult<Vec<PathBuf>> {
++    let mut files: Vec<PathBuf> = fs::read_dir(CPUFREQ_PATH)?
++        .flatten()
++        .map(|entry| entry.path())
++        .filter(|path| {
++            path.file_name()
++                .is_some_and(|name| name.to_string_lossy().starts_with("policy"))
++        })
++        .map(|path| path.join("scaling_governor"))
++        .collect();
++    files.sort();
++    Ok(files)
++}
++
++/// The profile with exactly these governors on the GPU and the online CPU policies.
++fn matching_profile(gpu: &str, cpus: &[String]) -> Option<&'static Profile> {
++    PROFILES
++        .iter()
++        .find(|p| p.gpu_governor == gpu && cpus.iter().all(|c| c == p.cpu_governor))
++}
++
++/// Reads a governor, or `None` for a policy whose CPUs are all offline: the
++/// kernel answers EBUSY there, and such a policy has no governor in force.
++fn read_governor(path: &Path) -> TDPResult<Option<String>> {
++    match fs::read_to_string(path) {
++        Ok(text) => Ok(Some(text.trim().to_string())),
++        Err(err) if err.kind() == io::ErrorKind::ResourceBusy => Ok(None),
++        Err(err) => Err(err.into()),
++    }
++}
++
++/// Writes a governor unless it is already in force, so a profile set twice does
++/// not restart the governor's sampling. Returns false for an offline policy,
++/// which refuses the write with EBUSY.
++fn write_governor(path: &Path, governor: &str) -> TDPResult<bool> {
++    match read_governor(path)? {
++        None => return Ok(false),
++        Some(current) if current == governor => return Ok(true),
++        Some(_) => {}
++    }
++    log::debug!("Writing value '{}' to: {}", governor, path.display());
++    match fs::write(path, governor) {
++        Ok(()) => Ok(true),
++        Err(err) if err.kind() == io::ErrorKind::ResourceBusy => Ok(false),
++        Err(err) => Err(TDPError::FailedOperation(format!(
++            "{}: {governor}: {err}",
++            path.display()
++        ))),
++    }
++}
++
++impl HardwareAccess for Tdp {
++    fn hardware(&self) -> Option<&Hardware> {
++        None
++    }
++}
++
++impl TDPDevice for Tdp {
++    async fn tdp(&self) -> TDPResult<f64> {
++        Err(TDPError::FeatureUnsupported)
++    }
++
++    async fn set_tdp(&mut self, _value: f64) -> TDPResult<()> {
++        Err(TDPError::FeatureUnsupported)
++    }
++
++    async fn boost(&self) -> TDPResult<f64> {
++        Err(TDPError::FeatureUnsupported)
++    }
++
++    async fn set_boost(&mut self, _value: f64) -> TDPResult<()> {
++        Err(TDPError::FeatureUnsupported)
++    }
++
++    async fn thermal_throttle_limit_c(&self) -> TDPResult<f64> {
++        Err(TDPError::FeatureUnsupported)
++    }
++
++    async fn set_thermal_throttle_limit_c(&mut self, _limit: f64) -> TDPResult<()> {
++        Err(TDPError::FeatureUnsupported)
++    }
++
++    /// The profile whose governors are the ones in force on the GPU and on every
++    /// online CPU policy. Any other mix matches no profile and is an error, so a
++    /// client re-applies the profile it wants instead of trusting a near match.
++    async fn power_profile(&self) -> TDPResult<String> {
++        let gpu = read_governor(&self.devfreq.join("governor"))?.unwrap_or_default();
++        let mut cpus = Vec::new();
++        for file in cpu_governor_files()? {
++            if let Some(governor) = read_governor(&file)? {
++                cpus.push(governor);
++            }
++        }
++        matching_profile(&gpu, &cpus)
++            .map(|p| p.name.to_string())
++            .ok_or_else(|| {
++                TDPError::FailedOperation(format!(
++                    "governors match no profile: GPU {gpu}, CPU {}",
++                    cpus.join(",")
++                ))
++            })
++    }
++
++    async fn power_profiles_available(&self) -> TDPResult<Vec<String>> {
++        Ok(PROFILES.iter().map(|p| p.name.to_string()).collect())
++    }
++
++    /// Policies whose CPUs are all offline are skipped: the kernel refuses them
++    /// and restores their previous governor when a CPU comes back, so whoever
++    /// onlines one has to bring its governor in line (see `CPUCore`).
++    async fn set_power_profile(&mut self, profile: String) -> TDPResult<()> {
++        let Some(p) = PROFILES.iter().find(|p| p.name == profile) else {
++            return Err(TDPError::InvalidArgument(format!(
++                "{profile} is not a valid profile"
++            )));
++        };
++        log::info!("Setting power profile {}", p.name);
++        write_governor(&self.devfreq.join("governor"), p.gpu_governor)?;
++        for file in cpu_governor_files()? {
++            if !write_governor(&file, p.cpu_governor)? {
++                log::debug!("{} is offline; left as is", file.display());
++            }
++        }
++        Ok(())
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn cpus(governors: &[&str]) -> Vec<String> {
++        governors.iter().map(|g| g.to_string()).collect()
++    }
++
++    #[test]
++    fn matches_the_profile_whose_governors_are_all_in_force() {
++        let found = matching_profile("simple_ondemand", &cpus(&["ondemand", "ondemand"]));
++        assert_eq!(found.map(|p| p.name), Some("balanced"));
++        let found = matching_profile("performance", &cpus(&["performance"]));
++        assert_eq!(found.map(|p| p.name), Some("max-performance"));
++    }
++
++    #[test]
++    fn a_mix_of_cpu_governors_matches_no_profile() {
++        let found = matching_profile("simple_ondemand", &cpus(&["ondemand", "performance"]));
++        assert!(found.is_none());
++    }
++
++    #[test]
++    fn the_kernel_boot_governors_match_no_profile() {
++        // performance on the CPUs (the kernel's boot default) with the GPU still scaling
++        assert!(matching_profile("simple_ondemand", &cpus(&["performance"])).is_none());
++    }
++
++    #[test]
++    fn profile_names_are_unique_and_lowest_power_first() {
++        let names: Vec<&str> = PROFILES.iter().map(|p| p.name).collect();
++        assert_eq!(names, ["power-saving", "balanced", "max-performance"]);
++    }
++}
 diff --git a/src/performance/gpu/mod.rs b/src/performance/gpu/mod.rs
 index 0bd5a8a..7683580 100644
 --- a/src/performance/gpu/mod.rs

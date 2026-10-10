@@ -281,6 +281,20 @@ check("the governor lands on every policy",
       [pd.read_text(p / "scaling_governor") for p in power_gov.cpu_policies],
       ["ondemand"] * 3)
 
+# The boot governor goes in once per boot: a restarted powerd, or a reload, must not undo the
+# power profile PowerStation set since.
+calls = []
+power_boot = fresh()
+power_boot.apply_cpu_governor = lambda: calls.append("applied")
+pd.BOOT_GOVERNOR_MARKER = pathlib.Path(os.environ["QFORGE_POWERD_ETC"]).parent / "run/boot-governor-applied"
+pd.QforgePower.apply_boot_cpu_governor(power_boot)
+pd.QforgePower.apply_boot_cpu_governor(power_boot)
+check("the boot governor is applied once per boot", calls, ["applied"])
+check("the boot marker is left behind", pd.BOOT_GOVERNOR_MARKER.exists(), True)
+power_boot.discover = lambda: None
+pd.QforgePower.reload_config(power_boot)
+check("a reload leaves the governor alone", calls, ["applied"])
+
 # The governor the shipped config names must be one the kernel config builds, or the fallback
 # above silently replaces it.
 factory = configparser.ConfigParser()
@@ -290,6 +304,15 @@ kconfig = pathlib.Path(root, "kernel/kernel.config").read_text()
 check("the shipped governor is built =y",
       f"CONFIG_CPU_FREQ_GOV_{named.upper()}=y" in kconfig
       or f"CONFIG_CPU_FREQ_DEFAULT_GOV_{named.upper()}=y" in kconfig, True)
+
+# PowerStation's "balanced" profile (packages/powerstation patch 0002) is the boot governor by
+# another name: OGUI saves the default performance profile from what it reads at startup, so if
+# the two drifted, the boot state would match no profile and the first one applied would change it.
+import re
+patch = next(pathlib.Path(root, "packages/powerstation/patches").glob("0002-*.patch")).read_text()
+balanced = re.search(r'name: "balanced",\n\+\s*cpu_governor: "([a-z_]+)"', patch)
+check("the boot governor is PowerStation's balanced profile",
+      balanced and balanced.group(1), named)
 
 for status, name in results:
     print(f"{status} {name}")
