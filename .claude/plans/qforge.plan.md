@@ -769,6 +769,20 @@ plus the ROM library that launches them)
   in ~/.local/share/ares/settings.bml after binding one button in the GUI), audio (SDL), GL under
   gamescope, speed on SM8250 (SuperFX/SA-1, 32X), Mega CD BIOS + a cue/chd, saves land in
   ~/saves/<system>/, 6-button pad needed? (MD port default is the 3-button Control Pad).
+  **ares dropped, Snes9x back, ClownMDEmu for Mega Drive + Mega CD, no 32X (2026-10-10, user
+  decision: ares too heavy).** Snes9x's exit crash is fixed by an LD_PRELOAD shim,
+  apps/qforge-sigdefer (/usr/lib/qforge/libqforge-sigdefer.so, stage sigdefer-shim, `make sigdefer`,
+  tests/test-sigdefer.sh): it interposes sigaction() and hands plain SIGTERM/SIGINT handlers to
+  g_unix_signal_add, so S9xExit runs from the GLib main loop like a window close. sharun drops
+  LD_PRELOAD unless SHARUN_ALLOW_LD_PRELOAD=1 (both in the definition's env). HW ✅ ACE: shim mapped,
+  Exit writes snes9x.conf + .srm, no crash; core dumps back on. ClownMDEmu 1.6.12
+  (pkgforge-dev/ClownMDEmu-AppImage-Enhanced, sharun, AGPL-3.0): `-f -u ~/.config/clownmdemu/<system>`,
+  its "Save Data" linked to ~/saves/<system> (tmpfiles L), seed rewinding = off (keyboard left
+  unbound), fixed SDL3 gamepad layout, Mega CD needs no BIOS (own boot ROM). HW ✅ ACE: Mega Drive
+  (Kunio) fullscreen, pad, sound, smooth, .srm on Exit. Mega CD untested. 32X: no light standalone
+  aarch64 emulator (PicoDrive: no Linux build, SIGTERM skips saves; BlastEm 1.0: interpreters on
+  ARM, needs 32X BIOS); Genesis Plus GX has no 32X and no usable standalone frontend. Plugin 0.1.15
+  (32x tab gone). The launcher's `system_args` stays (generic, tested) with no user.
   RPCS3 (HW 2026-10-07, Pocket FIT, Lollipop Chainsaw BLUS30917 folder dump): launcher fixes --
   its DwarFS runtime prints the mount point BEFORE mounting (launcher now waits for the mount);
   `rpcs3 --headless --installfw` installs FW 4.93 then aborts in a destructor (judge installs by

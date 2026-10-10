@@ -521,6 +521,7 @@ declare -A STAGE_EXPECTED=(
   [dev-ota-channel]="DEV-ONLY OTA channel pin"
   [boot-splash]="the splash drawer + its asset, in the sealed root"
   [ogui-plugin]="the QForge OGUI plugin zip, copied to the player's home by the session (not on the installer medium: it runs no OGUI)"
+  [sigdefer-shim]="the LD_PRELOAD shim Snes9x's definition names (not on the installer medium: it runs no emulator)"
   [debug-capture]="DEBUG-ONLY journald log capture"
   [seal]="strip the package manager from the RELEASE root"
   [trim]="delete build and documentation artefacts"

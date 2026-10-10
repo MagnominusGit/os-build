@@ -1,0 +1,25 @@
+{
+  "notes": [
+    "Snes9x (Super Nintendo): pkgforge-dev's sharun repackaging of Snes9x 1.63 (GTK frontend).",
+    "No fullscreen flag exists (FullscreenOnOpen in the seed does it) and no '--': ROM paths are absolute, so never taken for an option.",
+    "Snes9x does not quit when a game stops and cannot bind a button combination, so it has no pad exit: OpenGamepadUI's Exit (Guide) closes it, through its normal exit (SRAM written), no dialog. A launcher-side Select + Start may come later (user decision 2026-10-06: not R3, too easy to hit).",
+    "gui_args: Snes9x's own window (touch screen; no pad-driven UI).",
+    "LD_PRELOAD qforge-sigdefer (apps/qforge-sigdefer): Snes9x 1.63 (master too) installs S9xTerm for SIGTERM/SIGINT and runs its whole exit (S9xExit) inside the signal handler, where it crashed on every OpenGamepadUI Exit (SIGSEGV/SIGABRT, HW 2026-10-06, Pocket ACE). The shim hands that handler to GLib (g_unix_signal_add), so S9xExit runs from the main loop, as when the window is closed. sharun drops LD_PRELOAD unless SHARUN_ALLOW_LD_PRELOAD is set (HW 2026-10-10). HW 2026-10-10, Pocket ACE: shim mapped, Exit runs the full S9xExit (config + SRAM written), no crash; core dumps back on. SRAM is also safe through SaveSRAMEveryNSeconds = 1."
+  ],
+  "format": "appimage-sharun",
+  "binary": "bin/snes9x-gtk",
+  "args": [
+    "{rom}"
+  ],
+  "gui_args": [],
+  "env": {
+    "LD_PRELOAD": "/usr/lib/qforge/libqforge-sigdefer.so",
+    "SHARUN_ALLOW_LD_PRELOAD": "1"
+  },
+  "seed": [
+    {
+      "file": "snes9x.conf",
+      "to": ".config/snes9x/snes9x.conf"
+    }
+  ]
+}

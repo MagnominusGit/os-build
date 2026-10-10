@@ -20,7 +20,7 @@
 #    "gui_args": ["-bigpicture"],                  --gui's command line (no "{rom}")
 #    "system_args": {"md": ["--system", "Mega Drive"]},  put before args when the card's system has
 #                                                  an entry (one emulator, several systems it must
-#                                                  be told about: ares); "{system}" allowed
+#                                                  be told about); "{system}" allowed
 #    "env": {"NAME": "value"},                     added to the emulator's environment
 #    "core_dumps": false,                          no core file when it crashes (default true; below)
 #    "seed": [{"file": "x.ini", "to": ".config/x/x.ini"}],   first-run settings (below)
@@ -77,8 +77,8 @@
 #   - Exit pressed twice is SIGKILL for everything, which leaves a dead mount: sweep ours first.
 #
 # core_dumps false: the emulator starts with RLIMIT_CORE 0, so systemd-coredump logs a crash in the
-# journal but stores no core. For an emulator known to crash on a normal exit (Snes9x 1.63 runs its
-# whole exit inside its SIGTERM handler and dies there, HW 2026-10-06): ~14 MB per Exit otherwise.
+# journal but stores no core. For an emulator known to crash on a normal exit (Snes9x 1.63 did, until
+# the sigdefer shim moved its exit out of its SIGTERM handler): ~14 MB per Exit otherwise.
 #
 # Exit status: the emulator's (128 + N when signal N ended it), or 2 for a bad invocation or
 # definition, 3 when the emulator is not installed or does not start (its AppImage does not mount),

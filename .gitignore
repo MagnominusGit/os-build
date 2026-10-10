@@ -45,6 +45,8 @@ pkg/
 # artifact directory: `make splash` writes an aarch64 binary and the test suite writes a host
 # one beside it.
 /apps/qforge-splash/build/
+# The sigdefer shim's compiled output (apps/qforge-sigdefer).
+/apps/qforge-sigdefer/build/
 
 # Device-proprietary firmware, fetched on demand from the pinned Nova-Deck/qcom-firmwares
 # repo + verified against its sha256sums.txt (never committed here — only in that repo).

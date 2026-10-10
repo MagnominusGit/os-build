@@ -309,36 +309,38 @@ has mgba/config.ini keyB=0 "GBA B on the south button (b0)"
 has mgba/config.ini keySelect=6 "Select on b6"; has mgba/config.ini keyStart=7 "Start on b7"
 has mgba/config.ini keyL=4 "L on LB"; has mgba/config.ini keyR=5 "R on RB"
 lacks mgba/config.ini '^key[A-Za-z]+=8$' "binding on Guide (b8)"
-# No single-button quit (R3 was too easy to hit, user 2026-10-06): mGBA and ares cannot bind
+# No single-button quit (R3 was too easy to hit, user 2026-10-06): mGBA and Snes9x cannot bind
 # Select + Start, so OpenGamepadUI's Exit (Guide) is their way out.
 [ ! -e "$SEED_DIR/mgba/qt.ini" ] && ! grep -q qt.ini "$SEED_DIR/mgba/emulator.json" \
   && ok "mgba: no pad quit shortcut seeded" || bad "mgba seeds a pad shortcut file (qt.ini)"
 grep -q 'saves/{system}' "$SEED_DIR/mgba/emulator.json" && grep -q 'states/{system}' "$SEED_DIR/mgba/emulator.json" \
   && ok "mgba: per-system save and state folders from the card's system" || bad "mgba: saves/states not per system"
-# ares (snes, md, segacd, 32x): one virtual pad for every system, bound by SDL GUID + slot
-# ("<guid>/<slot>/<group>/<input>[/Lo|Hi]"; groups 0 axis, 1 hat, 3 button). Each console maps it by
-# position (SNES B / Mega Drive B on south ...).
-ARES_PAD="030010f85e040000000b000001000000/0"
-has ares/settings.bml "  A..South: $ARES_PAD/3/0" "south = b0"
-has ares/settings.bml "  B..East: $ARES_PAD/3/1" "east = b1"
-has ares/settings.bml "  X..West: $ARES_PAD/3/2" "west = b2"
-has ares/settings.bml "  Y..North: $ARES_PAD/3/3" "north = b3"
-has ares/settings.bml "  Select: $ARES_PAD/3/6" "Select = b6"; has ares/settings.bml "  Start: $ARES_PAD/3/7" "Start = b7"
-has ares/settings.bml "  Pad.Up: $ARES_PAD/1/1/Lo;$ARES_PAD/0/1/Lo" "D-pad = hat 0, and the left stick"
-has ares/settings.bml "  L-Trigger: $ARES_PAD/0/2/Hi" "LT = axis 2 pulled"
-has ares/settings.bml "  Driver: SDL" "SDL input (the GUID binding is SDL's)"
-lacks ares/settings.bml '/3/8($|;)' "binding on Guide (b8)"
-lacks ares/settings.bml '^Hotkey' "hotkey (one button each, no Select + Start: OGUI's Exit is the way out)"
-has ares/settings.bml "Video" "a Video section"
-has ares/settings.bml "  Overscan: false" "overscan cropped (on, the SNES border letterboxes the picture)"
-has ares/settings.bml "    BIOS.US: /home/player/bios/segacd/bios_CD_U.bin" "Mega CD BIOS named in ~/bios/segacd (no auto-scan)"
-python3 -c 'import json,sys; a=json.load(open(sys.argv[1]))["args"]; sys.exit(not ("--pseudofullscreen" in a and "--fullscreen" not in a))' \
-  "$SEED_DIR/ares/emulator.json" && ok "ares: --pseudofullscreen (GLX --fullscreen draws off-centre and cropped under gamescope)" \
-  || bad "ares: args must use --pseudofullscreen, not --fullscreen"
-for sys in snes md segacd 32x; do
-  python3 -c 'import json,sys; a=json.load(open(sys.argv[1]))["system_args"][sys.argv[2]]
-sys.exit(not (a[0] == "--system" and "--setting" in a and "Paths/Saves=/home/player/saves/{system}/" in a))' \
-    "$SEED_DIR/ares/emulator.json" "$sys" && ok "ares: $sys names its system and saves in ~/saves/$sys" || bad "ares: $sys system_args"
+# Snes9x: raw indices; SNES B south, A east, Y west, X north.
+has snes9x/snes9x.conf 'B = Joystick 1 Button 0' "SNES B on south"
+has snes9x/snes9x.conf 'A = Joystick 1 Button 1' "SNES A on east"
+has snes9x/snes9x.conf 'Y = Joystick 1 Button 2' "SNES Y on west"
+has snes9x/snes9x.conf 'X = Joystick 1 Button 3' "SNES X on north"
+has snes9x/snes9x.conf 'Up = Joystick 1 Axis 6 + 50%' "D-pad hat = axes 6/7 after the 6 real ones"
+lacks snes9x/snes9x.conf '^b_quit' "single-button quit shortcut"
+lacks snes9x/snes9x.conf '^b_[a-z_]+ = ' "binding under an internal b_* name (Snes9x reads Up, A, ...; b_* stays Unset)"
+has snes9x/snes9x.conf 'FullscreenOnOpen = true' "fullscreen (no flag exists)"
+lacks snes9x/snes9x.conf 'Button 8$' "binding on Guide (b8)"
+# Snes9x runs its whole exit inside its SIGTERM handler: the sigdefer shim moves it to the main
+# loop, and sharun only passes LD_PRELOAD on when SHARUN_ALLOW_LD_PRELOAD is set.
+python3 -c 'import json,sys; e=json.load(open(sys.argv[1]))["env"]
+sys.exit(not (e.get("LD_PRELOAD") == "/usr/lib/qforge/libqforge-sigdefer.so" and e.get("SHARUN_ALLOW_LD_PRELOAD") == "1"))' \
+  "$SEED_DIR/snes9x/emulator.json" && ok "snes9x: the sigdefer shim is preloaded, through sharun" || bad "snes9x: sigdefer shim not preloaded (LD_PRELOAD + SHARUN_ALLOW_LD_PRELOAD)"
+# ClownMDEmu (md, segacd): fixed SDL gamepad layout, nothing to bind; one user folder per system.
+has clownmdemu/configuration.ini '[Miscellaneous]' "the Miscellaneous section"
+has clownmdemu/configuration.ini 'rewinding = off' "rewinding off (a rewind buffer every frame otherwise)"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); a=d["args"]
+sys.exit(not ("-f" in a and a[a.index("-u") + 1] == "/home/player/.config/clownmdemu/{system}"
+              and {s["to"] for s in d["seed"]} == {".config/clownmdemu/md/configuration.ini", ".config/clownmdemu/segacd/configuration.ini"}))' \
+  "$SEED_DIR/clownmdemu/emulator.json" && ok "clownmdemu: fullscreen, a user folder per system, each seeded" \
+  || bad "clownmdemu: args need -f and -u ~/.config/clownmdemu/{system}, with a seed per system"
+for sys in md segacd; do
+  grep -qxF "L \"%h/.config/clownmdemu/$sys/Save Data\" - - - - %h/saves/$sys" "$LAYOUT" \
+    && ok "clownmdemu: $sys saves land in ~/saves/$sys" || bad "clownmdemu: no Save Data link for $sys in the layout"
 done
 # PPSSPP: SDL gamepad -> keycodes (A 189, B 190, X 191, Y 188, Guide 4); device 10.
 has ppsspp/controls.ini 'Cross = 10-189' "Cross on south"; has ppsspp/controls.ini 'Circle = 10-190' "Circle on east"
@@ -607,7 +609,7 @@ reset_logs; QFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
   && ok "{system} in args becomes the card's system (mGBA: one emulator, per-system folders)" \
   || bad "{system} not substituted: $(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' '|')"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
-# system_args: one emulator, several systems it must be told about (ares: --system "Mega Drive").
+# system_args: one emulator, several systems it must be told about (e.g. --system "Mega Drive").
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["args"] = ["-f", "{rom}"]; d["install"] = []
 d["system_args"] = {"psx": ["--system", "Play Station", "--saves={system}"], "md": ["--system", "Mega Drive"]}
 json.dump(d, open(sys.argv[2], "w"))' "$DS_DEF" "$INST/duckstation/emulator.json"

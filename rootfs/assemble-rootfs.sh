@@ -240,6 +240,9 @@ fi
 # ogui-plugin runs on EVERY build.
 . "$ROOT/rootfs/lib-assemble-plugin.sh"
 
+# sigdefer-shim runs on EVERY build.
+. "$ROOT/rootfs/lib-assemble-sigdefer.sh"
+
 # debug-capture is DEBUG-ONLY, same construction -- and independent of QFORGE_DEV.
 if [ "${QFORGE_DEBUG:-}" = "1" ]; then
   . "$ROOT/rootfs/lib-assemble-debug.sh"

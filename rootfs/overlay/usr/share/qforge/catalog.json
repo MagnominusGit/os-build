@@ -1,26 +1,6 @@
 {
   "schema": 1,
   "emulators": {
-    "ares": {
-      "name": "ares",
-      "author": "The ares team; AppImage by pkgforge-dev",
-      "systems": [
-        "snes",
-        "md",
-        "segacd",
-        "32x"
-      ],
-      "github": "pkgforge-dev/ares-emu-appimage",
-      "tag": "v148@2026-09-07_1788787887",
-      "asset": "^ares-v148-anylinux-aarch64\\.AppImage$",
-      "sha256": "b286de6efd7316f3c8e6b66d7d4524b81e13f7eb8a13ec2455c37defcb354ef1",
-      "size": 82093160,
-      "homepage": "https://ares-emu.net/",
-      "licence": {
-        "name": "ISC",
-        "url": "https://github.com/ares-emulator/ares/blob/master/LICENSE"
-      }
-    },
     "armsx2": {
       "name": "ARMSX2",
       "author": "The ARMSX2 team (based on PCSX2)",
@@ -70,6 +50,24 @@
       "licence": {
         "name": "MPL-2.0",
         "url": "https://github.com/cemu-project/Cemu/blob/main/LICENSE.txt"
+      }
+    },
+    "clownmdemu": {
+      "name": "ClownMDEmu",
+      "author": "Clownacy; AppImage by pkgforge-dev",
+      "systems": [
+        "md",
+        "segacd"
+      ],
+      "github": "pkgforge-dev/ClownMDEmu-AppImage-Enhanced",
+      "tag": "1.6.12@2026-10-01_1790875968",
+      "asset": "^ClownMDEmu-1\\.6\\.12-anylinux-aarch64\\.AppImage$",
+      "sha256": "fec5fd79124d702a3b416b02dff1df28a7c76582f0eb11bf6e63d91dbb5ec84a",
+      "size": 23524452,
+      "homepage": "https://github.com/Clownacy/clownmdemu-frontend",
+      "licence": {
+        "name": "AGPL-3.0-or-later",
+        "url": "https://github.com/Clownacy/clownmdemu-frontend/blob/master/LICENCE.txt"
       }
     },
     "dolphin": {
@@ -199,6 +197,23 @@
           "to": ".config/rpcs3/GuiConfigs/config_database.dat"
         }
       ]
+    },
+    "snes9x": {
+      "name": "Snes9x",
+      "author": "The Snes9x team; AppImage by pkgforge-dev",
+      "systems": [
+        "snes"
+      ],
+      "github": "pkgforge-dev/Snes9x-AppImage",
+      "tag": "1.63-1@2026-10-01_1790876690",
+      "asset": "^Snes9x-1\\.63-1-anylinux-aarch64\\.AppImage$",
+      "sha256": "8c9406ae4166c67037c7ff65a945bbb0f3c2431623b5b93b49fae6ad6b037144",
+      "size": 40282900,
+      "homepage": "https://www.snes9x.com/",
+      "licence": {
+        "name": "Snes9x licence (non-commercial)",
+        "url": "https://github.com/snes9xgit/snes9x/blob/master/LICENSE"
+      }
     },
     "xemu": {
       "name": "xemu",
