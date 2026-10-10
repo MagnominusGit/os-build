@@ -436,6 +436,7 @@ test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-power-led.sh
 	bash $(TESTS_DIR)/test-suspend.sh
 	bash $(TESTS_DIR)/test-stage2-grub.sh
+	bash $(TESTS_DIR)/test-device-env.sh
 	bash $(TESTS_DIR)/test-partition-table.sh
 	bash $(TESTS_DIR)/test-units.sh
 	bash $(TESTS_DIR)/test-session.sh

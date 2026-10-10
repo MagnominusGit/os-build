@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# Offline test of what device-env REPORTS: run the shipped script against the shipped profiles
+# with a faked devicetree model, and check the values userspace will eval.
+#
+#   tests/test-device-env.sh
+#
+# Focus: the second-panel block (QFORGE_SECONDARY_*) of dual-screen boards. gamescope drives that
+# connector as its second output (--secondary-output) and routes its digitizer there
+# (--secondary-touch-device, matched on the input device name). A wrong value here is a dark
+# bottom panel or touches landing on the wrong screen, and nothing on the device would say why.
+# Run via `make test`.
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DEVENV="$ROOT/rootfs/overlay/usr/lib/qforge/device-env"
+DEVICES="$ROOT/rootfs/overlay/usr/lib/qforge/devices"
+DTS="$ROOT/kernel/dts/qcom"
+
+PASS=0; FAIL=0; CASE=""
+ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
+bad() { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
+
+SECONDARY=(QFORGE_SECONDARY_CONNECTOR QFORGE_SECONDARY_TOUCHSCREEN)
+
+# What device-env reports for one model string, evaluated the way consumers do.
+report() { (QFORGE_MODEL="$1" QFORGE_DEVICE_DIR="$DEVICES" bash "$DEVENV"); }
+value()  { (eval "$(report "$1")"; eval "printf '%s' \"\${$2-<unset>}\""); }
+
+# =================================================================================================
+CASE="AYN Thor Lite"
+m="AYN Thor Lite"
+[ "$(value "$m" QFORGE_PRIMARY_CONNECTOR)" = DSI-1 ] && ok "primary stays DSI-1 (the 1080x1920 panel)" \
+  || bad "primary is '$(value "$m" QFORGE_PRIMARY_CONNECTOR)', not DSI-1"
+[ "$(value "$m" QFORGE_SECONDARY_CONNECTOR)" = DSI-2 ] && ok "second panel is DSI-2" \
+  || bad "QFORGE_SECONDARY_CONNECTOR is '$(value "$m" QFORGE_SECONDARY_CONNECTOR)', not DSI-2"
+[ "$(value "$m" QFORGE_SECONDARY_TOUCHSCREEN)" = bottom_touchscreen ] \
+  && ok "bottom digitizer is the input device bottom_touchscreen" \
+  || bad "QFORGE_SECONDARY_TOUCHSCREEN is '$(value "$m" QFORGE_SECONDARY_TOUCHSCREEN)'"
+
+# =================================================================================================
+CASE="single-panel boards"
+for m in "AYANEO Pocket ACE" "KONKR Pocket FIT" "some board nobody knows"; do
+  out="$(report "$m")"
+  for v in "${SECONDARY[@]}"; do
+    grep -qx "$v=''" <<<"$out" && ok "$m: $v is emitted, empty" \
+      || bad "$m: $v is not emitted empty ($(grep "^$v=" <<<"$out" || echo missing))"
+  done
+done
+
+# =================================================================================================
+# Every profile that declares a second panel declares the whole block, on a different connector,
+# and its touchscreen name is a `label` in that board's DTS: kernel patch 0705 makes edt-ft5x06
+# name the input device after that label, and gamescope matches the name.
+CASE="second-panel profiles"
+n=0
+for conf in "$DEVICES"/*.conf; do
+  [ "$(basename "$conf")" = defaults.conf ] && continue
+  name="$(sed -n "s/^QFORGE_DEVICE_NAME=//p" "$conf" | tr -d "'\"")"
+  out="$(report "$name")"
+  get() { sed -n "s/^$1=//p" <<<"$out" | tr -d "'"; }
+  [ -n "$(get QFORGE_SECONDARY_CONNECTOR)" ] || continue
+  n=$((n+1)); id="$(basename "$conf" .conf)"
+  missing=""
+  for v in "${SECONDARY[@]}"; do [ -n "$(get "$v")" ] || missing="$missing $v"; done
+  [ -z "$missing" ] && ok "$id declares the whole second-panel block" || bad "$id is missing:$missing"
+  [ "$(get QFORGE_SECONDARY_CONNECTOR)" != "$(get QFORGE_PRIMARY_CONNECTOR)" ] \
+    && ok "$id: second panel is not the primary connector" \
+    || bad "$id: QFORGE_SECONDARY_CONNECTOR equals the primary ($(get QFORGE_PRIMARY_CONNECTOR))"
+  ts="$(get QFORGE_SECONDARY_TOUCHSCREEN)"
+  dts="$(grep -l "model = \"$name\";" "$DTS"/*.dts 2>/dev/null | head -1)"
+  if [ -z "$dts" ]; then
+    bad "$id: no DTS declares model \"$name\""
+  elif grep -q "label = \"$ts\";" "$dts"; then
+    ok "$id: $ts is a touchscreen label in $(basename "$dts")"
+  else
+    bad "$id: '$ts' is not a label in $(basename "$dts") -- gamescope would never match it"
+  fi
+done
+[ "$n" -ge 1 ] && ok "$n board(s) declare a second panel" || bad "no board declares a second panel"
+
+echo
+echo "test-device-env.sh: $PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ]
