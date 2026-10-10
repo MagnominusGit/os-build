@@ -1,0 +1,70 @@
+From 38de67c9f6e5dc949193a58f2a5c0620d9f27b7f Mon Sep 17 00:00:00 2001
+From: Philippe Simons <simons.philippe@gmail.com>
+Date: Sat, 10 Oct 2026 17:51:54 +0200
+Subject: [PATCH] fix(PerformanceManager): key per-game profiles by provider
+ and app id
+
+A game's performance profile was saved under a hash of the library item's
+name, so it was lost whenever the item was renamed (a title changed
+upstream, a library that scrapes metadata, a provider that renames items
+to tell same-named games apart), and two providers' games with the same
+name shared one profile.
+
+Key it by the item's provider and app id instead, which do not change
+with the name; an item without an app id keeps using its name. A profile
+saved under the name is still loaded until the next save writes it under
+the new key.
+
+(cherry picked from commit 22d557905f98d62ff4803202330c3d93e49a720b)
+---
+ .../performance/performance_manager.gd        | 23 ++++++++++++++++++-
+ 1 file changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/core/systems/performance/performance_manager.gd b/core/systems/performance/performance_manager.gd
+index 16e44f13..b550ad33 100644
+--- a/core/systems/performance/performance_manager.gd
++++ b/core/systems/performance/performance_manager.gd
+@@ -76,11 +76,21 @@ func get_profile_filename(profile_state: PROFILE_STATE, library_item: LibraryLau
+ 	var prefix: String = _hardware_manager.get_product_name().replace(" ", "_") + "_" + profile_state_name
+ 	var postfix: String = "_default_profile.tres"
+ 	if library_item:
+-		postfix = "_" + library_item.name.sha256_text() + ".tres"
++		postfix = "_" + _get_profile_key(library_item).sha256_text() + ".tres"
+ 
+ 	return prefix+postfix
+ 
+ 
++## Returns what a library item's profile is keyed by: its provider and app id,
++## which stay the same when the item is renamed (a title changed upstream, a
++## metadata scrape), and tell apart same-named games from different providers.
++## Items without an app id fall back to their name.
++func _get_profile_key(library_item: LibraryLaunchItem) -> String:
++	if library_item._provider_id.is_empty() or library_item.provider_app_id.is_empty():
++		return library_item.name
++	return library_item._provider_id + "/" + library_item.provider_app_id
++
++
+ ## Saves the given PerformanceProfile to the given path. If a library item
+ ## is passed, the user's settings will be updated to use the given profile.
+ func save_profile(profile: PerformanceProfile, profile_path: String, library_item: LibraryLaunchItem = null) -> void:
+@@ -177,6 +187,17 @@ func load_or_create_profile(profile_path: String, library_item: LibraryLaunchIte
+ 		logger.debug("Found profile at: " + profile_path)
+ 		return profile
+ 
++	# Profiles were keyed by the item's name before; keep using one saved that
++	# way until the next save writes it under the new key.
++	if library_item:
++		var name_hash := library_item.name.sha256_text()
++		var key_hash := _get_profile_key(library_item).sha256_text()
++		if name_hash != key_hash:
++			profile = load_profile(profile_path.replace(key_hash, name_hash))
++			if profile:
++				logger.debug("Found profile under the item's name for: " + profile_path)
++				return profile
++
+ 	# If the profile does not exist, create one with the currently applied
+ 	# performance settings.
+ 	logger.debug("No profile found. Creating one.")
+-- 
+2.55.0
+
