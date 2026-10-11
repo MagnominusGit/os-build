@@ -33,7 +33,12 @@ if [ $# -eq 2 ] && [ "${1#-}" = "$1" ] && [ "${2#-}" = "$2" ] && [ -f "$1" ]; th
     say "releasing an earlier mount on $dst"
     "$FUSERMOUNT" -u -z "$dst" 2>/dev/null
   fi
-  "$SQUASHFUSE" "$src" "$dst" || { say "squashfuse could not mount $src on $dst"; exit 32; }
+  # OpenGamepadUI's Exit sends SIGTERM to every process of the port at once, squashfuse included:
+  # it would drop the runtime while the game still runs from it (a JVM shutting down then aborts
+  # and dumps core, ~15 s before OGUI comes back; HW Pocket ACE 2026-10-11). Ignored signals
+  # survive exec and libfuse keeps them (it only replaces default handlers): the mount lives until
+  # the port's or the launcher's lazy unmount and its last user are gone.
+  ( trap '' TERM INT; exec "$SQUASHFUSE" "$src" "$dst" ) || { say "squashfuse could not mount $src on $dst"; exit 32; }
   printf '%s\t%s\n' "$dst" "$src" >> "$REGISTRY"
   exit 0
 fi

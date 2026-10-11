@@ -43,6 +43,7 @@ mkdir -p "$T/stub" "$T/run" "$T/libs"
 cat > "$T/stub/squashfuse" <<EOF
 #!/bin/bash
 echo "squashfuse \$*" >> "$T/calls"
+awk '/^SigIgn:/ { print \$2 }' /proc/\$\$/status > "$T/sigign"
 case \$(basename "\$1") in bad.*) exit 1 ;; esac
 echo "squashfuse \$(printf '%s' "\$2" | sed 's/ /\\\\040/g') fuse.squashfuse ro,nosuid,nodev 0 0" >> "$T/mounts"
 EOF
@@ -70,6 +71,10 @@ reset
 "$BIN/mount" "$GODOT" "$T/home/godot"; rc=$?
 [ "$rc" = 0 ] && is_mounted "$T/home/godot" && ok "mount <file> <dir>: squashfuse mounts it, exit 0" || bad "rc=$rc calls: $(cat "$T/calls")"
 [ -d "$T/home/godot" ] && ok "creates the mount point" || bad "no mount point"
+ign=$((16#$(cat "$T/sigign")))
+[ $((ign & (1 << 14))) -ne 0 ] && [ $((ign & (1 << 1))) -ne 0 ] \
+  && ok "squashfuse starts with SIGTERM/SIGINT ignored (OGUI's Exit signals the whole port: the runtime outlives its users)" \
+  || bad "SigIgn=$(cat "$T/sigign")"
 grep -qxF "$T/home/godot	$GODOT" "$REG" && ok "recorded in the registry (mount point TAB file)" || bad "registry: $(cat "$REG" 2>/dev/null)"
 "$BIN/mount" "$GODOT" "$T/home/godot"
 grep -qx "fusermount -u -z $T/home/godot" "$T/calls" && [ "$(grep -c "^squashfuse $T/home/godot " "$T/mounts")" = 1 ] \
