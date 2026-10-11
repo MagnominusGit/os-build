@@ -328,6 +328,132 @@ run install dummy
 [ "$RC" = 4 ] && [ ! -e "$W/curl.log" ] && ok "an unknown channel is refused before any download" || bad "rc=$RC"
 
 # =================================================================================================
+CASE="unpacked archive"
+# PortMaster is a zip, not an AppImage: unpacked into ~/roms/ports/PortMaster (its own default
+# through the image's /roms link), version read from its own file, and it updates itself after the
+# first install (user decision 2026-10-11). An archive must not be able to write outside its folder.
+mkzip() {  # mkzip <name> <version> [extra python lines run with z open]
+  python3 - "$W/srv/$1.zip" "$2" "${3:-}" <<'PY'
+import sys, zipfile
+path, ver, extra = sys.argv[1:4]
+def add(z, name, data, mode):
+    i = zipfile.ZipInfo(name); i.external_attr = mode << 16; i.create_system = 3
+    z.writestr(i, data)
+with zipfile.ZipFile(path, "w") as z:
+    add(z, "Tool/", b"", 0o40755)
+    add(z, "Tool/version", ver + "\n", 0o100644)
+    add(z, "Tool/Tool.sh", "#!/bin/sh\necho tool\n", 0o100755)
+    add(z, "Tool/lib/data.txt", "data", 0o100644)
+    add(z, "Tool/setuid", "x", 0o104755)
+    exec(extra)
+PY
+}
+zip_catalog() {  # zip_catalog <name> [self_update true|false]
+  local f="$W/srv/$1.zip"
+  cat > "$W/catalog.json" <<EOF
+{"schema": 1, "emulators": {"tool": {
+  "name": "Tool", "author": "A. Tool", "systems": ["ports"], "github": "example/dummy", "tag": "$1",
+  "asset": "^Tool\\\\.zip\$", "sha256": "$(sha "$f")", "size": $(size "$f"),
+  "unpack": {"to": "roms/ports/Tool", "version": "version"}, "self_update": ${2:-true},
+  "homepage": "https://example.org/", "licence": {"name": "MIT", "url": "https://example.org/LICENSE"}}}}
+EOF
+  cat > "$W/srv/api-$1.json" <<EOF
+{"tag_name": "$1", "assets": [{"name": "Tool.zip", "size": $(size "$f"), "digest": "sha256:$(sha "$f")",
+   "browser_download_url": "https://github.com/example/dummy/releases/download/$1/Tool.zip"}]}
+EOF
+}
+# The curl stub serves <tag>.zip for .../download/<tag>/Tool.zip.
+sed -i 's|^  \*) exit 22 ;;$|  https://github.com/example/dummy/releases/download/*/Tool.zip)\n    tag=${url%/*}; tag=${tag##*/}; cp "'"$W"'/srv/$tag.zip" "${out:?no -o}" ;;\n  *) exit 22 ;;|' "$W/bin/curl"
+T="$W/home/roms/ports/Tool"
+tfield() { python3 -c 'import json,sys; e=json.loads(sys.argv[1])["emulators"]["tool"]; print(json.dumps(e[sys.argv[2]]))' "$OUT" "$1" 2>/dev/null; }
+
+mkzip 2026.1 2026.1
+reset; zip_catalog 2026.1
+run install tool
+[ "$RC" = 0 ] && [ -f "$T/Tool.sh" ] && [ "$(cat "$T/lib/data.txt")" = data ] \
+  && ok "unpacks the archive's top folder into ~/roms/ports/Tool" || bad "rc=$RC $ERR; got: $(find "$W/home" | tr '\n' ' ')"
+[ -x "$T/Tool.sh" ] && [ ! -x "$T/lib/data.txt" ] && ok "keeps the archive's executable bits" || bad "modes: $(stat -c '%n %a' "$T/Tool.sh" "$T/lib/data.txt")"
+[ "$(stat -c %a "$T/setuid" 2>/dev/null)" = 755 ] && ok "never carries a setuid bit over" || bad "setuid file mode $(stat -c %a "$T/setuid" 2>/dev/null)"
+pct_only && ok "stdout is only forward N% lines ending at 100%" || bad "stdout was: $(tr '\n' '|' <<<"$OUT")"
+[ -z "$(find "$W/home" "$D" -name '*.part' -o -name '*qforge-new*')" ] && ok "no download or staging folder left" || bad "left: $(find "$W/home" "$D" -name '*.part' -o -name '*qforge-new*')"
+[ ! -e "$D/tool/current" ] && [ -z "$(find "$D" -name '*.AppImage')" ] && ok "no AppImage layout for an archive" || bad "AppImage layout created"
+run list
+[ "$(tfield installed)" = '"2026.1"' ] && [ "$(tfield update)" = false ] && [ "$(tfield self_update)" = true ] \
+  && ok "list: installed = the archive's own version file, self_update, no update offered" \
+  || bad "got installed=$(tfield installed) update=$(tfield update) self_update=$(tfield self_update)"
+
+CASE="unpacked archive: it updates itself"
+# PortMaster rewrote its own version file: QForge must neither offer nor force a downgrade/update.
+printf '2026.9\n' > "$T/version"; mkdir -p "$T/libs"; printf 'runtime' > "$T/libs/godot.squashfs"
+mkzip 2026.2 2026.2; zip_catalog 2026.2; : > "$W/curl.log"
+run list
+[ "$(tfield installed)" = '"2026.9"' ] && [ "$(tfield update)" = false ] && ok "a self-updated version is reported, no update offered" || bad "installed=$(tfield installed) update=$(tfield update)"
+run install tool
+[ "$RC" = 0 ] && [ "$OUT" = "100%" ] && ! grep -q 'Tool.zip' "$W/curl.log" && [ "$(cat "$T/version")" = 2026.9 ] \
+  && ok "install on a self-updating install downloads nothing and changes nothing" || bad "rc=$RC out=$OUT version=$(cat "$T/version")"
+
+CASE="unpacked archive: pinned (no self-update)"
+reset; mkzip 2026.1 2026.1; zip_catalog 2026.1 false; run install tool
+mkdir -p "$T/libs"; printf 'runtime' > "$T/libs/godot.squashfs"
+mkzip 2026.2 2026.2; zip_catalog 2026.2 false
+run list
+[ "$(tfield update)" = true ] && ok "a newer pin offers an update" || bad "update=$(tfield update)"
+run install tool
+[ "$RC" = 0 ] && [ "$(cat "$T/version")" = 2026.2 ] && [ -f "$T/libs/godot.squashfs" ] \
+  && ok "the update unpacks over the folder and keeps what the tool added (runtimes)" || bad "rc=$RC version=$(cat "$T/version" 2>/dev/null) $ERR"
+
+CASE="unpacked archive: refusals"
+refused() {  # refused <what> <zip-name> <extra python>
+  mkzip "$2" "$2" "$3"; reset; zip_catalog "$2"
+  run install tool
+  if [ "$RC" = 4 ] && [ ! -e "$T" ] && [ -z "$(find "$W/home" -mindepth 1 -not -path "$W/home/roms" -not -path "$W/home/roms/ports")" ]; then
+    ok "$1: exit 4, nothing installed or left"
+  else
+    bad "$1: rc=$RC left: $(find "$W/home" -mindepth 1 | tr '\n' ' ') $ERR"
+  fi
+}
+refused "a '..' member" 3.1 'add(z, "Tool/../../escape", "x", 0o100644)'
+refused "an absolute member" 3.2 'add(z, "/tmp/abs-escape", "x", 0o100644)'
+refused "a symlink member" 3.3 'add(z, "Tool/link", "/etc/passwd", 0o120777)'
+refused "a second top-level folder" 3.4 'add(z, "Other/file", "x", 0o100644)'
+refused "a version file that is not the pinned tag" 3.5 'add(z, "Tool/version", "9.9\n", 0o100644)'
+[ ! -e "$W/escape" ] && [ ! -e /tmp/abs-escape ] && ok "no member was written outside the folder" || bad "an archive member escaped"
+mkzip 3.6 3.6; reset; zip_catalog 3.6
+python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); c["emulators"]["tool"]["unpack"]["to"]="../outside"; json.dump(c, open(sys.argv[1], "w"))' "$W/catalog.json"
+run install tool
+[ "$RC" = 4 ] && [ ! -e "$W/curl.log" ] && ok "an unpack target outside the home is refused before any download" || bad "rc=$RC"
+# Targets whose Delete would take the home or every emulator with it (security review 2026-10-11).
+for to in . emulators/.. ""; do
+  zip_catalog 3.6
+  python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); c["emulators"]["tool"]["unpack"]["to"]=sys.argv[2]; json.dump(c, open(sys.argv[1], "w"))' "$W/catalog.json" "$to"
+  rm -f "$W/curl.log"; run install tool
+  [ "$RC" = 4 ] && [ ! -e "$W/curl.log" ] && ok "unpack target '$to' (the home itself) is refused" || bad "target '$to': rc=$RC"
+done
+reset; zip_catalog 3.6; mkdir -p "$W/home/roms/ports"
+python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); c["emulators"]["tool"]["unpack"]["to"]="emus-parent"; json.dump(c, open(sys.argv[1], "w"))' "$W/catalog.json"
+OUT="$(HOME="$W/home" QFORGE_CURL="$W/bin/curl" QFORGE_EMU_DIR="$W/home/emus-parent/emulators" QFORGE_CATALOG="$W/catalog.json" python3 "$EMU" install tool 2>&1)"; RC=$?
+[ "$RC" = 4 ] && ok "an unpack target that holds the emulators folder is refused" || bad "target above ~/emulators: rc=$RC"
+# A symlinked target is never unpacked through, and a stale staging symlink does not block installs.
+mkzip 3.7 3.7; reset; zip_catalog 3.7; mkdir -p "$W/home/roms/ports" "$W/elsewhere"; ln -s "$W/elsewhere" "$T"
+run install tool
+[ "$RC" = 5 ] && [ -z "$(ls -A "$W/elsewhere")" ] && ok "a symlinked target folder is refused, nothing written through it" || bad "symlinked target: rc=$RC, wrote: $(ls -A "$W/elsewhere")"
+reset; zip_catalog 3.7; mkdir -p "$W/home/roms/ports"; ln -s /nonexistent "$W/home/roms/ports/.Tool.qforge-new"
+run install tool
+[ "$RC" = 0 ] && [ -f "$T/Tool.sh" ] && ok "a stale staging symlink is cleared, the install goes on" || bad "stale staging symlink: rc=$RC $ERR"
+refused "an archive of absolute paths only" 3.8 'z.filelist[:] = []; z.NameToInfo.clear(); add(z, "/abs/version", "3.8\n", 0o100644)'
+
+CASE="unpacked archive: remove"
+reset; mkzip 2026.1 2026.1; zip_catalog 2026.1; run install tool
+mkdir -p "$W/home/roms/ports/agame"; touch "$W/home/roms/ports/Agame.sh"
+run remove tool
+[ "$RC" = 0 ] && [ ! -e "$T" ] && [ ! -e "$D/tool" ] && ok "removes the unpacked folder" || bad "rc=$RC left: $(ls "$T" 2>&1)"
+[ -d "$W/home/roms/ports/agame" ] && [ -f "$W/home/roms/ports/Agame.sh" ] && ok "leaves the ports beside it alone" || bad "touched the ports"
+# A folder qforge-emu did not unpack (no marker) is never deleted, whatever the catalog says.
+mkdir -p "$T"; touch "$T/players-own"
+run remove tool
+[ -f "$T/players-own" ] && ok "a folder without qforge-emu's marker is left alone" || bad "deleted a folder qforge-emu did not install"
+
+# =================================================================================================
 CASE="remove"
 reset; catalog v1; api v1; run install dummy
 catalog v2; api v2; run install dummy

@@ -39,7 +39,30 @@
 # checksummed: the emulator reads them as data. A failed fetch keeps the previous file and never
 # fails the install (the emulator itself is in place): a warning on stderr.
 #
-# Layout (what qforge-launch runs): /home/player/emulators/<emulator>/{<tag>.AppImage, current}.
+# UNPACKED ARCHIVES (catalog "unpack": {"to": "<folder under $HOME>", "version": "<file in it>"},
+# optional): the asset is a zip with ONE top-level folder, unpacked into `to` instead of becoming an
+# AppImage -- PortMaster, a folder of scripts that every port it installs finds through
+# /roms/ports/PortMaster (plan Phase 4b). Downloaded and verified exactly like an AppImage, then
+# unpacked into a hidden staging folder beside `to` and renamed into place; over an existing folder
+# it unpacks on top instead, as PortMaster's own updater does, so what the tool added (its runtimes,
+# its config) stays. Refused (exit 4, nothing written): a member outside the top folder ('..', an
+# absolute path), a symlink or special file, more than one top folder, or a version file that is not
+# the pinned tag. Executable bits are kept, setuid/setgid/sticky never. The installed version is the
+# folder's own version file. A MARKER (.qforge-emu, naming the emulator) is written into the folder,
+# and remove deletes the folder only when the marker is there: a catalog `to` pointing at a folder
+# qforge-emu never unpacked can never delete it. A folder that was already there (a PortMaster the
+# player installed by hand) is unpacked over and marked, i.e. adopted: Delete then removes it, as
+# the page says. `to` is never the home itself nor a folder holding ~/emulators, and never a symlink.
+# Unpacking over a folder copies the version file last, so a copy that fails half way (no space)
+# still reports the old version.
+# "self_update": true (only with "unpack"): the tool updates itself after the first install
+# (PortMaster asks the player, then unzips its new release over its folder -- user decision
+# 2026-10-11). The pin is then the FIRST install only: no update is ever offered, and install on an
+# existing install downloads nothing.
+#
+# Layout (what qforge-launch runs): /home/player/emulators/<emulator>/{<tag>.AppImage, current}, or
+# for an unpacked archive the catalog's `to` (/home/player/emulators/<emulator>/ then only holds the
+# install lock and the download in progress).
 #
 # CATALOG: $QFORGE_CATALOG, else the plugin's copy of the hosted catalog
 # (~/.cache/qforge/catalog.json), else the image's (/usr/share/qforge/catalog.json, the offline
@@ -52,9 +75,12 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import time
+import zlib
+import zipfile
 
 EXIT_OK, EXIT_USAGE, EXIT_NET, EXIT_VERIFY, EXIT_LOCAL = 0, 2, 3, 4, 5
 
@@ -75,6 +101,7 @@ SPACE_MARGIN = 16 << 20  # bytes kept free beyond the AppImage itself
 DATA_MAX = 16 << 20  # bytes, per data file
 HOME = os.path.expanduser("~")
 POLL = 0.25  # s between progress samples
+MARKER = ".qforge-emu"  # in an unpacked folder: names the emulator that unpacked it
 
 
 class Fail(Exception):
@@ -107,8 +134,34 @@ def entry(emus, emu):
     return emus[emu]
 
 
-def installed_tag(emu):
-    """The tag `current` points at, or None when nothing (valid) is installed."""
+def unpack_spec(emu, e):
+    """For an "unpack" entry: (absolute folder, version file in it); None for an AppImage entry."""
+    spec = e.get("unpack")
+    if spec is None:
+        if e.get("self_update"):
+            raise Fail(EXIT_VERIFY, f"{emu}: self_update needs an unpacked archive")
+        return None
+    if not (isinstance(spec, dict) and set(spec) == {"to", "version"}
+            and safe_relative(spec["to"]) and safe_relative(spec["version"])):
+        raise Fail(EXIT_VERIFY, f"{emu}: bad unpack entry {spec!r} (to, version: relative paths)")
+    dest = os.path.join(HOME, spec["to"])
+    emus = os.path.abspath(EMU_DIR)
+    if os.path.commonpath([dest, emus]) == dest:
+        raise Fail(EXIT_VERIFY, f"{emu}: unpack target {dest} holds {emus}")
+    return dest, spec["version"]
+
+
+def installed_tag(emu, e=None):
+    """The installed version, or None when nothing (valid) is installed. An AppImage's is the tag
+    `current` points at; an unpacked archive's is its own version file."""
+    spec = unpack_spec(emu, e) if e is not None else None
+    if spec is not None:
+        try:
+            with open(os.path.join(*spec)) as f:
+                ver = f.read(256).strip()
+        except OSError:
+            return None
+        return ver if SAFE_TAG.fullmatch(ver) else None
     current = os.path.join(EMU_DIR, emu, "current")
     target = os.readlink(current) if os.path.islink(current) else ""
     if not target.endswith(".AppImage") or not os.path.isfile(current):
@@ -213,8 +266,87 @@ def activate(d, tag):
             os.unlink(os.path.join(d, name))
 
 
+def unpack(emu, archive, dest, version, tag):
+    """Unpack the zip's single top folder into `dest` (see UNPACKED ARCHIVES above)."""
+    parent, name = os.path.split(dest)
+    stage = os.path.join(parent, f".{name}.qforge-new")
+    try:
+        os.makedirs(parent, exist_ok=True)
+        if os.path.islink(dest):
+            raise Fail(EXIT_LOCAL, f"{dest} is a symlink: refusing to unpack through it")
+        over = os.path.lexists(dest)
+        discard(stage)
+        with zipfile.ZipFile(archive) as z:
+            members = z.infolist()
+            tops = {m.filename.split("/", 1)[0] for m in members}
+            if len(tops) != 1 or "" in tops:
+                raise Fail(EXIT_VERIFY, f"the archive's entries are not all in one top-level folder")
+            top = tops.pop()
+            # Over an existing folder the files exist twice for a moment: the stage and the copy.
+            need = sum(m.file_size for m in members) * (2 if over else 1)
+            if shutil.disk_usage(parent).free < need + SPACE_MARGIN:
+                raise Fail(EXIT_LOCAL, f"not enough free space in {parent} to unpack")
+            os.mkdir(stage, 0o755)
+            for m in members:
+                unpack_member(z, m, top, stage)
+        with open(os.path.join(stage, version)) as f:
+            found = f.read(256).strip()
+        if found != tag:
+            raise Fail(EXIT_VERIFY, f"the archive says it is version {found!r}, the catalog pinned {tag!r}")
+        with open(os.path.join(stage, MARKER), "w") as f:
+            f.write(f"{emu}\n")
+        if over:
+            shutil.copytree(stage, dest, symlinks=True, dirs_exist_ok=True,
+                            ignore=lambda d, names: [n for n in names if os.path.join(d, n) == os.path.join(stage, version)])
+            shutil.copy2(os.path.join(stage, version), os.path.join(dest, version))
+        else:
+            os.rename(stage, dest)
+    except OSError as err:
+        raise Fail(EXIT_LOCAL, f"cannot unpack into {dest}: {err}")
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, zlib.error, EOFError, ValueError,
+            RuntimeError, NotImplementedError) as err:
+        raise Fail(EXIT_VERIFY, f"cannot read the archive: {err}")
+    finally:
+        try:
+            discard(stage)
+        except OSError as err:
+            log(f"warning: could not clean {stage}: {err}")
+
+
+def discard(path):
+    """Remove a leftover staging entry, whatever it is (a folder, a file, a symlink)."""
+    if os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path)
+    elif os.path.lexists(path):
+        os.unlink(path)
+
+
+def unpack_member(z, m, top, stage):
+    """Write one archive member under `stage`, refusing anything that is not a plain file or folder
+    inside the top folder."""
+    rel = m.filename[len(top):].strip("/")
+    if not m.filename.startswith(top) or m.filename[len(top):len(top) + 1] not in ("", "/"):
+        raise Fail(EXIT_VERIFY, f"archive member outside its folder: {m.filename!r}")
+    if not rel:
+        return
+    if not safe_relative(rel):
+        raise Fail(EXIT_VERIFY, f"unsafe archive member: {m.filename!r}")
+    mode = m.external_attr >> 16
+    kind = stat.S_IFMT(mode)
+    target = os.path.join(stage, rel)
+    if m.is_dir():
+        os.makedirs(target, 0o755, exist_ok=True)
+        return
+    if kind not in (0, stat.S_IFREG):
+        raise Fail(EXIT_VERIFY, f"archive member is not a plain file: {m.filename!r}")
+    os.makedirs(os.path.dirname(target), 0o755, exist_ok=True)
+    with z.open(m) as src, open(target, "wb") as dst:
+        shutil.copyfileobj(src, dst)
+    os.chmod(target, 0o755 if mode & 0o111 else 0o644)
+
+
 def safe_relative(path):
-    return (isinstance(path, str) and path and "\0" not in path and not os.path.isabs(path)
+    return (isinstance(path, str) and path not in ("", ".") and "\0" not in path and not os.path.isabs(path)
             and os.path.normpath(path) == path and ".." not in path.split("/"))
 
 
@@ -254,7 +386,13 @@ def cmd_install(emu):
         raise Fail(EXIT_VERIFY, f"unknown channel in the catalog: {channel!r}")
     if channel is None and "sha256" not in e:
         raise Fail(EXIT_VERIFY, f"{emu}: a pinned catalog entry needs a sha256")
-    if channel is None and installed_tag(emu) == tag:
+    spec = unpack_spec(emu, e)
+    inst = installed_tag(emu, e)
+    if inst is not None and e.get("self_update"):
+        print("100%", flush=True)
+        log(f"{emu} {inst} is installed and updates itself")
+        return EXIT_OK
+    if channel is None and inst == tag:
         print("100%", flush=True)
         return EXIT_OK
     d = os.path.join(EMU_DIR, emu)
@@ -264,12 +402,13 @@ def cmd_install(emu):
         fcntl.flock(lock, fcntl.LOCK_EX)  # one install per emulator at a time
     except OSError as err:
         raise Fail(EXIT_LOCAL, f"cannot use {d}: {err}")
-    # Named after the catalog tag, so the plugin can follow its size for a nightly too.
+    # Named after the catalog tag, so the plugin can follow its size for a nightly too (and for an
+    # archive: the plugin follows this one name whatever the download is).
     part = os.path.join(d, f".{tag}.AppImage.part")
     try:
         build = release_asset(e)
         tag = build["tag"]
-        if channel is not None and installed_tag(emu) == tag:
+        if channel is not None and installed_tag(emu, e) == tag:
             print("100%", flush=True)
             log(f"{emu} {tag} is already the latest {channel}")
             return EXIT_OK
@@ -277,9 +416,12 @@ def cmd_install(emu):
             raise Fail(EXIT_LOCAL, f"not enough free space in {d} for {build['size']} bytes")
         download(build["url"], part, build["size"])
         verify(part, build)
-        os.chmod(part, 0o755)
-        os.replace(part, os.path.join(d, f"{tag}.AppImage"))
-        activate(d, tag)
+        if spec is not None:
+            unpack(emu, part, spec[0], spec[1], tag)
+        else:
+            os.chmod(part, 0o755)
+            os.replace(part, os.path.join(d, f"{tag}.AppImage"))
+            activate(d, tag)
     except OSError as err:
         raise Fail(EXIT_LOCAL, f"install of {emu} {tag} failed: {err}")
     finally:
@@ -297,7 +439,11 @@ def cmd_list():
     for emu, e in load_catalog().items():
         if not EMU_ID.fullmatch(emu):
             continue
-        inst = installed_tag(emu)
+        try:
+            inst = installed_tag(emu, e)
+        except Fail as f:
+            log(f"warning: {f}")
+            continue
         out[emu] = {
             "name": e.get("name", emu),
             "systems": e.get("systems", []),
@@ -305,7 +451,9 @@ def cmd_list():
             "channel": e.get("channel"),
             "installed": inst,
             # A nightly's newest build is only known online: install checks it.
-            "update": inst is not None and "channel" not in e and inst != e.get("tag"),
+            "update": (inst is not None and "channel" not in e and not e.get("self_update")
+                       and inst != e.get("tag")),
+            "self_update": bool(e.get("self_update")),
             "size": e.get("size"),
             "author": e.get("author"),
             "homepage": e.get("homepage"),
@@ -318,6 +466,7 @@ def cmd_list():
 def cmd_remove(emu):
     if not EMU_ID.fullmatch(emu or ""):
         raise Fail(EXIT_USAGE, f"bad emulator name '{emu}'")
+    remove_unpacked(emu)
     d = os.path.join(EMU_DIR, emu)
     try:
         shutil.rmtree(d)
@@ -326,6 +475,34 @@ def cmd_remove(emu):
     except OSError as err:
         raise Fail(EXIT_LOCAL, f"cannot remove {d}: {err}")
     return EXIT_OK
+
+
+def remove_unpacked(emu):
+    """Delete an unpacked archive's folder -- only when qforge-emu's marker names this emulator."""
+    try:
+        e = load_catalog().get(emu)
+    except Fail:
+        return
+    spec = unpack_spec(emu, e) if isinstance(e, dict) else None
+    if spec is None:
+        return
+    dest = spec[0]
+    try:
+        with open(os.path.join(dest, MARKER)) as f:
+            owner = f.read(256).strip()
+    except FileNotFoundError:
+        if os.path.lexists(dest):
+            log(f"warning: {dest} was not unpacked by qforge-emu: left alone")
+        return
+    except OSError as err:
+        raise Fail(EXIT_LOCAL, f"cannot read {dest}/{MARKER}: {err}")
+    if owner != emu:
+        log(f"warning: {dest} belongs to {owner!r}, not {emu}: left alone")
+        return
+    try:
+        shutil.rmtree(dest)
+    except OSError as err:
+        raise Fail(EXIT_LOCAL, f"cannot remove {dest}: {err}")
 
 
 def main(argv):

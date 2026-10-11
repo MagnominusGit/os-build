@@ -15,7 +15,9 @@
 #     digest): a malformed one would make every install fail, or, if skipped, verify nothing;
 #   - an emulator the image cannot launch (no /usr/share/qforge/emulators/<emu>/emulator.json), or one serving a
 #     system launch.conf maps elsewhere, would download fine and then never start;
-#   - a plain-http URL would let anyone on the path swap the AppImage.
+#   - a plain-http URL would let anyone on the path swap the AppImage;
+#   - an "unpack" entry (PortMaster, a zip unpacked into the player's home) with a target outside
+#     the home, or "self_update" on an AppImage, would be refused by qforge-emu at every install.
 #
 # Launch details (format, binary, args, first-run seed) live in the image's emulator.json, NOT here: the
 # catalog only says what to download and how to verify it.
@@ -70,7 +72,7 @@ for line in open(launch_conf):
 
 ROLLING = {"latest", "preview", "nightly", "continuous", "dev", "master", "main"}
 REQUIRED = {"name", "author", "systems", "github", "tag", "asset", "sha256", "size", "homepage", "licence"}
-OPTIONAL = {"data"}
+OPTIONAL = {"data", "unpack", "self_update"}
 CHANNELS = {"nightly"}
 
 def check_github(case, e, rx):
@@ -141,6 +143,22 @@ for emu, e in emus.items():
     else:
         bad(case, f"bad data entries {data!r}: each needs an https url and a relative path, nothing else")
 
+    # An unpacked archive (PortMaster): a folder under the player's home and the version file in it,
+    # both normalised relative paths; self_update only on one (qforge-emu refuses it otherwise).
+    unpack = e.get("unpack")
+    rel = lambda p: (isinstance(p, str) and p and not p.startswith("/")
+                     and os.path.normpath(p) == p and ".." not in p.split("/"))
+    if unpack is not None:
+        if isinstance(unpack, dict) and set(unpack) == {"to", "version"} and rel(unpack["to"]) and rel(unpack["version"]):
+            ok(case, f"unpacks into ~/{unpack['to']} (version in {unpack['version']})")
+        else:
+            bad(case, f"bad unpack {unpack!r}: needs exactly 'to' and 'version', relative paths")
+    if "self_update" in e:
+        if e["self_update"] is True and unpack is not None and channel is None:
+            ok(case, "updates itself after the pinned first install (no update offered)")
+        else:
+            bad(case, "self_update must be true, on a pinned unpacked archive only")
+
     if os.path.isfile(os.path.join(emu_conf_dir, emu, "emulator.json")):
         ok(case, f"the image can launch it (/usr/share/qforge/emulators/{emu}/emulator.json)")
     else:
@@ -182,8 +200,10 @@ for emu, e in emus.items():
     if rx:
         anchored = pattern.startswith("^") and pattern.endswith("$")
         arm = "arm64" in pattern.lower() or "aarch64" in pattern.lower()
-        if anchored and arm:
-            ok(case, f"asset pattern {pattern} is anchored and arm64")
+        # An unpacked archive carries every architecture's helpers (PortMaster.zip: aarch64, armhf,
+        # x86_64) and its tool picks the right one: one asset for all, no arch in the name.
+        if anchored and (arm or unpack is not None):
+            ok(case, f"asset pattern {pattern} is anchored and {'arm64' if arm else 'multi-arch (unpacked)'}")
         else:
             bad(case, f"asset pattern {pattern!r} must be ^...$ and name arm64/aarch64")
     if channel is not None:
