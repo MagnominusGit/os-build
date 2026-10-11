@@ -182,6 +182,16 @@ for slot in A B; do
                                               || bad "grub-$lc.cfg is missing an entry for $id"
   done
 
+  # the menu order: the catalog's rows in device-id order, each derived (top-dpad) entry right
+  # after its parent. A board appended at the end of boards.map would land out of place.
+  ids_menu=$(sed -n 's/^menuentry .* --id \([^ ]*\) .*/\1/p' "$cfg")
+  ids_want=$(awk -F'\t' '/^#/||!NF{next} {print $1 "\t" $3}' "$BOARDS" | LC_ALL=C sort -t$'\t' -k1,1 \
+             | while IFS=$'\t' read -r id dtb; do
+                 echo "$id"; grep -x -- "$dtb-top-dpad" <<<"$ids_menu"
+               done)
+  [ "$ids_menu" = "$ids_want" ] && ok "grub-$lc.cfg lists the boards in device-id order" \
+                                || bad "grub-$lc.cfg menu order: $(tr '\n' ' ' <<<"$ids_menu")"
+
   # the per-slot cmdline. Every entry must name THIS slot's root, var and efi partitions -- one
   # entry pointing at the other slot is a boot that silently mounts the wrong /var.
   for key in 'root=$rootspec' 'qforge.var=$varspec' 'qforge.efi=$efispec' "qforge.slot=$slot"; do

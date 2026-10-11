@@ -335,29 +335,32 @@ fi
 
 EOF
 
-for i in "${!pids[@]}"; do
-  emit_entry "${pids[$i]}" "${pnames[$i]}" "${pdtbs[$i]}" "${pbootargs[$i]}"
-done
-
 # Filename-derived entries: any board .dts with no catalog row. The RP6's top-dpad variant is a
 # hardware revision with its own DTB but the same board otherwise, so it inherits its parent's
-# bootargs by stripping the suffix. Anything else is a catalog gap and fails the build rather than
-# shipping a board nobody can select.
+# bootargs by stripping the suffix, and its entry follows its parent's in the menu (the catalog
+# is sorted by device id, which is the menu order). Anything else is a catalog gap and fails the
+# build rather than shipping a board nobody can select.
+declare -a dbases=() dparents=()
 for dts in "$DTS"/*.dts; do
   base="$(basename "$dts" .dts)"
   printf '%s\n' "${pdtbs[@]}" | grep -qx "$base" && continue
   parent="${base%-top-dpad}"
-  parent_idx=""
-  for i in "${!pdtbs[@]}"; do
-    [ "${pdtbs[$i]}" = "$parent" ] && parent_idx=$i
-  done
-  [ -n "$parent_idx" ] || {
+  printf '%s\n' "${pdtbs[@]}" | grep -qx "$parent" || {
     echo "no catalog row for DTB $base and no parent to derive from — add it to boot/boards.map" >&2
     exit 1
   }
-  derived_name="$(sed -n 's/^[[:space:]]*model = "\(.*\)";/\1/p' "$dts" | head -1)"
-  [ -n "$derived_name" ] || derived_name="${pnames[$parent_idx]} (${base#*-})"
-  emit_entry "$base" "$derived_name" "$base" "${pbootargs[$parent_idx]}"
+  dbases+=( "$base" ); dparents+=( "$parent" )
+done
+
+for i in "${!pids[@]}"; do
+  emit_entry "${pids[$i]}" "${pnames[$i]}" "${pdtbs[$i]}" "${pbootargs[$i]}"
+  for j in "${!dbases[@]}"; do
+    [ "${dparents[$j]}" = "${pdtbs[$i]}" ] || continue
+    base="${dbases[$j]}"
+    derived_name="$(sed -n 's/^[[:space:]]*model = "\(.*\)";/\1/p' "$DTS/$base.dts" | head -1)"
+    [ -n "$derived_name" ] || derived_name="${pnames[$i]} (${base#*-})"
+    emit_entry "$base" "$derived_name" "$base" "${pbootargs[$i]}"
+  done
 done
 } > "$OUTFILE"
 
