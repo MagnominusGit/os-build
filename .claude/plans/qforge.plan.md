@@ -835,7 +835,7 @@ plus the ROM library that launches them)
   prefer zink per emulator (its conf), not session-wide. The same change dropped Mesa's device_select
   layer, which only matters for x86 games under FEX/pressure-vessel: not applicable, keep it.
 
-#### PortMaster (planned 2026-10-11, not started)
+#### PortMaster (planned 2026-10-11; A-E done, HW-tested and merged 2026-10-11)
 
 PortMaster is an "emulator" in Settings > Emulators (Download / Update / Open like the others), but
 it is not an AppImage and its games do not go through it: each port installs its own launch script.
@@ -904,6 +904,26 @@ picks x11. `pm_finish` runs `pkill -9 gptokeyb` and `systemctl restart oga_event
   into the PortMaster folder when missing (like the OGUI plugin). HW test: one Godot port (runtime
   mount), one gptokeyb-heavy SDL2 port, one westonpack port; OGUI Exit and the port's own exit.
 - **F. Later, optional**: upstream a `PlatformQForge` to PortMaster-GUI.
+
+**Status 2026-10-11.** A-E shipped (ed3f4e1, 0840597, eabcc26, 9e2544a). HW Pocket ACE, dev card
+plus bind-mounted patches: PortMaster GUI (download, open, splash, installs), A Key(s) Path (Godot 3),
+Apotris (SDL2), Cave Crawler 2 (Godot 4 + Weston), Shattered Pixel Dungeon (Java + Weston,
+gptokeyb2 mouse), Warzone 2100 (Weston, own libs); OGUI Exit and in-game quit both clean. What the
+HW run changed against the plan above:
+- `PM_CAN_MOUNT` stays Y (with N ports skip only their umount; the stand-ins handle both).
+- PKGS + `openal libtheora` (LÖVE runtime: PortMaster's splash, patcher, LÖVE ports); libtheora 1.2
+  renames the decoder, so a private `libtheoradec.so.1` link on `LD_LIBRARY_PATH` (a06161b).
+- `get_controls` exports the whole gamecontrollerdb (no QForge pad GUID): E2BIG on every exec;
+  wrapped as mod_EmuELEC.txt does (1f77eca).
+- SDL GLES contexts over GLX on Xwayland are black under gamescope: `SDL_VIDEO_FORCE_EGL` (1911e8c).
+- westonpack: its Weston cannot start as player under gamescope (seatd, DRM); mod_QForge.txt runs
+  the command directly, as westonwrap itself does on ROCKNIX with Mesa, with the port's
+  WRAPPED_LIBRARY_PATH behind /usr/lib (0ef5b90, 7f0d556, 0d707a5).
+- OGUI's Exit SIGTERMs squashfuse with the game: started with TERM/INT ignored (399c9d5).
+- gptokeyb2's libinterpose reports the wrong fd under sdl2-compat (exclusive grab missed):
+  apps/qforge-gptk-interpose preloaded first, libinterpose kept (054fca4, 7f0d556).
+Still to do: a clean dev card from main (the image-side changes, openal/libtheora and the
+interposer stage, were HW-tested only through /tmp copies); F.
 
 Licence: PortMaster-GUI and PortMaster-New are MIT; gptokeyb/gptokeyb2 GPL-2.0 (downloaded with
 PortMaster, not redistributed by QForge). Ports and runtimes stay player downloads.
