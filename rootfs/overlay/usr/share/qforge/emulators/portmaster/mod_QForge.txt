@@ -29,6 +29,19 @@ esac
 GODOT2_OPTS="-r ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} -f"
 GODOT_OPTS="--resolution ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} -f"
 
+# control.txt knows no QForge pad GUID, so get_controls reads the whole gamecontrollerdb.txt
+# (~470 KB) into sdl_controllerconfig; ports export it as SDL_GAMECONTROLLERCONFIG, past the
+# kernel's 128 KiB per-string limit, and every exec after fails with E2BIG ("Argument list too
+# long"). SDL still gets every mapping from SDL_GAMECONTROLLERCONFIG_FILE. PortMaster's own
+# mod_EmuELEC.txt does the same. Wrapped once (this file can be sourced twice).
+if declare -f get_controls >/dev/null && ! declare -f _qforge_get_controls >/dev/null; then
+  eval "_qforge_get_controls() $(declare -f get_controls | tail -n +2)"
+  get_controls() {
+    _qforge_get_controls "$@"
+    if [ "${#sdl_controllerconfig}" -gt 100000 ]; then sdl_controllerconfig=""; fi
+  }
+fi
+
 pm_platform_helper() {
   if [ -e "$PM_PIPE" ]; then
     PortMasterDialogExit

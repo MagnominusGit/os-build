@@ -140,6 +140,12 @@ grep -qx "godot=--resolution 1920x1080 -f" <<<"$out" && grep -qx "godot2=-r 1920
   && ok "Godot 2 and 3+: full screen at the panel size" || bad "$(grep godot <<<"$out")"
 grep -qx "can_mount=unset" <<<"$out" && ok "leaves PM_CAN_MOUNT to PortMaster (Y: ports unmount their runtimes)" || bad "$(grep can_mount <<<"$out")"
 grep -qx "helper=function" <<<"$out" && ok "defines pm_platform_helper" || bad "no pm_platform_helper"
+ctl() { env -i PATH=/usr/bin:/bin bash -c '
+  get_controls() { sdl_controllerconfig="$(head -c "$1" /dev/zero | tr "\0" x)"; DEVICE=$2; }
+  source "$1"; source "$1"; get_controls "$2" "$3"; echo "${#sdl_controllerconfig} $DEVICE"' _ "$PM_DATA/mod_QForge.txt" "$@"; }
+[ "$(ctl 472286 "")" = "0 " ] \
+  && ok "get_controls with no device GUID: the whole db is not exported (E2BIG on every exec), SDL reads the file" || bad "big: $(ctl 472286 "")"
+[ "$(ctl 300 03000000)" = "300 03000000" ] && ok "a device's own mapping is kept, and get_controls' other results" || bad "small: $(ctl 300 03000000)"
 QLIB=/usr/lib/qforge/portmaster/lib
 ld() { env -i PATH=/usr/bin:/bin ${1+LD_LIBRARY_PATH="$1"} bash -c 'source "$1"; source "$1"; echo "$LD_LIBRARY_PATH"' _ "$PM_DATA/mod_QForge.txt"; }
 [ "$(ld)" = "$QLIB" ] && [ "$(ld "")" = "$QLIB" ] && [ "$(ld /port/libs)" = "/port/libs:$QLIB" ] \
