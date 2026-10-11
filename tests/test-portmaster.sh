@@ -167,8 +167,8 @@ out="$(ww westonwrap.sh cleanup)"; rc=$?
 [ -z "$out" ] && [ "$rc" = 0 ] && ok "westonwrap.sh cleanup: nothing to clean (no seatd, no pkill)" || bad "cleanup rc=$rc out=$out"
 out="$(cd "$T" && env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH=/sys/lib WRAPPED_LIBRARY_PATH=/game/libs:/game/extra WRAPPED_PRELOAD=/game/pre.so \
   bash "$T/weston/westonwrap.sh" headless noop kiosk crusty_x11egl 'sh -c "echo \$LD_LIBRARY_PATH \$LD_PRELOAD"' 2>/dev/null)"
-[ "$out" = "/game/libs:/game/extra:/sys/lib:/usr/lib/qforge/portmaster/lib /game/pre.so" ] \
-  && ok "westonwrap.sh: the port's WRAPPED_LIBRARY_PATH / WRAPPED_PRELOAD reach the command, as westonwrap gives them" || bad "wrapped: $out"
+[ "$out" = "/usr/lib:/game/libs:/game/extra:/sys/lib:/usr/lib/qforge/portmaster/lib /game/pre.so" ] \
+  && ok "westonwrap.sh: the port's WRAPPED_LIBRARY_PATH (behind the image's /usr/lib) and WRAPPED_PRELOAD reach the command" || bad "wrapped: $out"
 [ "$(ww other.sh headless noop kiosk x true)" = NOT-BYPASSED ] && ok "any other script sourcing it is untouched" || bad "other script bypassed"
 QLIB=/usr/lib/qforge/portmaster/lib
 ld() { env -i PATH=/usr/bin:/bin ${1+LD_LIBRARY_PATH="$1"} bash -c 'source "$1"; source "$1"; echo "$LD_LIBRARY_PATH"' _ "$PM_DATA/mod_QForge.txt"; }

@@ -76,8 +76,12 @@ pm_platform_helper() {
 # `westonwrap.sh cleanup` has nothing to clean then.
 if [[ "${0##*/}" == westonwrap*.sh ]]; then
   [ "${1-}" = cleanup ] && exit 0
-  # The port's own libraries and preloads, passed to westonwrap for its command (run_user_command).
-  [ -n "${WRAPPED_LIBRARY_PATH-}" ] && export LD_LIBRARY_PATH="$WRAPPED_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  # The port's own libraries and preloads, passed to westonwrap for its command (run_user_command),
+  # but behind the image's /usr/lib: Weston ports bundle fallbacks for bare firmwares (libs_extra:
+  # libEGL, libGL, an old libfreetype ...) that would shadow Mesa and newer system libraries their
+  # system dependencies need (Warzone 2100: the image's harfbuzz wants FT_Get_Transform, missing
+  # from the bundled freetype). A soname the image lacks still comes from the port.
+  [ -n "${WRAPPED_LIBRARY_PATH-}" ] && export LD_LIBRARY_PATH="/usr/lib:$WRAPPED_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
   [ -n "${WRAPPED_PRELOAD-}" ] && export LD_PRELOAD="$WRAPPED_PRELOAD${LD_PRELOAD:+:$LD_PRELOAD}"
   eval "${*:5}"
   exit $?
