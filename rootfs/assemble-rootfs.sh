@@ -243,6 +243,9 @@ fi
 # sigdefer-shim runs on EVERY build.
 . "$ROOT/rootfs/lib-assemble-sigdefer.sh"
 
+# gptk-interpose runs on EVERY build.
+. "$ROOT/rootfs/lib-assemble-gptk-interpose.sh"
+
 # debug-capture is DEBUG-ONLY, same construction -- and independent of QFORGE_DEV.
 if [ "${QFORGE_DEBUG:-}" = "1" ]; then
   . "$ROOT/rootfs/lib-assemble-debug.sh"

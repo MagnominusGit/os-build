@@ -25,6 +25,13 @@ case ":${LD_LIBRARY_PATH-}:" in
   *) export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}/usr/lib/qforge/portmaster/lib" ;;
 esac
 
+# gptokeyb2 grabs the pad (a .gptk's `exclusive = true`) through the fd its preloaded libinterpose
+# reports: the last one ANY open() returned. Under the image's sdl2-compat (SDL3) that is not the
+# pad, the grab misses and the game reads the pad too (Shattered Pixel Dungeon: its own right-stick
+# pointer on top of gptokeyb2's mouse). QForge's interposer reports the pad's event node.
+GPTOKEYB2="${GPTOKEYB2-}"; GPTOKEYB2="${GPTOKEYB2//${controlfolder-}\/libinterpose.${DEVICE_ARCH-}.so//usr/lib/qforge/portmaster/libqforge-gptk-interpose.so}"
+export GPTOKEYB2
+
 # SDL on Xwayland makes its GL contexts through EGL, not GLX. Ports ask SDL for GLES (Godot's frt,
 # gl4es, most engines): over GLX ES profiles on Xwayland under gamescope they present black frames
 # (A Key(s) Path, Godot 3 GLES2 on the ACE: a flickering boot splash, then black, sound playing).

@@ -187,6 +187,51 @@ o="$(gl "$T/glx-no")"
 [[ $o == "es=2 fb=unset ld=$T/port/libs.aarch64:$T/port/gl4es.aarch64:" ]] \
   && ok "no desktop GL: gl4es on X11, never LIBGL_FB=4 (KMS belongs to gamescope)" || bad "without GL: $o"
 
+CASE="gptokeyb2 interposer"
+GPTK_LIB=/usr/lib/qforge/portmaster/libqforge-gptk-interpose.so
+out="$(env -i PATH=/usr/bin:/bin bash -c '
+  controlfolder=/roms/ports/PortMaster DEVICE_ARCH=aarch64 ESUDO= ESUDOKILL= ESUDOKILL2=-1
+  export GPTOKEYB2="$ESUDO env LD_PRELOAD=$controlfolder/libinterpose.${DEVICE_ARCH}.so $controlfolder/gptokeyb2 $ESUDOKILL2"
+  export GPTOKEYB="$ESUDO $controlfolder/gptokeyb $ESUDOKILL"
+  source "$1"; source "$1"; echo "2=$GPTOKEYB2"; echo "1=$GPTOKEYB"' _ "$PM_DATA/mod_QForge.txt")"
+grep -qxF "2= env LD_PRELOAD=$GPTK_LIB /roms/ports/PortMaster/gptokeyb2 -1" <<<"$out" \
+  && grep -qxF "1= /roms/ports/PortMaster/gptokeyb " <<<"$out" \
+  && ok "GPTOKEYB2 preloads QForge's interposer instead of libinterpose; GPTOKEYB untouched" || bad "$out"
+# The library itself, built for the host on a temp folder's "event nodes" (the real ones need the
+# input group): gptokeyb2 asks for the pad's fd right after SDL opened it, SDL3 opens more after.
+GPTK_SRC_C="$ROOT/apps/qforge-gptk-interpose/src/qforge-gptk-interpose.c"
+if command -v cc >/dev/null; then
+  mkdir -p "$T/gptk"
+  cc -O2 -fPIC -shared -DEVENT_PREFIX="\"$T/gptk/event\"" -o "$T/gptk/lib.so" "$GPTK_SRC_C" -ldl -lpthread \
+    && cat > "$T/gptk/prog.c" <<EOF
+#define _GNU_SOURCE
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <unistd.h>
+int main(void)
+{
+    int (*get)(void) = (int (*)(void))dlsym(RTLD_DEFAULT, "interpose_get_fd");
+    if (!get) { puts("no interpose_get_fd"); return 1; }
+    int none = get();
+    int pad = open("$T/gptk/event9", O_RDONLY);
+    int other = open("/dev/null", O_RDONLY);             /* SDL3 opening something else */
+    int probe = openat(AT_FDCWD, "$T/gptk/event4", O_RDONLY); close(probe);  /* opened, closed */
+    printf("none=%d pad=%d got=%d other=%d\n", none, pad, get(), other);
+    close(pad);
+    printf("closed=%d\n", get());
+    return 0;
+}
+EOF
+  : > "$T/gptk/event9"; : > "$T/gptk/event4"
+  cc -o "$T/gptk/prog" "$T/gptk/prog.c" -ldl && out="$(LD_PRELOAD="$T/gptk/lib.so" "$T/gptk/prog")"
+  pad=$(sed -n 's/.* pad=\([0-9]*\).*/\1/p' <<<"$out")
+  grep -q "^none=-1 pad=$pad got=$pad other=" <<<"$out" && grep -qx "closed=-1" <<<"$out" \
+    && ok "reports the open event node, not a later open or a closed probe; -1 once closed" || bad "$out"
+else
+  ok "SKIP interposer build (no cc)"
+fi
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
