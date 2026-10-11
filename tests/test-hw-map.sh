@@ -7,7 +7,8 @@
 # matter on the boards we have: the charger's companion "battery" node (no capacity) is not the
 # battery; the charger IC (reports `status`) wins over a bare Type-C source; thermal roles by
 # profile type name or by pattern, every zone under all/; LED groups in natural order (l10 after
-# l2); the profile's QFORGE_HW_* pins; hw.env is sourceable. Host only, no root, no Godot.
+# l2); the profile's QFORGE_HW_* pins, and a stale pin falling back to detection; the soc link;
+# hw.env is sourceable; every board profile's pins are well-formed. Host only, no root, no Godot.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SCRIPT="$ROOT/rootfs/overlay/usr/lib/qforge/hw-map"
@@ -96,7 +97,115 @@ rm -rf "$S"; mkdir -p "$S/class"
 mk class/hwmon/hwmon3/name cpu_thermal
 mk class/hwmon/hwmon9/name pwmfan
 mk class/hwmon/hwmon9/pwm1 0
-run env && [ "$(target fan)" = class/hwmon/hwmon9 ] && ok "a hwmon with only pwm1 is the fan (Air X/Y pwm-fan)" || bad "fan -> $(target fan)"
+run env && [ "$(target fan)" = class/hwmon/hwmon9 ] && ok "a hwmon with only pwm1 is the fan (the SM8250 boards' pwm-fan)" || bad "fan -> $(target fan)"
+
+# =================================================================================================
+CASE="stale pins"
+# An SM8550-shaped board whose profile names things it does not have: each pin is logged and the
+# node is detected instead, so a wrong name costs a warning and not the link.
+rm -rf "$S"; mkdir -p "$S/class"
+mk class/power_supply/qcom-battmgr-bat/type Battery
+mk class/power_supply/qcom-battmgr-bat/capacity 55
+mk class/power_supply/qcom-battmgr-usb/type USB
+mk class/power_supply/qcom-battmgr-usb/online 1
+mk class/backlight/ae94000.dsi.0/brightness 100
+mk class/thermal/thermal_zone0/type aoss0-thermal
+mk class/thermal/thermal_zone1/type cpuss0-thermal
+mk class/thermal/thermal_zone30/type gpuss-0-thermal
+mk class/hwmon/hwmon5/name pwmfan
+mk class/hwmon/hwmon5/fan1_input 3000
+mkdir -p "$S/class/devfreq/3d00000.gpu"
+run env QFORGE_HW_BATTERY=battery QFORGE_HW_CHARGER=pm8150b-charger QFORGE_HW_BACKLIGHT=backlight \
+    QFORGE_HW_THERMAL_CPU=cpu7-top-thermal QFORGE_HW_FAN=gpio_fan QFORGE_HW_GPU_DEVFREQ=5900000.gpu \
+    && ok "runs" || bad "exit $?"
+[ "$(target battery)" = class/power_supply/qcom-battmgr-bat ] && ok "absent battery pin -> detected battery" || bad "battery -> $(target battery)"
+[ "$(target charger)" = class/power_supply/qcom-battmgr-usb ] && ok "absent charger pin -> detected charger" || bad "charger -> $(target charger)"
+[ "$(target backlight)" = class/backlight/ae94000.dsi.0 ] && ok "absent backlight pin -> detected backlight" || bad "backlight -> $(target backlight)"
+[ "$(target thermal/cpu)" = class/thermal/thermal_zone1 ] && ok "absent zone pin -> the pattern's zone" || bad "thermal/cpu -> $(target thermal/cpu)"
+[ "$(target fan)" = class/hwmon/hwmon5 ] && ok "absent fan pin -> detected fan" || bad "fan -> $(target fan)"
+[ "$(target gpu)" = class/devfreq/3d00000.gpu ] && ok "absent devfreq pin -> detected devfreq" || bad "gpu -> $(target gpu)"
+n=$(grep -c 'is not on this board -- detecting instead' "$T/stderr")
+[ "$n" = 6 ] && ok "each stale pin is logged" || bad "$n warnings: $(cat "$T/stderr")"
+run env QFORGE_HW_BATTERY=qcom-battmgr-bat QFORGE_HW_THERMAL_GPU=gpuss-0-thermal && ! grep -q 'detecting instead' "$T/stderr" \
+    && ok "pins that exist are not logged" || bad "stderr: $(cat "$T/stderr")"
+
+# =================================================================================================
+CASE="charge pump"
+# The Air Y Pro: an HL7139 charge pump (Mains, online+status, but `online` = pump engaged) sorts
+# before the PM8150B's smb5 charger, so detection takes the pump; the profile pins smb5.
+rm -rf "$S"; mkdir -p "$S/class"
+mk class/power_supply/battery/type Battery
+mk class/power_supply/battery/capacity 80
+mk class/power_supply/hl7139-charger/type Mains
+mk class/power_supply/hl7139-charger/online 0
+mk class/power_supply/hl7139-charger/status "Not charging"
+mk class/power_supply/pm8150b-charger/type USB
+mk class/power_supply/pm8150b-charger/online 1
+mk class/power_supply/pm8150b-charger/status Charging
+run env && [ "$(target charger)" = class/power_supply/hl7139-charger ] && ok "unpinned, the charge pump wins (why the profile pins)" || bad "charger -> $(target charger)"
+run env QFORGE_HW_CHARGER=pm8150b-charger && [ "$(target charger)" = class/power_supply/pm8150b-charger ] && ok "pinned, the smb5 charger" || bad "charger -> $(target charger)"
+
+# =================================================================================================
+CASE="soc"
+mk devices/soc0/machine SM8550
+mk devices/soc0/serial_number 1234567890
+run env && [ "$(target soc)" = devices/soc0 ] && ok "soc -> socinfo" || bad "soc -> $(target soc)"
+grep -q '^QFORGE_HW_SOC=SM8550$' "$T/run/hw/hw.env" && ok "hw.env records the SoC" || bad "hw.env: $(grep SOC "$T/run/hw/hw.env")"
+[ "$(cat "$T/run/hw/soc/serial_number")" = 1234567890 ] && ok "the serial number reads through the link" || bad "no serial"
+
+# =================================================================================================
+CASE="single-colour LED channels"
+# The Pocket Max: two aw20036s, no multicolor grouping, {red,green,blue}:indicator-0..15; pixels
+# 0-7 are the left ring, 8-15 the right. A bracket glob must not take indicator-10 into the left.
+for i in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+    for c in red green blue; do mkdir -p "$S/class/leds/$c:indicator-$i"; done
+done
+run env QFORGE_HW_LED_GROUPS="ring-left=*:indicator-[0-7] ring-right=*:indicator-[89],*:indicator-1[0-5] logo=logo-led" \
+    && ok "runs" || bad "exit $?"
+[ "$(ls "$T/run/hw/leds/ring-left" | wc -l | tr -d ' ')" = 24 ] && ok "left: 8 pixels x 3 channels" || bad "ring-left: $(ls "$T/run/hw/leds/ring-left" | wc -l)"
+[ "$(ls "$T/run/hw/leds/ring-right" | wc -l | tr -d ' ')" = 24 ] && ok "right: 8 pixels x 3 channels" || bad "ring-right: $(ls "$T/run/hw/leds/ring-right" | wc -l)"
+! (cd "$T/run/hw/leds/ring-left" && for l in *; do readlink "$l"; done) | grep -q 'indicator-1[0-5]$' \
+    && ok "no right-ring pixel in the left group" || bad "left group took a right pixel"
+[ ! -e "$T/run/hw/leds/logo" ] && grep -q 'LED group logo matched nothing' "$T/stderr" \
+    && ok "a group that matches nothing is left out, and logged" || bad "logo: $(cat "$T/stderr")"
+
+# =================================================================================================
+CASE="board profiles"
+# Every profile's pins, as device-env exports them. A zone type keeps its -thermal suffix and fits
+# THERMAL_NAME_LENGTH (20 with the NUL); a missing suffix or a typo would only show on a device.
+DEV="$ROOT/rootfs/overlay/usr/lib/qforge/devices"
+ENV_SCRIPT="$ROOT/rootfs/overlay/usr/lib/qforge/device-env"
+for conf in "$DEV"/*.conf; do
+    id=$(basename "$conf" .conf); [ "$id" = defaults ] && continue
+    vals=$( . "$DEV/defaults.conf"; . "$conf"
+        printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s' "$QFORGE_HW_BATTERY" "$QFORGE_HW_CHARGER" "$QFORGE_HW_BACKLIGHT" \
+            "$QFORGE_HW_THERMAL_CPU" "$QFORGE_HW_THERMAL_GPU" "$QFORGE_HW_FAN" "$QFORGE_HW_GPU_DEVFREQ" \
+            "$QFORGE_HW_THERMAL_BATTERY" "$QFORGE_HW_THERMAL_SKIN" "$QFORGE_HW_LED_GROUPS" )
+    IFS='|' read -r b c bl tc tg f g tb ts leds <<<"$vals"
+    if [ -n "$b" ] && [ -n "$c" ] && [ -n "$bl" ] && [ -n "$tc" ] && [ -n "$tg" ] && [ -n "$f" ] && [ -n "$g" ]; then
+        ok "$id pins battery, charger, backlight, cpu/gpu zones, fan, devfreq"
+    else bad "$id leaves a pin empty: $vals"; fi
+    zbad=""
+    for z in "$tc" "$tg" "$tb" "$ts"; do
+        [ -z "$z" ] && continue
+        case $z in *-thermal) ;; *) zbad="$zbad $z(no -thermal)";; esac
+        [ ${#z} -le 19 ] || zbad="$zbad $z(>19 chars)"
+    done
+    [ -z "$zbad" ] && ok "$id zone types well-formed" || bad "$id zone types:$zbad"
+    lbad=""
+    for spec in $leds; do case $spec in [a-z]*=?*) ;; *) lbad="$lbad $spec";; esac; done
+    [ -n "$leds" ] && [ -z "$lbad" ] && ok "$id LED groups well-formed" || bad "$id LED groups: '$leds'$lbad"
+done
+# device-env exports the pins (the Thor: the backlight detection would get wrong)
+out=$(QFORGE_DEVICE_DIR="$DEV" QFORGE_MODEL="AYN Thor" bash "$ENV_SCRIPT")
+printf '%s\n' "$out" | grep -q '^QFORGE_HW_BACKLIGHT=ae96000.dsi.0$' && ok "device-env exports the Thor's top-screen backlight" \
+    || bad "device-env: $(printf '%s\n' "$out" | grep HW_BACKLIGHT)"
+out=$(QFORGE_DEVICE_DIR="$DEV" QFORGE_MODEL="MANGMI Air Y Pro" bash "$ENV_SCRIPT")
+printf '%s\n' "$out" | grep -q '^QFORGE_HW_CHARGER=pm8150b-charger$' && ok "device-env exports the Air Y Pro's smb5 charger, not the charge pump" \
+    || bad "device-env: $(printf '%s\n' "$out" | grep HW_CHARGER)"
+leds=$( eval "$(QFORGE_DEVICE_DIR="$DEV" QFORGE_MODEL="MANGMI Pocket Max" bash "$ENV_SCRIPT")"; printf '%s' "$QFORGE_HW_LED_GROUPS" )
+[ "$leds" = 'ring-left=*:indicator-[0-7] ring-right=*:indicator-[89],*:indicator-1[0-5]' ] \
+    && ok "a glob survives device-env's quoting and eval" || bad "Pocket Max LED groups after eval: '$leds'"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
