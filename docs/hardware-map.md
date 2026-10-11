@@ -48,8 +48,9 @@ group that matches nothing is left out and logged the same way.
 
 Read off QForge's own DTS (`kernel/dts/qcom/`) and the drivers' naming rules, and cross-checked
 with what ROCKNIX `next` reads on the same boards (`packages/hardware/quirks/`). **Only the MANGMI
-Air X and Air Y have been seen running QForge** (detection resolved the same nodes there); for
-every other board the journal line above is how a wrong name will show.
+Air X and Air Y have been seen running QForge** (detection resolved the same nodes there). Every
+other board's pins are checked against its compiled devicetree (below), and on a device the
+journal line above is how a wrong name will show.
 
 | SoC | battery / charger | CPU / GPU zone | skin zone | fan | GPU devfreq |
 |---|---|---|---|---|---|
@@ -146,10 +147,49 @@ Board differences live in data: the profile names nodes, hw-map resolves them, t
 (PowerStation, InputPlumber, UPower, and qforge-powerd for fan and LEDs) drive them, and the UI
 talks to the daemons over D-Bus. A new board is a profile (and DTS), not code.
 
+## Checking the pins without a board
+
+Every name a profile pins is the devicetree plus a fixed rule in the driver that registers it, so
+`tools/check-hw-paths.py` reads each board's DTB, works out what the kernel will register the way
+the kernel does, and checks every pin against it:
+
+- **Zones:** the zone's node name, when the zone is available, its sensor provider is enabled and
+  the name fits `THERMAL_NAME_LENGTH`.
+- **LEDs:** `led_compose_name()` (label, else `color:function[-enumerator]`), for each LED whose
+  controller is enabled; a multicolor group only when every member registers, a PWM LED only when
+  every PWM provider is enabled.
+- **Backlights:** pwm-backlight's device name, the WLED's label, the SY7758's and the Odin 2
+  Mini's fixed names (an SY7758 without `enable-gpios` does not probe), and `<dsi device>.<reg>`
+  for a panel that dims over DCS. The checker's `PANELS` table says which panels do, and the test
+  holds it against each panel driver in `kernel/patches`. It also checks that the pinned backlight
+  dims the profile's `QFORGE_PRIMARY_CONNECTOR`, using msm's connector order: DSI hosts in address
+  order, a bridge (the Odin 2's lt8912b) taking its own connector type, and a bonded pair counting
+  once.
+- **Supplies, fan, GPU:** the supplies the enabled drivers register, `pwmfan`/`gpio_fan`, and the
+  Adreno's device name.
+
+Each DTB's `model` goes through the real `device-env`, so the pins checked are the ones a booted
+board gets.
+
+```sh
+make kernel && make check-hw-paths          # the DTBs the build staged in out/dtbs
+make check-hw-paths LINUX_SRC=~/linux       # or compile kernel/dts/qcom here, with QForge's DT patches
+```
+
+Known gaps live in `tools/check-hw-paths.xfail` (the Odin 2's stick lights, whose SN3112 chips the
+DTS disables). A listed check that starts passing fails the run, so a fixed gap must come off the
+list. Notes in the output flag hardware that will not register even where no pin names it, such
+as the Pocket DS's SY7758 without its enable.
+
+What this cannot see is anything only a device knows: whether a diode is fitted, which ring is the
+left one, which zone runs hottest, or whether a GPIO really is an enable.
+
 ## Tests
 
 `tests/test-hw-map.sh` drives the real script against a fabricated sysfs (`QFORGE_HW_SYS`,
 `QFORGE_HW_RUN`, `QFORGE_HW_DEVICE_ENV`), including stale pins, single-colour LED globs and the
 `soc` link, and checks every board profile: each pins battery, charger, backlight, CPU/GPU zones,
 fan and devfreq; zone types keep their `-thermal` suffix and fit the kernel's 19 characters; LED
-groups parse; and the pins survive `device-env`'s quoting.
+groups parse; and the pins survive `device-env`'s quoting. `tests/test-hw-dtb.sh` covers the checker's
+naming rules on fabricated devicetrees (with `dtc`) and its `PANELS` table against the panel
+drivers, and runs the whole fleet when `out/dtbs` or `QFORGE_LINUX_SRC` is there.
