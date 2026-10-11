@@ -185,7 +185,8 @@ func _add_emulator(id: String, emu: Dictionary) -> void:
 		main.button_up.connect(_install.bind(id, name_text, str(emu.get("pinned", "")), size, main, installed))
 	else:
 		main.text = "Version " + Credits.version_text(str(installed))
-		main.description = "Installed."
+		# PortMaster (catalog "self_update"): it offers its own updates when opened.
+		main.description = "Installed. Updates itself: open it to check." if emu.get("self_update", false) else "Installed."
 		main.button_text = "Open"
 		main.button_up.connect(_open.bind(id, name_text))
 	main.separator_visible = false

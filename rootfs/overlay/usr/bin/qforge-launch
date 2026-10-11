@@ -13,7 +13,10 @@
 # ROM card runs. /etc/qforge/launch.conf maps a system to its emulator (last `<system>=<emulator>`
 # line wins); /usr/share/qforge/emulators/<emulator>/emulator.json says how to run it -- DATA ONLY:
 #
-#   {"format": "appimage" | "appimage-sharun",   how the download is packaged (FORMATS below)
+#   {"format": "appimage" | "appimage-sharun" | "scripts",   how the download is packaged (FORMATS
+#                                                  below)
+#    "root": "roms/ports/PortMaster",              scripts only: the folder under $HOME qforge-emu
+#                                                  unpacked the download into
 #    "binary": "usr/bin/x",                        the program inside it (relative, no '..')
 #    "args": ["-batch", "--", "{rom}"],            a game's command line; "{rom}" exactly once,
 #                                                  "{system}" (the card's system) anywhere in an arg
@@ -56,6 +59,13 @@
 # emulator (it would wait on its own error dialog): it ends with exit 3 and `missing-file <emulator>
 # <from>` in the status file, so the plugin can tell the player where to put it. --gui still opens
 # without it.
+#
+# The scripts format (PortMaster) is a folder qforge-emu unpacked under $HOME, never mounted: --gui
+# runs <root>/<binary> in place, and a game card's ROM is ITSELF a script -- a port's own launch
+# script, which PortMaster installed beside its folder -- run with bash (args, "{rom}" = the
+# script), never with exec: its mode is whatever the port's zip carried. Not installed (exit 3,
+# `not-installed`) when <root>/<binary> is not executable, for a game too: every port script sources
+# PortMaster's control files.
 #
 # Every AppImage format mounts the AppImage and runs its real binary; every rule below was found on
 # hardware (DuckStation, MANGMI Pocket Max, 2026-10-03) and each one cost a crash:
@@ -121,8 +131,9 @@ INSTALL_SETTLE = 1.0  # s to wait after an install step for OGUI's Exit to reach
 USAGE = "usage: qforge-launch [--cpus big|all] <system> <rom> | [--cpus big|all] --gui <emulator>"
 SYSTEM_ID = re.compile(r"[a-z0-9_]+")
 EMU_ID = re.compile(r"[a-z0-9_-]+")
-DEFINITION_KEYS = {"format", "binary", "args", "gui_args", "system_args", "env", "seed", "install",
-                   "core_dumps", "notes"}
+DEFINITION_KEYS = {"format", "root", "binary", "args", "gui_args", "system_args", "env", "seed",
+                   "install", "core_dumps", "notes"}
+SCRIPT_SHELL = "/bin/bash"  # what a scripts-format game card's script runs with
 ROM = "{rom}"
 FILE = "{file}"
 SYSTEM = "{system}"
@@ -224,6 +235,9 @@ def load_definition(emulator):
         raise bad(f"unknown keys {sorted(unknown)} (a definition is data; new behaviour is a format)")
     if not isinstance(d.get("format"), str) or d["format"] not in FORMATS:
         raise bad(f"format {d.get('format')!r} is not one of {sorted(FORMATS)}")
+    if (d["format"] == "scripts") != ("root" in d) or ("root" in d and not safe_relative(d["root"])):
+        raise bad("root (a relative folder under $HOME, without '..') is required for the scripts "
+                  "format and only for it")
     if not safe_relative(d.get("binary")):
         raise bad("binary must be a relative path inside the download, without '..'")
     args = d.get("args")
@@ -263,7 +277,7 @@ def load_definition(emulator):
     core_dumps = d.get("core_dumps", True)
     if not isinstance(core_dumps, bool):
         raise bad("core_dumps must be true or false")
-    return {"format": d["format"], "binary": d["binary"], "args": args, "gui_args": gui_args,
+    return {"format": d["format"], "root": d.get("root"), "binary": d["binary"], "args": args, "gui_args": gui_args,
             "system_args": system_args, "env": env, "seed": seed, "install": install, "core_dumps": core_dumps}
 
 
@@ -525,7 +539,27 @@ class SharunAppImage(AppImage):
                 "DISABLE_AUTO_UPDATES": "1"}
 
 
-FORMATS = {"appimage": AppImage, "appimage-sharun": SharunAppImage}
+class Scripts:
+    """A folder of scripts qforge-emu unpacked under $HOME (PortMaster): nothing to mount; a game is
+    a script of its own (see the scripts format above)."""
+
+    runs_rom = True
+
+    def __init__(self, emulator, root):
+        self.emulator, self.root = emulator, root
+
+    def prepare(self):
+        return self.root
+
+    def env(self):
+        return {}
+
+    def release(self):
+        pass
+
+
+AppImage.runs_rom = False
+FORMATS = {"appimage": AppImage, "appimage-sharun": SharunAppImage, "scripts": Scripts}
 
 
 # ---------------------------------------------------------------------------------------- run --
@@ -615,9 +649,13 @@ def run(argv):
              for a in definition["system_args"].get(system, []) + definition["args"]]
             if rom is not None else definition["gui_args"])
 
-    image = os.path.join(EMU_DIR, emulator, "current")
-    if not os.access(image, os.X_OK):
-        fail("not-installed", emulator, f"{emulator} is not installed ({image} missing or not executable)")
+    if definition["root"] is not None:  # the scripts format: the unpacked folder itself
+        image = os.path.join(HOME, definition["root"])
+        installed = os.path.join(image, definition["binary"])
+    else:
+        image = installed = os.path.join(EMU_DIR, emulator, "current")
+    if not os.access(installed, os.X_OK):
+        fail("not-installed", emulator, f"{emulator} is not installed ({installed} missing or not executable)")
     seed_first_run(emulator, definition["seed"])
     todo = missing_installs(emulator, definition["install"], rom is not None)
     pin = pinning(emulator, cpus)
@@ -636,10 +674,11 @@ def run(argv):
         binary = os.path.join(root, definition["binary"])
         env = {**ENV, **package.env(), **definition["env"]}
         run_installs(emulator, binary, env, todo, interrupted)
-        log(f"{system or 'gui'} -> {emulator}: {binary} {' '.join(args)}")
+        program = SCRIPT_SHELL if package.runs_rom and rom is not None else binary
+        log(f"{system or 'gui'} -> {emulator}: {program} {' '.join(args)}")
         try:
             # Its own session; taskset execs, so the emulator keeps this PID and leads it.
-            emu = subprocess.Popen(pin + [binary] + args, env=env, start_new_session=True,
+            emu = subprocess.Popen(pin + [program] + args, env=env, start_new_session=True,
                                    preexec_fn=None if definition["core_dumps"] else no_core_dumps)
         except (OSError, ValueError) as err:
             fail("mount-failed", emulator, f"could not start {binary}: {err}")

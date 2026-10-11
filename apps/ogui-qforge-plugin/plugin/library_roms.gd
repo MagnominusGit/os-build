@@ -19,7 +19,9 @@ var settings_manager := load("res://core/global/settings_manager.tres") as Setti
 ## Systems the image can launch, in tab order (by maker, then by age). Tab label, and the file
 ## extensions that are a game. An .m3u playlist wins over the disc images it lists, so a multi-disc
 ## game is one card. "dirs": the files that make a subfolder a game (game_dirs.gd): a PS3 disc dump
-## is a folder, and the folder is what RPCS3 boots.
+## is a folder, and the folder is what RPCS3 boots. Ports are PortMaster's: each port it installs is
+## a launch script, <Name>.sh, in ~/roms/ports (PortMaster's own folder sits beside them; its
+## PortMaster.sh is one level down, so it is never a card).
 const SYSTEMS := {
 	"gb": {"name": "Game Boy", "exts": ["gb", "zip", "7z"]},
 	"gbc": {"name": "Game Boy Color", "exts": ["gbc", "gb", "zip", "7z"]},
@@ -38,6 +40,7 @@ const SYSTEMS := {
 	"segacd": {"name": "Mega CD", "exts": ["chd", "cue"]},
 	"dc": {"name": "Dreamcast", "exts": ["chd", "gdi", "cdi", "cue"]},
 	"xbox": {"name": "Xbox", "exts": ["iso", "xiso"]},
+	"ports": {"name": "Ports", "exts": ["sh"]},
 }
 
 

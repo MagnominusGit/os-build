@@ -211,10 +211,14 @@ grep -q 'SDL-0/Guide' "$DS_SEED" && bad "duckstation seed binds Guide, which Ope
 # The player folder layout (user tmpfiles): every system an emulator serves has its folders, and
 # the seed points DuckStation at them (the player home is /home/player).
 layout_has() { grep -Eq "^d[[:space:]]+%h/$1[[:space:]]" "$LAYOUT"; }
+# A scripts-format emulator's games (PortMaster's ports) keep their data in their own folders:
+# only roms/<system> for those.
 for sys in $(sed -n 's/^\([a-z0-9_]*\)=.*/\1/p' "$LAUNCH_CONF"); do
-  missing=""
-  for top in roms bios saves states; do layout_has "$top/$sys" || missing="$missing $top/$sys"; done
-  [ -z "$missing" ] && ok "layout has roms/bios/saves/states for system '$sys'" || bad "layout lacks:$missing (system '$sys' is in launch.conf)"
+  missing="" tops="roms bios saves states"
+  emu="$(sed -n "s/^$sys=//p" "$LAUNCH_CONF" | tail -1)"
+  [ "$(jget "$SEED_DIR/$emu/emulator.json" format 2>/dev/null)" = '"scripts"' ] && tops="roms"
+  for top in $tops; do layout_has "$top/$sys" || missing="$missing $top/$sys"; done
+  [ -z "$missing" ] && ok "layout has ${tops// /\/} for system '$sys'" || bad "layout lacks:$missing (system '$sys' is in launch.conf)"
 done
 for d in bios emulators; do layout_has "$d" && ok "layout has ~/$d" || bad "layout lacks ~/$d"; done
 # PortMaster and its ports find themselves through hardcoded /roms/ports paths (its generic
@@ -291,7 +295,7 @@ for def in "$SEED_DIR"/*/emulator.json; do
   emu="$(basename "$(dirname "$def")")"
   [ "$(QFORGE_EMU_DIR="$T/none" code --gui "$emu")" = 3 ] && ok "$emu: emulator.json is accepted" \
     || bad "$emu: emulator.json refused: $(QFORGE_EMU_DIR="$T/none" "$LAUNCH" --gui "$emu" 2>&1 | tail -1)"
-  python3 -c 'import json,os,sys; d=json.load(open(sys.argv[1])); sys.exit(any(not os.path.isfile(os.path.join(sys.argv[2], s["file"])) for s in d["seed"]))' \
+  python3 -c 'import json,os,sys; d=json.load(open(sys.argv[1])); sys.exit(any(not os.path.isfile(os.path.join(sys.argv[2], s["file"])) for s in d.get("seed", [])))' \
     "$def" "$(dirname "$def")" && ok "$emu: every seeded file is in the image" || bad "$emu seeds a file that is not in the image"
 done
 for emu in $(sed -n 's/^[a-z0-9_]*=\([a-z0-9_-]*\)$/\1/p' "$LAUNCH_CONF" | sort -u); do
@@ -453,6 +457,10 @@ bad_def "system_args that are not an object" 'd["system_args"] = ["--system", "x
 bad_def "system_args with {rom}" 'd["system_args"] = {"psx": ["{rom}"]}'
 bad_def "system_args for a bad system name" 'd["system_args"] = {"../x": ["a"]}'
 bad_def "system_args that are not strings" 'd["system_args"] = {"psx": [1]}'
+bad_def "a root on an AppImage format (only a folder of scripts has one)" 'd["root"] = "roms/ports/x"'
+bad_def "a scripts format with no root" 'd["format"] = "scripts"'
+bad_def "a scripts root outside \$HOME (..)" 'd["format"] = "scripts"; d["root"] = "../../usr"'
+bad_def "a scripts root that is absolute" 'd["format"] = "scripts"; d["root"] = "/usr"'
 printf '{not json' > "$BAD/duckstation/emulator.json"
 [ "$(QFORGE_EMU_DATA_DIR="$BAD" code psx "$ROM")" = 2 ] && ok "a definition that is not JSON is refused (exit 2)" || bad "broken JSON was accepted"
 
@@ -831,6 +839,45 @@ wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
 touch "$T/stop-emu"; reap_launcher "$lpid"
 [ "$(sed -n 's/^cpus=//p' "$T/taskset.log" 2>/dev/null)" = "4,5,6,7" ] \
   && ok "--cpus big --gui pins the GUI like a game" || bad "--cpus big --gui was not pinned"
+
+# =================================================================================================
+CASE="folder of scripts (PortMaster)"
+# PortMaster is no AppImage: qforge-emu unpacks it into ~/roms/ports/PortMaster. --gui runs its own
+# PortMaster.sh from there; a ports card's "ROM" is the port's own launch script, run with bash
+# (PortMaster installs ports as <Name>.sh beside its folder; their mode is not ours to trust).
+SD="$T/defs-scripts"; mkdir -p "$SD/fakepm"
+cat > "$SD/fakepm/emulator.json" <<'EOF'
+{"format": "scripts", "root": "roms/ports/FakePM", "binary": "FakePM.sh", "args": ["{rom}"], "gui_args": ["--gui-arg"]}
+EOF
+echo "ports=fakepm" > "$T/launch-ports.conf"
+sl() { QFORGE_EMU_DATA_DIR="$SD" QFORGE_LAUNCH_CONF="$T/launch-ports.conf" "$LAUNCH" "$@"; }
+rm -rf "$HOME"; mkdir -p "$HOME/roms/ports"
+PORT="$HOME/roms/ports/A Port.sh"; cp "$T/fake-emu" "$PORT"; chmod 644 "$PORT"
+st="$T/launch.status.scripts"; rm -f "$st"
+QFORGE_LAUNCH_STATUS="$st" sl --gui fakepm >/dev/null 2>&1; rc=$?
+[ "$rc" = 3 ] && [ "$(cat "$st" 2>/dev/null)" = "not-installed fakepm" ] \
+  && ok "not unpacked yet: exit 3, status 'not-installed fakepm'" || bad "rc=$rc status=$(cat "$st" 2>/dev/null)"
+QFORGE_LAUNCH_STATUS="$st" sl ports "$PORT" >/dev/null 2>&1; rc=$?
+[ "$rc" = 3 ] && [ "$(cat "$st" 2>/dev/null)" = "not-installed fakepm" ] \
+  && ok "a port card without PortMaster: exit 3, not-installed (ports need its control files)" || bad "port without PortMaster: rc=$rc"
+mkdir -p "$HOME/roms/ports/FakePM"; cp "$T/fake-emu" "$HOME/roms/ports/FakePM/FakePM.sh"; chmod 755 "$HOME/roms/ports/FakePM/FakePM.sh"
+reset_logs
+sl --gui fakepm 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "PortMaster never started: $(cat "$T/launch.err")"
+[ "$(field self)" = "$HOME/roms/ports/FakePM/FakePM.sh" ] && ok "--gui runs ~/<root>/<binary> in place (no mount)" || bad "--gui ran '$(field self)'"
+[ "$(sed -n 's/^arg=//p' "$T/emu.log")" = "--gui-arg" ] && ok "--gui passes gui_args" || bad "--gui args: $(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' ' ')"
+[ "$(field pid)" = "$(field sid)" ] && ok "--gui: it leads its own session (OGUI's Exit reaches its whole tree)" || bad "--gui: not a session leader"
+touch "$T/stop-emu"; reap_launcher "$lpid"; rc=$?
+[ "$rc" = 7 ] && ok "--gui: exits with PortMaster's status" || bad "--gui: launcher exited $rc"
+[ ! -s "$T/fusermount.log" ] && ok "nothing to mount or unmount" || bad "fusermount ran for a folder"
+reset_logs
+sl ports "$PORT" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the port never started: $(cat "$T/launch.err")"
+[ "$(field self)" = "$PORT" ] && ok "a port card runs the port's own script (with bash: its mode is 644)" || bad "the port ran '$(field self)'"
+[ -z "$(sed -n 's/^arg=//p' "$T/emu.log")" ] && ok "... with no arguments" || bad "port args: $(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' ' ')"
+[ "$(field pid)" = "$(field sid)" ] && ok "the port leads its own session" || bad "the port is not a session leader"
+ogui_reap "$lpid"; reap_launcher "$lpid"
+grep -qx term "$T/emu.log" && ok "OGUI's Exit reaches the port" || bad "the port never got SIGTERM"
 
 # =================================================================================================
 CASE="stale mounts"

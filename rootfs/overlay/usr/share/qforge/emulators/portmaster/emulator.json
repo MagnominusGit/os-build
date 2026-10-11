@@ -1,0 +1,12 @@
+{
+  "notes": [
+    "PortMaster (ports: native Linux games and engines packaged for handhelds): not an AppImage. qforge-emu unpacks PortMaster.zip into ~/roms/ports/PortMaster, PortMaster's own generic default through the image's /roms -> /home/player/roms link, and it updates itself from there (user decision 2026-10-11).",
+    "gui_args: PortMaster's own UI (browse, install, update ports), from Settings > Emulators > Open.",
+    "args: a Ports card's ROM is the port's own launch script, which PortMaster installed as ~/roms/ports/<Name>.sh; qforge-launch runs it with bash. It sources PortMaster's control.txt and mod_QForge.txt (plan Phase 4b, part E)."
+  ],
+  "format": "scripts",
+  "root": "roms/ports/PortMaster",
+  "binary": "PortMaster.sh",
+  "args": ["{rom}"],
+  "gui_args": []
+}

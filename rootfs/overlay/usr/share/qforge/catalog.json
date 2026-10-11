@@ -231,6 +231,28 @@
         "name": "GPL-2.0",
         "url": "https://github.com/xemu-project/xemu/blob/master/LICENSE"
       }
+    },
+    "portmaster": {
+      "name": "PortMaster",
+      "author": "The PortMaster team (PortsMaster)",
+      "systems": [
+        "ports"
+      ],
+      "github": "PortsMaster/PortMaster-GUI",
+      "tag": "2026.10.03-1041",
+      "asset": "^PortMaster\\.zip$",
+      "sha256": "6e4fa938c39efdb9237aa9973b3ce3f318242ada171f26cd72511b09e393fdf2",
+      "size": 24131471,
+      "unpack": {
+        "to": "roms/ports/PortMaster",
+        "version": "version"
+      },
+      "self_update": true,
+      "homepage": "https://portmaster.games/",
+      "licence": {
+        "name": "MIT",
+        "url": "https://github.com/PortsMaster/PortMaster-GUI/blob/main/LICENSE"
+      }
     }
   }
 }
