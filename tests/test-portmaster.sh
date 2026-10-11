@@ -165,6 +165,10 @@ out="$(ww westonwrap.sh headless noop kiosk crusty_x11egl 'GAME_VAR=ok' "sh -c '
   && ok "westonwrap.sh: no Weston, its command runs on gamescope's display, exit code kept" || bad "rc=$rc out=$out"
 out="$(ww westonwrap.sh cleanup)"; rc=$?
 [ -z "$out" ] && [ "$rc" = 0 ] && ok "westonwrap.sh cleanup: nothing to clean (no seatd, no pkill)" || bad "cleanup rc=$rc out=$out"
+out="$(cd "$T" && env -i PATH=/usr/bin:/bin LD_LIBRARY_PATH=/sys/lib WRAPPED_LIBRARY_PATH=/game/libs:/game/extra WRAPPED_PRELOAD=/game/pre.so \
+  bash "$T/weston/westonwrap.sh" headless noop kiosk crusty_x11egl 'sh -c "echo \$LD_LIBRARY_PATH \$LD_PRELOAD"' 2>/dev/null)"
+[ "$out" = "/game/libs:/game/extra:/sys/lib:/usr/lib/qforge/portmaster/lib /game/pre.so" ] \
+  && ok "westonwrap.sh: the port's WRAPPED_LIBRARY_PATH / WRAPPED_PRELOAD reach the command, as westonwrap gives them" || bad "wrapped: $out"
 [ "$(ww other.sh headless noop kiosk x true)" = NOT-BYPASSED ] && ok "any other script sourcing it is untouched" || bad "other script bypassed"
 QLIB=/usr/lib/qforge/portmaster/lib
 ld() { env -i PATH=/usr/bin:/bin ${1+LD_LIBRARY_PATH="$1"} bash -c 'source "$1"; source "$1"; echo "$LD_LIBRARY_PATH"' _ "$PM_DATA/mod_QForge.txt"; }
@@ -194,9 +198,9 @@ out="$(env -i PATH=/usr/bin:/bin bash -c '
   export GPTOKEYB2="$ESUDO env LD_PRELOAD=$controlfolder/libinterpose.${DEVICE_ARCH}.so $controlfolder/gptokeyb2 $ESUDOKILL2"
   export GPTOKEYB="$ESUDO $controlfolder/gptokeyb $ESUDOKILL"
   source "$1"; source "$1"; echo "2=$GPTOKEYB2"; echo "1=$GPTOKEYB"' _ "$PM_DATA/mod_QForge.txt")"
-grep -qxF "2= env LD_PRELOAD=$GPTK_LIB /roms/ports/PortMaster/gptokeyb2 -1" <<<"$out" \
+grep -qxF "2= env LD_PRELOAD=$GPTK_LIB:/roms/ports/PortMaster/libinterpose.aarch64.so /roms/ports/PortMaster/gptokeyb2 -1" <<<"$out" \
   && grep -qxF "1= /roms/ports/PortMaster/gptokeyb " <<<"$out" \
-  && ok "GPTOKEYB2 preloads QForge's interposer instead of libinterpose; GPTOKEYB untouched" || bad "$out"
+  && ok "GPTOKEYB2 preloads QForge's interposer first, libinterpose still (gptokeyb2 links it: NEEDED); GPTOKEYB untouched" || bad "$out"
 # The library itself, built for the host on a temp folder's "event nodes" (the real ones need the
 # input group): gptokeyb2 asks for the pad's fd right after SDL opened it, SDL3 opens more after.
 GPTK_SRC_C="$ROOT/apps/qforge-gptk-interpose/src/qforge-gptk-interpose.c"

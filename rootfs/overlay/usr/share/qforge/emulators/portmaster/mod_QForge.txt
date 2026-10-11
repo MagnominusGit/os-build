@@ -28,8 +28,11 @@ esac
 # gptokeyb2 grabs the pad (a .gptk's `exclusive = true`) through the fd its preloaded libinterpose
 # reports: the last one ANY open() returned. Under the image's sdl2-compat (SDL3) that is not the
 # pad, the grab misses and the game reads the pad too (Shattered Pixel Dungeon: its own right-stick
-# pointer on top of gptokeyb2's mouse). QForge's interposer reports the pad's event node.
-GPTOKEYB2="${GPTOKEYB2-}"; GPTOKEYB2="${GPTOKEYB2//${controlfolder-}\/libinterpose.${DEVICE_ARCH-}.so//usr/lib/qforge/portmaster/libqforge-gptk-interpose.so}"
+# pointer on top of gptokeyb2's mouse). QForge's interposer reports the pad's event node; it is
+# preloaded first so its interpose_get_fd() wins, and libinterpose stays preloaded behind it:
+# gptokeyb2 links it (NEEDED) and fails to start without it.
+GPTOKEYB2="${GPTOKEYB2-}"
+GPTOKEYB2="${GPTOKEYB2//LD_PRELOAD=${controlfolder-}\//LD_PRELOAD=/usr/lib/qforge/portmaster/libqforge-gptk-interpose.so:${controlfolder-}/}"
 export GPTOKEYB2
 
 # SDL on Xwayland makes its GL contexts through EGL, not GLX. Ports ask SDL for GLES (Godot's frt,
@@ -73,6 +76,9 @@ pm_platform_helper() {
 # `westonwrap.sh cleanup` has nothing to clean then.
 if [[ "${0##*/}" == westonwrap*.sh ]]; then
   [ "${1-}" = cleanup ] && exit 0
+  # The port's own libraries and preloads, passed to westonwrap for its command (run_user_command).
+  [ -n "${WRAPPED_LIBRARY_PATH-}" ] && export LD_LIBRARY_PATH="$WRAPPED_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  [ -n "${WRAPPED_PRELOAD-}" ] && export LD_PRELOAD="$WRAPPED_PRELOAD${LD_PRELOAD:+:$LD_PRELOAD}"
   eval "${*:5}"
   exit $?
 fi
