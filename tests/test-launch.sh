@@ -217,6 +217,12 @@ for sys in $(sed -n 's/^\([a-z0-9_]*\)=.*/\1/p' "$LAUNCH_CONF"); do
   [ -z "$missing" ] && ok "layout has roms/bios/saves/states for system '$sys'" || bad "layout lacks:$missing (system '$sys' is in launch.conf)"
 done
 for d in bios emulators; do layout_has "$d" && ok "layout has ~/$d" || bad "layout lacks ~/$d"; done
+# PortMaster and its ports find themselves through hardcoded /roms/ports paths (its generic
+# default): the image links /roms to the player's roms, and roms/ports exists for them.
+layout_has roms/ports && ok "layout has ~/roms/ports (PortMaster and its ports)" || bad "layout lacks ~/roms/ports"
+[ "$(readlink "$ROOT/rootfs/overlay/roms" 2>/dev/null)" = /home/player/roms ] \
+  && ok "the image links /roms to /home/player/roms (PortMaster's /roms/ports)" \
+  || bad "rootfs/overlay/roms is not a symlink to /home/player/roms: PortMaster would look in an empty read-only /roms"
 [ "$(ini BIOS SearchDirectory)" = /home/player/bios/psx ] && [ "$(ini GameList RecursivePaths)" = /home/player/roms/psx ] \
   && [ "$(ini MemoryCards Directory)" = /home/player/saves/psx ] && [ "$(ini Folders SaveStates)" = /home/player/states/psx ] \
   && ok "duckstation seed: BIOS, ROMs, memory cards and states in the shared layout" \

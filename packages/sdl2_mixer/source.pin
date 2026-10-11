@@ -1,0 +1,18 @@
+# sdl2_mixer — built FROM SOURCE via a qforge-owned PKGBUILD (packages/sdl2_mixer/PKGBUILD).
+# It is an Arch [extra] package but absent from the pinned holo aarch64 snapshot (its db has
+# sdl2_ttf and sdl2_image, not sdl2_mixer), so there is no repo row to resolve. Same "local
+# PKGBUILD" form as packages/brightnessctl/source.pin.
+#
+# Why: PortMaster's GUI (pugwash, python + pysdl2 on the system SDL2 libraries) imports
+# sdl2.sdlmixer at start-up, and pysdl2 refuses that import when libSDL2_mixer is missing — no
+# PortMaster at all without it. Plan: Phase 4b, PortMaster.
+#
+# Version: 2.8.2, upstream's latest SDL2 release and what Arch ships.
+#
+# Fields (see packages/README.md):
+#   name           pkgname (must match the PKGBUILD); also the work/ build-dir + repo entry
+#   pkgbuild_local path (relative to this dir) to the checked-in PKGBUILD to build
+#   pkgrel_suffix  numeric suffix appended to the PKGBUILD's pkgrel so pacman prefers our build
+name: sdl2_mixer
+pkgbuild_local: PKGBUILD
+pkgrel_suffix: 1

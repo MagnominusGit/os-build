@@ -151,7 +151,20 @@ BOOTSTRAP_PKGS=(base)
 #                       smb.service). Already pulled in as a dependency; listed because the image
 #                       now ENABLES avahi-daemon (60-qforge-shares.preset), which must not depend on
 #                       some other package keeping it around.
-PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-tools mesa gamescope seatd mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit e2fsprogs xorg-xwayland noto-fonts noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl opengamepadui powerstation which fuse3 ksmbd-tools avahi)
+#   PortMaster's needs (Settings > Emulators downloads it into ~/roms/ports/PortMaster; plan Phase
+#   4b). Its GUI is python + pysdl2 on the system SDL2 libraries:
+#   sdl2_ttf/sdl2_image  its text and images. sdl2_image's JPEG XL support brings libjxl + highway
+#                       + gperftools (~17 MiB), measured 2026-10-11.
+#   sdl2_mixer          its sounds and music; pysdl2 refuses to load the GUI without it. Overlay
+#                       (packages/sdl2_mixer): not in the holo snapshot.
+#   squashfuse          ports mount their runtimes (Godot, mono, ...) from squashfs images with
+#                       `mount`; as player, without root, a FUSE mount is the only way. Pulls fuse2
+#                       (its fusermount is already on guard-rootfs.sh's setuid permit list).
+#   mesa-utils          glxinfo: PortMaster's per-system GL setup files (libgl_<system>.txt, ours
+#                       too) ask it whether desktop GL exists before falling back to gl4es.
+#   unzip               PortMaster.sh installs runtime bundles dropped in its autoinstall folder
+#                       with it, and some ports unpack their game data with it on first run.
+PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-tools mesa gamescope seatd mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit e2fsprogs xorg-xwayland noto-fonts noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl opengamepadui powerstation which fuse3 ksmbd-tools avahi sdl2_ttf sdl2_image sdl2_mixer squashfuse mesa-utils unzip)
 
 # Dev-only packages — installed ONLY under QFORGE_DEV=1, NEVER in a release base.
 # On-device bring-up tools: evtest reads raw /dev/input events; usbutils provides lsusb.

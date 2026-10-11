@@ -85,3 +85,11 @@ this image `/etc/passwd` and `/var` are *build products* rather than device stat
 - `usr/lib/systemd/zram-generator.conf` — the image's only swap device, `ram/2` compressed in RAM.
   **Coupled to the kernel:** it needs `CONFIG_ZRAM` + the zstd backend, which `kernel/build.sh`
   asserts, because without them there is no `zram0`, no swap, and no error.
+
+**PortMaster's `/roms` — `roms -> /home/player/roms`**
+The only top-level symlink in the tree. PortMaster (downloaded into the player's home from
+Settings > Emulators) and every port script it installs locate themselves through hardcoded
+`/roms/ports/...` paths (PortMaster's generic default when the system is not one of its known
+handheld firmwares). The link points them at the player's `~/roms`, so PortMaster lives in
+`~/roms/ports/PortMaster` and its ports in `~/roms/ports` with no change to PortMaster's own files,
+which its self-updates would overwrite. The overlay-ownership stage resets it to root (`-h`).

@@ -835,6 +835,79 @@ plus the ROM library that launches them)
   prefer zink per emulator (its conf), not session-wide. The same change dropped Mesa's device_select
   layer, which only matters for x86 games under FEX/pressure-vessel: not applicable, keep it.
 
+#### PortMaster (planned 2026-10-11, not started)
+
+PortMaster is an "emulator" in Settings > Emulators (Download / Update / Open like the others), but
+it is not an AppImage and its games do not go through it: each port installs its own launch script.
+Researched 2026-10-11 from PortMaster-GUI (release 2026.10.03-1041) and PortMaster-New (1469 port
+scripts); paths below are relative to PortMaster-GUI/PortMaster/.
+
+**Decisions (user, 2026-10-11):**
+- **Self-update.** The catalog installs a pinned, sha256-checked `PortMaster.zip` the first time;
+  after that PortMaster updates itself (hourly check of GitHub's latest `version.json`, asks the
+  player, unzips over its own folder, relaunches). It only writes into a folder player owns, so it
+  cannot touch the image. No `--no-check`: the port list moves fast and new ports often require a
+  newer PortMaster. Settings > Emulators shows no Update for it (the catalog pin is first-install
+  only).
+- **No root.** No sudo for player; ports run as player with `ESUDO` empty. A port that only works
+  as root is unsupported. (Rejected: NOPASSWD sudo, as handheld firmwares effectively do --
+  downloaded scripts would run as root.)
+- **Plain cards.** Port cards are named like other ROMs; no screenshots / port.json art for now
+  (art comes with the library metadata work, Phase 4c).
+
+**Where it lives (how PortMaster picks its folder).** Three layers each resolve it on their own:
+every port script searches `/opt/system/Tools/PortMaster`, `/opt/tools/PortMaster`,
+`$XDG_DATA_HOME/PortMaster`, `/roms/ports/PortMaster`; `control.txt` (sourced by every port)
+searches again without `$XDG_DATA_HOME`, sets `directory=roms` and ports go to
+`/$directory/ports/<port>`; harbourmaster (`pylibs/harbourmaster/config.py:37-242`) probes per-CFW
+paths, falls back to `/roms/ports`, and honours `HM_TOOLS_DIR` / `HM_PORTS_DIR` / `HM_SCRIPTS_DIR`.
+The system is `NAME=` of /etc/os-release (ours is already `QForge`); unknown names get the generic
+`PlatformBase` (no gamelist writing, no frontend refresh). There is no plugin mechanism for a new
+platform (static `HM_PLATFORMS` dict), but two hook files survive updates (an update unzips over the
+folder without deleting): `mod_QForge.txt` (sourced by ~1465 ports) and `libgl_QForge.txt`. A
+custom `control.txt` would NOT survive (only a Platform class re-copies it).
+So: image symlink `/roms -> /home/player/roms`, PortMaster at `~/roms/ports/PortMaster`, ports in
+`~/roms/ports` -- the generic default of all three layers, no fork, no custom control.txt. Never let
+`~/.local/share/PortMaster` exist (port scripts look there before /roms/ports).
+
+**What ports assume, and the no-root answer** (counts over 1469 scripts):
+| Assumption | Ports | QForge |
+|---|---|---|
+| root via `$ESUDO` (empty when sudo does not work) | 1231 | empty: no sudo |
+| `$ESUDO mount x.squashfs` for a runtime (godot, mono, java, love...) | ~295 | `mount`/`umount` stand-ins first on PATH, on squashfuse + fusermount3 (RetroDECK, the only non-root target, does the same with unsquashfs); `PM_CAN_MOUNT=N` |
+| gptokeyb writes `/dev/uinput` | 1363 | udev rule: /dev/uinput for player (group or uaccess, 0660) |
+| gl4es with `LIBGL_FB=4` (GBM, straight to KMS) | ~109 | `libgl_QForge.txt`: native Mesa GL, gl4es only as fallback (ROCKNIX's libgl_ROCKNIX.txt checks glxinfo) |
+| westonpack (headless weston + crusty) | 75 | unknown under gamescope: HW test |
+| armhf (`PORT_32BIT=Y`) | 210 | unsupported; PortMaster filters them out by arch |
+Most ports are SDL2 built for KMSDRM but do not force `SDL_VIDEODRIVER`, so under our Xwayland SDL
+picks x11. `pm_finish` runs `pkill -9 gptokeyb` and `systemctl restart oga_events` (harmless).
+
+**Phases:**
+- **A. Image** (host-testable): packages `sdl2_ttf`, `sdl2_image`, `sdl2_mixer` (the GUI is
+  python3 + bundled pysdl2 on system SDL2, `PYSDL2_DLL_PATH=/usr/lib`), `squashfuse`, `mesa-utils`
+  (glxinfo), `unzip`; the `/roms` symlink; the /dev/uinput udev rule; tmpfiles row for `~/roms/ports`.
+- **B. Install through the catalog**: qforge-emu assumes one AppImage in four places
+  (`installed_tag`, `<tag>.AppImage` naming, chmod, remove-the-whole-dir). Add an archive format:
+  unpack the pinned, sha256-checked zip into `~/roms/ports/PortMaster` (python zipfile), installed
+  version read from PortMaster's own version file, no Update offered after install (self-update).
+  Delete removes only `PortMaster/` and never the ports. test-catalog's arm64/aarch64 asset-name
+  rule needs an exception (one zip for every arch).
+- **C. Open**: a `script` format driver in qforge-launch so Open runs `PortMaster.sh` (fast cores,
+  status file, own session / process group as for the AppImages). Its relaunch loop after a
+  self-update must stay inside that process group so OGUI's Exit still reaps it.
+- **D. `ports` system**: plugin SYSTEMS entry `exts: ["sh"]` scanning `~/roms/ports/*.sh` (skip
+  `PortMaster.sh`), launched as `qforge-launch ports <script>` (same CPU pinning and exit path as
+  ROMs); launch.conf row, tmpfiles rows (bios/saves/states not needed: decide whether
+  test-launch's per-system row rule gets an exception), plugin version bump.
+- **E. Hook files + HW**: `mod_QForge.txt` (`PM_CAN_MOUNT=N`, PATH for the mount stand-ins, display
+  size, `GODOT_OPTS`, `pm_platform_helper`) and `libgl_QForge.txt`, shipped in the image and copied
+  into the PortMaster folder when missing (like the OGUI plugin). HW test: one Godot port (runtime
+  mount), one gptokeyb-heavy SDL2 port, one westonpack port; OGUI Exit and the port's own exit.
+- **F. Later, optional**: upstream a `PlatformQForge` to PortMaster-GUI.
+
+Licence: PortMaster-GUI and PortMaster-New are MIT; gptokeyb/gptokeyb2 GPL-2.0 (downloaded with
+PortMaster, not redistributed by QForge). Ports and runtimes stay player downloads.
+
 ### Phase 4c — Library scaling polish (later, decided 2026-10-04)
 
 Measured 2026-10-04 on the Pocket ACE (plugin timing logs, 2,000 empty `.chd` in `~/roms/psx`):

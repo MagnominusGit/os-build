@@ -1,0 +1,42 @@
+# sdl2_mixer — SDL2's audio mixer, for PortMaster's GUI (see source.pin).
+#
+# Recipe mirrors Arch's packaging/packages/sdl2_mixer PKGBUILD (2.8.2-1) with ONE change: MOD music
+# through libmodplug only. Arch also links libxmp, which the holo snapshot does not carry;
+# --enable-music-mod-modplug alone is what Arch enables explicitly anyway, and PortMaster's default
+# theme music (music.mod) is the format that needs it. No fluidsynth either (an Arch makedepend for
+# MIDI, also absent): MIDI falls back to the built-in timidity, as on Arch without fluidsynth.
+# sha256 of the same tarball whose sha512 Arch pins (9ea190a3…).
+
+pkgname=sdl2_mixer
+pkgver=2.8.2
+pkgrel=1
+pkgdesc='A simple multi-channel audio mixer (Version 2)'
+arch=('aarch64')
+url='https://github.com/libsdl-org/SDL_mixer'
+license=('Zlib')
+depends=('sdl2' 'libvorbis' 'libmodplug' 'mpg123' 'flac' 'opusfile')
+source=("https://github.com/libsdl-org/SDL_mixer/releases/download/release-${pkgver}/SDL2_mixer-${pkgver}.tar.gz")
+sha256sums=('938dff531d00ace2296557a6599abe6f34599e2f34f0a4a08a397e2ccac8b8f7')
+
+build() {
+  cd "SDL2_mixer-${pkgver}"
+  ./configure \
+      --enable-music-mod-modplug \
+      --disable-music-mod-xmp \
+      --enable-music-ogg-vorbis \
+      --enable-music-flac-libflac \
+      --enable-music-mp3-mpg123 \
+      --disable-music-ogg-stb \
+      --disable-music-flac-drflac \
+      --disable-music-mp3-drmp3 \
+      --disable-music-midi-fluidsynth \
+      --disable-static \
+      --prefix=/usr
+  make
+}
+
+package() {
+  cd "SDL2_mixer-${pkgver}"
+  make DESTDIR="${pkgdir}" install
+  install -Dm644 LICENSE.txt "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}
