@@ -56,3 +56,16 @@ pm_platform_helper() {
   # a helper here).
   printf ""
 }
+
+# Ports in PortMaster's Weston runtime (Godot 4, Java ...) run `westonwrap.sh <backend> <renderer>
+# <shell> <gllib> <command...>`, which sources this file before anything else. Its Weston needs
+# its own seatd and the DRM/input devices: as the player, under gamescope, it dies ("client is not
+# active") and the port hangs on the launch screen. gamescope's Xwayland and Mesa's EGL are
+# already what the command needs, so do what westonwrap itself does on ROCKNIX with Mesa
+# ("bypassing weston setup entirely"): run the command here and leave with its exit code.
+# `westonwrap.sh cleanup` has nothing to clean then.
+if [[ "${0##*/}" == westonwrap*.sh ]]; then
+  [ "${1-}" = cleanup ] && exit 0
+  eval "${*:5}"
+  exit $?
+fi

@@ -149,6 +149,18 @@ ctl() { env -i PATH=/usr/bin:/bin bash -c '
 [ "$(ctl 472286 "")" = "0 " ] \
   && ok "get_controls with no device GUID: the whole db is not exported (E2BIG on every exec), SDL reads the file" || bad "big: $(ctl 472286 "")"
 [ "$(ctl 300 03000000)" = "300 03000000" ] && ok "a device's own mapping is kept, and get_controls' other results" || bad "small: $(ctl 300 03000000)"
+# westonwrap.sh (PortMaster's Weston runtime) sources mod_QForge.txt with its own arguments
+# (backend renderer shell gllib command...). QForge skips Weston and runs the command on gamescope.
+mkdir -p "$T/weston"
+printf '#!/bin/bash\nsource "%s"\necho NOT-BYPASSED\n' "$PM_DATA/mod_QForge.txt" > "$T/weston/westonwrap.sh"
+cp "$T/weston/westonwrap.sh" "$T/weston/other.sh"
+ww() { (cd "$T" && env -i PATH=/usr/bin:/bin DISPLAY=:1 bash "$T/weston/$1" "${@:2}" 2>&1); }
+out="$(ww westonwrap.sh headless noop kiosk crusty_x11egl 'GAME_VAR=ok' "sh -c 'echo ran \$GAME_VAR on \$DISPLAY; exit 3'")"; rc=$?
+[ "$out" = "ran ok on :1" ] && [ "$rc" = 3 ] \
+  && ok "westonwrap.sh: no Weston, its command runs on gamescope's display, exit code kept" || bad "rc=$rc out=$out"
+out="$(ww westonwrap.sh cleanup)"; rc=$?
+[ -z "$out" ] && [ "$rc" = 0 ] && ok "westonwrap.sh cleanup: nothing to clean (no seatd, no pkill)" || bad "cleanup rc=$rc out=$out"
+[ "$(ww other.sh headless noop kiosk x true)" = NOT-BYPASSED ] && ok "any other script sourcing it is untouched" || bad "other script bypassed"
 QLIB=/usr/lib/qforge/portmaster/lib
 ld() { env -i PATH=/usr/bin:/bin ${1+LD_LIBRARY_PATH="$1"} bash -c 'source "$1"; source "$1"; echo "$LD_LIBRARY_PATH"' _ "$PM_DATA/mod_QForge.txt"; }
 [ "$(ld)" = "$QLIB" ] && [ "$(ld "")" = "$QLIB" ] && [ "$(ld /port/libs)" = "/port/libs:$QLIB" ] \
