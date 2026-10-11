@@ -27,6 +27,7 @@
 #    "env": {"NAME": "value"},                     added to the emulator's environment
 #    "core_dumps": false,                          no core file when it crashes (default true; below)
 #    "seed": [{"file": "x.ini", "to": ".config/x/x.ini"}],   first-run settings (below)
+#    "sync": [{"file": "x.txt", "to": "roms/x/x.txt"}],      QForge's own files, kept current (below)
 #    "install": [{"from": "bios/x/fw.bin",          a one-time step with the emulator's own binary
 #                 "unless": ".config/x/fw/ok",       (below); paths under $HOME
 #                 "args": ["--installfw", "{file}"]}],
@@ -52,6 +53,12 @@
 # emulator is kept. One set per emulator serves every device: InputPlumber presents each handheld's
 # joypad as the same virtual pad.
 #
+# Kept current (sync): files that are QForge's, not the player's, placed into the download's world --
+# PortMaster's mod_QForge.txt and libgl_QForge.txt, which every port sources from PortMaster's
+# folder. Copied from the image at every launch when missing or different (an image update must
+# reach an existing install, which a seed never would), atomically. A failed copy is a warning: the
+# emulator still starts.
+#
 # One-time installs (install): a file the PLAYER provides that the emulator must import before any
 # game runs (RPCS3's PS3 firmware). When `unless` is missing under $HOME, the emulator's binary is run
 # with `args` ("{file}" = $HOME/<from>) from the mounted download, before the game, and waited for;
@@ -65,7 +72,10 @@
 # script, which PortMaster installed beside its folder -- run with bash (args, "{rom}" = the
 # script), never with exec: its mode is whatever the port's zip carried. Not installed (exit 3,
 # `not-installed`) when <root>/<binary> is not executable, for a game too: every port script sources
-# PortMaster's control files.
+# PortMaster's control files. When the run ends, every runtime a port left mounted is released: the
+# mounts QForge's port `mount` stand-in (/usr/lib/qforge/portmaster/bin/mount) records in
+# $QFORGE_PM_MOUNTS (default $XDG_RUNTIME_DIR/qforge-portmaster-mounts), whose squashfuse daemons
+# outlive the port's session when OGUI's Exit skips the port's own umount.
 #
 # Every AppImage format mounts the AppImage and runs its real binary; every rule below was found on
 # hardware (DuckStation, MANGMI Pocket Max, 2026-10-03) and each one cost a crash:
@@ -123,6 +133,8 @@ PLAYER_CONF_DIR = ENV.get("QFORGE_PLAYER_CONF_DIR",
 STATUS = ENV.get("QFORGE_LAUNCH_STATUS",
                  os.path.join(ENV.get("XDG_RUNTIME_DIR") or "/tmp", "qforge-launch.status"))
 TMP_LINK_DIR = ENV.get("QFORGE_TMP_LINK_DIR", "/tmp")
+PM_MOUNTS = ENV.get("QFORGE_PM_MOUNTS",
+                    os.path.join(ENV.get("XDG_RUNTIME_DIR") or "/tmp", "qforge-portmaster-mounts"))
 SYSTEM_VULKAN_ICD = "/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json"
 UNMOUNT_TRIES = 50   # x 0.1 s for the runtime to let go of the mount after SIGHUP
 MOUNT_TIMEOUT = 30   # s for the AppImage runtime to print its mount point
@@ -132,7 +144,7 @@ USAGE = "usage: qforge-launch [--cpus big|all] <system> <rom> | [--cpus big|all]
 SYSTEM_ID = re.compile(r"[a-z0-9_]+")
 EMU_ID = re.compile(r"[a-z0-9_-]+")
 DEFINITION_KEYS = {"format", "root", "binary", "args", "gui_args", "system_args", "env", "seed",
-                   "install", "core_dumps", "notes"}
+                   "sync", "install", "core_dumps", "notes"}
 SCRIPT_SHELL = "/bin/bash"  # what a scripts-format game card's script runs with
 ROM = "{rom}"
 FILE = "{file}"
@@ -256,12 +268,13 @@ def load_definition(emulator):
             and all(isinstance(k, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k)
                     and clean_str(v) for k, v in env.items())):
         raise bad("env must map variable names to strings")
-    seed = d.get("seed", [])
-    if not (isinstance(seed, list)
-            and all(isinstance(s, dict) and set(s) == {"file", "to"}
-                    and safe_relative(s["file"]) and safe_relative(s["to"]) for s in seed)):
-        raise bad('seed entries must be {"file": <in the image>, "to": <path under $HOME>}, '
-                  "both relative without '..'")
+    seed, sync = d.get("seed", []), d.get("sync", [])
+    for key, entries in (("seed", seed), ("sync", sync)):
+        if not (isinstance(entries, list)
+                and all(isinstance(s, dict) and set(s) == {"file", "to"}
+                        and safe_relative(s["file"]) and safe_relative(s["to"]) for s in entries)):
+            raise bad(f'{key} entries must be {{"file": <in the image>, "to": <path under $HOME>}}, '
+                      "both relative without '..'")
     install = d.get("install", [])
     if not (isinstance(install, list)
             and all(isinstance(i, dict) and set(i) == {"from", "unless", "args"}
@@ -278,7 +291,7 @@ def load_definition(emulator):
     if not isinstance(core_dumps, bool):
         raise bad("core_dumps must be true or false")
     return {"format": d["format"], "root": d.get("root"), "binary": d["binary"], "args": args, "gui_args": gui_args,
-            "system_args": system_args, "env": env, "seed": seed, "install": install, "core_dumps": core_dumps}
+            "system_args": system_args, "env": env, "seed": seed, "sync": sync, "install": install, "core_dumps": core_dumps}
 
 
 def seed_first_run(emulator, seed):
@@ -295,6 +308,34 @@ def seed_first_run(emulator, seed):
         except OSError as err:
             raise Exit(2, f"could not seed {dst}: {err}") from None
         log(f"first run of {emulator}: seeded {dst}")
+
+
+def sync_files(emulator, sync):
+    """QForge's own files (sync above): the image's copy, whenever the one under $HOME differs."""
+    for s in sync:
+        src = os.path.join(EMU_DATA_DIR, emulator, s["file"])
+        dst = os.path.join(HOME, s["to"])
+        tmp = f"{dst}.qforge-{secrets.token_hex(4)}"
+        try:
+            with open(src, "rb") as f:
+                want = f.read()
+            try:
+                with open(dst, "rb") as f:
+                    if f.read() == want:
+                        continue
+            except OSError:
+                pass
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with open(tmp, "wb") as f:
+                f.write(want)
+            os.replace(tmp, dst)
+            log(f"{emulator}: updated {dst}")
+        except OSError as err:
+            log(f"warning: {emulator}: could not place {dst}: {err}")
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
 
 
 # -------------------------------------------------------------------------------------- CPUs --
@@ -555,7 +596,25 @@ class Scripts:
         return {}
 
     def release(self):
-        pass
+        """Release every runtime mount the port `mount` stand-in recorded (see above). Never raises."""
+        try:
+            with open(PM_MOUNTS) as f:
+                entries = [line.rstrip("\n").split("\t", 1)[0] for line in f if line.strip()]
+        except OSError:
+            return
+        live = {fields[1].replace("\\040", " ") for fields in mount_table() if len(fields) > 1}
+        for dst in dict.fromkeys(entries):
+            if dst in live:
+                log(f"releasing {dst}, left mounted by the port")
+                try:
+                    subprocess.run(["fusermount", "-u", "-z", dst], stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, check=False)
+                except OSError as err:
+                    log(f"fusermount -u {dst}: {err}")
+        try:
+            open(PM_MOUNTS, "w").close()
+        except OSError:
+            pass
 
 
 AppImage.runs_rom = False
@@ -657,6 +716,7 @@ def run(argv):
     if not os.access(installed, os.X_OK):
         fail("not-installed", emulator, f"{emulator} is not installed ({installed} missing or not executable)")
     seed_first_run(emulator, definition["seed"])
+    sync_files(emulator, definition["sync"])
     todo = missing_installs(emulator, definition["install"], rom is not None)
     pin = pinning(emulator, cpus)
 

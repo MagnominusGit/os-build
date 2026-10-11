@@ -879,6 +879,45 @@ wait_for emu_up || bad "the port never started: $(cat "$T/launch.err")"
 ogui_reap "$lpid"; reap_launcher "$lpid"
 grep -qx term "$T/emu.log" && ok "OGUI's Exit reaches the port" || bad "the port never got SIGTERM"
 
+CASE="folder of scripts: QForge's hook files (sync)"
+# mod_QForge.txt / libgl_QForge.txt live in the image and are copied into PortMaster's folder at
+# every launch: an image update must reach an existing install, unlike a seed, which never
+# overwrites. A file already identical is left alone.
+printf 'hook v1\n' > "$SD/fakepm/mod_Test.txt"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["sync"]=[{"file":"mod_Test.txt","to":"roms/ports/FakePM/mod_Test.txt"}]; json.dump(d,open(sys.argv[1],"w"))' "$SD/fakepm/emulator.json"
+HOOK="$HOME/roms/ports/FakePM/mod_Test.txt"
+sync_run() { reset_logs; sl --gui fakepm 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"; wait_for emu_up || bad "PortMaster never started: $(cat "$T/launch.err")"; touch "$T/stop-emu"; reap_launcher "$lpid"; }
+sync_run
+[ "$(cat "$HOOK" 2>/dev/null)" = "hook v1" ] && ok "a launch copies the image's hook file into the folder" || bad "hook not synced: $(cat "$T/launch.err")"
+touch -d '2001-01-01' "$HOOK"; sync_run
+[ "$(stat -c %Y "$HOOK")" = "$(date -d 2001-01-01 +%s)" ] && ok "an identical hook file is left alone" || bad "an identical hook was rewritten"
+printf 'player edit\n' > "$HOOK"; printf 'hook v2\n' > "$SD/fakepm/mod_Test.txt"; sync_run
+[ "$(cat "$HOOK")" = "hook v2" ] && ok "a different one is replaced by the image's (an image update reaches existing installs)" || bad "hook is '$(cat "$HOOK")'"
+[ -z "$(find "$HOME/roms/ports/FakePM" -name '*qforge*')" ] && ok "no temporary file left" || bad "left: $(find "$HOME/roms/ports/FakePM" -name '*qforge*')"
+
+CASE="folder of scripts: runtimes a port left mounted"
+# A port's runtime is a squashfuse mount (QForge's mount stand-in) that outlives the port when
+# OGUI's Exit skips the port's own umount: the launcher releases every mount the registry lists.
+REG="$T/pm-mounts"; mkdir -p "$T/rt1" "$T/rt2"
+printf '%s\t%s\n' "$T/rt1" /x/godot.squashfs "$T/gone" /x/weston.squashfs > "$REG"
+echo "squashfuse $T/rt1 fuse.squashfuse ro,nosuid,nodev 0 0" >> "$T/mounts"
+cat > "$T/bin/fusermount" <<EOF
+#!/bin/bash
+echo "\$*" >> "$T/fusermount2.log"
+m="\${!#}"
+awk -v m="\$m" '\$2 != m' "$T/mounts" > "$T/mounts.new" && mv "$T/mounts.new" "$T/mounts"
+EOF
+chmod +x "$T/bin/fusermount"; rm -f "$T/fusermount2.log"
+reset_logs
+QFORGE_PM_MOUNTS="$REG" sl ports "$PORT" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the port never started: $(cat "$T/launch.err")"
+grep -q "rt1" "$T/fusermount2.log" 2>/dev/null && bad "released a mount while the port still ran" || ok "nothing is released while the port runs"
+ogui_reap "$lpid"; reap_launcher "$lpid"
+grep -qx -- "-u -z $T/rt1" "$T/fusermount2.log" 2>/dev/null && ok "after the port, its runtime mount is released (fusermount -u -z)" || bad "fusermount calls: $(cat "$T/fusermount2.log" 2>/dev/null)"
+! grep -q gone "$T/fusermount2.log" 2>/dev/null && ok "a registry entry no longer mounted is skipped" || bad "unmounted something not mounted"
+[ ! -s "$REG" ] && ok "the registry is emptied" || bad "registry left: $(cat "$REG")"
+rm -f "$T/bin/fusermount"
+
 # =================================================================================================
 CASE="stale mounts"
 reset_logs

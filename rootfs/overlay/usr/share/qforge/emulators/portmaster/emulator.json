@@ -2,11 +2,24 @@
   "notes": [
     "PortMaster (ports: native Linux games and engines packaged for handhelds): not an AppImage. qforge-emu unpacks PortMaster.zip into ~/roms/ports/PortMaster, PortMaster's own generic default through the image's /roms -> /home/player/roms link, and it updates itself from there (user decision 2026-10-11).",
     "gui_args: PortMaster's own UI (browse, install, update ports), from Settings > Emulators > Open.",
-    "args: a Ports card's ROM is the port's own launch script, which PortMaster installed as ~/roms/ports/<Name>.sh; qforge-launch runs it with bash. It sources PortMaster's control.txt and mod_QForge.txt (plan Phase 4b, part E)."
+    "args: a Ports card's ROM is the port's own launch script, which PortMaster installed as ~/roms/ports/<Name>.sh; qforge-launch runs it with bash. It sources PortMaster's control.txt and mod_QForge.txt (plan Phase 4b, part E).",
+    "sync: QForge's hook files for ports, copied into PortMaster's folder at every launch (an image update reaches existing installs): mod_QForge.txt puts /usr/lib/qforge/portmaster/bin (mount/umount stand-ins: squashfuse runtimes without root) first on PATH and sets the Godot options; libgl_QForge.txt keeps ports on Mesa's desktop GL (gl4es only without one, never on KMS)."
   ],
   "format": "scripts",
   "root": "roms/ports/PortMaster",
   "binary": "PortMaster.sh",
-  "args": ["{rom}"],
-  "gui_args": []
+  "args": [
+    "{rom}"
+  ],
+  "gui_args": [],
+  "sync": [
+    {
+      "file": "mod_QForge.txt",
+      "to": "roms/ports/PortMaster/mod_QForge.txt"
+    },
+    {
+      "file": "libgl_QForge.txt",
+      "to": "roms/ports/PortMaster/libgl_QForge.txt"
+    }
+  ]
 }

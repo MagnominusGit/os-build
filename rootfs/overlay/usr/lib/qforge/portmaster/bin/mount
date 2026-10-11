@@ -1,0 +1,56 @@
+#!/bin/bash
+# QForge's `mount` for PortMaster ports: first on their PATH (mod_QForge.txt puts this folder
+# there), so a port's `$ESUDO mount ...` works without root -- $ESUDO is empty on QForge, there is no
+# sudo (plan Phase 4b, PortMaster, user decision 2026-10-11).
+#
+#   mount <file.squashfs> <dir>    a runtime (Godot, Weston, mono, Java ...): squashfuse, as player.
+#                                  A mount already on <dir> (a port that crashed) is released first.
+#                                  Recorded in $XDG_RUNTIME_DIR/qforge-portmaster-mounts (<dir> TAB
+#                                  <file>) so `umount <file>` finds it, and qforge-launch releases
+#                                  what a port left mounted when it ends (OGUI's Exit skips the
+#                                  port's own umount; squashfuse outlives the port's session).
+#   mount --bind <src> <dst>       no bind mount without root: <dst> becomes a symlink to <src>, but
+#                                  only over nothing, a symlink, an empty folder or an empty file --
+#                                  never over data (exit 32 instead).
+#   anything else                  the real mount (listing mounts works; mounting does not, as player).
+set -u
+MOUNTS="${QFORGE_MOUNTS:-/proc/mounts}"
+REGISTRY="${XDG_RUNTIME_DIR:-/tmp}/qforge-portmaster-mounts"
+SQUASHFUSE="${QFORGE_SQUASHFUSE:-squashfuse}"
+FUSERMOUNT="${QFORGE_FUSERMOUNT:-fusermount}"
+REAL_MOUNT="${QFORGE_REAL_MOUNT:-/usr/bin/mount}"
+
+say() { echo "mount (QForge): $*" >&2; }
+mounted() {  # mounted <dir>: is it a mount point (/proc/mounts escapes a space as \040)
+  awk -v p="$1" '{ gsub(/\\040/, " ", $2); if ($2 == p) f = 1 } END { exit !f }' "$MOUNTS"
+}
+
+if [ $# -eq 2 ] && [ "${1#-}" = "$1" ] && [ "${2#-}" = "$2" ] && [ -f "$1" ]; then
+  src="$(realpath -- "$1")"
+  mkdir -p -- "$2" || exit 32
+  dst="$(realpath -- "$2")"
+  if mounted "$dst"; then
+    say "releasing an earlier mount on $dst"
+    "$FUSERMOUNT" -u -z "$dst" 2>/dev/null
+  fi
+  "$SQUASHFUSE" "$src" "$dst" || { say "squashfuse could not mount $src on $dst"; exit 32; }
+  printf '%s\t%s\n' "$dst" "$src" >> "$REGISTRY"
+  exit 0
+fi
+
+if [ $# -eq 3 ] && [ "$1" = --bind ]; then
+  src="$2" dst="$3"
+  [ -e "$src" ] || { say "$src: no such file or folder"; exit 32; }
+  if [ -L "$dst" ]; then
+    rm -f -- "$dst"
+  elif [ -d "$dst" ]; then
+    rmdir -- "$dst" 2>/dev/null || { say "$dst holds data: no bind mount without root, left as it is"; exit 32; }
+  elif [ -e "$dst" ]; then
+    { [ -f "$dst" ] && [ ! -s "$dst" ]; } || { say "$dst holds data: no bind mount without root, left as it is"; exit 32; }
+    rm -f -- "$dst"
+  fi
+  mkdir -p -- "$(dirname -- "$dst")" && ln -s -- "$(realpath -- "$src")" "$dst" || exit 32
+  exit 0
+fi
+
+exec "$REAL_MOUNT" "$@"

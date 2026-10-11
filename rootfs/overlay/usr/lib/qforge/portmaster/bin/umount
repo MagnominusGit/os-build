@@ -1,0 +1,59 @@
+#!/bin/bash
+# QForge's `umount` for PortMaster ports, the other half of ./mount (read it first).
+#
+#   umount [-l] <dir>              a FUSE mount there (a runtime): fusermount -u (-z with -l).
+#   umount [-l] <file.squashfs>    every mount ./mount made of that file (ports unmount by either).
+#   umount <symlink>               a --bind stand-in: nothing is mounted, success.
+#   anything else                  the real umount.
+# Not mounted: exit 32 with umount's message, as the real one (ports write `umount ... || true`).
+set -u
+MOUNTS="${QFORGE_MOUNTS:-/proc/mounts}"
+REGISTRY="${XDG_RUNTIME_DIR:-/tmp}/qforge-portmaster-mounts"
+FUSERMOUNT="${QFORGE_FUSERMOUNT:-fusermount}"
+REAL_UMOUNT="${QFORGE_REAL_UMOUNT:-/usr/bin/umount}"
+
+mounted() {
+  awk -v p="$1" '{ gsub(/\\040/, " ", $2); if ($2 == p) f = 1 } END { exit !f }' "$MOUNTS"
+}
+
+lazy="" target="" other=""
+for a in "$@"; do
+  case $a in
+    -l) lazy=-z ;;
+    -f) ;;
+    -*) other=1 ;;
+    *) [ -z "$target" ] && target=$a || other=1 ;;
+  esac
+done
+[ -n "$target" ] && [ -z "$other" ] || exec "$REAL_UMOUNT" "$@"
+
+targets=()
+if [ -f "$target" ]; then
+  src="$(realpath -- "$target")"
+  while IFS=$'\t' read -r dst file; do
+    [ "$file" = "$src" ] && mounted "$dst" && targets+=("$dst")
+  done < <(cat -- "$REGISTRY" 2>/dev/null)
+else
+  dst="$(realpath -m -- "$target")"
+  if mounted "$dst"; then
+    targets=("$dst")
+  elif [ -L "$target" ]; then
+    exit 0
+  fi
+fi
+if [ ${#targets[@]} -eq 0 ]; then
+  echo "umount: $target: not mounted." >&2
+  exit 32
+fi
+rc=0
+for dst in "${targets[@]}"; do
+  "$FUSERMOUNT" -u $lazy "$dst" || rc=32
+done
+# Forget what is gone (keeps the registry to the mounts that still exist).
+if [ -f "$REGISTRY" ]; then
+  tmp="$REGISTRY.$$"
+  while IFS=$'\t' read -r dst file; do
+    mounted "$dst" && printf '%s\t%s\n' "$dst" "$file"
+  done < "$REGISTRY" > "$tmp" && mv -f -- "$tmp" "$REGISTRY"
+fi
+exit $rc

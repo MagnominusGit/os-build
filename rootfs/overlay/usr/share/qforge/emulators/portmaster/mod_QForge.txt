@@ -1,0 +1,31 @@
+#!/bin/bash
+#
+# SPDX-License-Identifier: MIT
+#
+## Modular - QForge
+#
+# Sourced by ports after control.txt: `[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source ...`
+# (CFW_NAME is os-release's NAME, "QForge"). QForge's launcher copies this file into PortMaster's
+# folder at every launch, from /usr/share/qforge/emulators/portmaster/: edits here do not last.
+#
+# Ports run as the player, without root: there is no sudo, so control.txt leaves $ESUDO empty. The
+# folder below holds QForge's `mount` and `umount`, which mount a port's squashfs runtime (Godot,
+# Weston, mono, Java ...) with squashfuse and turn `mount --bind` into a symlink. With them a
+# port's mounts and unmounts both work, so PM_CAN_MOUNT keeps PortMaster's default (Y).
+case ":$PATH:" in
+  *:/usr/lib/qforge/portmaster/bin:*) ;;
+  *) export PATH="/usr/lib/qforge/portmaster/bin:$PATH" ;;
+esac
+
+# Godot ports: full screen at the panel's size (device_info.txt reads it from DRM, landscape).
+GODOT2_OPTS="-r ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} -f"
+GODOT_OPTS="--resolution ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} -f"
+
+pm_platform_helper() {
+  if [ -e "$PM_PIPE" ]; then
+    PortMasterDialogExit
+  fi
+  # gamescope makes every game full screen and gives it focus: nothing to do (ROCKNIX's sway needs
+  # a helper here).
+  printf ""
+}
