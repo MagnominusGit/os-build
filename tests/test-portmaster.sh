@@ -133,13 +133,16 @@ CASE="mod_QForge.txt"
 out="$(env -i PATH=/usr/bin:/bin DISPLAY_WIDTH=1920 DISPLAY_HEIGHT=1080 bash -c '
   source "$1"; source "$1"
   echo "path=$PATH"; echo "godot=$GODOT_OPTS"; echo "godot2=$GODOT2_OPTS"
-  echo "can_mount=${PM_CAN_MOUNT-unset}"; echo "helper=$(type -t pm_platform_helper)"' _ "$PM_DATA/mod_QForge.txt")"
+  echo "can_mount=${PM_CAN_MOUNT-unset}"; echo "helper=$(type -t pm_platform_helper)"
+  env | grep -E "^SDL_VIDEO(_X11)?_FORCE_EGL=" | sort' _ "$PM_DATA/mod_QForge.txt")"
 grep -qx "path=/usr/lib/qforge/portmaster/bin:/usr/bin:/bin" <<<"$out" \
   && ok "puts the stand-ins first on PATH, once (sourced twice)" || bad "$(grep path= <<<"$out")"
 grep -qx "godot=--resolution 1920x1080 -f" <<<"$out" && grep -qx "godot2=-r 1920x1080 -f" <<<"$out" \
   && ok "Godot 2 and 3+: full screen at the panel size" || bad "$(grep godot <<<"$out")"
 grep -qx "can_mount=unset" <<<"$out" && ok "leaves PM_CAN_MOUNT to PortMaster (Y: ports unmount their runtimes)" || bad "$(grep can_mount <<<"$out")"
 grep -qx "helper=function" <<<"$out" && ok "defines pm_platform_helper" || bad "no pm_platform_helper"
+grep -qx "SDL_VIDEO_FORCE_EGL=1" <<<"$out" && grep -qx "SDL_VIDEO_X11_FORCE_EGL=1" <<<"$out" \
+  && ok "SDL on Xwayland through EGL, exported (GLX ES contexts show black frames under gamescope)" || bad "$(grep EGL <<<"$out")"
 ctl() { env -i PATH=/usr/bin:/bin bash -c '
   get_controls() { sdl_controllerconfig="$(head -c "$1" /dev/zero | tr "\0" x)"; DEVICE=$2; }
   source "$1"; source "$1"; get_controls "$2" "$3"; echo "${#sdl_controllerconfig} $DEVICE"' _ "$PM_DATA/mod_QForge.txt" "$@"; }

@@ -25,6 +25,12 @@ case ":${LD_LIBRARY_PATH-}:" in
   *) export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}/usr/lib/qforge/portmaster/lib" ;;
 esac
 
+# SDL on Xwayland makes its GL contexts through EGL, not GLX. Ports ask SDL for GLES (Godot's frt,
+# gl4es, most engines): over GLX ES profiles on Xwayland under gamescope they present black frames
+# (A Key(s) Path, Godot 3 GLES2 on the ACE: a flickering boot splash, then black, sound playing).
+# SDL_VIDEO_FORCE_EGL is SDL3's name (the image's SDL2 is sdl2-compat over it), the X11 one SDL2's.
+export SDL_VIDEO_FORCE_EGL=1 SDL_VIDEO_X11_FORCE_EGL=1
+
 # Godot ports: full screen at the panel's size (device_info.txt reads it from DRM, landscape).
 GODOT2_OPTS="-r ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} -f"
 GODOT_OPTS="--resolution ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} -f"
