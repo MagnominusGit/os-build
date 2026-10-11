@@ -44,8 +44,9 @@ first hwmon with `fan1_input`, the `*gpu*` devfreq, and `power=power-led` when t
   over `hardware_info.gd`) shows battery, charger, temperatures, fan, clocks, backlight and LED
   groups from this tree, hiding whatever the board lacks. No board-specific code.
 - **qforge-powerd** drives the `fan` link's hwmon (a two-speed gpio-fan is switched on/off at
-  the curve's first step) and every LED in `leds/<group>/` (colour on multicolor LEDs, brightness
-  on all; off for suspend). It falls back to scanning sysfs only when the map is absent or names
+  the curve's first step) and every LED in `leds/<group>/` (colour on multicolor LEDs; a
+  `red:`/`green:`/`blue:` channel LED at its component of the colour; brightness on all; off for
+  suspend). It falls back to scanning sysfs only when the map is absent or names
   no LEDs. Its D-Bus interface (`org.qforge.Power1`) is how a UI changes them: `FanCurve`,
   `LedCount`, `LedEnabled`, `LedColor` (R, G, B), `LedBrightness` (0-255), kept in
   `/etc/qforge/power.conf.d/50-{fan-curves,leds}.conf`. `qforge-powerd.service` starts after

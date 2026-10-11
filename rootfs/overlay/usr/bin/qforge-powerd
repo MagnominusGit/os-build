@@ -485,14 +485,26 @@ def led_intensity(multi_index, color):
     return " ".join(str(by_name.get(name, 0)) for name in multi_index.split())
 
 
+def led_channel(name):
+    """The colour channel a single-colour LED is, from the kernel's <color>:<function> name
+    ("red:indicator-3"), or None. The Pocket Max and Air Y Pro stick rings are such channels, three
+    per pixel, with no multicolor device over them."""
+    color = name.split(":", 1)[0] if ":" in name else ""
+    return {"red": 0, "green": 1, "blue": 2}.get(color)
+
+
 def apply_leds(leds, color, brightness):
-    """Colour for multicolor LEDs, brightness for all. A single-colour LED has no colour of its
-    own: it is lit at the brightness unless the colour is black."""
+    """Colour for multicolor LEDs, brightness for all. A red/green/blue channel LED takes its own
+    component of the colour, so a ring of channels mixes it like a multicolor LED would. Any other
+    single-colour LED has no colour of its own: it is lit at the brightness unless the colour is
+    black."""
     for led in leds:
         top = int(read_text(led / "max_brightness", "255") or 255)
         if (led / "multi_intensity").exists():
             write_text(led / "multi_intensity", led_intensity(read_text(led / "multi_index"), color))
             level = brightness
+        elif led_channel(led.name) is not None:
+            level = brightness * color[led_channel(led.name)] / 255
         else:
             level = brightness if any(color) else 0
         # brightness is 0-255 on the D-Bus side; scale onto LEDs with a smaller range

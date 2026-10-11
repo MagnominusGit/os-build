@@ -378,6 +378,22 @@ pd.apply_leds(mapped, (0, 0, 0), 255)
 check("hw: black turns a single-colour LED off", (plain / "brightness").read_text().strip(), "0")
 pd.apply_leds(mapped, (10, 20, 30), 128)
 check("hw: brightness scales onto a 0-1 LED", (plain / "brightness").read_text().strip(), "1")
+# The Pocket Max / Air Y Pro rings: aw20036 channels named <color>:indicator-N, no multicolor device
+check("led: channel names", [pd.led_channel(n) for n in ("red:indicator-0", "green:indicator-15", "blue:x", "white:status", "power-led", "left_red_1")],
+      [0, 1, 2, None, None, None])
+ring = tmp / "hw-ring"; (ring / "leds" / "ring-left").mkdir(parents=True, exist_ok=True)
+for i, name in enumerate(("blue:indicator-0", "green:indicator-0", "red:indicator-0")):
+    d = leds / name; d.mkdir(parents=True, exist_ok=True)
+    (d / "brightness").write_text("0\n"); (d / "max_brightness").write_text("255\n")
+    os.symlink(d, ring / "leds" / "ring-left" / f"{i + 1:02d}")
+channels = pd.discover_leds(leds, hw=ring)
+pd.apply_leds(channels, (255, 96, 0), 200)
+check("hw: each channel LED takes its own component of the colour",
+      [(leds / n / "brightness").read_text().strip() for n in ("red:indicator-0", "green:indicator-0", "blue:indicator-0")],
+      ["200", "75", "0"])
+pd.apply_leds(channels, (0, 0, 0), 200)
+check("hw: black turns every channel off",
+      {(leds / n / "brightness").read_text().strip() for n in ("red:indicator-0", "green:indicator-0", "blue:indicator-0")}, {"0"})
 empty = tmp / "hw-empty"; (empty / "leds").mkdir(parents=True, exist_ok=True)
 check("hw: a map with no LED groups falls back to the RGB scan",
       [p.name for p in pd.discover_leds(leds, hw=empty)], ["rgb:l1", "rgb:l2"])
