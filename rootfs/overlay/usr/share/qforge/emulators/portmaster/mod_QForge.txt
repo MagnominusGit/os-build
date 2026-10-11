@@ -17,6 +17,14 @@ case ":$PATH:" in
   *) export PATH="/usr/lib/qforge/portmaster/bin:$PATH" ;;
 esac
 
+# Libraries PortMaster's runtimes expect under an older name: LÖVE 11.5 (its splash, its port
+# patcher, LÖVE ports) links libtheoradec.so.1, the image has libtheora 1.2's libtheoradec.so.2
+# with the same symbols (version libtheoradec_1.0). Last on the path: a port's own libs win.
+case ":${LD_LIBRARY_PATH-}:" in
+  *:/usr/lib/qforge/portmaster/lib:*) ;;
+  *) export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}/usr/lib/qforge/portmaster/lib" ;;
+esac
+
 # Godot ports: full screen at the panel's size (device_info.txt reads it from DRM, landscape).
 GODOT2_OPTS="-r ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} -f"
 GODOT_OPTS="--resolution ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} -f"

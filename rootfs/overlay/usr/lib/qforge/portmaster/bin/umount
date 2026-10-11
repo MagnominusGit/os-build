@@ -49,11 +49,12 @@ rc=0
 for dst in "${targets[@]}"; do
   "$FUSERMOUNT" -u $lazy "$dst" || rc=32
 done
-# Forget what is gone (keeps the registry to the mounts that still exist).
+# Forget what is gone (keeps the registry to the mounts that still exist). The loop's status is its
+# last body's, a false `mounted` on the last row: never chain the mv on it.
 if [ -f "$REGISTRY" ]; then
   tmp="$REGISTRY.$$"
   while IFS=$'\t' read -r dst file; do
-    mounted "$dst" && printf '%s\t%s\n' "$dst" "$file"
-  done < "$REGISTRY" > "$tmp" && mv -f -- "$tmp" "$REGISTRY"
+    if mounted "$dst"; then printf '%s\t%s\n' "$dst" "$file"; fi
+  done < "$REGISTRY" > "$tmp" && mv -f -- "$tmp" "$REGISTRY" || rm -f -- "$tmp"
 fi
 exit $rc

@@ -164,7 +164,10 @@ BOOTSTRAP_PKGS=(base)
 #                       too) ask it whether desktop GL exists before falling back to gl4es.
 #   unzip               PortMaster.sh installs runtime bundles dropped in its autoinstall folder
 #                       with it, and some ports unpack their game data with it on first run.
-PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-tools mesa gamescope seatd mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit e2fsprogs xorg-xwayland noto-fonts noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl opengamepadui powerstation which fuse3 ksmbd-tools avahi sdl2_ttf sdl2_image sdl2_mixer squashfuse mesa-utils unzip)
+#   openal/libtheora    the LÖVE runtime PortMaster fetches (runtimes/love_11.5) links both and
+#                       does not ship them; PortMaster's splash, its first-run port patcher and
+#                       every LÖVE port run on it. Measured 2026-10-11 on the ACE: +5.0 MiB.
+PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-tools mesa gamescope seatd mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit e2fsprogs xorg-xwayland noto-fonts noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl opengamepadui powerstation which fuse3 ksmbd-tools avahi sdl2_ttf sdl2_image sdl2_mixer squashfuse mesa-utils unzip openal libtheora)
 
 # Dev-only packages — installed ONLY under QFORGE_DEV=1, NEVER in a release base.
 # On-device bring-up tools: evtest reads raw /dev/input events; usbutils provides lsusb.

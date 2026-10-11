@@ -90,6 +90,8 @@ CASE="umount"
 reset; "$BIN/mount" "$GODOT" "$T/home/godot"
 "$BIN/umount" "$GODOT"; rc=$?
 [ "$rc" = 0 ] && ! is_mounted "$T/home/godot" && ok "umount <file.squashfs> releases what that file is mounted on" || bad "umount by file: rc=$rc"
+[ ! -s "$REG" ] && [ -z "$(ls "$T/run" | grep -v '^qforge-portmaster-mounts$')" ] \
+  && ok "... the registry forgets its last row too, no temp file left" || bad "registry: $(cat "$REG") run: $(ls "$T/run")"
 "$BIN/mount" "$WESTON" "$T/tmp dir/weston"
 "$BIN/umount" -l "$T/tmp dir/weston"; rc=$?
 [ "$rc" = 0 ] && grep -qx "fusermount -u -z $T/tmp dir/weston" "$T/calls" && ok "umount -l: lazy (fusermount -z)" || bad "calls: $(tail -1 "$T/calls")"
@@ -138,6 +140,13 @@ grep -qx "godot=--resolution 1920x1080 -f" <<<"$out" && grep -qx "godot2=-r 1920
   && ok "Godot 2 and 3+: full screen at the panel size" || bad "$(grep godot <<<"$out")"
 grep -qx "can_mount=unset" <<<"$out" && ok "leaves PM_CAN_MOUNT to PortMaster (Y: ports unmount their runtimes)" || bad "$(grep can_mount <<<"$out")"
 grep -qx "helper=function" <<<"$out" && ok "defines pm_platform_helper" || bad "no pm_platform_helper"
+QLIB=/usr/lib/qforge/portmaster/lib
+ld() { env -i PATH=/usr/bin:/bin ${1+LD_LIBRARY_PATH="$1"} bash -c 'source "$1"; source "$1"; echo "$LD_LIBRARY_PATH"' _ "$PM_DATA/mod_QForge.txt"; }
+[ "$(ld)" = "$QLIB" ] && [ "$(ld "")" = "$QLIB" ] && [ "$(ld /port/libs)" = "/port/libs:$QLIB" ] \
+  && ok "appends QForge's compat libs to LD_LIBRARY_PATH, once, last (a port's own libs win)" || bad "unset=$(ld) empty=$(ld "") set=$(ld /port/libs)"
+link="$ROOT/rootfs/overlay$QLIB/libtheoradec.so.1"
+[ -L "$link" ] && [ "$(readlink "$link")" = /usr/lib/libtheoradec.so.2 ] \
+  && ok "libtheoradec.so.1 (PortMaster's LÖVE runtime) -> the image's libtheoradec.so.2" || bad "link: $(readlink "$link")"
 
 CASE="libgl_QForge.txt"
 mkdir -p "$T/port/gl4es.aarch64" "$T/port/libs.aarch64" "$T/glx-yes" "$T/glx-no"
