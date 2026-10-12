@@ -99,7 +99,6 @@ source=(
   git+https://github.com/ValveSoftware/gamescope.git#commit=${pkgver}
   git+https://gitlab.freedesktop.org/emersion/libdisplay-info.git
   git+https://gitlab.freedesktop.org/emersion/libliftoff.git
-  git+https://github.com/ValveSoftware/openvr.git
   git+https://github.com/Joshua-Ashton/reshade.git
   git+https://github.com/KhronosGroup/SPIRV-Headers.git
   git+https://github.com/Joshua-Ashton/vkroots.git
@@ -117,14 +116,14 @@ b2sums=('SKIP'
         'SKIP'
         'SKIP'
         'SKIP'
-        'SKIP'
         'SKIP')
 
 prepare() {
   # Submodules BEFORE the `cd` below: build-overlay.sh applies source.pin's patches right after
   # the first `cd` in prepare(), and some of them patch a submodule (subprojects/libliftoff). The
   # `cd` must still precede `meson subprojects download`, because 0007 patches a .wrap it reads.
-  for submodule in src/reshade subprojects/{libdisplay-info,libliftoff,openvr,vkroots,wlroots} thirdparty/SPIRV-Headers; do
+  # subprojects/openvr is left uninitialised: the OpenVR backend is not built (-Denable_openvr_support).
+  for submodule in src/reshade subprojects/{libdisplay-info,libliftoff,vkroots,wlroots} thirdparty/SPIRV-Headers; do
     git -C gamescope submodule init ${submodule}
     git -C gamescope config submodule.${submodule}.url ../${submodule##*/}
   done
@@ -166,10 +165,15 @@ build() {
   # zenity in neither manifest.lock, so the exec fails and the message is lost. Disabled, the same
   # text is written to the client's stderr, which for a session-launched client is captured rather
   # than discarded. Upstream disables it for its own SteamOS builds (e77e1848).
+  #
+  # enable_openvr_support defaults to TRUE and builds the OpenVR backend (gamescope inside SteamVR)
+  # from the openvr submodule, a large clone that is slow under arm64 emulation. QForge runs no
+  # SteamVR, so the backend, its source and its submodule are dropped.
   arch-meson gamescope build \
     -Dforce_fallback_for=glm,stb,libdisplay-info,libliftoff,vkroots,wlroots,wayland-protocols \
     -Denable_tests=false \
     -Denable_zenity=false \
+    -Denable_openvr_support=false \
     -Dpipewire=enabled
   meson compile -C build
 }
