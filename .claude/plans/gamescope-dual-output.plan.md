@@ -2,7 +2,8 @@
 
 **Complexity**: Large
 **Branch**: `feat/gamescope-dual-output` (off `main` at 479d84d)
-**Status** (2026-10-12): planned, nothing built. Supersedes the DRM-lease approach of the unmerged
+**Status** (2026-10-12): step 0 spikes done on the Thor Lite (results under step 0), no gamescope
+code yet. Supersedes the DRM-lease approach of the unmerged
 branch `feat/gamescope-ogc-lease` (1be3865, 103c24c, 4998658).
 **Targets**: AYN Thor Lite (top DSI-1, bottom DSI-2 1080x1240, `bottom_touchscreen`), AYN Thor
 (SM8550, panels the other way round: top DSI-2, bottom DSI-1 per ROCKNIX/Armada), AYANEO Pocket DS.
@@ -44,7 +45,7 @@ second gamescope's Xwayland as primary). One gamescope that drives both CRTCs re
 | Window routing | Title regex (default covers melonDS `[w2]` and Azahar `Secondary Window`) **plus** a `GAMESCOPE_OUTPUT` window property that overrides it | Works with unmodified emulators; the atom is there for anything else |
 | Main screen | Unchanged: OGUI focus atoms, overlay/QAM, mangoapp, screenshots, PipeWire, fps limiter, rotation and colour patches stay on the top output | Smallest behaviour change; OGUI needs nothing |
 | Bottom panel colour management (0014/0018) | Skipped in v1 | Night mode on the bottom panel needs its own CRTC colour state (later step) |
-| Clock | v1: bottom repaints inside the existing loop with one flip in flight, never blocking. v2: a second `CVBlankTimer` | Both panels run 60 Hz; v1 is enough to ship |
+| Clock | v1: bottom repaints inside the existing loop with one flip in flight, never blocking. v2: a second `CVBlankTimer` | The session runs both panels at 60 Hz (top is 120 Hz capable, spike 0.1); v1 is enough while it does |
 | Base tree | Valve 3.16.31 as on `main` (NOT the OGC fork of the lease branch) | Virtual-connector work is in Valve's tree; OGC was only taken for the lease |
 | Patch style | New series `0040`+ in `packages/gamescope/patches`, developed as commits in a git checkout and exported with `git format-patch`; each patch builds alone and is a no-op without `--secondary-output` | Bisectable; single-panel boards stay identical |
 
@@ -67,7 +68,37 @@ Line numbers below are in the patched 3.16.31 tree (`work/overlay-build/aarch64/
 
 ### 0. Spikes on hardware (before any gamescope code)
 
-1. **Two independent commits.** A small libdrm program (scratch, not shipped): modeset DSI-1 and
+**Results 2026-10-12 on the Thor Lite (dev card 03e3661, root@192.168.1.155):**
+- 0.1 PASSED. Python/ctypes libdrm spike (no compiler on the card), session stopped: DSI-1
+  (conn 36, CRTC 94, primary plane 46, 1080x1920, preferred mode **120 Hz**) and DSI-2 (conn 39,
+  CRTC 95, plane 52, 1080x1240 @ 60 Hz) modeset together, then 10 s with one
+  `NONBLOCK|PAGE_FLIP_EVENT` commit per CRTC in flight: 1186 flips (118.6/s) and 600 flips
+  (60.0/s), 0 EBUSY, 0 errors, commit ioctl median 0.1 ms / max 0.25 ms, DSI-2 intervals
+  16.66-16.68 ms. Phase between the panels drifted 2.7 -> 8.1 ms: not genlocked, and msm does
+  not serialise commits on the two CRTCs. Separate commits per CRTC confirmed.
+- The panels can run at **different refresh rates** (top 120 Hz capable; the session pins `-r 60`).
+  Do not assume equal rates anywhere; the step 8 second vblank timer matters if the top ever
+  runs at 120 Hz.
+- 0.2 melonDS 1.1 with `[Instance0.Window1] Enabled = true` (created at startup, no ROM needed):
+  both windows are plain top-levels, `WM_CLASS melonDS`, `_NET_WM_WINDOW_TYPE_NORMAL`, **no
+  `WM_TRANSIENT_FOR`** (despite the Qt parent), static gravity without `PPosition` (not a
+  gamescope dropdown). Titles `[w1] melonDS 1.1` / `[w2] melonDS 1.1`, in game
+  `[w2] [60/60] melonDS 1.1`: the `^\[w2\] ` rule holds. Both windows carry `STEAM_GAME`. Size
+  hints: w1 min 512x192 (214 with menu), w2 min 256x406.
+- **Launched from OGUI (Mario Kart DS), OGUI sets `GAMESCOPECTRL_BASELAYER_WINDOW` to the `[w2]`
+  window**, so today gamescope shows the bottom-screen window on the top panel. Step 3 must
+  (a) leave tagged windows out of `GAMESCOPE_FOCUSABLE_WINDOWS` (what OGUI picks from) and
+  (b) ignore a `BASELAYER_WINDOW` that names a tagged window, falling back to the app-id match.
+- **Exit needs two presses with two windows**: OGUI's Exit (SIGTERM) did not end melonDS the
+  first time; the second did (clean, mount released). Without a game a SIGTERM never ended it
+  (SIGKILL needed). Single-window melonDS quits on the first SIGTERM. Handled in step 6.
+- Azahar not checked (no 3DS title on the card). Source: the secondary `GRenderWindow` is
+  `setParent(nullptr)` and only shown while a game runs (`citra_qt.cpp:559-562, 2809-2826`);
+  confirm with `xprop` once a 3DS game is available.
+- 0.3 Thor Lite: top `top_touchscreen` / DSI-1, bottom `bottom_touchscreen` / DSI-2. Thor and
+  Pocket DS still owed.
+
+1. **Two independent commits.** A small libdrm program (`spikes/twocrtc.py`, not shipped): modeset DSI-1 and
    DSI-2 together, then flip each CRTC with its own `NONBLOCK|PAGE_FLIP_EVENT` commit in a loop,
    measuring both flip timestamps. Pass: neither CRTC's flip waits for the other's vblank (msm
    shares DPU global resource state between them). Fail: fall back to one commit for both, paced
@@ -135,7 +166,10 @@ Line numbers below are in the patched 3.16.31 tree (`work/overlay-build/aarch64/
   external overlay, cursor.
 - X side for the secondary focus: raise, `XResizeWindow` to the secondary panel size (instead of
   `ctx->root_width/height`, 5019-5033), never `XSetInputFocus` and never keyboard/mouse focus.
-- Root atoms (`GAMESCOPE_FOCUSED_*`, 5575) stay main-only.
+- Root atoms (`GAMESCOPE_FOCUSED_*`, 5575) stay main-only, and tagged windows are left out of
+  `GAMESCOPE_FOCUSABLE_WINDOWS/APPS` (5279-5283), so OGUI never picks one as the base layer.
+- `GAMESCOPECTRL_BASELAYER_WINDOW` naming a tagged window is ignored by the main pick (4428), which
+  falls back to the app-id match (spike 0.2: OGUI set it to melonDS's `[w2]`).
 - Without the flag no secondary focus exists and the filters see no tagged windows: behaviour
   identical.
 
@@ -178,6 +212,10 @@ Line numbers below are in the patched 3.16.31 tree (`work/overlay-build/aarch64/
 - Launcher: nothing new if the default title regex matches. Only if some emulator needs its own
   rule: gamescope reads a root property `GAMESCOPE_SECONDARY_WINDOW_TITLE` that qforge-launch sets
   from the emulator def and clears on exit.
+- melonDS with two windows needs two SIGTERMs (spike 0.2). Find why in melonDS's SIGTERM path
+  (each signal closing one window?) and fix it in the launcher (forward a second TERM after a
+  short grace when windows remain) or with a small melonDS patch / LD_PRELOAD shim like
+  `apps/qforge-sigdefer`.
 - HW: one NDS and one 3DS game on Thor Lite, every exit path (OGUI Exit, emulator menu), state
   saves.
 
@@ -202,7 +240,7 @@ About 1,500-2,500 changed lines in four gamescope files, most of it in steps 2-4
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
-| msm serialises commits on the two CRTCs | Medium | Spike 0.1 first; fallback = one commit paced by the top panel |
+| msm serialises commits on the two CRTCs | Ruled out (spike 0.1) | — |
 | Flip bookkeeping races (FB released while still scanned out, stuck pending counters) | High while building | Per-output queues and counters from the start; stress with the debug colour flip on both outputs |
 | A tagged window disturbs the main focus (raise/resize ping-pong, transient walk) | Medium | Filters run before every main-focus step; spike 0.2 decides the transient case |
 | Rebase cost on the next gamescope bump | Medium | Keep the series small and flag-gated; offer upstream |
