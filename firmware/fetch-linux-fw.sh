@@ -5,7 +5,7 @@
 # linux-firmware repo, pinned by commit + per-file sha256 in firmware/LINUX_FW.pin.
 #
 # Device-proprietary blobs (GPU zap, adsp/cdsp) are NOT fetched here — those come from the
-# pinned Nova-Deck/qcom-firmwares repo via firmware/fetch-qcom-fw.sh.
+# pinned retroforge-linux/qcom-firmwares repo via firmware/fetch-qcom-fw.sh.
 #
 #   firmware/fetch-linux-fw.sh
 #

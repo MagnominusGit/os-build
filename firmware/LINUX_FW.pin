@@ -4,7 +4,7 @@
 # The upstream Holo aarch64 base ships NO /lib/firmware, so these `linux-fw`-class blobs
 # (Adreno GPU, qca Wi-Fi/BT, Venus/Iris VPU, and on SM8250 the DSPs too) must be delivered
 # by us. Blobs that are device-signed and absent upstream are NOT here — those come from
-# the Nova-Deck/qcom-firmwares repo via firmware/fetch-qcom-fw.sh (firmware/QCOM_FW.pin).
+# the retroforge-linux/qcom-firmwares repo via firmware/fetch-qcom-fw.sh (firmware/QCOM_FW.pin).
 # Which class a blob falls in is per-SoC, not fixed: the SM8550/SM8650 boards need
 # vendor-signed adsp/cdsp, while every SM8250 board is served by the generic open pair.
 #
@@ -131,7 +131,7 @@ qca/htnv20.bin             qca/htnv20.bin           a4c0cbafc102998805679a2947aa
 # ---------------------------------------------------------------------------------------
 # SM6115 (Snapdragon 662) — MANGMI Air X MQ65 / MQ66 / MQ66B and MANGMI Air Y. Added 2026-10-09,
 # aligned the same day with ROCKNIX `next`: the GPU zap shader, cDSP, modem and WLAN firmware are
-# the MANGMI-signed blobs in EXTRA_FW.pin (ROCKNIX's "sm6115: remove firmware from main repo",
+# the MANGMI-signed blobs in QCOM_FW.pin (originally ROCKNIX's "sm6115: remove firmware from main repo",
 # 2026-10-05), and only these three stay open. The A610 has no GMU, so there is no gmu row.
 # Every sha below was taken from the file downloaded at the commit above.
 # ---------------------------------------------------------------------------------------

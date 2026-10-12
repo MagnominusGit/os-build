@@ -9,7 +9,7 @@
 # Prereq: unified kernel already built (kernel/build.sh) so out/ has Image + modroot,
 # plus the initramfs (image/mkinitramfs.sh) and the stage-1/2 boot artifacts (boot/steamcl.sh +
 # boot/grub.sh) — the assembler now bakes all three into the root (Phase 5).
-# Device firmware is fetched from the pinned Nova-Deck/qcom-firmwares repo — no proprietary
+# Device firmware is fetched from the pinned retroforge-linux/qcom-firmwares repo — no proprietary
 # blobs ship in-repo. Steps 3-4 run in the retroforge-build image.
 #
 #   rootfs/build-image.sh

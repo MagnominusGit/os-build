@@ -181,7 +181,7 @@ Proprietary Qualcomm firmware is **never** committed to this repo. `firmware/` h
 fetch-and-verify recipes against two pinned sources, both landing in gitignored trees: open
 firmware from upstream `linux-firmware`, and device-proprietary vendor blobs — extracted from each
 device's Android vendor image and published at
-[Nova-Deck/qcom-firmwares](https://github.com/Nova-Deck/qcom-firmwares) — at a pinned commit,
+[retroforge-linux/qcom-firmwares](https://github.com/retroforge-linux/qcom-firmwares) — at a pinned commit,
 verified against that repo's `sha256sums.txt`.
 
 Respect per-device bootloader-unlock terms and upstream package licenses.

@@ -101,7 +101,7 @@ rootfs/build-image.sh
 `customize-base.sh` runs on the host (needs `docker` + network + arm64 binfmt; it
 pacman-installs the release runtime under emulation); firmware fetch/verify + assembly
 run in `retroforge-build`. Device-proprietary firmware is fetched from the pinned
-Nova-Deck/qcom-firmwares repo (`firmware/fetch-qcom-fw.sh`, idempotent — no device dump
+retroforge-linux/qcom-firmwares repo (`firmware/fetch-qcom-fw.sh`, idempotent — no device dump
 needed). Output is `out/images/rootfs.img`; the root carries its own boot half
 (`/boot/{Image, initramfs-retroforge.img, dtbs}` + the `/usr/lib/retroforge/boot` mirror).
 The flashable card is `image/make-sdcard.sh` (or `make sdcard`).

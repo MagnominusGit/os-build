@@ -2,7 +2,7 @@
 # retroforge qcom-firmware fetch — stage the DEVICE-PROPRIETARY firmware blobs the target
 # needs at runtime (GPU zap shaders, adsp/cdsp DSP images, AudioReach tplg, ath12k Wi-Fi/BT,
 # Renesas xHCI). These are Qualcomm/vendor blobs republished from each device's Android vendor
-# image to the Nova-Deck/qcom-firmwares repo, pinned by commit in firmware/QCOM_FW.pin.
+# image to the retroforge-linux/qcom-firmwares repo, pinned by commit in firmware/QCOM_FW.pin.
 #
 # Open firmware (Adreno microcode, qca BT, Iris VPU) is fetched separately by
 # firmware/fetch-linux-fw.sh from the official linux-firmware repo.

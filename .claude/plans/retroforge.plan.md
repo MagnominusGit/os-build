@@ -31,7 +31,7 @@ per ROM by `retroforge-launch`.
 | Kept | retroforge-pairingd (always on until the shell has a switch), userspace fake-suspend (retroforge-suspend / retroforge-rest) |
 | Names | Display RetroForge, os-release ID `retroforge`, D-Bus `org.retroforge`, session user `player` (uid 1000) |
 | Root slots | 2G each (was 4G until 2026-10-03 trim, 7G with the x86 payloads) |
-| Firmware | Still fetched from Nova-Deck/qcom-firmwares (pinned); move to a RetroForge repo later |
+| Firmware | Fetched from retroforge-linux/qcom-firmwares (pinned; Nova-Deck import + SM6115 blobs) |
 | OTA signing | New RetroForge CA; private keys in `~/retroforge-pki`, never in the repo |
 | Emulators | Upstream AppImages, downloaded on demand by an OGUI plugin (not in the image); must use our patched Mesa/Turnip, not a bundled one |
 

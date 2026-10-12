@@ -59,13 +59,12 @@ pkg/
 # The melonDS second-window menu shim's compiled output (apps/retroforge-hidemenu).
 /apps/retroforge-hidemenu/build/
 
-# Device-proprietary firmware, fetched on demand from the pinned Nova-Deck/qcom-firmwares
+# Device-proprietary firmware, fetched on demand from the pinned retroforge-linux/qcom-firmwares
 # repo + verified against its sha256sums.txt (never committed here — only in that repo).
 /firmware/blobs/
 /firmware/qcom-fw/
 # Open linux-firmware blobs, fetched on demand + verified against firmware/LINUX_FW.pin
 /firmware/linux-fw
-firmware/extra-fw/
 
 # Local Claude Code settings (keep .claude/plans/ tracked)
 /.claude/settings.local.json
