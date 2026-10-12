@@ -1,0 +1,168 @@
+From: qforge
+Subject: [PATCH] secondary output: direct scanout rotated on the plane
+
+0042 never asked the secondary plane to rotate, so a rotated second
+panel (the AYN Thor Lite's bottom one, 270 degrees) was always
+composited. The reason first given, the top panel stalling, turned out
+to be the DPU SSPP handover (kernel patch 0397), not the rotation.
+
+The secondary plane now rotates an app's buffer onto a rotated panel,
+and scales it: any single opaque buffer with the logical output's
+aspect (within 1%) fills the panel, so the window's buffer size does not
+matter. Each FB and rotation is checked once with a TEST_ONLY commit; a
+refused buffer is composited as before. On SM8250 the rotation goes
+through the one offline SDE rotator of kernel patch 0385, which the main
+output also uses.
+
+ConVar drm_secondary_plane_rotation (default on) turns it off at runtime,
+back to compositing the rotation.
+
+HW Thor Lite (kernel 0397), Mario Kart DS: both panels scan out
+melonDS's own buffers (top 1920x1080, bottom 1240x1080 rotated on the
+plane), no composite on either; no DPU or rotator messages in dmesg over
+a 90 s watch, play clean.
+
+(qforge: dual-screen boards, 2026-10-12.)
+---
+diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
+index a94948a..4ab8282 100644
+--- a/src/Backends/DRMBackend.cpp
++++ b/src/Backends/DRMBackend.cpp
+@@ -223,8 +223,8 @@ struct drm_secondary_t
+ 	// What the compositor put on screen: holding the FB keeps a client's buffer locked.
+ 	gamescope::Rc<gamescope::IBackendFb> pQueuedFb;
+ 	gamescope::Rc<gamescope::IBackendFb> pVisibleFb;
+-	// FB id -> whether the plane takes that client buffer (TEST_ONLY once per FB).
+-	std::unordered_map<uint32_t, bool> directScanoutTested;
++	// (FB id, plane rotation) -> whether the plane takes that client buffer (TEST_ONLY once each).
++	std::unordered_map<uint64_t, bool> directScanoutTested;
+ 
+ 	uint64_t ulPatternFlips = 0;
+ 	uint64_t ulPatternStart = 0;
+@@ -844,6 +844,11 @@ static bool have_overlay_planes(struct drm_t *drm)
+ }
+ 
+ static void OnSecondaryPatternChanged( gamescope::ConVar<bool> & );
++// Let the secondary plane rotate (and scale) an app's buffer onto a rotated panel: direct scanout
++// instead of a composite. On SM8250 that goes through the one offline SDE rotator (kernel patch
++// 0385) the main output also uses; HW-clean on the Thor Lite with kernel patch 0397. Off: the
++// rotation is composited (gamescopectl drm_secondary_plane_rotation 0).
++gamescope::ConVar<bool> cv_drm_secondary_plane_rotation( "drm_secondary_plane_rotation", true, "Let the secondary output's plane rotate and scale an app's buffer onto a rotated panel (direct scanout) instead of compositing it." );
+ gamescope::ConVar<bool> cv_drm_debug_secondary_pattern( "drm_debug_secondary_pattern", false, "Flip the secondary output between two greys every vblank and log its flip rate.", OnSecondaryPatternChanged );
+ 
+ // Puts uFbId on the secondary output with a non-blocking flip; the first one also modesets
+@@ -5215,7 +5220,12 @@ namespace gamescope
+ 			return sec.pConnector && !sec.bFlipPending && !g_DRM.paused && !cv_drm_debug_secondary_pattern;
+ 		}
+ 
+-		virtual SecondaryPresentResult PresentSecondary( IBackendFb *pFb, uint32_t uWidth, uint32_t uHeight, bool bClientBuffer ) override
++		virtual bool SecondaryPlaneMayRotate() override
++		{
++			return cv_drm_secondary_plane_rotation;
++		}
++
++		virtual SecondaryPresentResult PresentSecondary( IBackendFb *pFb, uint32_t uWidth, uint32_t uHeight, bool bClientBuffer, bool bRotate ) override
+ 		{
+ 			drm_secondary_t &sec = g_DRMSecondary;
+ 			CDRMFb *pDrmFb = pFb ? static_cast<CDRMFb *>( pFb->EnsureImported() ) : nullptr;
+@@ -5226,25 +5236,29 @@ namespace gamescope
+ 			if ( !sec.pConnector || sec.bFlipPending || g_DRM.paused || cv_drm_debug_secondary_pattern )
+ 				return SecondaryPresentResult::Busy;
+ 
++			static constexpr uint64_t k_ulStepToRotation[4] = { DRM_MODE_ROTATE_0, DRM_MODE_ROTATE_90, DRM_MODE_ROTATE_180, DRM_MODE_ROTATE_270 };
++			const uint64_t ulRotation = bRotate ? k_ulStepToRotation[ sec.uRotationStep & 3u ] : DRM_MODE_ROTATE_0;
+ 			const uint32_t uFbId = pDrmFb->GetFbId();
++			const uint64_t ulTestKey = ( uint64_t( uFbId ) << 8 ) | ulRotation;
+ 			if ( bClientBuffer )
+ 			{
+-				// The plane may not take every app buffer (format, modifier). Ask once per FB.
+-				auto iter = sec.directScanoutTested.find( uFbId );
++				// The plane may not take every app buffer (format, modifier, rotated or scaled).
++				// Ask once per FB and rotation.
++				auto iter = sec.directScanoutTested.find( ulTestKey );
+ 				if ( iter == sec.directScanoutTested.end() )
+ 				{
+ 					if ( sec.directScanoutTested.size() > 64 )
+ 						sec.directScanoutTested.clear();
+-					iter = sec.directScanoutTested.emplace( uFbId, drm_secondary_commit_locked( &g_DRM, uFbId, uWidth, uHeight, DRM_MODE_ROTATE_0, true ) ).first;
++					iter = sec.directScanoutTested.emplace( ulTestKey, drm_secondary_commit_locked( &g_DRM, uFbId, uWidth, uHeight, ulRotation, true ) ).first;
+ 				}
+ 				if ( !iter->second )
+ 					return SecondaryPresentResult::Refused;
+ 			}
+ 
+-			if ( !drm_secondary_commit_locked( &g_DRM, uFbId, uWidth, uHeight, DRM_MODE_ROTATE_0 ) )
++			if ( !drm_secondary_commit_locked( &g_DRM, uFbId, uWidth, uHeight, ulRotation ) )
+ 			{
+ 				if ( bClientBuffer )
+-					sec.directScanoutTested[ uFbId ] = false;
++					sec.directScanoutTested[ ulTestKey ] = false;
+ 				return bClientBuffer ? SecondaryPresentResult::Refused : SecondaryPresentResult::Busy;
+ 			}
+ 
+diff --git a/src/backend.h b/src/backend.h
+index 8edc8d2..9e31f83 100644
+--- a/src/backend.h
++++ b/src/backend.h
+@@ -379,9 +379,13 @@ namespace gamescope
+         // Whether the secondary output can take a frame now (no flip pending), and whether it
+         // needs one even without new content (after a modeset request).
+         virtual bool SecondaryOutputReady( bool *pbNeedsFrame ) { return false; }
+-        // Puts a panel-sized, panel-oriented pFb on the secondary output, never waiting.
+-        // bClientBuffer: an app's buffer (direct scanout), which the plane may refuse.
+-        virtual SecondaryPresentResult PresentSecondary( IBackendFb *pFb, uint32_t uWidth, uint32_t uHeight, bool bClientBuffer ) { return SecondaryPresentResult::Refused; }
++        // Whether the secondary plane may rotate (and scale) an app's buffer onto the panel
++        // (ConVar drm_secondary_plane_rotation), so a rotated panel can take direct scanout.
++        virtual bool SecondaryPlaneMayRotate() { return false; }
++        // Puts pFb on the secondary output, never waiting, filling the panel. bClientBuffer: an
++        // app's buffer (direct scanout), which the plane may refuse. bRotate: pFb is in logical
++        // orientation and the plane rotates it to the panel; otherwise it is panel-oriented.
++        virtual SecondaryPresentResult PresentSecondary( IBackendFb *pFb, uint32_t uWidth, uint32_t uHeight, bool bClientBuffer, bool bRotate = false ) { return SecondaryPresentResult::Refused; }
+ 
+         virtual bool SupportsPlaneHardwareCursor() const = 0;
+         virtual bool SupportsTearing() const = 0;
+diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
+index 2366281..af0f7e7 100644
+--- a/src/steamcompmgr.cpp
++++ b/src/steamcompmgr.cpp
+@@ -5733,7 +5733,7 @@ static void paint_secondary_output()
+ 	if ( w )
+ 		paint_window( &g_SecondaryFocus, w, w, &frameInfo, nullptr, 0, 1.0f, nullptr );
+ 
+-	enum class SecondaryPath { Unset, DirectScanout, Composited };
++	enum class SecondaryPath { Unset, DirectScanout, DirectScanoutRotated, Composited };
+ 	static SecondaryPath s_eLastPath = SecondaryPath::Unset;
+ 	SecondaryPath ePath = SecondaryPath::DirectScanout;
+ 
+@@ -5749,6 +5749,21 @@ static void paint_secondary_output()
+ 			eResult = GetBackend()->PresentSecondary( layer.tex->GetBackendFb(), layer.tex->width(), layer.tex->height(), true );
+ 		}
+ 	}
++	else if ( uRotation != 0 && frameInfo.layers.count() == 1 && GetBackend()->SecondaryPlaneMayRotate() )
++	{
++		// The plane rotates (and scales) the buffer to the panel: any buffer with the logical
++		// output's aspect fills it, so the window's own buffer size does not matter.
++		const FrameInfo_t::Layer_t &layer = frameInfo.layers.get( 0 );
++		const bool bSameAspect = layer.tex &&
++			std::abs( int64_t( layer.tex->width() ) * g_uSecondaryOutputHeight - int64_t( layer.tex->height() ) * g_uSecondaryOutputWidth ) <=
++			int64_t( g_uSecondaryOutputWidth ) * g_uSecondaryOutputHeight / 100;
++		if ( bSameAspect && layer.tex->GetBackendFb() && !layer.isYcbcr() && !layer.bPreRotated && layer.opacity >= 1.0f &&
++		     std::abs( layer.offset.x ) < 1.0f && std::abs( layer.offset.y ) < 1.0f )
++		{
++			ePath = SecondaryPath::DirectScanoutRotated;
++			eResult = GetBackend()->PresentSecondary( layer.tex->GetBackendFb(), layer.tex->width(), layer.tex->height(), true, true );
++		}
++	}
+ 
+ 	if ( eResult == gamescope::SecondaryPresentResult::Refused )
+ 	{
+@@ -5774,7 +5789,8 @@ static void paint_secondary_output()
+ 
+ 	if ( ePath != s_eLastPath )
+ 	{
+-		xwm_log.infof( "Secondary output: %s", ePath == SecondaryPath::DirectScanout ? "direct scanout" : "composited" );
++		xwm_log.infof( "Secondary output: %s", ePath == SecondaryPath::DirectScanout ? "direct scanout" :
++			ePath == SecondaryPath::DirectScanoutRotated ? "direct scanout, rotated on the plane" : "composited" );
+ 		s_eLastPath = ePath;
+ 	}
+ 	s_pLastWindow = w;

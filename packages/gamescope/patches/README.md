@@ -522,6 +522,14 @@ whose surface the compositor hands to wlserver. They never move the pointer or k
 and their ids are offset so the two digitizers never collide. Needs kernel patch 0397 on SM8250
 (two outputs committed independently).
 
+`0044` — **the secondary output's direct scanout, rotated on the plane** (ours, 2026-10-12). Lifts
+0042's "never rotate": an app buffer with the logical output's aspect goes on the secondary plane
+rotated (and scaled) to the panel, each FB and rotation checked once with TEST_ONLY; a refused one
+is composited. On SM8250 the plane rotation uses the offline SDE rotator of kernel 0385 that the
+main output also uses: HW-clean on the Thor Lite with kernel 0397 (Mario Kart DS, both panels
+scanning out melonDS's own buffers, no composite, no DPU/rotator messages). ConVar
+`drm_secondary_plane_rotation` (default on) turns it off at runtime.
+
 Drop the patch files here with those exact names (or rename and update `source.pin`'s
 `patches:` line). **Until a declared patch is present, `make overlay` / `make base` fail fast**
 with a clear "missing patch" message from `build-overlay.sh`.

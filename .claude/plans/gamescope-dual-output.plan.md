@@ -2,9 +2,11 @@
 
 **Complexity**: Large
 **Branch**: `feat/gamescope-dual-output` (off `main` at 479d84d)
-**Status** (2026-10-12): steps 0-4 done and HW-verified on the Thor Lite (Mario Kart DS: melonDS
-[w1] on the top panel, [w2] on the bottom panel, rotated, both live). Next: step 5 (touch), then 6
-(per-window emulator layouts, double-Exit), 7 (bottom panel off when unused).
+**Status** (2026-10-12): steps 0-5 done and HW-verified on the Thor Lite dev card, plus kernel
+patch 0397 (DPU SSPP handover between CRTCs) and patch 0044 (bottom panel direct scanout rotated on
+the plane: both panels now scan out melonDS's own buffers, no composite). melonDS second-window menu
+hidden by apps/qforge-hidemenu. Next: step 6 rest (per-window seeds on dual-screen boards, Azahar,
+double-Exit), touch landing confirmation, step 7 (bottom panel off when unused).
 **Targets**: AYN Thor Lite (top DSI-1, bottom DSI-2 1080x1240, `bottom_touchscreen`), AYN Thor
 (SM8550, panels the other way round: top DSI-2, bottom DSI-1 per ROCKNIX/Armada), AYANEO Pocket DS.
 Every single-panel board must behave exactly as today.
@@ -40,7 +42,7 @@ second gamescope's Xwayland as primary). One gamescope that drives both CRTCs re
 | Model | A second **output** with its own focus, its own composite and its own commits | Panels are not genlocked. One commit for both would hold the top game's flip until the bottom vblank |
 | Rejected: one tall canvas cropped across both CRTCs (PR #2344 style) | No | Forces composition every frame on the top panel; drops direct scanout and our pre-rotation series; one rotation for both |
 | Rejected: global `--virtual-connector-strategy PerAppId/PerWindow` | No | Both emulator windows share one app id; the strategy also changes overlay/input behaviour of the main screen |
-| Bottom panel scanout | **Always composited** (one layer blit, ~0.5 ms GPU, only when its content changes) | No per-output liftoff, no pre-rotation logic on the bottom |
+| Bottom panel scanout | Direct scanout first, the plane rotating/scaling an app buffer with the output's aspect (0044); composited otherwise | HW-clean on SM8250's shared offline rotator once kernel 0397 stopped the SSPP handover race |
 | Bottom panel plane | Its primary plane is **reserved and never registered with libliftoff** | libliftoff writes `FB_ID=0/CRTC_ID=0` on every registered plane it does not own (`plane.c:367`) on each apply; a second liftoff output would drag both CRTCs into every commit (`apply_current`, `alloc.c:569`) |
 | Window routing | Title regex (default covers melonDS `[w2]` and Azahar `Secondary Window`) **plus** a `GAMESCOPE_OUTPUT` window property that overrides it | Works with unmodified emulators; the atom is there for anything else |
 | Main screen | Unchanged: OGUI focus atoms, overlay/QAM, mangoapp, screenshots, PipeWire, fps limiter, rotation and colour patches stay on the top output | Smallest behaviour change; OGUI needs nothing |
