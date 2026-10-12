@@ -1,0 +1,390 @@
+From: qforge
+Subject: [PATCH] steamcompmgr: route second-screen windows to the secondary output
+
+NDS/3DS emulators put their second screen in a second top-level window
+of the same process: melonDS titles it "[w2] ...", Azahar ends it with
+"| Secondary Window". Both are plain, non-transient toplevels carrying
+the game's STEAM_GAME, so gamescope showed whichever mapped last on the
+main panel (Azahar), or the one OpenGamepadUI named in
+GAMESCOPECTRL_BASELAYER_WINDOW (melonDS): the DS bottom screen on the
+top panel.
+
+With --secondary-output, a window goes to the secondary output when its
+GAMESCOPE_OUTPUT property is 1, or, without the property, when its
+title matches --secondary-window-title (default
+"^\[w2\] |\| Secondary Window$"). Such a window is never a focus
+candidate for the main output, which also keeps it out of
+GAMESCOPE_FOCUSABLE_WINDOWS and out of a BASELAYER_WINDOW match, so the
+main pick falls back to the game's other window. A separate secondary
+focus picks the newest of them and sizes it to the panel (the panel's
+orientation applied, as reported by IBackend::GetSecondaryOutputSize);
+client resize requests on it are clamped to that size, and the desktop
+window resize skips it. The secondary focus takes no part in focus
+control: no appid, overlays or input focus.
+
+Nothing is painted on the secondary output yet (next patch).
+
+(qforge: dual-screen boards, step 3 of the dual-output plan, 2026-10-12.
+Window shapes read with xprop on the Thor Lite: melonDS 1.1 with
+Window1 enabled, Azahar 2126.1.2 with layout_option=4.)
+---
+diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
+index 116d2ab..71f4bf2 100644
+--- a/src/Backends/DRMBackend.cpp
++++ b/src/Backends/DRMBackend.cpp
+@@ -1097,6 +1097,8 @@ static void setup_secondary_output( struct drm_t *drm )
+ 	if ( !pMode )
+ 		return fail( "no mode" );
+ 	sec.mode = *pMode;
++	// The panel's orientation property (a rotated panel reports which side is up).
++	sec.pConnector->UpdateEffectiveOrientation( &sec.mode );
+ 
+ 	if ( drmModeCreatePropertyBlob( drm->fd, &sec.mode, sizeof( sec.mode ), &sec.uModeBlobId ) != 0 )
+ 		return fail( "cannot create its mode blob" );
+@@ -5141,6 +5143,19 @@ namespace gamescope
+ 			return &s_HeadlessConnector;
+ 		}
+ 
++		virtual bool GetSecondaryOutputSize( uint32_t *puWidth, uint32_t *puHeight ) override
++		{
++			const drm_secondary_t &sec = g_DRMSecondary;
++			if ( !sec.pConnector )
++				return false;
++
++			const GamescopePanelOrientation eOrientation = sec.pConnector->GetCurrentOrientation();
++			const bool bSideways = eOrientation == GAMESCOPE_PANEL_ORIENTATION_90 || eOrientation == GAMESCOPE_PANEL_ORIENTATION_270;
++			*puWidth = bSideways ? sec.mode.vdisplay : sec.mode.hdisplay;
++			*puHeight = bSideways ? sec.mode.hdisplay : sec.mode.vdisplay;
++			return true;
++		}
++
+ 		virtual IBackendConnector *GetConnector( GamescopeScreenType eScreenType ) override
+ 		{
+ 			if ( g_DRM.pConnector && g_DRM.pConnector->GetScreenType() == eScreenType )
+diff --git a/src/backend.h b/src/backend.h
+index 69a2b6f..095061b 100644
+--- a/src/backend.h
++++ b/src/backend.h
+@@ -364,6 +364,10 @@ namespace gamescope
+         }
+         virtual IBackendConnector *GetConnector( GamescopeScreenType eScreenType ) = 0;
+ 
++        // Dual-screen boards: the logical (orientation-applied) size of the --secondary-output
++        // panel. False when there is none.
++        virtual bool GetSecondaryOutputSize( uint32_t *puWidth, uint32_t *puHeight ) { return false; }
++
+         virtual bool SupportsPlaneHardwareCursor() const = 0;
+         virtual bool SupportsTearing() const = 0;
+ 
+diff --git a/src/main.cpp b/src/main.cpp
+index f4c4251..cc42704 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -92,6 +92,7 @@ const struct option *gamescope_options = (struct option[]){
+ 	{ "debug-layers", no_argument, nullptr, 0 },
+ 	{ "prefer-output", required_argument, nullptr, 'O' },
+ 	{ "secondary-output", required_argument, nullptr, 0 },
++	{ "secondary-window-title", required_argument, nullptr, 0 },
+ 	{ "default-touch-mode", required_argument, nullptr, 0 },
+ 	{ "generate-drm-mode", required_argument, nullptr, 0 },
+ 	{ "immediate-flips", no_argument, nullptr, 0 },
+@@ -242,6 +243,8 @@ const char usage[] =
+ 	"Embedded mode options:\n"
+ 	"  -O, --prefer-output            list of connectors in order of preference (ex: DP-1,DP-2,DP-3,HDMI-A-1)\n"
+ 	"  --secondary-output             drive this connector as a second output next to the main one (ex: DSI-2)\n"
++	"  --secondary-window-title       windows whose title matches this regex go to the secondary output\n"
++	"                                 (default: melonDS '[w2] ' and Azahar '| Secondary Window' windows)\n"
+ 	"  --default-touch-mode           0: hover, 1: left, 2: right, 3: middle, 4: passthrough\n"
+ 	"  --generate-drm-mode            DRM mode generation algorithm (cvt, fixed)\n"
+ 	"  --immediate-flips              Enable immediate flips, may result in tearing\n"
+@@ -718,6 +721,7 @@ int g_nPreferredOutputHeight = 0;
+ bool g_bExposeWayland = false;
+ const char *g_sOutputName = nullptr;
+ const char *g_sSecondaryOutputName = nullptr;
++const char *g_sSecondaryWindowTitle = nullptr;
+ bool g_bDebugLayers = false;
+ bool g_bForceDisableColorMgmt = false;
+ bool g_bRt = false;
+@@ -836,6 +840,8 @@ int main(int argc, char **argv)
+ 					g_bCompositeGraphics = true;
+ 				} else if (strcmp(opt_name, "secondary-output") == 0) {
+ 					g_sSecondaryOutputName = optarg;
++				} else if (strcmp(opt_name, "secondary-window-title") == 0) {
++					g_sSecondaryWindowTitle = optarg;
+ 				} else if (strcmp(opt_name, "composite-blit") == 0) {
+ 					g_bCompositeBlit = true;
+ 				} else if (strcmp(opt_name, "force-orientation") == 0) {
+diff --git a/src/main.hpp b/src/main.hpp
+index 2de1d36..c4837af 100644
+--- a/src/main.hpp
++++ b/src/main.hpp
+@@ -41,6 +41,7 @@ extern bool g_bGrabbed;
+ extern float g_mouseSensitivity;
+ extern const char *g_sOutputName;
+ extern const char *g_sSecondaryOutputName;
++extern const char *g_sSecondaryWindowTitle;
+ 
+ enum class GamescopeUpscaleFilter : uint32_t
+ {
+diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
+index 29b84ad..383237e 100644
+--- a/src/steamcompmgr.cpp
++++ b/src/steamcompmgr.cpp
+@@ -32,6 +32,7 @@
+ #include "backend.h"
+ #include "gamescope_shared.h"
+ #include "xwayland_ctx.hpp"
++#include <regex>
+ #include <X11/X.h>
+ #include <X11/Xlib.h>
+ #include <X11/Xcursor/Xcursor.h>
+@@ -1091,6 +1092,18 @@ struct global_focus_t : public focus_t
+ };
+ 
+ std::unordered_map<gamescope::VirtualConnectorKey_t, global_focus_t> g_VirtualConnectorFocuses;
++
++// Dual-screen boards (--secondary-output). The windows of an emulator's second screen
++// (bOnSecondaryOutput) are never focus candidates for the main output; the secondary focus
++// shows the newest of them on the second panel, sized to it. Unlike g_VirtualConnectorFocuses
++// it takes no part in Steam/OpenGamepadUI focus control: no appid, no overlays, no input focus.
++static bool g_bSecondaryOutput = false;
++static uint32_t g_uSecondaryOutputWidth = 0;
++static uint32_t g_uSecondaryOutputHeight = 0;
++static std::optional<std::regex> g_SecondaryWindowTitle;
++static global_focus_t g_SecondaryFocus;
++// melonDS prefixes "[w2] " to its second window's title, Azahar ends its with "| Secondary Window".
++static constexpr const char *k_pszDefaultSecondaryWindowTitle = R"(^\[w2\] |\| Secondary Window$)";
+ global_focus_t *GetCurrentFocus()
+ {
+ 	uint64_t ulKey = GetBackend()->GetCurrentConnector() ? GetBackend()->GetCurrentConnector()->GetVirtualConnectorKey() : 0;
+@@ -1580,6 +1593,7 @@ bool steamcompmgr_window_should_refresh_switch( steamcompmgr_win_t *w )
+ #define STEAM_PROP			"STEAM_BIGPICTURE"
+ #define OVERLAY_PROP		"STEAM_OVERLAY"
+ #define EXTERNAL_OVERLAY_PROP		"GAMESCOPE_EXTERNAL_OVERLAY"
++#define OUTPUT_PROP			"GAMESCOPE_OUTPUT"
+ #define MANGOAPP_MSG_TYPE_PROP		"GAMESCOPE_MANGOAPP_MSG_TYPE"
+ #define GAMES_RUNNING_PROP 	"STEAM_GAMES_RUNNING"
+ #define SCREEN_SCALE_PROP	"STEAM_SCREEN_SCALE"
+@@ -4665,6 +4679,13 @@ found:;
+ 			continue;
+ 		}
+ 
++		// Shown on the secondary output. Also keeps it out of GAMESCOPE_FOCUSABLE_WINDOWS and out
++		// of a GAMESCOPECTRL_BASELAYER_WINDOW match (OpenGamepadUI names the newest window of a game).
++		if ( w->bOnSecondaryOutput )
++		{
++			continue;
++		}
++
+ 		// Skip overlay targets
+ 		if ( w->oulTargetVROverlay && !cv_vr_show_forwarded_overlays )
+ 		{
+@@ -5670,6 +5691,41 @@ determine_and_apply_focus( global_focus_t *pFocus )
+ 	pFocus->ulCurrentFocusSerial = GetFocusSerial();
+ }
+ 
++// The secondary output shows the newest viewable window tagged for it, at the panel's size.
++static void determine_and_apply_secondary_focus()
++{
++	std::vector< steamcompmgr_win_t* > vecCandidates;
++	gamescope_xwayland_server_t *server = NULL;
++	for ( size_t i = 0; ( server = wlserver_get_xwayland_server( i ) ); i++ )
++	{
++		for ( steamcompmgr_win_t *w = server->ctx->list; w; w = w->xwayland().next )
++		{
++			if ( w->bOnSecondaryOutput && w->xwayland().a.map_state == IsViewable && w->xwayland().a.c_class == InputOutput )
++				vecCandidates.push_back( w );
++		}
++	}
++	std::stable_sort( vecCandidates.begin(), vecCandidates.end(), is_focus_priority_greater );
++
++	steamcompmgr_win_t *pFocusWindow = vecCandidates.empty() ? nullptr : vecCandidates.front();
++	if ( pFocusWindow != g_SecondaryFocus.focusWindow )
++	{
++		if ( pFocusWindow )
++			focus_log.infof( "Secondary output shows %s (%x)", pFocusWindow->debug_name(), pFocusWindow->id() );
++		else
++			focus_log.infof( "Secondary output shows nothing" );
++	}
++	g_SecondaryFocus.focusWindow = pFocusWindow;
++
++	if ( pFocusWindow && ( (uint32_t)pFocusWindow->GetGeometry().nWidth != g_uSecondaryOutputWidth ||
++	                       (uint32_t)pFocusWindow->GetGeometry().nHeight != g_uSecondaryOutputHeight ) )
++	{
++		xwayland_ctx_t *ctx = pFocusWindow->xwayland().ctx;
++		XMoveResizeWindow( ctx->dpy, pFocusWindow->xwayland().id, 0, 0, g_uSecondaryOutputWidth, g_uSecondaryOutputHeight );
++	}
++
++	g_SecondaryFocus.ulCurrentFocusSerial = GetFocusSerial();
++}
++
+ static void
+ get_win_type(xwayland_ctx_t *ctx, steamcompmgr_win_t *w)
+ {
+@@ -5838,12 +5894,37 @@ get_win_icon(xwayland_ctx_t* ctx, steamcompmgr_win_t* w)
+ 	get_prop(ctx, w->xwayland().id, ctx->atoms.netWMIcon, *w->icon.get());
+ }
+ 
++// Recomputes whether a window belongs on the secondary output: its GAMESCOPE_OUTPUT property when
++// it has one, else the title rule.
++static void update_win_output( steamcompmgr_win_t *w )
++{
++	bool bSecondary = false;
++	if ( g_bSecondaryOutput )
++	{
++		if ( w->bHasOutputProp )
++			bSecondary = w->uOutputProp == 1;
++		else if ( w->title && g_SecondaryWindowTitle )
++			bSecondary = std::regex_search( *w->title, *g_SecondaryWindowTitle );
++	}
++
++	if ( bSecondary == w->bOnSecondaryOutput )
++		return;
++
++	w->bOnSecondaryOutput = bSecondary;
++	focus_log.infof( "%s (%x) %s the secondary output", w->debug_name(), w->id(), bSecondary ? "goes to" : "leaves" );
++	MakeFocusDirty();
++}
++
+ static void
+ handle_desktop_window(steamcompmgr_win_t *w)
+ {
+ 	if ( !w )
+ 		return;
+ 
++	// Sized to the secondary output by its own focus.
++	if ( w->bOnSecondaryOutput )
++		return;
++
+ 	if ( win_has_game_id( w ) || w->bIsSteamPid || w->bIsSteamWebHelperPid || w->bIsVRWebHelperPid )
+ 		return;
+ 
+@@ -5934,6 +6015,8 @@ map_win(xwayland_ctx_t* ctx, Window id, unsigned long sequence)
+ 	w->isOverlay = get_prop(ctx, w->xwayland().id, ctx->atoms.overlayAtom, 0);
+ 	w->isExternalOverlay = get_prop(ctx, w->xwayland().id, ctx->atoms.externalOverlayAtom, 0, &w->bHasExternalOverlayProp);
+ 	w->uMangoappMsgType = get_prop(ctx, w->xwayland().id, ctx->atoms.mangoappMsgTypeAtom, 0);
++	w->uOutputProp = get_prop(ctx, w->xwayland().id, ctx->atoms.gamescopeOutputAtom, 0, &w->bHasOutputProp);
++	update_win_output( w );
+ 
+ 	// misyl: Disable appID for overlay types, as parts of the code don't expect that focus-wise.
+ 	// Fixes mangoapp usage when nested, and not in SteamOS.
+@@ -6327,6 +6410,15 @@ static void configure_request(xwayland_ctx_t *ctx, XConfigureRequestEvent *confi
+ 
+ 	// Take a client's own drag out of the pointer position so it does not chase itself.
+ 	steamcompmgr_win_t *w = find_win( ctx, configureRequest->window, false );
++
++	// A window on the secondary output keeps the panel's size.
++	if ( w && w->bOnSecondaryOutput )
++	{
++		changes.x = 0;
++		changes.y = 0;
++		changes.width = g_uSecondaryOutputWidth;
++		changes.height = g_uSecondaryOutputHeight;
++	}
+ 	if ( w && ( configureRequest->value_mask & ( CWX | CWY ) ) && w->xwayland().a.map_state == IsViewable )
+ 	{
+ 		// Any window moved during a press may be the drag target, the anchor only applies under the pointer.
+@@ -6447,6 +6539,9 @@ destroy_win(xwayland_ctx_t *ctx, Window id, bool gone, bool fade)
+ 		std::erase_if(pFocus->decorationWindows, [id](steamcompmgr_win_t *w) { return x11_win(w) == id; });
+ 	}
+ 
++	if (x11_win(g_SecondaryFocus.focusWindow) == id)
++		g_SecondaryFocus.focusWindow = nullptr;
++
+ #if HAVE_PIPEWIRE
+ 	// The pipewire repick can retain the old focus when no candidates remain.
+ 	if (x11_win(s_PipewireFocus.focusWindow) == id)
+@@ -7154,6 +7249,15 @@ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
+ 			MakeFocusDirty();
+ 		}
+ 	}
++	if (ev->atom == ctx->atoms.gamescopeOutputAtom)
++	{
++		steamcompmgr_win_t * w = find_win(ctx, ev->window);
++		if (w)
++		{
++			w->uOutputProp = get_prop(ctx, w->xwayland().id, ctx->atoms.gamescopeOutputAtom, 0, &w->bHasOutputProp);
++			update_win_output( w );
++		}
++	}
+ 	if (ev->atom == ctx->atoms.externalOverlayAtom)
+ 	{
+ 		steamcompmgr_win_t * w = find_win(ctx, ev->window);
+@@ -7269,6 +7373,7 @@ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
+ 		if (w)
+ 		{
+ 			get_win_title(ctx, w, ev->atom);
++			update_win_output( w );
+ 
+ 			for ( auto &iter : g_VirtualConnectorFocuses )
+ 			{
+@@ -9116,6 +9221,7 @@ void init_xwayland_ctx(uint32_t serverId, gamescope_xwayland_server_t *xwayland_
+ 	ctx->atoms.gameAtom = XInternAtom(ctx->dpy, GAME_PROP, false);
+ 	ctx->atoms.overlayAtom = XInternAtom(ctx->dpy, OVERLAY_PROP, false);
+ 	ctx->atoms.externalOverlayAtom = XInternAtom(ctx->dpy, EXTERNAL_OVERLAY_PROP, false);
++	ctx->atoms.gamescopeOutputAtom = XInternAtom(ctx->dpy, OUTPUT_PROP, false);
+ 	ctx->atoms.mangoappMsgTypeAtom = XInternAtom(ctx->dpy, MANGOAPP_MSG_TYPE_PROP, false);
+ 	ctx->atoms.opacityAtom = XInternAtom(ctx->dpy, OPACITY_PROP, false);
+ 	ctx->atoms.gamesRunningAtom = XInternAtom(ctx->dpy, GAMES_RUNNING_PROP, false);
+@@ -10192,6 +10298,23 @@ steamcompmgr_main(int argc, char **argv)
+ 		set_string_prop( root_ctx, root_ctx->atoms.gamescopeMainSteamVROverlay, *g_pVROverlayKey );
+ 	}
+ 
++	g_bSecondaryOutput = GetBackend()->GetSecondaryOutputSize( &g_uSecondaryOutputWidth, &g_uSecondaryOutputHeight );
++	if ( g_bSecondaryOutput )
++	{
++		const char *pszTitle = g_sSecondaryWindowTitle ? g_sSecondaryWindowTitle : k_pszDefaultSecondaryWindowTitle;
++		try
++		{
++			if ( *pszTitle )
++				g_SecondaryWindowTitle.emplace( pszTitle, std::regex::ECMAScript | std::regex::optimize );
++		}
++		catch ( const std::regex_error &e )
++		{
++			xwm_log.errorf( "--secondary-window-title '%s' is not a valid regex (%s): only GAMESCOPE_OUTPUT places windows", pszTitle, e.what() );
++		}
++		xwm_log.infof( "Secondary output %ux%u, windows titled /%s/ or with GAMESCOPE_OUTPUT=1 go there",
++			g_uSecondaryOutputWidth, g_uSecondaryOutputHeight, pszTitle );
++	}
++
+ 	update_edid_prop();
+ 
+ 	update_screenshot_color_mgmt();
+@@ -10715,6 +10838,9 @@ steamcompmgr_main(int argc, char **argv)
+ 			}
+ 		}
+ 
++		if ( g_bSecondaryOutput && g_SecondaryFocus.IsDirty() )
++			determine_and_apply_secondary_focus();
++
+ 		if ( g_bPendingFocusInfo.exchange( false ) )
+ 			DumpFocusInfo();
+ 
+diff --git a/src/steamcompmgr_shared.hpp b/src/steamcompmgr_shared.hpp
+index c344d10..43df0d0 100644
+--- a/src/steamcompmgr_shared.hpp
++++ b/src/steamcompmgr_shared.hpp
+@@ -121,6 +121,11 @@ struct steamcompmgr_win_t {
+ 	bool bHasExternalOverlayProp = false;
+ 	// Set by per-connector mangoapp instances.
+ 	uint32_t uMangoappMsgType = 0;
++	// GAMESCOPE_OUTPUT (1 = the secondary output), else the --secondary-window-title rule.
++	uint32_t uOutputProp = 0;
++	bool bHasOutputProp = false;
++	// Shown on the secondary output, never a candidate for the main one.
++	bool bOnSecondaryOutput = false;
+ 
+ 	bool bIsSteamPid = false;
+ 	bool bIsSteamWebHelperPid = false;
+diff --git a/src/xwayland_ctx.hpp b/src/xwayland_ctx.hpp
+index 7b39ecb..201ea6a 100644
+--- a/src/xwayland_ctx.hpp
++++ b/src/xwayland_ctx.hpp
+@@ -109,6 +109,7 @@ struct xwayland_ctx_t final : public gamescope::IWaitable
+ 		Atom gameAtom;
+ 		Atom overlayAtom;
+ 		Atom externalOverlayAtom;
++		Atom gamescopeOutputAtom;
+ 		Atom mangoappMsgTypeAtom;
+ 		Atom gamesRunningAtom;
+ 		Atom screenZoomAtom;

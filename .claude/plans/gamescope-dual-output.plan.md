@@ -2,9 +2,10 @@
 
 **Complexity**: Large
 **Branch**: `feat/gamescope-dual-output` (off `main` at 479d84d)
-**Status** (2026-10-12): steps 0-2 done. Step 2 (patch 0040) HW-verified on the Thor Lite: bottom
+**Status** (2026-10-12): steps 0-3 done (step 3: patch 0041, HW-verified with Mario Kart DS: main
+focus melonDS [w1], [w2] routed to the secondary output and resized to 1240x1080). Step 2 (patch 0040) HW-verified on the Thor Lite: bottom
 panel modeset on the boot console's CRTC 95 / plane 52, debug pattern 60.00 flips/s for 20 s
-(longest interval 16.68 ms), main output unaffected. Next: step 3. Supersedes the DRM-lease approach of the unmerged
+(longest interval 16.68 ms), main output unaffected. Next: step 4. Supersedes the DRM-lease approach of the unmerged
 branch `feat/gamescope-ogc-lease` (1be3865, 103c24c, 4998658).
 **Targets**: AYN Thor Lite (top DSI-1, bottom DSI-2 1080x1240, `bottom_touchscreen`), AYN Thor
 (SM8550, panels the other way round: top DSI-2, bottom DSI-1 per ROCKNIX/Armada), AYANEO Pocket DS.
@@ -187,6 +188,12 @@ Line numbers below are in the patched 3.16.31 tree (`work/overlay-build/aarch64/
   falls back to the app-id match (spike 0.2: OGUI set it to melonDS's `[w2]`).
 - Without the flag no secondary focus exists and the filters see no tagged windows: behaviour
   identical.
+- **Done 2026-10-12 (patch 0041).** Secondary focus is a standalone `global_focus_t`
+  (`g_SecondaryFocus`), not a `g_VirtualConnectorFocuses` entry (keeps it out of the re-key/diff
+  loop and of focus control). The filter sits in `xwayland_ctx_t::GetPossibleFocusWindows`, which
+  feeds the per-ctx focus, the global list, `GAMESCOPE_FOCUSABLE_*` and the PipeWire focus at
+  once. `handle_desktop_window` and `configure_request` keep tagged windows at the panel size
+  (bottom panel: orientation property RIGHT_UP -> 270, logical 1240x1080).
 
 ### 4. Per-output rendering and paint state (patch 0042)
 

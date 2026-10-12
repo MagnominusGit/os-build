@@ -492,6 +492,15 @@ and its flip events carry their own user data. It shows
 black until the compositor paints it (later patches); ConVar `drm_debug_secondary_pattern` flips
 it between two greys every vblank and logs the flip rate. No flag, no change.
 
+`0041` — **second-screen windows go to the secondary output** (ours, 2026-10-12; plan step 3).
+A window whose `GAMESCOPE_OUTPUT` property is 1, or (without the property) whose title matches
+`--secondary-window-title` (default `^\[w2\] |\| Secondary Window$`: melonDS's and Azahar's
+second window), is never a focus candidate for the main output, so it also drops out of
+`GAMESCOPE_FOCUSABLE_WINDOWS` and of a `GAMESCOPECTRL_BASELAYER_WINDOW` match (OpenGamepadUI names
+the newest window of a game, which was melonDS's `[w2]`). A separate secondary focus shows the
+newest such window, sized to the panel with its orientation applied; client resizes of it are
+clamped. Painting it is the next patch. Only active with `--secondary-output`.
+
 Drop the patch files here with those exact names (or rename and update `source.pin`'s
 `patches:` line). **Until a declared patch is present, `make overlay` / `make base` fail fast**
 with a clear "missing patch" message from `build-overlay.sh`.
