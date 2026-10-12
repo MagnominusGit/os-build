@@ -2,11 +2,9 @@
 
 **Complexity**: Large
 **Branch**: `feat/gamescope-dual-output` (off `main` at 479d84d)
-**Status** (2026-10-12): steps 0-3 done (step 3: patch 0041, HW-verified with Mario Kart DS: main
-focus melonDS [w1], [w2] routed to the secondary output and resized to 1240x1080). Step 2 (patch 0040) HW-verified on the Thor Lite: bottom
-panel modeset on the boot console's CRTC 95 / plane 52, debug pattern 60.00 flips/s for 20 s
-(longest interval 16.68 ms), main output unaffected. Next: step 4. Supersedes the DRM-lease approach of the unmerged
-branch `feat/gamescope-ogc-lease` (1be3865, 103c24c, 4998658).
+**Status** (2026-10-12): steps 0-4 done and HW-verified on the Thor Lite (Mario Kart DS: melonDS
+[w1] on the top panel, [w2] on the bottom panel, rotated, both live). Next: step 5 (touch), then 6
+(per-window emulator layouts, double-Exit), 7 (bottom panel off when unused).
 **Targets**: AYN Thor Lite (top DSI-1, bottom DSI-2 1080x1240, `bottom_touchscreen`), AYN Thor
 (SM8550, panels the other way round: top DSI-2, bottom DSI-1 per ROCKNIX/Armada), AYANEO Pocket DS.
 Every single-panel board must behave exactly as today.
@@ -211,6 +209,16 @@ Line numbers below are in the patched 3.16.31 tree (`work/overlay-build/aarch64/
 - Screenshots and PipeWire stay on the main output.
 - HW: melonDS bottom screen and Azahar secondary window shown on the bottom panel; top panel
   still direct-scanned-out (debug: composite counter), OGUI overlay and Exit work.
+- **Done 2026-10-12 (patch 0042), with direct scanout limited to unrotated panels.** A first
+  version scanned the bottom buffers out with the plane rotating them (ROTATE_270): on SM8250 that
+  goes through the single offline SDE rotator of kernel patch 0385 (one rotator object, one
+  `race_job` flag, timed against one CRTC), which the top panel already uses. The top
+  (command-mode) panel stalled: `dpu_encoder_frame_done_timeout` / `kickoff timeout` on enc35, garbage
+  until a session restart. The plane is now never asked to rotate; the bottom frame is composited
+  into a panel-sized image (rotated-copy blit when the layer is unscaled). melonDS [w2]'s buffer is
+  not panel-sized (layer scale 0.58), so it takes the shader composite. True direct scanout on a
+  rotated bottom panel would need client buffers already in panel orientation (Mesa prerotate,
+  packages/mesa 0006, keyed to the main output today) -- not pursued.
 
 ### 5. Touch routing (patch 0043)
 

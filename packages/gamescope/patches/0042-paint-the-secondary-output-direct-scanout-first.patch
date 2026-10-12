@@ -1,0 +1,495 @@
+From: qforge
+Subject: [PATCH] paint the secondary output, direct scanout first
+
+The secondary focus (patch 0041) is now painted on the secondary output
+(patch 0040), on every main-loop vblank where it has a new commit and
+the output can take a frame (no flip pending).
+
+Direct scanout first: on an unrotated panel, a single opaque buffer the
+size of the output goes on the secondary plane as is (each FB is
+checked once with a TEST_ONLY commit, the plane may refuse a format or
+modifier). Otherwise the frame is composited into one of three
+panel-sized images, the composite applying the panel's rotation
+(vulkan_composite takes a rotation for override targets; with one
+unscaled layer that is the composite-blit rotated copy, which now also
+serves such a panel-sized override). The backend holds the queued and
+visible FBs, which keeps a client's buffer locked while it is on
+screen, and nudges the compositor when a flip completes.
+
+The plane is never asked to rotate. A first version scanned a
+logical-sized buffer out with the plane rotated: on SM8250 that goes
+through the one offline SDE rotator (kernel patch 0385), which the main
+output already uses and which times its jobs against a single CRTC. The
+main panel stalled (DPU "frame done timeout", command-mode panel left
+showing garbage) on the Thor Lite.
+
+No colour management on that panel. The secondary paint never sets
+bPainted, so the main output's repaint state and pacing ignore it. The
+debug pattern takes the output back while it is on.
+
+(qforge: dual-screen boards, step 4 of the dual-output plan, 2026-10-12.)
+---
+diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
+index 71f4bf2..a94948a 100644
+--- a/src/Backends/DRMBackend.cpp
++++ b/src/Backends/DRMBackend.cpp
+@@ -198,6 +198,11 @@ struct drm_secondary_t
+ 	gamescope::CDRMPlane *pPlane = nullptr;
+ 	drmModeModeInfo mode = {};
+ 	uint32_t uModeBlobId = 0;
++	// The panel's orientation as the compositor's rotation step. The plane itself is never asked
++	// to rotate: on SM8250 90/270 goes through the one offline SDE rotator (kernel patch 0385),
++	// which the main output already uses and which times its jobs against a single CRTC; feeding
++	// it from both outputs stalled the main panel (DPU frame done timeout, Thor Lite).
++	uint32_t uRotationStep = 0;
+ 
+ 	// Commits come from more than one thread (the debug pattern flips from the
+ 	// flip handler thread), so everything below is guarded by this.
+@@ -211,6 +216,16 @@ struct drm_secondary_t
+ 	uint32_t uDebugFbIds[3] = {};
+ 	uint32_t uDebugFb = 0;
+ 
++	// Once the compositor has presented, the debug FBs only come back with the pattern.
++	bool bCompositorOwned = false;
++	// A frame is wanted even without new content: after a modeset request or the pattern.
++	bool bNeedsFrame = true;
++	// What the compositor put on screen: holding the FB keeps a client's buffer locked.
++	gamescope::Rc<gamescope::IBackendFb> pQueuedFb;
++	gamescope::Rc<gamescope::IBackendFb> pVisibleFb;
++	// FB id -> whether the plane takes that client buffer (TEST_ONLY once per FB).
++	std::unordered_map<uint32_t, bool> directScanoutTested;
++
+ 	uint64_t ulPatternFlips = 0;
+ 	uint64_t ulPatternStart = 0;
+ 	uint64_t ulLastVBlank = 0;
+@@ -834,10 +849,10 @@ gamescope::ConVar<bool> cv_drm_debug_secondary_pattern( "drm_debug_secondary_pat
+ // Puts uFbId on the secondary output with a non-blocking flip; the first one also modesets
+ // it. Fails while the previous flip is pending: never waits, so a slow panel cannot hold up
+ // the main output. Caller holds g_DRMSecondary.mutCommit.
+-static bool drm_secondary_commit_locked( struct drm_t *drm, uint32_t uFbId )
++static bool drm_secondary_commit_locked( struct drm_t *drm, uint32_t uFbId, uint32_t uSrcWidth, uint32_t uSrcHeight, uint64_t ulRotation, bool bTestOnly = false )
+ {
+ 	drm_secondary_t &sec = g_DRMSecondary;
+-	if ( !sec.pConnector || sec.bFlipPending || drm->paused )
++	if ( !sec.pConnector || ( sec.bFlipPending && !bTestOnly ) || drm->paused )
+ 		return false;
+ 
+ 	drmModeAtomicReq *req = drmModeAtomicAlloc();
+@@ -849,7 +864,7 @@ static bool drm_secondary_commit_locked( struct drm_t *drm, uint32_t uFbId )
+ 			drmModeAtomicAddProperty( req, uObjectId, oProperty->GetPropertyId(), ulValue );
+ 	};
+ 
+-	uint32_t uFlags = DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_EVENT;
++	uint32_t uFlags = bTestOnly ? DRM_MODE_ATOMIC_TEST_ONLY : DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_EVENT;
+ 	const uint32_t uCRTCId = sec.pCRTC->GetObjectId();
+ 	const auto &crtcProps = sec.pCRTC->GetProperties();
+ 	if ( !sec.bModeSet )
+@@ -872,16 +887,18 @@ static bool drm_secondary_commit_locked( struct drm_t *drm, uint32_t uFbId )
+ 	add( uPlaneId, planeProps.CRTC_ID, uCRTCId );
+ 	add( uPlaneId, planeProps.SRC_X, 0 );
+ 	add( uPlaneId, planeProps.SRC_Y, 0 );
+-	add( uPlaneId, planeProps.SRC_W, uint64_t( sec.mode.hdisplay ) << 16 );
+-	add( uPlaneId, planeProps.SRC_H, uint64_t( sec.mode.vdisplay ) << 16 );
++	add( uPlaneId, planeProps.SRC_W, uint64_t( uSrcWidth ) << 16 );
++	add( uPlaneId, planeProps.SRC_H, uint64_t( uSrcHeight ) << 16 );
+ 	add( uPlaneId, planeProps.CRTC_X, 0 );
+ 	add( uPlaneId, planeProps.CRTC_Y, 0 );
+ 	add( uPlaneId, planeProps.CRTC_W, sec.mode.hdisplay );
+ 	add( uPlaneId, planeProps.CRTC_H, sec.mode.vdisplay );
+-	add( uPlaneId, planeProps.rotation, DRM_MODE_ROTATE_0 );
++	add( uPlaneId, planeProps.rotation, ulRotation );
+ 	add( uPlaneId, planeProps.alpha, 0xFFFF );
+ 
+ 	int ret = drmModeAtomicCommit( drm->fd, req, uFlags, &g_DRMSecondary );
++	if ( bTestOnly )
++		return ret == 0;
+ 	if ( ret != 0 )
+ 	{
+ 		// -EACCES: VT-switched away. Log the first failure and then every 600th, a
+@@ -908,8 +925,12 @@ static void drm_secondary_show_debug_fb_locked( struct drm_t *drm )
+ 	if ( sec.bModeSet && uNext == sec.uDebugFb )
+ 		return;
+ 
+-	if ( drm_secondary_commit_locked( drm, sec.uDebugFbIds[ uNext ] ) )
++	if ( drm_secondary_commit_locked( drm, sec.uDebugFbIds[ uNext ], sec.mode.hdisplay, sec.mode.vdisplay, DRM_MODE_ROTATE_0 ) )
++	{
+ 		sec.uDebugFb = uNext;
++		// The compositor's FBs are off screen now.
++		sec.pQueuedFb = nullptr;
++	}
+ }
+ 
+ // After a VT switch (another DRM master may have changed everything) or a forced modeset, the
+@@ -919,6 +940,7 @@ static void drm_secondary_needs_modeset()
+ 	std::scoped_lock lock{ g_DRMSecondary.mutCommit };
+ 	g_DRMSecondary.bModeSet = false;
+ 	g_DRMSecondary.bFlipPending = false;
++	g_DRMSecondary.bNeedsFrame = true;
+ }
+ 
+ // Called with the main output's state polls: (re)shows the output after a modeset request or a
+@@ -926,7 +948,8 @@ static void drm_secondary_needs_modeset()
+ static void drm_secondary_refresh( struct drm_t *drm )
+ {
+ 	std::scoped_lock lock{ g_DRMSecondary.mutCommit };
+-	drm_secondary_show_debug_fb_locked( drm );
++	if ( !g_DRMSecondary.bCompositorOwned )
++		drm_secondary_show_debug_fb_locked( drm );
+ }
+ 
+ static void OnSecondaryPatternChanged( gamescope::ConVar<bool> & )
+@@ -934,14 +957,22 @@ static void OnSecondaryPatternChanged( gamescope::ConVar<bool> & )
+ 	std::scoped_lock lock{ g_DRMSecondary.mutCommit };
+ 	g_DRMSecondary.ulPatternFlips = 0;
+ 	g_DRMSecondary.ulMaxInterval = 0;
+-	drm_secondary_show_debug_fb_locked( &g_DRM );
++	// Back from the pattern, the compositor repaints.
++	g_DRMSecondary.bNeedsFrame = true;
++	if ( cv_drm_debug_secondary_pattern || !g_DRMSecondary.bCompositorOwned )
++		drm_secondary_show_debug_fb_locked( &g_DRM );
+ }
+ 
+ static void drm_secondary_page_flip( uint64_t ulVBlankTime )
+ {
+ 	drm_secondary_t &sec = g_DRMSecondary;
++	// Released outside the lock: dropping a client buffer takes the wlserver lock.
++	gamescope::Rc<gamescope::IBackendFb> pNoLongerVisible;
++	defer( nudge_steamcompmgr() );
+ 	std::scoped_lock lock{ sec.mutCommit };
+ 	sec.bFlipPending = false;
++	pNoLongerVisible = std::move( sec.pVisibleFb );
++	sec.pVisibleFb = std::move( sec.pQueuedFb );
+ 
+ 	if ( cv_drm_debug_secondary_pattern )
+ 	{
+@@ -959,7 +990,8 @@ static void drm_secondary_page_flip( uint64_t ulVBlankTime )
+ 	}
+ 	sec.ulLastVBlank = ulVBlankTime;
+ 
+-	drm_secondary_show_debug_fb_locked( &g_DRM );
++	if ( cv_drm_debug_secondary_pattern || !sec.bCompositorOwned )
++		drm_secondary_show_debug_fb_locked( &g_DRM );
+ }
+ 
+ static bool drm_secondary_create_debug_fb( struct drm_t *drm, uint32_t uColor, uint32_t *pFbId )
+@@ -1099,6 +1131,20 @@ static void setup_secondary_output( struct drm_t *drm )
+ 	sec.mode = *pMode;
+ 	// The panel's orientation property (a rotated panel reports which side is up).
+ 	sec.pConnector->UpdateEffectiveOrientation( &sec.mode );
++	switch ( sec.pConnector->GetCurrentOrientation() )
++	{
++		case GAMESCOPE_PANEL_ORIENTATION_90:
++			sec.uRotationStep = 1;
++			break;
++		case GAMESCOPE_PANEL_ORIENTATION_180:
++			sec.uRotationStep = 2;
++			break;
++		case GAMESCOPE_PANEL_ORIENTATION_270:
++			sec.uRotationStep = 3;
++			break;
++		default:
++			break;
++	}
+ 
+ 	if ( drmModeCreatePropertyBlob( drm->fd, &sec.mode, sizeof( sec.mode ), &sec.uModeBlobId ) != 0 )
+ 		return fail( "cannot create its mode blob" );
+@@ -5156,6 +5202,58 @@ namespace gamescope
+ 			return true;
+ 		}
+ 
++		virtual uint32_t GetSecondaryOutputRotation() override
++		{
++			return g_DRMSecondary.uRotationStep;
++		}
++
++		virtual bool SecondaryOutputReady( bool *pbNeedsFrame ) override
++		{
++			drm_secondary_t &sec = g_DRMSecondary;
++			std::scoped_lock lock{ sec.mutCommit };
++			*pbNeedsFrame = sec.bNeedsFrame || !sec.bModeSet;
++			return sec.pConnector && !sec.bFlipPending && !g_DRM.paused && !cv_drm_debug_secondary_pattern;
++		}
++
++		virtual SecondaryPresentResult PresentSecondary( IBackendFb *pFb, uint32_t uWidth, uint32_t uHeight, bool bClientBuffer ) override
++		{
++			drm_secondary_t &sec = g_DRMSecondary;
++			CDRMFb *pDrmFb = pFb ? static_cast<CDRMFb *>( pFb->EnsureImported() ) : nullptr;
++			if ( !pDrmFb )
++				return SecondaryPresentResult::Refused;
++
++			std::scoped_lock lock{ sec.mutCommit };
++			if ( !sec.pConnector || sec.bFlipPending || g_DRM.paused || cv_drm_debug_secondary_pattern )
++				return SecondaryPresentResult::Busy;
++
++			const uint32_t uFbId = pDrmFb->GetFbId();
++			if ( bClientBuffer )
++			{
++				// The plane may not take every app buffer (format, modifier). Ask once per FB.
++				auto iter = sec.directScanoutTested.find( uFbId );
++				if ( iter == sec.directScanoutTested.end() )
++				{
++					if ( sec.directScanoutTested.size() > 64 )
++						sec.directScanoutTested.clear();
++					iter = sec.directScanoutTested.emplace( uFbId, drm_secondary_commit_locked( &g_DRM, uFbId, uWidth, uHeight, DRM_MODE_ROTATE_0, true ) ).first;
++				}
++				if ( !iter->second )
++					return SecondaryPresentResult::Refused;
++			}
++
++			if ( !drm_secondary_commit_locked( &g_DRM, uFbId, uWidth, uHeight, DRM_MODE_ROTATE_0 ) )
++			{
++				if ( bClientBuffer )
++					sec.directScanoutTested[ uFbId ] = false;
++				return bClientBuffer ? SecondaryPresentResult::Refused : SecondaryPresentResult::Busy;
++			}
++
++			sec.pQueuedFb = pFb;
++			sec.bCompositorOwned = true;
++			sec.bNeedsFrame = false;
++			return SecondaryPresentResult::Presented;
++		}
++
+ 		virtual IBackendConnector *GetConnector( GamescopeScreenType eScreenType ) override
+ 		{
+ 			if ( g_DRM.pConnector && g_DRM.pConnector->GetScreenType() == eScreenType )
+diff --git a/src/backend.h b/src/backend.h
+index 095061b..8edc8d2 100644
+--- a/src/backend.h
++++ b/src/backend.h
+@@ -290,6 +290,13 @@ namespace gamescope
+         virtual ~IBackendPlane() = default;
+     };
+ 
++    enum class SecondaryPresentResult
++    {
++        Presented,
++        Busy,    // the previous flip is still pending: try again on a later frame
++        Refused, // the plane cannot scan this buffer out: composite it instead
++    };
++
+     class CBaseBackendFb : public IBackendFb
+     {
+     public:
+@@ -367,6 +374,14 @@ namespace gamescope
+         // Dual-screen boards: the logical (orientation-applied) size of the --secondary-output
+         // panel. False when there is none.
+         virtual bool GetSecondaryOutputSize( uint32_t *puWidth, uint32_t *puHeight ) { return false; }
++        // The rotation (0-3, as g_uOutputRotation) that draws a logical frame onto that panel.
++        virtual uint32_t GetSecondaryOutputRotation() { return 0; }
++        // Whether the secondary output can take a frame now (no flip pending), and whether it
++        // needs one even without new content (after a modeset request).
++        virtual bool SecondaryOutputReady( bool *pbNeedsFrame ) { return false; }
++        // Puts a panel-sized, panel-oriented pFb on the secondary output, never waiting.
++        // bClientBuffer: an app's buffer (direct scanout), which the plane may refuse.
++        virtual SecondaryPresentResult PresentSecondary( IBackendFb *pFb, uint32_t uWidth, uint32_t uHeight, bool bClientBuffer ) { return SecondaryPresentResult::Refused; }
+ 
+         virtual bool SupportsPlaneHardwareCursor() const = 0;
+         virtual bool SupportsTearing() const = 0;
+diff --git a/src/rendervulkan.cpp b/src/rendervulkan.cpp
+index 6578024..33bf42a 100644
+--- a/src/rendervulkan.cpp
++++ b/src/rendervulkan.cpp
+@@ -3797,6 +3797,43 @@ bool vulkan_remake_swapchain( void )
+ 	return bRet;
+ }
+ 
++gamescope::Rc<CVulkanTexture> vulkan_acquire_secondary_output_image( uint32_t uWidth, uint32_t uHeight )
++{
++	// Three: one on screen, one queued, one being drawn.
++	static std::vector<gamescope::OwningRc<CVulkanTexture>> s_Images;
++	static uint32_t s_uNext = 0;
++
++	if ( s_Images.empty() || s_Images[0]->width() != uWidth || s_Images[0]->height() != uHeight )
++	{
++		CVulkanTexture::createFlags flags;
++		flags.bFlippable = true;
++		flags.bStorage = !g_bCompositeGraphics;
++		flags.bColorAttachment = g_bCompositeGraphics;
++		flags.bTransferSrc = true;
++		flags.bTransferDst = true; // the rotated blit of composite-blit
++		flags.bSampled = true;
++		flags.bOutputImage = true;
++
++		s_Images.clear();
++		for ( int i = 0; i < 3; i++ )
++		{
++			gamescope::OwningRc<CVulkanTexture> pImage = new CVulkanTexture();
++			if ( !pImage->BInit( uWidth, uHeight, 1u, g_output.uOutputFormat, flags ) )
++			{
++				vk_log.errorf( "failed to allocate a %ux%u secondary output image", uWidth, uHeight );
++				s_Images.clear();
++				return nullptr;
++			}
++			s_Images.push_back( std::move( pImage ) );
++		}
++		s_uNext = 0;
++	}
++
++	gamescope::Rc<CVulkanTexture> pImage = s_Images[ s_uNext ];
++	s_uNext = ( s_uNext + 1 ) % s_Images.size();
++	return pImage;
++}
++
+ static bool vulkan_make_output_images( VulkanOutput_t *pOutput )
+ {
+ 	if ( g_bCompositeGraphics )
+@@ -4953,7 +4990,7 @@ static bool vulkan_composite_blit( CVulkanCmdBuffer *cmdBuffer, const struct Fra
+ 	return true;
+ }
+ 
+-std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamescope::Rc<CVulkanTexture> pPipewireTexture, bool partial, gamescope::Rc<CVulkanTexture> pOutputOverride, bool increment, std::unique_ptr<CVulkanCmdBuffer> pInCommandBuffer, bool bAllowGfxBlit )
++std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamescope::Rc<CVulkanTexture> pPipewireTexture, bool partial, gamescope::Rc<CVulkanTexture> pOutputOverride, bool increment, std::unique_ptr<CVulkanCmdBuffer> pInCommandBuffer, bool bAllowGfxBlit, uint32_t uOverrideRotation )
+ {
+ 	UnrotatedFrameScope_t unrotated( frameInfo );
+ 
+@@ -5000,8 +5037,9 @@ std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamesco
+ 	else
+ 		compositeImage = partial ? g_output.outputImagesPartialOverlay[ g_output.nOutImage ] : g_output.outputImages[ g_output.nOutImage ];
+ 
+-	// Overrides (screenshots, upscale cache) are logical-sized, so never rotated.
+-	uint32_t uOutputRotation = pOutputOverride ? 0u : g_uOutputRotation;
++	// Overrides (screenshots, upscale cache) are logical-sized, so never rotated, unless the
++	// caller draws for another panel (the secondary output passes its own rotation).
++	uint32_t uOutputRotation = pOutputOverride ? uOverrideRotation : g_uOutputRotation;
+ 	if ( !pOutputOverride && partial && g_uPreRotation )
+ 		uOutputRotation = g_uPreRotation;
+ 	const bool bWantGfxBlit = g_bCompositeGraphics && ( !pOutputOverride || bAllowGfxBlit );
+@@ -5045,7 +5083,9 @@ std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamesco
+ 		cmdBuffer->bindColorMgmtLuts(i, frameInfo->shaperLut[i], frameInfo->lut3D[i]);
+ 
+ 	frameInfo->compositeBlitted = false;
+-	if ( vulkan_composite_blit( cmdBuffer.get(), frameInfo, compositeImage, uOutputRotation, pOutputOverride != nullptr ) )
++	// An override drawn for a panel (it brings its own rotation) is a scanout target like the
++	// output images; logical-sized ones (screenshots, upscale cache) are not.
++	if ( vulkan_composite_blit( cmdBuffer.get(), frameInfo, compositeImage, uOutputRotation, pOutputOverride != nullptr && uOverrideRotation == 0 ) )
+ 	{
+ 		// copied by the transfer engine, nothing applied: the display colour manages it
+ 		frameInfo->compositeBlitted = true;
+diff --git a/src/rendervulkan.hpp b/src/rendervulkan.hpp
+index 7ef27e9..e4155a2 100644
+--- a/src/rendervulkan.hpp
++++ b/src/rendervulkan.hpp
+@@ -477,7 +477,9 @@ gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_dmabuf( struct wl
+ gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_bits( uint32_t width, uint32_t height, uint32_t contentWidth, uint32_t contentHeight, uint32_t drmFormat, CVulkanTexture::createFlags texCreateFlags, void *bits );
+ gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_wlr_buffer( struct wlr_buffer *buf, gamescope::OwningRc<gamescope::IBackendFb> pBackendFb );
+ 
+-std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamescope::Rc<CVulkanTexture> pScreenshotTexture, bool partial, gamescope::Rc<CVulkanTexture> pOutputOverride = nullptr, bool increment = true, std::unique_ptr<CVulkanCmdBuffer> pInCommandBuffer = nullptr, bool bAllowGfxBlit = false );
++std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamescope::Rc<CVulkanTexture> pScreenshotTexture, bool partial, gamescope::Rc<CVulkanTexture> pOutputOverride = nullptr, bool increment = true, std::unique_ptr<CVulkanCmdBuffer> pInCommandBuffer = nullptr, bool bAllowGfxBlit = false, uint32_t uOverrideRotation = 0 );
++// The next of a ring of three scanout images for the secondary output (dual-screen boards).
++gamescope::Rc<CVulkanTexture> vulkan_acquire_secondary_output_image( uint32_t uWidth, uint32_t uHeight );
+ void vulkan_wait( uint64_t ulSeqNo, bool bReset );
+ gamescope::Rc<CVulkanTexture> vulkan_get_last_output_image( bool partial, bool defer );
+ gamescope::Rc<CVulkanTexture> vulkan_blit_rotate_target( gamescope::Rc<CVulkanTexture> pTex, uint32_t uRotation, uint32_t uSlot, bool bAdvance, uint64_t ulContentID = 0, bool *pbNeedsBlit = nullptr );
+diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
+index 383237e..88007b4 100644
+--- a/src/steamcompmgr.cpp
++++ b/src/steamcompmgr.cpp
+@@ -5691,6 +5691,96 @@ determine_and_apply_focus( global_focus_t *pFocus )
+ 	pFocus->ulCurrentFocusSerial = GetFocusSerial();
+ }
+ 
++// Paints the secondary focus onto the secondary output when it has new content and the output can
++// take a frame. Direct scanout first: on an unrotated panel, a buffer the size of the output goes
++// on the plane as is. Otherwise (a rotated panel, other sizes, or a buffer the plane refuses) the
++// frame is composited into a panel-sized image, the composite rotating it (with one unscaled layer,
++// a rotated-copy blit). The plane is never asked to rotate, see drm_secondary_t.
++static void paint_secondary_output()
++{
++	bool bNeedsFrame = false;
++	if ( !GetBackend()->SecondaryOutputReady( &bNeedsFrame ) )
++		return;
++
++	steamcompmgr_win_t *w = g_SecondaryFocus.focusWindow;
++	static const steamcompmgr_win_t *s_pLastWindow = nullptr;
++	static uint64_t s_ulLastCommitId = UINT64_MAX;
++	const uint64_t ulCommitId = window_last_done_commit_id( w );
++	if ( !bNeedsFrame && w == s_pLastWindow && ulCommitId == s_ulLastCommitId )
++		return;
++
++	struct FrameInfo_t frameInfo = {};
++	// No colour management on this panel: neither the DPU nor the composite applies any, so the
++	// rotated-copy blit is as good as the composite shader.
++	frameInfo.applyOutputColorMgmt = false;
++	frameInfo.scanoutIsColorManaged = true;
++	frameInfo.outputEncodingEOTF = EOTF_Gamma22;
++	frameInfo.allowVRR = false;
++	frameInfo.bFadingOut = false;
++
++	const uint32_t uCompositeDebugBackup = g_uCompositeDebug;
++	const uint32_t uBackupWidth = currentOutputWidth;
++	const uint32_t uBackupHeight = currentOutputHeight;
++	defer(
++		g_uCompositeDebug = uCompositeDebugBackup;
++		currentOutputWidth = uBackupWidth;
++		currentOutputHeight = uBackupHeight;
++	);
++	g_uCompositeDebug = 0;
++	currentOutputWidth = g_uSecondaryOutputWidth;
++	currentOutputHeight = g_uSecondaryOutputHeight;
++
++	if ( w )
++		paint_window( &g_SecondaryFocus, w, w, &frameInfo, nullptr, 0, 1.0f, nullptr );
++
++	enum class SecondaryPath { Unset, DirectScanout, Composited };
++	static SecondaryPath s_eLastPath = SecondaryPath::Unset;
++	SecondaryPath ePath = SecondaryPath::DirectScanout;
++
++	const uint32_t uRotation = GetBackend()->GetSecondaryOutputRotation();
++	gamescope::SecondaryPresentResult eResult = gamescope::SecondaryPresentResult::Refused;
++	if ( uRotation == 0 && frameInfo.layers.count() == 1 )
++	{
++		const FrameInfo_t::Layer_t &layer = frameInfo.layers.get( 0 );
++		if ( layer.tex && layer.tex->GetBackendFb() && !layer.isYcbcr() && !layer.bPreRotated &&
++		     layer.opacity >= 1.0f && layer.isScreenSize() && layer.offset.x == 0.0f && layer.offset.y == 0.0f &&
++		     layer.tex->width() == g_uSecondaryOutputWidth && layer.tex->height() == g_uSecondaryOutputHeight )
++		{
++			eResult = GetBackend()->PresentSecondary( layer.tex->GetBackendFb(), layer.tex->width(), layer.tex->height(), true );
++		}
++	}
++
++	if ( eResult == gamescope::SecondaryPresentResult::Refused )
++	{
++		ePath = SecondaryPath::Composited;
++
++		const bool bTransposed = ( uRotation & 1u ) != 0;
++		gamescope::Rc<CVulkanTexture> pImage = vulkan_acquire_secondary_output_image(
++			bTransposed ? g_uSecondaryOutputHeight : g_uSecondaryOutputWidth,
++			bTransposed ? g_uSecondaryOutputWidth : g_uSecondaryOutputHeight );
++		if ( !pImage )
++			return;
++
++		std::optional<uint64_t> oSequence = vulkan_composite( &frameInfo, nullptr, false, pImage, false, nullptr, true, uRotation );
++		if ( !oSequence )
++			return;
++		vulkan_wait( *oSequence, true );
++
++		eResult = GetBackend()->PresentSecondary( pImage->GetBackendFb(), pImage->width(), pImage->height(), false );
++	}
++
++	if ( eResult != gamescope::SecondaryPresentResult::Presented )
++		return;
++
++	if ( ePath != s_eLastPath )
++	{
++		xwm_log.infof( "Secondary output: %s", ePath == SecondaryPath::DirectScanout ? "direct scanout" : "composited" );
++		s_eLastPath = ePath;
++	}
++	s_pLastWindow = w;
++	s_ulLastCommitId = ulCommitId;
++}
++
+ // The secondary output shows the newest viewable window tagged for it, at the panel's size.
+ static void determine_and_apply_secondary_focus()
+ {
+@@ -11017,6 +11107,11 @@ steamcompmgr_main(int argc, char **argv)
+ 			}
+ 		}
+ 
++		// The secondary output paints on its own: it never sets bPainted, so the main output's
++		// repaint state and frame pacing do not see it.
++		if ( vblank && g_bSecondaryOutput )
++			paint_secondary_output();
++
+ 		if ( vblank && g_bUpdateForwardedVROverlays )
+ 		{
+ 			ForwardVROverlayTargets();
