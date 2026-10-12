@@ -1,0 +1,132 @@
+From: Philippe Simons <simons.philippe@gmail.com>
+Subject: [PATCH] drm/msm/dpu: keep SSPPs with their CRTC across commits
+
+With virtual planes, every commit that changes a CRTC's planes releases
+all of that CRTC's SSPPs and reserves them again from the free pool,
+first free one of the wanted type. The release is visible in the global
+state as soon as that commit is, not when the hardware stops fetching.
+With two outputs committed independently (a dual-screen handheld: the
+compositor drives each panel with its own non-blocking commits, the
+panels not being genlocked), one CRTC's commit could pick the SSPP the
+other CRTC had just released and reprogram it while the other panel's
+last frame was still being fetched through it. On the AYN Thor Lite
+(SM8250) the top panel is command-mode: its transfer stalled every time
+("enc35 frame done timeout", "kickoff timeout ... ret:-110") and the
+panel showed garbage until a full modeset. It happened at the moment the
+compositor moved the main output's frame to another plane and started
+painting the second panel, rotated or not.
+
+Remember the CRTC each SSPP was last reserved for (kept across the
+release) and reserve in two passes: first only SSPPs this CRTC had or no
+CRTC ever had, then SSPPs whose last CRTC holds no SSPP any more (it was
+disabled). An SSPP never moves to another CRTC that still uses SSPPs;
+when nothing fits, the plane does not fit and userspace composites.
+
+A first version let the SSPP move and added its previous CRTC to the
+commit instead, to serialise against it. The other output flips every
+frame, so the non-blocking commit that pulled it in kept failing with
+-EBUSY and the main panel froze.
+
+Single-output use is unchanged: one CRTC only ever takes SSPPs it had or
+that were never used.
+
+(qforge: dual-screen boards, gamescope patches 0040-0043, 2026-10-12.)
+---
+diff -ru a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h	2026-10-12 16:07:21.788428466 +0200
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h	2026-10-12 16:26:33.121059768 +0200
+@@ -136,6 +136,12 @@
+ 	uint32_t cdm_to_crtc_id;
+ 
+ 	uint32_t sspp_to_crtc_id[SSPP_MAX - SSPP_NONE];
++	/*
++	 * The CRTC each SSPP was last reserved for, kept when the reservation is
++	 * released: an SSPP never moves to another CRTC while its last owner still
++	 * holds SSPPs, see dpu_rm_reserve_sspp().
++	 */
++	uint32_t sspp_last_crtc_id[SSPP_MAX - SSPP_NONE];
+ 	uint32_t cwb_to_crtc_id[CWB_MAX - CWB_0];
+ };
+ 
+diff -ru a/drivers/gpu/drm/msm/disp/dpu1/dpu_rm.c b/drivers/gpu/drm/msm/disp/dpu1/dpu_rm.c
+--- a/drivers/gpu/drm/msm/disp/dpu1/dpu_rm.c	2026-10-12 16:07:21.789255277 +0200
++++ b/drivers/gpu/drm/msm/disp/dpu1/dpu_rm.c	2026-10-12 16:26:33.121783101 +0200
+@@ -785,11 +785,23 @@
+ 	return ret;
+ }
+ 
++static bool dpu_rm_crtc_holds_sspp(struct dpu_global_state *global_state, uint32_t crtc_id)
++{
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(global_state->sspp_to_crtc_id); i++)
++		if (global_state->sspp_to_crtc_id[i] == crtc_id)
++			return true;
++
++	return false;
++}
++
+ static struct dpu_hw_sspp *dpu_rm_try_sspp(struct dpu_rm *rm,
+ 					   struct dpu_global_state *global_state,
+ 					   struct drm_crtc *crtc,
+ 					   struct dpu_rm_sspp_requirements *reqs,
+-					   unsigned int type)
++					   unsigned int type,
++					   bool other_crtc_ok)
+ {
+ 	uint32_t crtc_id = crtc->base.id;
+ 	struct dpu_hw_sspp *hw_sspp;
+@@ -802,6 +814,12 @@
+ 		if (global_state->sspp_to_crtc_id[i])
+ 			continue;
+ 
++		if (global_state->sspp_last_crtc_id[i] &&
++		    global_state->sspp_last_crtc_id[i] != crtc_id &&
++		    (!other_crtc_ok ||
++		     dpu_rm_crtc_holds_sspp(global_state, global_state->sspp_last_crtc_id[i])))
++			continue;
++
+ 		hw_sspp = rm->hw_sspp[i];
+ 
+ 		if (hw_sspp->cap->type != type)
+@@ -821,6 +839,7 @@
+ 			continue;
+ 
+ 		global_state->sspp_to_crtc_id[i] = crtc_id;
++		global_state->sspp_last_crtc_id[i] = crtc_id;
+ 
+ 		return rm->hw_sspp[i];
+ 	}
+@@ -841,13 +860,26 @@
+ 					struct dpu_rm_sspp_requirements *reqs)
+ {
+ 	struct dpu_hw_sspp *hw_sspp = NULL;
++	int pass;
+ 
+-	if (!reqs->scale && !reqs->yuv)
+-		hw_sspp = dpu_rm_try_sspp(rm, global_state, crtc, reqs, SSPP_TYPE_DMA);
+-	if (!hw_sspp && !reqs->yuv)
+-		hw_sspp = dpu_rm_try_sspp(rm, global_state, crtc, reqs, SSPP_TYPE_RGB);
+-	if (!hw_sspp)
+-		hw_sspp = dpu_rm_try_sspp(rm, global_state, crtc, reqs, SSPP_TYPE_VIG);
++	/*
++	 * First the SSPPs this CRTC had or nobody had, then ones whose last CRTC
++	 * holds no SSPP any more (disabled). Never one another CRTC still uses
++	 * SSPPs on: every commit reassigns SSPPs and the release is visible here as
++	 * soon as that CRTC's commit is, not when its hardware stops fetching
++	 * through it. Without a fitting SSPP the plane does not fit and userspace
++	 * composites instead.
++	 */
++	for (pass = 0; pass < 2 && !hw_sspp; pass++) {
++		bool other_crtc_ok = pass == 1;
++
++		if (!reqs->scale && !reqs->yuv)
++			hw_sspp = dpu_rm_try_sspp(rm, global_state, crtc, reqs, SSPP_TYPE_DMA, other_crtc_ok);
++		if (!hw_sspp && !reqs->yuv)
++			hw_sspp = dpu_rm_try_sspp(rm, global_state, crtc, reqs, SSPP_TYPE_RGB, other_crtc_ok);
++		if (!hw_sspp)
++			hw_sspp = dpu_rm_try_sspp(rm, global_state, crtc, reqs, SSPP_TYPE_VIG, other_crtc_ok);
++	}
+ 
+ 	return hw_sspp;
+ }
