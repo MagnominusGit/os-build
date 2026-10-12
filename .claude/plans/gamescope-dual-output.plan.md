@@ -1,0 +1,219 @@
+# Plan: one gamescope on two panels (dual-screen boards)
+
+**Complexity**: Large
+**Branch**: `feat/gamescope-dual-output` (off `main` at 479d84d)
+**Status** (2026-10-12): planned, nothing built. Supersedes the DRM-lease approach of the unmerged
+branch `feat/gamescope-ogc-lease` (1be3865, 103c24c, 4998658).
+**Targets**: AYN Thor Lite (top DSI-1, bottom DSI-2 1080x1240, `bottom_touchscreen`), AYN Thor
+(SM8550, panels the other way round: top DSI-2, bottom DSI-1 per ROCKNIX/Armada), AYANEO Pocket DS.
+Every single-panel board must behave exactly as today.
+
+## Why
+
+NDS/3DS emulators (melonDS, Azahar) put the second screen in a **second top-level window of the
+same process**. One X11 client can only talk to one Xwayland, so a second gamescope on a leased
+panel cannot show it (that is what the lease branch hit; Armada and Bazzite don't do it either:
+melonDS `Window1` off, Azahar hybrid layout). The lease setup also broke OGUI (it picked the
+second gamescope's Xwayland as primary). One gamescope that drives both CRTCs removes both problems.
+
+## Prior art (researched 2026-10-12)
+
+- Upstream: #211 / #227 "one vblankmanager/composition step per output", never built, never
+  refused. PR #2344 (open) spans several CRTCs with one cropped framebuffer in one commit (tiled
+  monitors). Nobody drives two independent panels from DRM gamescope.
+- 3.16.31 (our base) already has **virtual connectors**: `g_VirtualConnectorFocuses`, per-focus
+  `paint_all(pFocus)` and `Present`, per-connector held commits, upscaler, fade, mangoapp, touch
+  following the mouse-focus connector. Wired only for the OpenVR and nested Wayland backends
+  (`UsesVirtualConnectors()` is false for DRM).
+- ROCKNIX does dual screen under **sway**: title rules
+  (`.*(Secondary|\[w2\]|Sub|Bottom|Screen 2|GamePad).*` -> second output), `map_to_output` per
+  touchscreen, touch on a separate seat; melonDS `Screen1Enabled=1 Screen1Layout=2 ScreenSizing=4
+  Screen1Sizing=5` plus a patch so `-f` fullscreens every window; Azahar `layout_option=4`.
+- Window titles to match: melonDS prefixes `[w1] ` / `[w2] ` when it has several windows; Azahar
+  ends the titles with `| Primary Window` / `| Secondary Window`. Neither picks a QScreen itself.
+
+## Decisions
+
+| Decision | Choice | Why |
+|---|---|---|
+| Model | A second **output** with its own focus, its own composite and its own commits | Panels are not genlocked. One commit for both would hold the top game's flip until the bottom vblank |
+| Rejected: one tall canvas cropped across both CRTCs (PR #2344 style) | No | Forces composition every frame on the top panel; drops direct scanout and our pre-rotation series; one rotation for both |
+| Rejected: global `--virtual-connector-strategy PerAppId/PerWindow` | No | Both emulator windows share one app id; the strategy also changes overlay/input behaviour of the main screen |
+| Bottom panel scanout | **Always composited** (one layer blit, ~0.5 ms GPU, only when its content changes) | No per-output liftoff, no pre-rotation logic on the bottom |
+| Bottom panel plane | Its primary plane is **reserved and never registered with libliftoff** | libliftoff writes `FB_ID=0/CRTC_ID=0` on every registered plane it does not own (`plane.c:367`) on each apply; a second liftoff output would drag both CRTCs into every commit (`apply_current`, `alloc.c:569`) |
+| Window routing | Title regex (default covers melonDS `[w2]` and Azahar `Secondary Window`) **plus** a `GAMESCOPE_OUTPUT` window property that overrides it | Works with unmodified emulators; the atom is there for anything else |
+| Main screen | Unchanged: OGUI focus atoms, overlay/QAM, mangoapp, screenshots, PipeWire, fps limiter, rotation and colour patches stay on the top output | Smallest behaviour change; OGUI needs nothing |
+| Bottom panel colour management (0014/0018) | Skipped in v1 | Night mode on the bottom panel needs its own CRTC colour state (later step) |
+| Clock | v1: bottom repaints inside the existing loop with one flip in flight, never blocking. v2: a second `CVBlankTimer` | Both panels run 60 Hz; v1 is enough to ship |
+| Base tree | Valve 3.16.31 as on `main` (NOT the OGC fork of the lease branch) | Virtual-connector work is in Valve's tree; OGC was only taken for the lease |
+| Patch style | New series `0040`+ in `packages/gamescope/patches`, developed as commits in a git checkout and exported with `git format-patch`; each patch builds alone and is a no-op without `--secondary-output` | Bisectable; single-panel boards stay identical |
+
+## Gamescope interface (new flags)
+
+- `--secondary-output <connector>`: drive this connector as output 2 (e.g. `DSI-2`). Without it
+  nothing in the series changes behaviour.
+- `--secondary-touch-device <input name>`: route this touchscreen to output 2 (e.g.
+  `bottom_touchscreen`). Other touchscreens stay on output 1.
+- `--secondary-window-title <regex>`: windows whose title matches go to output 2. Default
+  `^\[w2\] |\| Secondary Window$`.
+- Window property `GAMESCOPE_OUTPUT` (CARDINAL, 0 = main, 1 = secondary): overrides the title rule.
+
+## Steps
+
+Each step ends with a build of the overlay package and, where marked, a HW check. Thor Lite dev
+card (root@192.168.1.125) for dual-screen, ACE / FIT / Pocket Max for single-panel regression.
+Rootfs is read-only on cards: test a new gamescope by `mount --bind` over `/usr/bin/gamescope`.
+Line numbers below are in the patched 3.16.31 tree (`work/overlay-build/aarch64/gamescope/src/gamescope/src`).
+
+### 0. Spikes on hardware (before any gamescope code)
+
+1. **Two independent commits.** A small libdrm program (scratch, not shipped): modeset DSI-1 and
+   DSI-2 together, then flip each CRTC with its own `NONBLOCK|PAGE_FLIP_EVENT` commit in a loop,
+   measuring both flip timestamps. Pass: neither CRTC's flip waits for the other's vblank (msm
+   shares DPU global resource state between them). Fail: fall back to one commit for both, paced
+   by the top panel (bottom latency up to one frame, acceptable for NDS/3DS).
+2. **Window shape.** Under the current gamescope, launch melonDS with `Window1` enabled and Azahar
+   with `layout_option=4`; `xprop` both windows: `WM_NAME`/`_NET_WM_NAME`, `WM_TRANSIENT_FOR`,
+   `_NET_WM_WINDOW_TYPE`, `WM_CLASS`, size hints. If the second window is transient-for the first,
+   gamescope's focus walk (`steamcompmgr.cpp:4546-4570`) would make it the main focus: step 3 must
+   exclude tagged windows before that walk.
+3. Read Thor (SM8550) and Pocket DS connector names, bottom panel mode, touch device names and
+   backlight nodes off the devices.
+
+### 1. Device and session config
+
+- Cherry-pick 103c24c from the lease branch (device-env `QFORGE_SECONDARY_*`, Thor Lite values,
+  `tests/test-device-env.sh`). Reword its message: no lease any more. Drop
+  `QFORGE_SECONDARY_PANEL_NATIVE_{WIDTH,HEIGHT}` if gamescope reads the mode off the connector
+  (it will), or keep them for the touch rotation check only.
+- Add Thor and Pocket DS rows (from spike 0.3).
+- `qforge-session` passes `--secondary-output` / `--secondary-touch-device` when the block is set;
+  `tests/test-session.sh` case "dual screen" (and "single panel passes neither").
+- Do not take 4998658 (second gamescope) or the lease series 0030-0037.
+
+### 2. DRM backend: second output shows a test pattern (patch 0040)
+
+`src/Backends/DRMBackend.cpp`:
+- `drm_output_t { pConnector, pCRTC, pPrimaryPlane, mode_id, orientation, queued/visible FB ids,
+  pending flip count, present ctx ring }`; `g_DRM` keeps today's members for output 0 and gains an
+  optional secondary.
+- Selection: after `setup_best_connector`, `setup_secondary_output` picks the named connector,
+  a CRTC **distinct** from the primary's (`find_crtc_for_connector` needs an exclude mask) and that
+  CRTC's primary plane. Make primary selection deterministic: the main connector must never be the
+  secondary one (`-O` with the primary name from device-env).
+- libliftoff: replace `liftoff_device_register_all_planes` (1609) with per-plane
+  `liftoff_plane_create`, skipping the reserved plane.
+- Modeset (`drm_prepare` 3425-3519): keep the secondary CRTC/connector enabled instead of zeroing
+  every CRTC that is not `pCRTC`; `drm_unlink_foreign_planes` (3260) treats both CRTCs as ours.
+  Bring both up in the first modeset.
+- Secondary commit path: own `drmModeAtomicReq` (plane `FB_ID`, `CRTC_ID`, `SRC_*`, `CRTC_*`,
+  `rotation`, `IN_FENCE_FD`), `NONBLOCK|PAGE_FLIP_EVENT`, **no blocking wait** (the primary's
+  `Commit` blocks at 5001); refuse a new commit while one is in flight.
+- `page_flip_handler` (787-828): route by `crtc_id` instead of dropping (798); per-output FB
+  queue rotation and pending counters; only the primary feeds `GetVBlankTimer().MarkVBlank`; move
+  the `m_uCompletedPresents` write (792) after the routing.
+- Backend API: `IBackend::GetSecondaryConnector()` returning an `IBackendConnector` whose
+  `Present` composites into its own output image (step 4) and commits the secondary path.
+  `GetCurrentConnector()` keeps meaning the main panel.
+- Debug hook: a convar that fills the secondary with a solid colour.
+- HW: Thor Lite bottom panel shows the colour while OGUI runs on the top; top frame pacing
+  unchanged (mangoapp frametime graph); ACE/FIT/Max unchanged without the flag.
+
+### 3. Window routing and the second focus (patch 0041)
+
+`src/steamcompmgr.cpp`, `steamcompmgr_shared.hpp`, `xwayland_ctx.hpp`:
+- `steamcompmgr_win_t::uOutput`; set in `map_win` (next to `STEAM_GAME`, ~5910) and on
+  PropertyNotify of `GAMESCOPE_OUTPUT` / `WM_NAME` / `_NET_WM_NAME` (~7127) from the atom or the
+  title regex.
+- Candidate filters: `xwayland_ctx_t::GetPossibleFocusWindows` (4656),
+  `GetGlobalPossibleFocusWindows` (5103) and the per-ctx `DetermineAndApplyFocus` (4706) skip
+  tagged windows for the main focus, so a tagged window can never steal or resize the main one.
+  Exclude them before the transient walk (4546).
+- A second `global_focus_t` for the secondary, created next to the key-0 entry (10143, 10304),
+  `pVirtualConnector` = the backend's secondary connector; picked from tagged windows only, with
+  an empty `vecFocuscontrolAppIDs` (never the Steam-controlled branch); no overlay, notification,
+  external overlay, cursor.
+- X side for the secondary focus: raise, `XResizeWindow` to the secondary panel size (instead of
+  `ctx->root_width/height`, 5019-5033), never `XSetInputFocus` and never keyboard/mouse focus.
+- Root atoms (`GAMESCOPE_FOCUSED_*`, 5575) stay main-only.
+- Without the flag no secondary focus exists and the filters see no tagged windows: behaviour
+  identical.
+
+### 4. Per-output rendering and paint state (patch 0042)
+
+`src/rendervulkan.cpp/.hpp`, `src/steamcompmgr.cpp`:
+- `g_output` becomes per output (ring of output images, partial-overlay images, `nOutImage`,
+  `tmpOutput`, `computeFallback`); `vulkan_composite` / `vulkan_get_last_output_image` take the
+  output. Pipelines are shared (same format).
+- Compute dispatch sizes (`rendervulkan.cpp` 5109, 5170, 5229, 5256, 4669) come from the target
+  image, not `currentOutputWidth/Height`.
+- `paint_all` sets an RAII "current output" (size, rotation, refresh) from the focus, like the
+  PipeWire/screenshot swap at 3037-3041; the secondary paints with rotation from its connector's
+  orientation, pre-rotation off, colour LUT/CTM off.
+- `hasRepaint` / `hasRepaintNonBasePlane` per focus; the clear at 10907 only clears what was
+  painted. Secondary paints when its content changed and it has no flip in flight.
+- Screenshots and PipeWire stay on the main output.
+- HW: melonDS bottom screen and Azahar secondary window shown on the bottom panel; top panel
+  still direct-scanned-out (debug: composite counter), OGUI overlay and Exit work.
+
+### 5. Touch routing (patch 0043)
+
+`src/wlserver.cpp/.hpp`:
+- `wlserver_touch` gains the output it belongs to, chosen by `libinput_device_get_name` ==
+  `--secondary-touch-device`; the bus heuristic (418-460) keeps binding the others to the main
+  panel.
+- Per touch point: target surface, offset/scale and orientation of **its** output, kept from down
+  to up (today the global `focusedWindowOffset/Scale` and `g_nOutputWidth/Height`, 3269-3274 and
+  3329-3334). Remap touch ids per device so ids from the two digitizers never collide.
+- Secondary touch is always passthrough (no pointer emulation), never moves keyboard/mouse focus
+  (`wlr_seat` keeps them separate).
+- HW: DS touch works on the bottom panel while the pad drives the game; touching the top panel in
+  OGUI still works; OGUI's input focus never jumps to the bottom window.
+
+### 6. Emulator seeds for dual-screen boards (repo, not gamescope)
+
+- Per-device seed values (qforge.plan.md Phase 4b "Device-specific values only when needed"):
+  melonDS `Window1` enabled, top-only / bottom-only layouts (ROCKNIX values above); Azahar
+  `layout_option=4`. Single-panel boards keep today's seeds.
+- Launcher: nothing new if the default title regex matches. Only if some emulator needs its own
+  rule: gamescope reads a root property `GAMESCOPE_SECONDARY_WINDOW_TITLE` that qforge-launch sets
+  from the emulator def and clears on exit.
+- HW: one NDS and one 3DS game on Thor Lite, every exit path (OGUI Exit, emulator menu), state
+  saves.
+
+### 7. Bottom panel off when unused (patch 0044)
+
+- No tagged window: secondary CRTC `ACTIVE=0` through its own modeset commit (the lease series'
+  0034 blanked the connector the same way) and backlight off; back on when a tagged window maps.
+  Check the msm DSI power-down/up time and that it does not glitch the top panel.
+- HW: idle current with the bottom panel off vs on (OGUI menu).
+
+### 8. Later (not needed to ship)
+
+- Second `CVBlankTimer` for the bottom CRTC (only if the panels ever differ in refresh).
+- Frame callbacks / presentation feedback for windows on the bottom panel from its own clock.
+- Night mode / colour management on the bottom CRTC (per-output CTM/LUT state, 0014/0018).
+- Direct scanout on the bottom panel.
+- Upstream: offer the series to Valve (refers to #227 / #1842) once it has run for a while.
+
+## Size and risk
+
+About 1,500-2,500 changed lines in four gamescope files, most of it in steps 2-4.
+
+| Risk | Likelihood | Mitigation |
+|---|---|---|
+| msm serialises commits on the two CRTCs | Medium | Spike 0.1 first; fallback = one commit paced by the top panel |
+| Flip bookkeeping races (FB released while still scanned out, stuck pending counters) | High while building | Per-output queues and counters from the start; stress with the debug colour flip on both outputs |
+| A tagged window disturbs the main focus (raise/resize ping-pong, transient walk) | Medium | Filters run before every main-focus step; spike 0.2 decides the transient case |
+| Rebase cost on the next gamescope bump | Medium | Keep the series small and flag-gated; offer upstream |
+| Bottom panel colour differs (no CTM/LUT) | Certain in v1 | Step 8 |
+| Single-panel regression | Low | Everything gated on `--secondary-output`; ACE/FIT/Max regression on each step |
+
+## Validation
+
+```bash
+make test       # device-env, session wiring
+make overlay    # gamescope with the series (build each patch on its own while developing)
+```
+HW per step as listed above; final run: Thor Lite NDS + 3DS games, OGUI overlay/QAM, Exit paths,
+suspend/resume with both panels; ACE, Pocket FIT, Pocket Max unchanged.

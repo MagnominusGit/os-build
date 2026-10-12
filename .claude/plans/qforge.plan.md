@@ -944,6 +944,15 @@ is only built after that churn (28 s) and three times. Options, to pick when pol
 A metadata cache (titles, serials, resume) keyed by path + size + mtime comes with the per-ROM
 work that needs it, not before.
 
+### Phase 4d — Dual-screen boards: one gamescope on two panels (planned 2026-10-12)
+
+Detailed plan: [gamescope-dual-output.plan.md](gamescope-dual-output.plan.md), branch
+`feat/gamescope-dual-output`. Gamescope drives the bottom panel as a second output (own focus,
+own composite, own commits); melonDS / Azahar second windows routed there by title or a
+`GAMESCOPE_OUTPUT` property; bottom touchscreen routed by device name. Replaces the DRM-lease
+attempt (branch `feat/gamescope-ogc-lease`, not merged: one emulator process cannot span two
+gamescopes). Thor Lite first, then Thor and Pocket DS.
+
 ### Phase 5 — Release infrastructure (Medium)
 
 - **OGUI's storage screen is dead** (deferred 2026-10-03: only matters once QForge runs from
