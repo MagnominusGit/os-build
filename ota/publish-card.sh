@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge release-card publisher — upload a built SD card to the Cloudflare R2 bucket it is served
+# retroforge release-card publisher — upload a built SD card to the Cloudflare R2 bucket it is served
 # from, and emit the metadata the GitHub Release carries alongside it.
 #
 #   image/card-meta.sh <image-file>                     -> out/images/release-meta/
@@ -38,7 +38,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-KEEP="${QFORGE_CARD_KEEP:-1}"
+KEEP="${RETROFORGE_CARD_KEEP:-1}"
 # WHICH BUCKET PREFIX, and therefore which kind of flashable image this is. `cards/<version>/` is
 # the default and the only one this script had; `installer/<version>/` is the recovery medium
 # release-installer.yml publishes. Both are the same act — a file a person downloads and writes to a
@@ -49,7 +49,7 @@ KEEP="${QFORGE_CARD_KEEP:-1}"
 #
 # THE PRUNE IS SCOPED TO THIS PREFIX, which is the part to be careful with — it is an `rclone purge`,
 # and a KIND that leaked between callers would delete the other artifact's back catalogue.
-KIND="${QFORGE_R2_KIND:-cards}"
+KIND="${RETROFORGE_R2_KIND:-cards}"
 
 log() { printf '[publish] %s\n' "$*" >&2; }
 die() { printf '[publish] %s\n' "$*" >&2; exit 1; }
@@ -58,10 +58,10 @@ die() { printf '[publish] %s\n' "$*" >&2; exit 1; }
 # found` and exit 127, which says nothing about the variable it was checking.
 # NO EMPTY BRANCH HERE, and its absence is deliberate: `:-` above already substitutes the default
 # for an empty value as well as an unset one, so `''` in this case could never fire. That is also the
-# behaviour to want — a `QFORGE_R2_KIND: ${{ vars.X }}` that evaluates empty in CI should publish
-# a card, not break the release. Same `:-` semantics as QFORGE_CARD_KEEP above.
+# behaviour to want — a `RETROFORGE_R2_KIND: ${{ vars.X }}` that evaluates empty in CI should publish
+# a card, not break the release. Same `:-` semantics as RETROFORGE_CARD_KEEP above.
 case "$KIND" in
-  *[!a-z0-9-]*) die "QFORGE_R2_KIND must be a plain lowercase bucket prefix, got '$KIND'" ;;
+  *[!a-z0-9-]*) die "RETROFORGE_R2_KIND must be a plain lowercase bucket prefix, got '$KIND'" ;;
 esac
 
 . "$ROOT/ota/lib-rclone.sh"
@@ -115,7 +115,7 @@ esac
 # overruns it: this is what keeps the bucket free rather than a tidiness preference.
 # Never touches the prefix just written.
 case "$KEEP" in
-  ''|*[!0-9]*) die "QFORGE_CARD_KEEP must be a whole number, got '$KEEP'" ;;
+  ''|*[!0-9]*) die "RETROFORGE_CARD_KEEP must be a whole number, got '$KEEP'" ;;
 esac
 if [ "$KEEP" -ge 1 ]; then
   mapfile -t old < <("$RCLONE" lsf --dirs-only "r2:$R2_BUCKET/$KIND/" 2>/dev/null | sed 's:/$::' | sort -V)

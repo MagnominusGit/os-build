@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# qforge GRUB (stage 2) build.
+# retroforge GRUB (stage 2) build.
 #
 # Builds the per-slot stage-2 bootloader for arm64-efi from the pinned GNU GRUB 2.14 release
-# tarball plus boot/patches/grub/ (the qforge boot-attempts module), and generates the two
+# tarball plus boot/patches/grub/ (the retroforge boot-attempts module), and generates the two
 # per-slot grub.cfg files that go with it. Emits:
 #   out/boot/grubaa64.efi
 #   out/boot/grub-a.cfg, out/boot/grub-b.cfg
@@ -13,7 +13,7 @@
 #
 # Run inside the build image (needs the arm64 toolchain, the autotools + autogen, gawk and
 # grub-common — see build/Dockerfile):
-#   docker run --rm -v "$PWD":/src -w /src qforge-build boot/grub.sh
+#   docker run --rm -v "$PWD":/src -w /src retroforge-build boot/grub.sh
 #
 # There is no ./bootstrap step and no gnulib checkout: the release tarball already vendors gnulib.
 # See boot/grub.pin for why that matters and what the patch set covers.
@@ -57,16 +57,16 @@ done
 # This is the one autotools step in the GRUB build. It is not the tarball's `bootstrap`: bootstrap
 # is what needs a separately-checked-out gnulib at an exact revision, and the release tarball
 # already vendors gnulib under grub-core/lib/gnulib. Hence no gnulib pin.
-echo "[grub] autogen.sh (regenerating the module tables for the qforge stanza)"
+echo "[grub] autogen.sh (regenerating the module tables for the retroforge stanza)"
 ( cd "$SRCDIR" && ./autogen.sh )
-grep -q qforge "$SRCDIR/grub-core/Makefile.in" \
-  || { echo "autogen.sh did not pick up the qforge module — is patch 0003 applied?" >&2; exit 1; }
+grep -q retroforge "$SRCDIR/grub-core/Makefile.in" \
+  || { echo "autogen.sh did not pick up the retroforge module — is patch 0003 applied?" >&2; exit 1; }
 
 BUILDDIR="$WORK/build"
 rm -rf "$BUILDDIR"; mkdir -p "$BUILDDIR"
 cd "$BUILDDIR"
 
-# TARGET_CFLAGS carries -fshort-wchar, which the qforge module needs so its L"..." UCS-2 path
+# TARGET_CFLAGS carries -fshort-wchar, which the retroforge module needs so its L"..." UCS-2 path
 # literals are 2-byte as the firmware expects (see boot/grub.pin). -Os has to be repeated:
 # configure only defaults TARGET_CFLAGS to -Os when it is EMPTY, and then appends its own flags to
 # whatever it found (configure.ac:93-101), so setting it here replaces the default rather than
@@ -102,13 +102,13 @@ make -j"$(nproc)" AWK=gawk
 #                           cmdline names. Stock GRUB builds it and we simply never embedded it;
 #                           without it here the generated config's probe calls are "unknown
 #                           command" and every boot silently takes the PARTLABEL fallback.
-#   qforge                qforge_bootattempts, called once per boot by the generated grub.cfg
+#   retroforge                retroforge_bootattempts, called once per boot by the generated grub.cfg
 MODULES="boot linux part_gpt fat btrfs loadenv search search_fs_file \
 search_fs_uuid search_label chain reboot halt sleep test true echo read \
-configfile regexp probe normal minicmd gfxterm efi_gop font all_video qforge"
+configfile regexp probe normal minicmd gfxterm efi_gop font all_video retroforge"
 
 echo "[grub] grub-mkimage"
-test -f grub-core/qforge.mod || { echo "qforge.mod was not built — is patch 0003 applied?" >&2; exit 1; }
+test -f grub-core/retroforge.mod || { echo "retroforge.mod was not built — is patch 0003 applied?" >&2; exit 1; }
 ./grub-mkimage -d grub-core -O arm64-efi -p /EFI/steamos $MODULES \
   -o "$OUT/grubaa64.efi"
 
@@ -142,7 +142,7 @@ file "$OUT/grubaa64.efi" | grep -q "ARM64" || { echo "grubaa64.efi not ARM64" >&
 # slot updates (the ESP is the only partition an A/B update does not replace).
 #
 #   image/make-sdcard.sh  mcopy's this file rather than running `grub-editenv create` a second time
-#   the internal installer  cp's it out of /usr/lib/qforge/boot/ of the root it just wrote
+#   the internal installer  cp's it out of /usr/lib/retroforge/boot/ of the root it just wrote
 #
 # THE INSTALLER IS WHY IT IS AN ARTIFACT AT ALL. grub-editenv is not on the shipped image -- no grub
 # in customize-base.sh's PKGS -- so the device cannot create one, and adding grub to the installer's

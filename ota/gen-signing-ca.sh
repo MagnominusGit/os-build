@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge RAUC signing CA — Phase 4b.
+# retroforge RAUC signing CA — Phase 4b.
 #
 # Mints the two-level PKI that signs OTA bundles:
 #
@@ -13,13 +13,13 @@
 # A single self-signed key would make key rotation a reflash, which on this device means a
 # screwdriver and an SD card reader.
 #
-# WHAT ENTERS THE REPO: exactly one file, ota/rauc/qforge-ca.pem -- the CA CERTIFICATE,
+# WHAT ENTERS THE REPO: exactly one file, ota/rauc/retroforge-ca.pem -- the CA CERTIFICATE,
 # which is public by construction (it is shipped on every device as /etc/rauc/keyring.pem).
 # Every private key stays under $PKIDIR, which defaults inside out/ precisely because
 # .gitignore already excludes /out/ wholesale. Nothing here should ever need `git add -f`.
 #
 #   ota/gen-signing-ca.sh                 # mint into out/pki/, install the keyring
-#   PKIDIR=~/qforge-pki ota/gen-signing-ca.sh
+#   PKIDIR=~/retroforge-pki ota/gen-signing-ca.sh
 #
 # Then sign a bundle with:
 #   RAUC_CERT=out/pki/release.cert.pem RAUC_KEY=out/pki/release.key.pem make bundle
@@ -27,12 +27,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PKIDIR="${PKIDIR:-$ROOT/out/pki}"
-KEYRING="$ROOT/ota/rauc/qforge-ca.pem"
+KEYRING="$ROOT/ota/rauc/retroforge-ca.pem"
 RELEASE_EXT="$ROOT/ota/rauc/release.ext"   # shared with ota/rauc/verify-signing.sh
 
 CA_DAYS="${CA_DAYS:-7300}"        # 20 years: the device's trust root, replaced only by reflash
 REL_DAYS="${REL_DAYS:-800}"       # ~2 years: rotated under the CA without touching devices
-ORG="${ORG:-qforge}"
+ORG="${ORG:-retroforge}"
 
 command -v openssl >/dev/null 2>&1 || { echo "openssl not found" >&2; exit 1; }
 # An absent or empty profile does not fail openssl loudly enough: it mints a cert with NO
@@ -64,14 +64,14 @@ esac
 
 umask 077
 
-echo "[qforge] root CA (${CA_DAYS}d, RSA-4096)"
+echo "[retroforge] root CA (${CA_DAYS}d, RSA-4096)"
 openssl req -x509 -newkey rsa:4096 -nodes -sha256 -days "$CA_DAYS" \
   -keyout ca.key.pem -out ca.cert.pem \
   -subj "/O=$ORG/CN=$ORG OTA root CA" \
   -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
   -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
 
-echo "[qforge] release signing cert (${REL_DAYS}d, RSA-4096)"
+echo "[retroforge] release signing cert (${REL_DAYS}d, RSA-4096)"
 openssl req -newkey rsa:4096 -nodes -sha256 \
   -keyout release.key.pem -out release.csr.pem \
   -subj "/O=$ORG/CN=$ORG OTA release" >/dev/null 2>&1

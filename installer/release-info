@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# qforge internal install — WHICH RELEASE THIS MEDIUM INSTALLS. Phase 6 of
+# retroforge internal install — WHICH RELEASE THIS MEDIUM INSTALLS. Phase 6 of
 # .claude/plans/internal-install.plan.md, and the last unanswered question in §4b.
 #
 #   release-info          resolve <OTA_URL>/<channel>/latest.json and print key=value
@@ -19,7 +19,7 @@
 # THE MANIFEST IS NOT A TRUST BOUNDARY. latest.json says which bundle to fetch and nothing more; it
 # cannot select a keyring, a verification mode or an install flag, and the bundle it names still has
 # to verify against the baked CA before a single partition is touched. Every field in it is
-# attacker-controlled, and the validation below is rootfs/overlay/usr/bin/qforge-update's, ported: the
+# attacker-controlled, and the validation below is rootfs/overlay/usr/bin/retroforge-update's, ported: the
 # `bundle` field is forced to a BARE FILENAME so a manifest can never aim this device at another
 # host. tests/test-ui.sh asserts the two agree, both on the default URL literal and on the shapes
 # they reject; that assertion is the only thing keeping the copies together.
@@ -43,14 +43,14 @@ def emit(key, value):
 
 # Test seams, in the spirit of the rest of installer/: tests/test-ui.sh executes THIS file with curl
 # stubbed and every path redirected. What runs under test is the artifact that ships.
-CONFIG_FILE = os.environ.get("QFORGE_OTA_CONFIG", "/etc/qforge/ota.conf")
-CURL = os.environ.get("QFORGE_CURL", "curl")
-TIMEOUT = os.environ.get("QFORGE_NET_TIMEOUT", "20")
-# The server this medium fetches from, resolved exactly as qforge-update resolves it: the
-# environment, then OTA_URL/OTA_CHANNEL in /etc/qforge/ota.conf, then these built-in defaults. The
+CONFIG_FILE = os.environ.get("RETROFORGE_OTA_CONFIG", "/etc/retroforge/ota.conf")
+CURL = os.environ.get("RETROFORGE_CURL", "curl")
+TIMEOUT = os.environ.get("RETROFORGE_NET_TIMEOUT", "20")
+# The server this medium fetches from, resolved exactly as retroforge-update resolves it: the
+# environment, then OTA_URL/OTA_CHANNEL in /etc/retroforge/ota.conf, then these built-in defaults. The
 # literals are written a third time here because the other two are Python and shell in files that do
 # not ship together; tests/test-ui.sh asserts all three agree.
-DEFAULT_URL = "https://updates.qforge.invalid"
+DEFAULT_URL = "https://updates.retroforge.invalid"
 DEFAULT_CHANNEL = "stable"
 
 
@@ -72,8 +72,8 @@ def read_env_file(path):
 
 def config():
     conf = read_env_file(CONFIG_FILE)
-    url = os.environ.get("QFORGE_OTA_URL") or conf.get("OTA_URL") or DEFAULT_URL
-    channel = os.environ.get("QFORGE_OTA_CHANNEL") or conf.get("OTA_CHANNEL") or DEFAULT_CHANNEL
+    url = os.environ.get("RETROFORGE_OTA_URL") or conf.get("OTA_URL") or DEFAULT_URL
+    channel = os.environ.get("RETROFORGE_OTA_CHANNEL") or conf.get("OTA_CHANNEL") or DEFAULT_CHANNEL
     return url.rstrip("/"), channel
 
 
@@ -96,7 +96,7 @@ def manifest(raw):
     """
     (release, complaint) -- the validated manifest, or why it is unusable.
 
-    qforge-update's manifest() with its download logic removed. Every check here is one of that
+    retroforge-update's manifest() with its download logic removed. Every check here is one of that
     file's, and for the same reason: left unchecked, `bundle` is a redirect primitive -- "../../x",
     "http://elsewhere/x" and "/etc/passwd" all become part of a URL this medium then fetches and
     hands to rauc. The signature would still reject whatever came back, but a manifest must not be
@@ -172,7 +172,7 @@ def main():
     # and the alternative -- the bundle URL itself -- is long enough to wrap twice on a panel that
     # has already overflowed once (HW 2026-08-25). The host is the part an operator needs: it is
     # the one thing about this install they may have repointed ([[devices-are-operator-reachable]]).
-    emit("DETAIL", "QForge %s, %s GiB from %s"
+    emit("DETAIL", "RetroForge %s, %s GiB from %s"
          % (release["version"] or release["build"], gib(release["size"]),
             urllib.parse.urlparse(base).netloc or base))
     return 0

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Offline test for /usr/bin/qforge-emu — the emulator manager the QForge plugin drives.
+# Offline test for /usr/bin/retroforge-emu — the emulator manager the RetroForge plugin drives.
 #
 #   tests/test-emu.sh
 #
-# WHY THIS EXISTS. qforge-emu puts executables from the internet into the player's home and makes
+# WHY THIS EXISTS. retroforge-emu puts executables from the internet into the player's home and makes
 # them what every ROM card runs. Each rule below is what keeps a bad download from becoming the
 # emulator, and none of it shows when the download simply works:
 #
-#   - the pinned release's asset must still be the one QForge tested: GitHub's digest and size must
+#   - the pinned release's asset must still be the one RetroForge tested: GitHub's digest and size must
 #     equal the catalog's BEFORE anything is fetched (an upstream that re-uploads under the same tag
 #     is refused, not installed);
 #   - the downloaded bytes must hash to the catalog's sha256, or nothing changes on disk;
@@ -17,14 +17,14 @@
 #   - stdout is a contract: install prints forward-only `N%` lines and list prints JSON, and nothing
 #     else, or the plugin misreads it.
 #
-# HOW: the shipped rootfs/overlay/usr/bin/qforge-emu runs with its environment seams (QFORGE_CURL,
-# QFORGE_EMU_DIR, QFORGE_CATALOG) pointing into a sandbox; curl is a stub that serves a fake GitHub
+# HOW: the shipped rootfs/overlay/usr/bin/retroforge-emu runs with its environment seams (RETROFORGE_CURL,
+# RETROFORGE_EMU_DIR, RETROFORGE_CATALOG) pointing into a sandbox; curl is a stub that serves a fake GitHub
 # API answer and a fake AppImage, and logs every call. No network.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-EMU="$ROOT/rootfs/overlay/usr/bin/qforge-emu"
-[ -f "$EMU" ] || { echo "no qforge-emu: $EMU" >&2; exit 1; }
+EMU="$ROOT/rootfs/overlay/usr/bin/retroforge-emu"
+[ -f "$EMU" ] || { echo "no retroforge-emu: $EMU" >&2; exit 1; }
 
 PASS=0; FAIL=0; CASE=""
 ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
@@ -101,7 +101,7 @@ chmod +x "$W/bin/curl"
 
 D="$W/emus"
 run() {  # run <args...>: sets OUT, ERR, RC
-  OUT="$(HOME="$W/home" QFORGE_CURL="$W/bin/curl" QFORGE_EMU_DIR="$D" QFORGE_CATALOG="$W/catalog.json" \
+  OUT="$(HOME="$W/home" RETROFORGE_CURL="$W/bin/curl" RETROFORGE_EMU_DIR="$D" RETROFORGE_CATALOG="$W/catalog.json" \
     python3 "$EMU" "$@" 2>"$W/err")"
   RC=$?
   ERR="$(cat "$W/err")"
@@ -227,7 +227,7 @@ run install dummy
   && ok "an install fetches the catalog's data file into the player's home" || bad "data fetch: rc=$RC $ERR"
 pct_only && ok "stdout stays N% lines only" || bad "stdout: $OUT"
 grep "data.example/db" "$W/curl.log" | grep -q -- "--proto =https" && ok "data downloads are https only too" || bad "data curl args: $(grep data.example "$W/curl.log")"
-[ -z "$(find "$W/home" -name '*.qforge-part')" ] && ok "no partial file left" || bad "a .qforge-part was left"
+[ -z "$(find "$W/home" -name '*.retroforge-part')" ] && ok "no partial file left" || bad "a .retroforge-part was left"
 : > "$W/curl.log"; printf 'database two' > "$W/srv/data"
 run install dummy
 [ "$RC" = 0 ] && ! grep -q data.example "$W/curl.log" && [ "$(cat "$W/home/.config/dummy/db.dat")" = "database one" ] \
@@ -375,7 +375,7 @@ run install tool
 [ -x "$T/Tool.sh" ] && [ ! -x "$T/lib/data.txt" ] && ok "keeps the archive's executable bits" || bad "modes: $(stat -c '%n %a' "$T/Tool.sh" "$T/lib/data.txt")"
 [ "$(stat -c %a "$T/setuid" 2>/dev/null)" = 755 ] && ok "never carries a setuid bit over" || bad "setuid file mode $(stat -c %a "$T/setuid" 2>/dev/null)"
 pct_only && ok "stdout is only forward N% lines ending at 100%" || bad "stdout was: $(tr '\n' '|' <<<"$OUT")"
-[ -z "$(find "$W/home" "$D" -name '*.part' -o -name '*qforge-new*')" ] && ok "no download or staging folder left" || bad "left: $(find "$W/home" "$D" -name '*.part' -o -name '*qforge-new*')"
+[ -z "$(find "$W/home" "$D" -name '*.part' -o -name '*retroforge-new*')" ] && ok "no download or staging folder left" || bad "left: $(find "$W/home" "$D" -name '*.part' -o -name '*retroforge-new*')"
 [ ! -e "$D/tool/current" ] && [ -z "$(find "$D" -name '*.AppImage')" ] && ok "no AppImage layout for an archive" || bad "AppImage layout created"
 run list
 [ "$(tfield installed)" = '"2026.1"' ] && [ "$(tfield update)" = false ] && [ "$(tfield self_update)" = true ] \
@@ -383,7 +383,7 @@ run list
   || bad "got installed=$(tfield installed) update=$(tfield update) self_update=$(tfield self_update)"
 
 CASE="unpacked archive: it updates itself"
-# PortMaster rewrote its own version file: QForge must neither offer nor force a downgrade/update.
+# PortMaster rewrote its own version file: RetroForge must neither offer nor force a downgrade/update.
 printf '2026.9\n' > "$T/version"; mkdir -p "$T/libs"; printf 'runtime' > "$T/libs/godot.squashfs"
 mkzip 2026.2 2026.2; zip_catalog 2026.2; : > "$W/curl.log"
 run list
@@ -431,13 +431,13 @@ for to in . emulators/.. ""; do
 done
 reset; zip_catalog 3.6; mkdir -p "$W/home/roms/ports"
 python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); c["emulators"]["tool"]["unpack"]["to"]="emus-parent"; json.dump(c, open(sys.argv[1], "w"))' "$W/catalog.json"
-OUT="$(HOME="$W/home" QFORGE_CURL="$W/bin/curl" QFORGE_EMU_DIR="$W/home/emus-parent/emulators" QFORGE_CATALOG="$W/catalog.json" python3 "$EMU" install tool 2>&1)"; RC=$?
+OUT="$(HOME="$W/home" RETROFORGE_CURL="$W/bin/curl" RETROFORGE_EMU_DIR="$W/home/emus-parent/emulators" RETROFORGE_CATALOG="$W/catalog.json" python3 "$EMU" install tool 2>&1)"; RC=$?
 [ "$RC" = 4 ] && ok "an unpack target that holds the emulators folder is refused" || bad "target above ~/emulators: rc=$RC"
 # A symlinked target is never unpacked through, and a stale staging symlink does not block installs.
 mkzip 3.7 3.7; reset; zip_catalog 3.7; mkdir -p "$W/home/roms/ports" "$W/elsewhere"; ln -s "$W/elsewhere" "$T"
 run install tool
 [ "$RC" = 5 ] && [ -z "$(ls -A "$W/elsewhere")" ] && ok "a symlinked target folder is refused, nothing written through it" || bad "symlinked target: rc=$RC, wrote: $(ls -A "$W/elsewhere")"
-reset; zip_catalog 3.7; mkdir -p "$W/home/roms/ports"; ln -s /nonexistent "$W/home/roms/ports/.Tool.qforge-new"
+reset; zip_catalog 3.7; mkdir -p "$W/home/roms/ports"; ln -s /nonexistent "$W/home/roms/ports/.Tool.retroforge-new"
 run install tool
 [ "$RC" = 0 ] && [ -f "$T/Tool.sh" ] && ok "a stale staging symlink is cleared, the install goes on" || bad "stale staging symlink: rc=$RC $ERR"
 refused "an archive of absolute paths only" 3.8 'z.filelist[:] = []; z.NameToInfo.clear(); add(z, "/abs/version", "3.8\n", 0o100644)'
@@ -448,10 +448,10 @@ mkdir -p "$W/home/roms/ports/agame"; touch "$W/home/roms/ports/Agame.sh"
 run remove tool
 [ "$RC" = 0 ] && [ ! -e "$T" ] && [ ! -e "$D/tool" ] && ok "removes the unpacked folder" || bad "rc=$RC left: $(ls "$T" 2>&1)"
 [ -d "$W/home/roms/ports/agame" ] && [ -f "$W/home/roms/ports/Agame.sh" ] && ok "leaves the ports beside it alone" || bad "touched the ports"
-# A folder qforge-emu did not unpack (no marker) is never deleted, whatever the catalog says.
+# A folder retroforge-emu did not unpack (no marker) is never deleted, whatever the catalog says.
 mkdir -p "$T"; touch "$T/players-own"
 run remove tool
-[ -f "$T/players-own" ] && ok "a folder without qforge-emu's marker is left alone" || bad "deleted a folder qforge-emu did not install"
+[ -f "$T/players-own" ] && ok "a folder without retroforge-emu's marker is left alone" || bad "deleted a folder retroforge-emu did not install"
 
 # =================================================================================================
 CASE="remove"

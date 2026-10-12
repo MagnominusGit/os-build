@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge SD-card image builder.
+# retroforge SD-card image builder.
 #
 # Lays the FULL SteamOS-style 8-partition GPT from image/partition-table.txt and populates
 # BOTH slots: ESP + rootfs-a/-b + var-a/-b + home, and each slot's efi-a/efi-b partition with
@@ -13,10 +13,10 @@
 #
 # The ESP carries the stage-1 software + the boot state (SteamOS/conf/A.conf|B.conf + the
 # grubenv); each efi partition carries its own stage-2 GRUB + identity partsets. There is no
-# /KERNEL and no /QFORGE/STATE.0 — that was design C; the slot state IS the confs now.
+# /KERNEL and no /RETROFORGE/STATE.0 — that was design C; the slot state IS the confs now.
 #
-# WHY B IS POPULATED ON A DEV CARD AND EMPTY ON A RELEASE CARD. The default follows QFORGE_DEV;
-# QFORGE_SLOT_B=0|1 overrides it in either direction.
+# WHY B IS POPULATED ON A DEV CARD AND EMPTY ON A RELEASE CARD. The default follows RETROFORGE_DEV;
+# RETROFORGE_SLOT_B=0|1 overrides it in either direction.
 #
 # Dev (Phase 4b): the deliverable of the boot-path pass is that a slot switch and a rollback are
 # provable by hand, and you cannot prove a switch to a slot that does not boot — an empty B can only
@@ -39,7 +39,7 @@
 # byte offset — no loop mounts, no root.
 #
 # Run inside the build image (needs sgdisk + mkfs.vfat + mtools + mkfs.ext4 + grub-editenv):
-#   docker run --rm -v "$PWD":/src -w /src qforge-build image/make-sdcard.sh
+#   docker run --rm -v "$PWD":/src -w /src retroforge-build image/make-sdcard.sh
 #
 # Prereqs: boot/steamcl.sh + boot/grub.sh (-> out/boot/{steamcl.efi,steamcl-version,holo-bootconf,
 # fonts/default.pf2, grubaa64.efi, grub-a.cfg, grub-b.cfg, fonts/dejavu-mono.pf2}) and
@@ -48,7 +48,7 @@ set -euo pipefail
 export MTOOLS_SKIP_CHECK=1   # mtools on a file image has no geometry; silence the warning
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-# The /home layout, shared with installer/qforge-install. Resolved relative to this script with no
+# The /home layout, shared with installer/retroforge-install. Resolved relative to this script with no
 # seam: both files live in image/, so there is exactly one path and no test-only variant of it.
 # shellcheck source=lib-homestage.sh
 . "$ROOT/image/lib-homestage.sh"
@@ -74,21 +74,21 @@ GRUB_FONT="$BOOT/fonts/dejavu-mono.pf2" # stage-2 boot font ($prefix/fonts/ in g
 GRUBENV="$BOOT/grubenv"                 # pristine stage-2 env block (saved_entry lives here)
 
 # Populate the B slot too: on for a dev card, off for a release card. See the header for why.
-# Read the mode rather than defaulting to 1, so that forgetting to forward QFORGE_DEV produces a
+# Read the mode rather than defaulting to 1, so that forgetting to forward RETROFORGE_DEV produces a
 # release-shaped card (small, one bootable slot) rather than silently shipping the 4 GiB copy.
-SLOT_B="${QFORGE_SLOT_B:-$([ "${QFORGE_DEV:-}" = 1 ] && echo 1 || echo 0)}"
+SLOT_B="${RETROFORGE_SLOT_B:-$([ "${RETROFORGE_DEV:-}" = 1 ] && echo 1 || echo 0)}"
 
 MIB=$((1024 * 1024))
 END_SLACK_MIB=2   # tail room for the backup GPT (well over its ~17 KiB)
 
 # /home (ext4) carries a ready /home/player from image-build time (see below). The partition is
-# flashed small; on first boot qforge-grow-home extends the partition + its ext4 to fill the card.
+# flashed small; on first boot retroforge-grow-home extends the partition + its ext4 to fill the card.
 
 for t in sgdisk mkfs.vfat mcopy mmd mkfs.ext4 grub-editenv; do
-  command -v "$t" >/dev/null 2>&1 || { echo "$t not found — run inside qforge-build" >&2; exit 1; }
+  command -v "$t" >/dev/null 2>&1 || { echo "$t not found — run inside retroforge-build" >&2; exit 1; }
 done
 [ "$SLOT_B" = 1 ] && { command -v btrfstune >/dev/null 2>&1 || {
-  echo "btrfstune not found — run inside qforge-build (or set QFORGE_SLOT_B=0)" >&2; exit 1; }; }
+  echo "btrfstune not found — run inside retroforge-build (or set RETROFORGE_SLOT_B=0)" >&2; exit 1; }; }
 for f in "$STEAMCL" "$STEAMCL_VER" "$BOOTCONF" "$STAGE_FONT" \
          "$GRUB_EFI" "$GRUB_CFG_A" "$GRUB_CFG_B" "$GRUB_FONT" "$GRUBENV"; do
   [ -f "$f" ] || { echo "no boot artifact: ${f#"$ROOT"/} (run boot/steamcl.sh + boot/grub.sh)" >&2; exit 1; }
@@ -140,7 +140,7 @@ trap 'rm -f "${esp:-}" "${efi_a:-}" "${efi_b:-}" "${home:-}" "${ROOTFS_B:-}" "${
 stage_player_home "$homestage"
 
 # Size /home to its content + headroom (ext4 metadata + a little slack so mkfs.ext4 -d has room),
-# unless forced. qforge-grow-home grows it to fill the card on first boot, so this is only the flash-time
+# unless forced. retroforge-grow-home grows it to fill the card on first boot, so this is only the flash-time
 # floor. du -sm rounds each file up to a whole MiB, so this already over-counts slightly.
 home_mib=$(du -sm "$homestage" | cut -f1)
 HOME_SIZE_MIB="${HOME_SIZE_MIB:-$(( home_mib + home_mib / 5 + 128 ))}"
@@ -148,7 +148,7 @@ HOME_SIZE_MIB="${HOME_SIZE_MIB:-$(( home_mib + home_mib / 5 + 128 ))}"
 fixed_mib=$("$ROOT/image/genpart.sh" --min)
 total_mib=$(( fixed_mib + HOME_SIZE_MIB + END_SLACK_MIB ))
 
-echo "[qforge] SD image: ${fixed_mib}MiB fixed layout ($([ "$SLOT_B" = 1 ] && echo 'A+B populated' || echo 'A populated, B empty')) + home ${HOME_SIZE_MIB}MiB -> ${total_mib}MiB"
+echo "[retroforge] SD image: ${fixed_mib}MiB fixed layout ($([ "$SLOT_B" = 1 ] && echo 'A+B populated' || echo 'A populated, B empty')) + home ${HOME_SIZE_MIB}MiB -> ${total_mib}MiB"
 
 # 1b. Slot B's root: the SAME content, but it MUST NOT be the same bytes.
 #
@@ -166,21 +166,21 @@ if [ "$SLOT_B" = 1 ]; then
   rm -f "$ROOTFS_B"
   cp --reflink=auto "$ROOTFS" "$ROOTFS_B"
   btrfstune -f -U "$(cat /proc/sys/kernel/random/uuid)" "$ROOTFS_B" >/dev/null
-  btrfs filesystem label "$ROOTFS_B" qforge-root-B >/dev/null
-  echo "  slotB rootfs-b.img: fresh btrfs fsid + label qforge-root-B (content identical to A)"
+  btrfs filesystem label "$ROOTFS_B" retroforge-root-B >/dev/null
+  echo "  slotB rootfs-b.img: fresh btrfs fsid + label retroforge-root-B (content identical to A)"
 fi
-# Slot A needs no copy at all: rootfs/assemble-rootfs.sh already labels rootfs.img qforge-root-A,
+# Slot A needs no copy at all: rootfs/assemble-rootfs.sh already labels rootfs.img retroforge-root-A,
 # and section 5 writes it straight into p4. This used to `cp --reflink=auto` the whole multi-GiB
 # image to a rootfs-a.img purely to run `btrfs filesystem label` on it -- an extra full-size write
-# per build, and one that happened even with QFORGE_SLOT_B=0.
+# per build, and one that happened even with RETROFORGE_SLOT_B=0.
 
-# 3. /home filesystem (ext4, label qforge-home) populated with the player home via mkfs.ext4 -d,
+# 3. /home filesystem (ext4, label retroforge-home) populated with the player home via mkfs.ext4 -d,
 # which fills the fs from $homestage at creation — unprivileged, no loop mount. -m0: no reserved
-# blocks (it's a data partition). -d preserves the staged player:player ownership. The offload directories under /home/.qforge are created on first boot by
-# qforge-offload-prepare.service, not here — it seeds them from the read-only root's content.
+# blocks (it's a data partition). -d preserves the staged player:player ownership. The offload directories under /home/.retroforge are created on first boot by
+# retroforge-offload-prepare.service, not here — it seeds them from the read-only root's content.
 home="$(mktemp)"
 truncate -s "${HOME_SIZE_MIB}M" "$home"
-mkfs.ext4 -q -F -L qforge-home -m0 -d "$homestage" "$home"
+mkfs.ext4 -q -F -L retroforge-home -m0 -d "$homestage" "$home"
 echo "  home ${HOME_SIZE_MIB}MiB ext4 — player home (${home_mib}MiB), grows to fill the card on first boot"
 
 # 4. blank disk image + the full GPT from the table (single source of truth for offsets/types).
@@ -192,7 +192,7 @@ sgdisk -p "$IMG"
 # 4b. Partition uuids (Phase 5). sgdisk assigns these at GPT-lay time; the ESP confs and the efi
 # partsets are keyed by them (steamcl matches a partset's `efi` value against the uuid of the
 # partition it was loaded from, and reads partsets/all for the ESP; bootconf reads partsets/self).
-# Stage 2 reads none of them: qforge_bootattempts takes the image name as an ARGUMENT, which is
+# Stage 2 reads none of them: retroforge_bootattempts takes the image name as an ARGUMENT, which is
 # what let its ~2000-line predecessor go. Lowercased — PARTUUID= on the kernel cmdline and the EFI
 # guid strings are lowercase.
 part_uuid() { sgdisk -i "$1" "$IMG" | sed -n 's/^Partition unique GUID: \(.*\)/\1/p' | tr '[:upper:]' '[:lower:]'; }
@@ -231,11 +231,11 @@ fatdir() {  # <img> <msdos path, no leading '::'>
 # PARTLABEL from /etc/fstab, and the stage-2 grub.cfg addresses it by partition index (falling back
 # to a search for /SteamOS/conf/<slot>.conf, i.e. by content). The label is a human convenience on
 # a mounted card, and it is deliberately NOT the GPT name: a FAT label caps at 11 characters and
-# QFORGE-ESP is twelve. An earlier version of this script had grub.cfg searching for a FAT label
+# RETROFORGE-ESP is fourteen. An earlier version of this script had grub.cfg searching for a FAT label
 # this line had stopped writing, and nothing failed -- the saved board choice just never persisted.
 esp="$(mktemp)"
 truncate -s "${ESP_SIZE_MIB}M" "$esp"
-mkfs.vfat -F 32 -n QFORGE "$esp" >/dev/null
+mkfs.vfat -F 32 -n RETROFORGE "$esp" >/dev/null
 fatdir "$esp" /EFI/BOOT
 fatdir "$esp" /EFI/BOOT/fonts
 fatdir "$esp" /EFI/steamos
@@ -257,7 +257,7 @@ mcopy -i "$esp" "$GRUBENV" ::/EFI/steamos/grubenv
 # B gets 0, so a fresh card's first boot lands on A.
 mkconf() {  # <outfile> <ident> <stamp>
   cat >"$1" <<EOF
-title: qforge $2
+title: retroforge $2
 boot-requested-at: $3
 boot-other: 0
 boot-other-disabled: 0
@@ -299,7 +299,7 @@ mcopy -i "$esp" "$conf_a" ::/SteamOS/conf/A.conf
 # nothing is switched. A is retried behind the failsafe menu, which is the right answer for a device
 # that genuinely has one populated slot, instead of being handed a slot with no kernel.
 #
-# It returns on its own the first time B becomes real: qforge-bootctl's ensure_exists() runs
+# It returns on its own the first time B becomes real: retroforge-bootctl's ensure_exists() runs
 # `bc config --image B || bc create --image B`, bootconf's create_missing defaults to on, RAUC's
 # set-primary goes through it, and post-install.sh then clears image-invalid on the slot it wrote.
 if [ "$SLOT_B" = 1 ]; then
@@ -363,16 +363,16 @@ write_part() {  # <partnum> <file> <label>
   dd if="$2" of="$IMG" bs=512 seek="$start" conv=notrunc status=none
   echo "  p$1  $3"
 }
-write_part "$P_ESP"   "$esp"    "QFORGE-ESP (steamcl + boot confs + grubenv)"
-write_part "$P_EFIA"  "$efi_a"  "qforge-efi-A (stage-2 GRUB A + partsets)"
-write_part "$P_EFIB"  "$efi_b"  "qforge-efi-B (stage-2 GRUB B + partsets)"
-write_part "$P_ROOTA" "$ROOTFS"   "qforge-root-A (btrfs, ro)"
-write_part "$P_VARA"  "$VARIMG" "qforge-var-A (ext4)"
+write_part "$P_ESP"   "$esp"    "RETROFORGE-ESP (steamcl + boot confs + grubenv)"
+write_part "$P_EFIA"  "$efi_a"  "retroforge-efi-A (stage-2 GRUB A + partsets)"
+write_part "$P_EFIB"  "$efi_b"  "retroforge-efi-B (stage-2 GRUB B + partsets)"
+write_part "$P_ROOTA" "$ROOTFS"   "retroforge-root-A (btrfs, ro)"
+write_part "$P_VARA"  "$VARIMG" "retroforge-var-A (ext4)"
 if [ "$SLOT_B" = 1 ]; then
-  write_part "$P_ROOTB" "$ROOTFS_B" "qforge-root-B (btrfs, ro, distinct fsid)"
-  write_part "$P_VARB"  "$VARIMG_B" "qforge-var-B (ext4)"
+  write_part "$P_ROOTB" "$ROOTFS_B" "retroforge-root-B (btrfs, ro, distinct fsid)"
+  write_part "$P_VARB"  "$VARIMG_B" "retroforge-var-B (ext4)"
 fi
-write_part "$P_HOME"  "$home"   "qforge-home (ext4, grows on first boot)"
+write_part "$P_HOME"  "$home"   "retroforge-home (ext4, grows on first boot)"
 
 echo "  ok   $(du -h "$IMG" | cut -f1) -> ${IMG#"$ROOT"/}"
 
@@ -389,7 +389,7 @@ at /SteamOS/conf/{A,B}.conf, then chainloads \EFI\steamos\grubaa64.efi on the SL
 partition (stage 2, per-slot grub.cfg + partsets), which boots the kernel in the slot root's /boot.
 /home (last partition) holds the player home and grows to fill the card.
 $([ "$SLOT_B" = 1 ] \
-  && echo "Both slots carry a full system, so a switch is testable: qforge-bootctl set-primary B" \
+  && echo "Both slots carry a full system, so a switch is testable: retroforge-bootctl set-primary B" \
   || echo "The B slots are empty and there is no B.conf, so steamcl sees ONE image and retries A
 rather than switching. The first update writes B in full and creates its conf.")
 
@@ -400,5 +400,5 @@ every boot after that takes it automatically (3s visible menu), including across
 ESP layout: /EFI/BOOT/{bootaa64.efi, steamcl-version, steamcl-restricted, fonts/default.pf2}
             /EFI/steamos/grubenv (shared stage-2 env — the saved board choice)
             /SteamOS/conf/$([ "$SLOT_B" = 1 ] && echo '{A,B}' || echo 'A').conf (the per-image boot state)
-Filesystem labels: ESP QFORGE | efi-A GRUB-A | efi-B GRUB-B (cosmetic; nothing resolves by them)
+Filesystem labels: ESP RETROFORGE | efi-A GRUB-A | efi-B GRUB-B (cosmetic; nothing resolves by them)
 EOF

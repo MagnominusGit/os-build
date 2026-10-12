@@ -5,7 +5,7 @@
 # package not in the holo repo, drop a sibling packages/<name>/prebuilt.pin — no code change.
 #
 # InputPlumber is NOT in the holo pacman repo, and its .rpm/.deb release assets don't fit
-# Arch — so qforge uses the release's distro-agnostic tarball (rooted at inputplumber/usr,
+# Arch — so retroforge uses the release's distro-agnostic tarball (rooted at inputplumber/usr,
 # hence strip: 1 to land at /usr).
 #
 # Fields:

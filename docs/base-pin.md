@@ -1,6 +1,6 @@
 # Upstream base pinning
 
-qforge layers on Valve's official **Steam Frame ("deckard") aarch64 Arch Linux port** — the
+retroforge layers on Valve's official **Steam Frame ("deckard") aarch64 Arch Linux port** — the
 same Collabora-built "mash" lineage the public `holo-core-aarch64-preview` was a frozen mirror
 of — not on a from-scratch userspace rebuild. This document records *what* we pin and *how*.
 
@@ -52,7 +52,7 @@ The builder is the pinned snapshot's own `system.rootfs.zst` (it ships `base-dev
 never written down: it is always `<snapshot>/system.rootfs.zst`, so builder and packages cannot come
 from different snapshots. `build/lib-pins.sh` fetches it, checks the sha256, `docker import`s it,
 points its pacman at the pinned snapshot, asserts every installed package is in that snapshot at
-exactly the installed version, and tags the result `qforge/builder:<sha256>`. The tag is keyed on
+exactly the installed version, and tags the result `retroforge/builder:<sha256>`. The tag is keyed on
 the tarball because `docker import` stamps a creation time, so the image ID is not reproducible.
 
 Before 2026-09-23 the builder was `registry.gitlab.steamos.cloud/holo/holo-core-aarch64-preview/base-devel`,

@@ -10,7 +10,7 @@ two threads, 15 s per run).
 
 | Setting | Why |
 |---|---|
-| CPU governor **ondemand** (qforge-powerd) | 7.8 ms/frame, 1% missed, game threads on the A73s |
+| CPU governor **ondemand** (retroforge-powerd) | 7.8 ms/frame, 1% missed, game threads on the A73s |
 | Stock scheduler (EEVDF), no sched_ext | see LAVD below |
 | **Animated Effects off** (OGUI, patch 0006) | the idle shell otherwise pins the GPU at 1050 MHz |
 | `--composite-blit` + `--force-composition-rotation` (session.conf) | single layers and two layers (a HUD) scan out pre-rotated, UBWC, on the DPU planes; ~1.1 ms of GPU per layer per frame for the rotated copy |
@@ -23,8 +23,8 @@ two threads, 15 s per run).
 |---|---|---|
 | Touch on the SPI touchscreen | taps unrotated: axes swapped, scrolling inverted | gamescope patch 0033 |
 | OGUI home banner's animated god-rays shader | idle shell: 40 submits/s at 47 ms GPU each, GPU at 1050 MHz, ~20 fps; with it hidden: zero submits, GPU runtime-suspended at 320 MHz | OGUI patch 0006: Settings > General > Animated Effects, default off |
-| **schedutil** turns on energy-aware scheduling | EAS packs game threads onto the A53s: 36 ms/frame, **95% missed** | qforge-powerd writes `sched_energy_aware=0` after every governor change (`[cpu] energy_aware=off`). schedutil with EAS off: 7.8 ms, 1-2% missed, 15-20% lower average clocks than ondemand |
-| **scx_lavd** | puts one of two game threads on the A53s: 35-48 ms, 76-86% missed, under every governor | SM6115 profiles set `QFORGE_CPU_SCHEDULERS=none` |
+| **schedutil** turns on energy-aware scheduling | EAS packs game threads onto the A53s: 36 ms/frame, **95% missed** | retroforge-powerd writes `sched_energy_aware=0` after every governor change (`[cpu] energy_aware=off`). schedutil with EAS off: 7.8 ms, 1-2% missed, 15-20% lower average clocks than ondemand |
+| **scx_lavd** | puts one of two game threads on the A53s: 35-48 ms, 76-86% missed, under every governor | SM6115 profiles set `RETROFORGE_CPU_SCHEDULERS=none` |
 | OGUI **core count** slider | PowerStation offlined from the top: "4 cores" kept the four A53s | PowerStation patch 0003: fastest cores (cpu_capacity) kept online first |
 | Screenshots (gamescope) | every screenshot crashed gamescope (no cached+coherent memory type on the A610) | gamescope patch 0032 |
 | Battery state in OGUI | 50% / charging on a full battery: UPower averaged in the charger's empty companion supply; also drove the docked/undocked performance profile | kernel patch 0967 (built, not yet booted) |
@@ -39,7 +39,7 @@ from a throwaway probe plugin, OGUI forced to redraw continuously, hiding one br
 |---|---|---|
 | stock, 1920x1080 | 19.6 ms | 27/s |
 | + banner collage clipped by scissor (OGUI patch 0007) | 13.9 ms | |
-| + rendered at the 1280x800 design size (`QFORGE_UI_VIEWPORT_RENDER=1`) | 7.9 ms | 34/s |
+| + rendered at the 1280x800 design size (`RETROFORGE_UI_VIEWPORT_RENDER=1`) | 7.9 ms | 34/s |
 | + low-processor mode off for 1.5 s after input (plugin) | 7.9 ms | **61/s** |
 
 - The home banner's collage used `clip_children` with an all-opaque mask: an offscreen canvas

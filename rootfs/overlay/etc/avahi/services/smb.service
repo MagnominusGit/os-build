@@ -1,7 +1,7 @@
 <?xml version="1.0" standalone='no'?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">
-<!-- Announces the QForge SMB shares (/etc/ksmbd/ksmbd.conf) so Linux/macOS file browsers list the
-     device by itself; %h is the hostname (qforge, or qforge-2 ... when several are on one LAN). -->
+<!-- Announces the RetroForge SMB shares (/etc/ksmbd/ksmbd.conf) so Linux/macOS file browsers list the
+     device by itself; %h is the hostname (retroforge, or retroforge-2 ... when several are on one LAN). -->
 <service-group>
   <name replace-wildcards="yes">%h</name>
   <service>

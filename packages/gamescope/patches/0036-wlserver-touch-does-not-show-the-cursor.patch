@@ -1,4 +1,4 @@
-From: qforge
+From: retroforge
 Subject: [PATCH] wlserver: a touch does not show the cursor
 
 With the default touch click mode (Left), a touch moves the pointer to
@@ -12,7 +12,7 @@ Keep the emulated click and drop the arrow. Touch-driven warps are
 synthetic, so they don't reveal the cursor, and they hide one a real
 mouse left visible. A mouse or trackpad moving again shows it as before.
 
-(qforge: UX, MANGMI Air X / Air Y touchscreens, 2026-10-11.)
+(retroforge: UX, MANGMI Air X / Air Y touchscreens, 2026-10-11.)
 ---
 diff --git a/src/wlserver.cpp b/src/wlserver.cpp
 index 0ceaa1e..df0c7c5 100644

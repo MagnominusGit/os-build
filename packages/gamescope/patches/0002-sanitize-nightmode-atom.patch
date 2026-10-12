@@ -62,7 +62,7 @@ index 18b799e0..05e961db 100644
  		nightmode.hue = vec[1];
  		nightmode.saturation = vec[2];
  
-+		// qforge: the arm64 Steam client packs this property wrong for Xlib's format=32
++		// retroforge: the arm64 Steam client packs this property wrong for Xlib's format=32
 +		// ABI. XChangeProperty(format=32) takes a long* on LP64 and transmits the low 32 bits
 +		// of each element. The client hands it a float[3] {amount, hue, saturation} -- 12
 +		// bytes -- so Xlib reads three 8-byte longs off a 12-byte buffer:

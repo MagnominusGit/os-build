@@ -1,6 +1,6 @@
 # gamescope patches
 
-qforge patches applied on top of the local gamescope PKGBUILD source (the Valve gamescope tag
+retroforge patches applied on top of the local gamescope PKGBUILD source (the Valve gamescope tag
 named by `pkgver` in [`../PKGBUILD`](../PKGBUILD)), in the order listed by `patches:` in
 [`../source.pin`](../source.pin). Each is applied with `patch -p1` from the gamescope source
 root (the `gamescope/` checkout inside makepkg's `$srcdir`) by
@@ -21,12 +21,12 @@ root (the `gamescope/` checkout inside makepkg's `$srcdir`) by
 0016-steamcompmgr-arm64-virtual-white.patch
 0017-color-neutral-virtual-white-keeps-scanout.patch
 0018-drm-sdr-color-management-through-the-dpu-output-luts.patch
-0019-rendervulkan-fragment-shader-composite.patch   (--composite-graphics, passed by default from etc/qforge/session.conf)
+0019-rendervulkan-fragment-shader-composite.patch   (--composite-graphics, passed by default from etc/retroforge/session.conf)
 0020-libliftoff-treat-enodev-as-no-fit.patch        (patches the libliftoff SUBMODULE; only with 0021)
 0021-libliftoff-give-planes-the-layer-zpos.patch    (patches the libliftoff SUBMODULE)
 0025-steamcompmgr-elapsed-time-fps-limiter.patch     (ConVar limiter_use_elapsed_time, default on)
 0026-rendervulkan-upscale-cache-compressed.patch        (ROCKNIX fork 0018)
-0027-rendervulkan-composite-blit-rotated-copy.patch     (ROCKNIX fork 0019; --composite-blit, passed by default from etc/qforge/session.conf)
+0027-rendervulkan-composite-blit-rotated-copy.patch     (ROCKNIX fork 0019; --composite-blit, passed by default from etc/retroforge/session.conf)
 0028-drmbackend-pre-rotate-layers-the-plane-cannot-rotate.patch   (ROCKNIX fork 0021, re-rolled by hand on 0014/0018)
 0029-rendervulkan-safe-compute-fallback.patch           (ROCKNIX fork 0025)
 0030-composite-blit-keeps-the-dpu-colour-management.patch   (ours: 0027 under 0014/0018)
@@ -67,7 +67,7 @@ the requested values, so only the transitions it chose could be observed.
 fire on the FIT's 1080-wide panel, gamescope gets NO flag, the clamp log is empty, and planes stay
 `1920x1080 -> 1080x1920 rotation=8`. The patch is invisible on boards that do not need it.
 
-Set from `rootfs/overlay/etc/qforge/session.conf` on panels over the cap. An unknown argument
+Set from `rootfs/overlay/etc/retroforge/session.conf` on panels over the cap. An unknown argument
 makes gamescope EXIT, so if this patch is ever dropped, that session.conf line must change back to
 `--force-composition-rotation` in the same commit.
 
@@ -119,9 +119,9 @@ confirmed it on HW, and that caught a baselayer-appid reorder (the retired `0023
 rather than deleted — the next focus mystery should not have to re-derive it.
 
 To use it: add it back to `source.pin`, rebuild, and `export GAMESCOPE_DEBUG_FOCUS=1` in
-`/etc/qforge/session.conf` (the only way to catch a defect at boot, before SSH is up), or
+`/etc/retroforge/session.conf` (the only way to catch a defect at boot, before SSH is up), or
 `gamescopectl debug_focus_candidates 1` live once a session is reachable. Output goes to
-the journal (`journalctl -b -u qforge-session`) — grep that for `cand:`.
+the journal (`journalctl -b -u retroforge-session`) — grep that for `cand:`.
 
 `0007` — declares a `subprojects/wayland-protocols.wrap` so meson vendors wayland-protocols. Needed
 by the 3.16.28 bump: it moved the wlroots submodule to 0.20, which requires
@@ -150,7 +150,7 @@ sources.** That is expected on a dev card and is exactly why it must come back o
 
 `0008`-`0013` — **RETIRED 2026-09-14 when HDR was dropped (issue #93).** The EDID-synthesis +
 HDR series (third-party, by virtudude and enjihn) is gone from the tree and from `source.pin`, along
-with `rootfs/overlay/usr/share/gamescope/scripts/10-qforge/` and `tests/test-display-profile.sh`.
+with `rootfs/overlay/usr/share/gamescope/scripts/10-retroforge/` and `tests/test-display-profile.sh`.
 
 **Why, in one line: `--hdr-itm-enabled` maps nothing.** In gamescope 3.16.28 the shader branch is
 guarded by `c_itm_enable`, specialization constant 7, which is only ever set from
@@ -178,7 +178,7 @@ because every one of them tested `DrmHdrOutputRequiresVulkanComposition` itself.
 
 `0015` — **make `BIsWideGamut()` inclusive at the threshold.** It uses the red primary as its
 sentinel and wants `r.y < 0.320f`. DCI-P3 red is exactly `(0.680, 0.320)`, which is what the
-(now-retired) `qforge.internal-amoled.lua` display profile declared for the whole DDIC family, so
+(now-retired) `retroforge.internal-amoled.lua` display profile declared for the whole DDIC family, so
 every one of our panels landed on the wrong side by a rounding-free tie and was classified
 **narrow**. The profile is gone with `0008`-`0013`, but the off-by-a-tie is a general fix worth
 keeping: any panel whose red sits exactly on the threshold hits it.
@@ -338,7 +338,7 @@ a bare convar name *sets it false*.
 (xdg-shell) titles under Steam — Lepton's Android guest above all: `0022` deferred Steam's own window
 in focus selection (and hid the Quick Access menu while such a title ran), and `0023` replaced it by
 reporting xdg titles in `GAMESCOPE_FOCUSABLE_APPS`/`_WINDOWS`, following a shared-Android appID root
-property, and passing touch through. qforge ships no Android container and its shell and emulators
+property, and passing touch through. retroforge ships no Android container and its shell and emulators
 are XWayland clients, so neither has a user. If a native-Wayland emulator ever needs to be focusable
 under `--steam`, part (1) of `0023` — reporting an xdg window with a resolved appID — is the piece
 to revive.

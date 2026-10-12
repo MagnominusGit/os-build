@@ -37,7 +37,7 @@
 	chosen {
 		stdout-path = "serial0:115200n8";
 		/*
-		 * SoC-specific kernel args moved to QFORGE_BOOTARGS in the board
+		 * SoC-specific kernel args moved to RETROFORGE_BOOTARGS in the board
 		 * catalog boot/boards.map (Phase 5): the stage-2 GRUB builds the full cmdline in the
 		 * menuentry's linux line, and the EFI stub overwrites /chosen/bootargs
 		 * with it, so a bootargs property here would be dead. irqaffinity pins

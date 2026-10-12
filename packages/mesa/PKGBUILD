@@ -1,7 +1,7 @@
-# qforge mesa — built FROM SOURCE off the upstream release TARBALL (not a git clone, not the
+# retroforge mesa — built FROM SOURCE off the upstream release TARBALL (not a git clone, not the
 # holo binary repo). This tracks the stock Arch/holo mesa recipe AS CLOSELY AS POSSIBLE so the
 # freedreno driver is built exactly the way upstream builds it; the ONLY deliberate deviations are:
-#   * driver selection      — gallium-drivers / vulkan-drivers narrowed to `freedreno` (qforge
+#   * driver selection      — gallium-drivers / vulkan-drivers narrowed to `freedreno` (retroforge
 #                             only ever targets Qualcomm Adreno), which also drops every other
 #                             vulkan-*/opencl/docs split package and the NVK rust-crate machinery.
 #   * gallium-rusticl=false — no OpenCL on a handheld; avoids dragging the Rust toolchain + a
@@ -31,7 +31,7 @@ pkgver=26.2.4
 _pkgver=${pkgver/[a-z]/-&}
 pkgrel=2
 epoch=1
-pkgdesc="Open-source OpenGL drivers (qforge freedreno-only build)"
+pkgdesc="Open-source OpenGL drivers (retroforge freedreno-only build)"
 url="https://www.mesa3d.org/"
 arch=(aarch64)
 license=("MIT AND BSD-3-Clause AND SGI-B-2.0")
@@ -127,7 +127,7 @@ prepare() {
 
   # Include package release in the GL version string (matches upstream; helps clients invalidate
   # GPU shader caches across rebuilds).
-  echo "$_pkgver-qforge$epoch.$pkgrel" >VERSION
+  echo "$_pkgver-retroforge$epoch.$pkgrel" >VERSION
 }
 
 # llvm=disabled is a SIZE decision with no functional cost here, and it is worth spelling out
@@ -145,21 +145,21 @@ build() {
   local meson_options=(
     -D android-libbacktrace=disabled
     -D b_ndebug=true
-    -D gallium-drivers=freedreno              # qforge: Adreno only (upstream builds every vendor)
+    -D gallium-drivers=freedreno              # retroforge: Adreno only (upstream builds every vendor)
     -D gallium-extra-hud=true
     -D gallium-mediafoundation=disabled
-    -D gallium-rusticl=false                  # qforge: no OpenCL (avoids LLVM/Rust crate chain)
-    -D gallium-va=disabled                    # qforge: no VA-capable driver in a freedreno build
+    -D gallium-rusticl=false                  # retroforge: no OpenCL (avoids LLVM/Rust crate chain)
+    -D gallium-va=disabled                    # retroforge: no VA-capable driver in a freedreno build
     -D gles1=disabled
-    -D html-docs=disabled                     # qforge: no Sphinx docs in the image
+    -D html-docs=disabled                     # retroforge: no Sphinx docs in the image
     -D intel-rt=disabled                      # aarch64 (upstream disables on non-x86)
     -D libunwind=disabled
-    -D llvm=disabled                          # qforge: nothing in this build uses it (see above)
+    -D llvm=disabled                          # retroforge: nothing in this build uses it (see above)
     -D microsoft-clc=disabled
     -D sysprof=true
     -D valgrind=enabled
     -D video-codecs=all
-    -D vulkan-drivers=freedreno               # qforge: Turnip only
+    -D vulkan-drivers=freedreno               # retroforge: Turnip only
     -D vulkan-layers=device-select,intel-nullhw,overlay,screenshot,vram-report-limit
   )
 

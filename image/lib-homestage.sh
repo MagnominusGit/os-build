@@ -1,11 +1,11 @@
 # shellcheck shell=bash
-# qforge /home staging — the player user's home, built once and used by two writers.
+# retroforge /home staging — the player user's home, built once and used by two writers.
 #
 # SOURCED, never executed (hence mode 0644, like lib-slotwrite.sh).
 #
 # WHY THIS FILE EXISTS, and it is the same argument lib-slotwrite.sh opens with: /home is written
 # twice -- once by image/make-sdcard.sh into a card image at build time, and once by
-# installer/qforge-install onto an internal disk on the device -- and the two must produce the
+# installer/retroforge-install onto an internal disk on the device -- and the two must produce the
 # same tree. So the layout lives here and both callers ask for it.
 
 if ! declare -F die >/dev/null 2>&1; then

@@ -1,4 +1,4 @@
-qforge: hunks regenerated on v7.2.9 + 0945-0960 (one hunk's context had drifted); the change
+retroforge: hunks regenerated on v7.2.9 + 0945-0960 (one hunk's context had drifted); the change
 is ROCKNIX SM6115 0032 at its 2026-10 state, unchanged.
 
 --- a/drivers/power/supply/bq256xx_charger.c

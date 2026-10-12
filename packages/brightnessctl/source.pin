@@ -1,4 +1,4 @@
-# brightnessctl — built FROM SOURCE via a qforge-owned PKGBUILD (packages/brightnessctl/PKGBUILD).
+# brightnessctl — built FROM SOURCE via a retroforge-owned PKGBUILD (packages/brightnessctl/PKGBUILD).
 # It is an Arch [extra] package but absent from the pinned holo aarch64 snapshot (`make relock`
 # failed with "target not found: brightnessctl"), so there is no repo row to resolve. Same "local
 # PKGBUILD" form as packages/f3/source.pin.

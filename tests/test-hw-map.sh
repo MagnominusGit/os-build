@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# Offline test for /usr/lib/qforge/hw-map (the standard hardware tree, /run/qforge/hw).
+# Offline test for /usr/lib/retroforge/hw-map (the standard hardware tree, /run/retroforge/hw).
 #
 #   tests/test-hw-map.sh
 #
-# Drives the real script against a fabricated sysfs (QFORGE_HW_SYS) and checks the rules that
+# Drives the real script against a fabricated sysfs (RETROFORGE_HW_SYS) and checks the rules that
 # matter on the boards we have: the charger's companion "battery" node (no capacity) is not the
 # battery; the charger IC (reports `status`) wins over a bare Type-C source; thermal roles by
 # profile type name or by pattern, every zone under all/; LED groups in natural order (l10 after
-# l2); the profile's QFORGE_HW_* pins, and a stale pin falling back to detection; the soc link;
+# l2); the profile's RETROFORGE_HW_* pins, and a stale pin falling back to detection; the soc link;
 # hw.env is sourceable; every board profile's pins are well-formed. Host only, no root, no Godot.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SCRIPT="$ROOT/rootfs/overlay/usr/lib/qforge/hw-map"
+SCRIPT="$ROOT/rootfs/overlay/usr/lib/retroforge/hw-map"
 PASS=0; FAIL=0; CASE=""
 ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
@@ -46,7 +46,7 @@ mkdir -p "$S/class/devfreq/5900000.gpu" "$S/devices/system/cpu"
 for l in rgb:l1 rgb:l2 rgb:l10 rgb:l3 rgb:r1 rgb:r2 left_red_1 mmc0::; do mkdir -p "$S/class/leds/$l"; done
 for z in "$S"/class/thermal/thermal_zone*; do printf '%s\n' 40000 > "$z/temp"; done
 
-run() { QFORGE_HW_SYS="$S" QFORGE_HW_RUN="$T/run/hw" QFORGE_HW_DEVICE_ENV= "$@" bash "$SCRIPT" 2>"$T/stderr"; }
+run() { RETROFORGE_HW_SYS="$S" RETROFORGE_HW_RUN="$T/run/hw" RETROFORGE_HW_DEVICE_ENV= "$@" bash "$SCRIPT" 2>"$T/stderr"; }
 target() { readlink "$T/run/hw/$1" 2>/dev/null | sed "s|^$S/||"; }
 
 # =================================================================================================
@@ -64,18 +64,18 @@ run env && ok "runs" || bad "exit $? -- $(cat "$T/stderr")"
 [ "$(target gpu)" = class/devfreq/5900000.gpu ] && ok "gpu devfreq" || bad "gpu -> $(target gpu)"
 [ "$(target cpu)" = devices/system/cpu ] && ok "cpu" || bad "cpu -> $(target cpu)"
 [ ! -e "$T/run/hw/leds/power" ] && ok "no power-led, no default LED group" || bad "leds/power exists"
-grep -q '^QFORGE_HW_BATTERY=battery$' "$T/run/hw/hw.env" && ok "hw.env records the battery" || bad "hw.env: $(grep BATTERY "$T/run/hw/hw.env")"
-( set -e; . "$T/run/hw/hw.env"; [ "$QFORGE_HW_CHARGER" = bq256xx-charger ] ) && ok "hw.env is sourceable" || bad "hw.env does not source"
+grep -q '^RETROFORGE_HW_BATTERY=battery$' "$T/run/hw/hw.env" && ok "hw.env records the battery" || bad "hw.env: $(grep BATTERY "$T/run/hw/hw.env")"
+( set -e; . "$T/run/hw/hw.env"; [ "$RETROFORGE_HW_CHARGER" = bq256xx-charger ] ) && ok "hw.env is sourceable" || bad "hw.env does not source"
 
 # =================================================================================================
 CASE="profile pins"
-run env QFORGE_HW_THERMAL_CPU=cpu67-thermal QFORGE_HW_LED_GROUPS="ring-left=rgb:l* ring-right=rgb:r*" QFORGE_HW_CHARGER=tcpm-source && ok "runs" || bad "exit $?"
-[ "$(target thermal/cpu)" = class/thermal/thermal_zone11 ] && ok "QFORGE_HW_THERMAL_CPU picks the zone by type name" || bad "thermal/cpu -> $(target thermal/cpu)"
-[ "$(target charger)" = class/power_supply/tcpm-source ] && ok "QFORGE_HW_CHARGER pins the charger" || bad "charger -> $(target charger)"
+run env RETROFORGE_HW_THERMAL_CPU=cpu67-thermal RETROFORGE_HW_LED_GROUPS="ring-left=rgb:l* ring-right=rgb:r*" RETROFORGE_HW_CHARGER=tcpm-source && ok "runs" || bad "exit $?"
+[ "$(target thermal/cpu)" = class/thermal/thermal_zone11 ] && ok "RETROFORGE_HW_THERMAL_CPU picks the zone by type name" || bad "thermal/cpu -> $(target thermal/cpu)"
+[ "$(target charger)" = class/power_supply/tcpm-source ] && ok "RETROFORGE_HW_CHARGER pins the charger" || bad "charger -> $(target charger)"
 [ "$(ls "$T/run/hw/leds/ring-left" | tr '\n' ' ')" = "01 02 03 04 " ] && ok "a glob group numbers its LEDs 01.." || bad "ring-left: $(ls "$T/run/hw/leds/ring-left" | tr '\n' ' ')"
 [ "$(target leds/ring-left/03)" = class/leds/rgb:l3 ] && [ "$(target leds/ring-left/04)" = class/leds/rgb:l10 ] && ok "natural order: l3 before l10" || bad "03 -> $(target leds/ring-left/03), 04 -> $(target leds/ring-left/04)"
 [ "$(ls "$T/run/hw/leds/ring-right" | wc -l | tr -d ' ')" = 2 ] && ok "second group" || bad "ring-right: $(ls "$T/run/hw/leds/ring-right")"
-grep -q '^QFORGE_HW_LED_GROUPS=ring-left=4\\ ring-right=2$' "$T/run/hw/hw.env" && ok "hw.env summarises the groups" || bad "hw.env: $(grep LED "$T/run/hw/hw.env")"
+grep -q '^RETROFORGE_HW_LED_GROUPS=ring-left=4\\ ring-right=2$' "$T/run/hw/hw.env" && ok "hw.env summarises the groups" || bad "hw.env: $(grep LED "$T/run/hw/hw.env")"
 
 # =================================================================================================
 CASE="rebuild"
@@ -89,7 +89,7 @@ CASE="bare board"
 rm -rf "$S"; mkdir -p "$S/class"
 run env && ok "runs with nothing to map" || bad "exit $?"
 [ -z "$(find "$T/run/hw" -type l)" ] && ok "no links" || bad "links: $(find "$T/run/hw" -type l)"
-grep -q '^QFORGE_HW_BATTERY=.*$' "$T/run/hw/hw.env" && ok "hw.env still written" || bad "no hw.env"
+grep -q '^RETROFORGE_HW_BATTERY=.*$' "$T/run/hw/hw.env" && ok "hw.env still written" || bad "no hw.env"
 
 # =================================================================================================
 CASE="pwm fan without a tachometer"
@@ -115,8 +115,8 @@ mk class/thermal/thermal_zone30/type gpuss-0-thermal
 mk class/hwmon/hwmon5/name pwmfan
 mk class/hwmon/hwmon5/fan1_input 3000
 mkdir -p "$S/class/devfreq/3d00000.gpu"
-run env QFORGE_HW_BATTERY=battery QFORGE_HW_CHARGER=pm8150b-charger QFORGE_HW_BACKLIGHT=backlight \
-    QFORGE_HW_THERMAL_CPU=cpu7-top-thermal QFORGE_HW_FAN=gpio_fan QFORGE_HW_GPU_DEVFREQ=5900000.gpu \
+run env RETROFORGE_HW_BATTERY=battery RETROFORGE_HW_CHARGER=pm8150b-charger RETROFORGE_HW_BACKLIGHT=backlight \
+    RETROFORGE_HW_THERMAL_CPU=cpu7-top-thermal RETROFORGE_HW_FAN=gpio_fan RETROFORGE_HW_GPU_DEVFREQ=5900000.gpu \
     && ok "runs" || bad "exit $?"
 [ "$(target battery)" = class/power_supply/qcom-battmgr-bat ] && ok "absent battery pin -> detected battery" || bad "battery -> $(target battery)"
 [ "$(target charger)" = class/power_supply/qcom-battmgr-usb ] && ok "absent charger pin -> detected charger" || bad "charger -> $(target charger)"
@@ -126,7 +126,7 @@ run env QFORGE_HW_BATTERY=battery QFORGE_HW_CHARGER=pm8150b-charger QFORGE_HW_BA
 [ "$(target gpu)" = class/devfreq/3d00000.gpu ] && ok "absent devfreq pin -> detected devfreq" || bad "gpu -> $(target gpu)"
 n=$(grep -c 'is not on this board -- detecting instead' "$T/stderr")
 [ "$n" = 6 ] && ok "each stale pin is logged" || bad "$n warnings: $(cat "$T/stderr")"
-run env QFORGE_HW_BATTERY=qcom-battmgr-bat QFORGE_HW_THERMAL_GPU=gpuss-0-thermal && ! grep -q 'detecting instead' "$T/stderr" \
+run env RETROFORGE_HW_BATTERY=qcom-battmgr-bat RETROFORGE_HW_THERMAL_GPU=gpuss-0-thermal && ! grep -q 'detecting instead' "$T/stderr" \
     && ok "pins that exist are not logged" || bad "stderr: $(cat "$T/stderr")"
 
 # =================================================================================================
@@ -143,14 +143,14 @@ mk class/power_supply/pm8150b-charger/type USB
 mk class/power_supply/pm8150b-charger/online 1
 mk class/power_supply/pm8150b-charger/status Charging
 run env && [ "$(target charger)" = class/power_supply/hl7139-charger ] && ok "unpinned, the charge pump wins (why the profile pins)" || bad "charger -> $(target charger)"
-run env QFORGE_HW_CHARGER=pm8150b-charger && [ "$(target charger)" = class/power_supply/pm8150b-charger ] && ok "pinned, the smb5 charger" || bad "charger -> $(target charger)"
+run env RETROFORGE_HW_CHARGER=pm8150b-charger && [ "$(target charger)" = class/power_supply/pm8150b-charger ] && ok "pinned, the smb5 charger" || bad "charger -> $(target charger)"
 
 # =================================================================================================
 CASE="soc"
 mk devices/soc0/machine SM8550
 mk devices/soc0/serial_number 1234567890
 run env && [ "$(target soc)" = devices/soc0 ] && ok "soc -> socinfo" || bad "soc -> $(target soc)"
-grep -q '^QFORGE_HW_SOC=SM8550$' "$T/run/hw/hw.env" && ok "hw.env records the SoC" || bad "hw.env: $(grep SOC "$T/run/hw/hw.env")"
+grep -q '^RETROFORGE_HW_SOC=SM8550$' "$T/run/hw/hw.env" && ok "hw.env records the SoC" || bad "hw.env: $(grep SOC "$T/run/hw/hw.env")"
 [ "$(cat "$T/run/hw/soc/serial_number")" = 1234567890 ] && ok "the serial number reads through the link" || bad "no serial"
 
 # =================================================================================================
@@ -160,7 +160,7 @@ CASE="single-colour LED channels"
 for i in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
     for c in red green blue; do mkdir -p "$S/class/leds/$c:indicator-$i"; done
 done
-run env QFORGE_HW_LED_GROUPS="ring-left=*:indicator-[0-7] ring-right=*:indicator-[89],*:indicator-1[0-5] logo=logo-led" \
+run env RETROFORGE_HW_LED_GROUPS="ring-left=*:indicator-[0-7] ring-right=*:indicator-[89],*:indicator-1[0-5] logo=logo-led" \
     && ok "runs" || bad "exit $?"
 [ "$(ls "$T/run/hw/leds/ring-left" | wc -l | tr -d ' ')" = 24 ] && ok "left: 8 pixels x 3 channels" || bad "ring-left: $(ls "$T/run/hw/leds/ring-left" | wc -l)"
 [ "$(ls "$T/run/hw/leds/ring-right" | wc -l | tr -d ' ')" = 24 ] && ok "right: 8 pixels x 3 channels" || bad "ring-right: $(ls "$T/run/hw/leds/ring-right" | wc -l)"
@@ -173,14 +173,14 @@ run env QFORGE_HW_LED_GROUPS="ring-left=*:indicator-[0-7] ring-right=*:indicator
 CASE="board profiles"
 # Every profile's pins, as device-env exports them. A zone type keeps its -thermal suffix and fits
 # THERMAL_NAME_LENGTH (20 with the NUL); a missing suffix or a typo would only show on a device.
-DEV="$ROOT/rootfs/overlay/usr/lib/qforge/devices"
-ENV_SCRIPT="$ROOT/rootfs/overlay/usr/lib/qforge/device-env"
+DEV="$ROOT/rootfs/overlay/usr/lib/retroforge/devices"
+ENV_SCRIPT="$ROOT/rootfs/overlay/usr/lib/retroforge/device-env"
 for conf in "$DEV"/*.conf; do
     id=$(basename "$conf" .conf); [ "$id" = defaults ] && continue
     vals=$( . "$DEV/defaults.conf"; . "$conf"
-        printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s' "$QFORGE_HW_BATTERY" "$QFORGE_HW_CHARGER" "$QFORGE_HW_BACKLIGHT" \
-            "$QFORGE_HW_THERMAL_CPU" "$QFORGE_HW_THERMAL_GPU" "$QFORGE_HW_FAN" "$QFORGE_HW_GPU_DEVFREQ" \
-            "$QFORGE_HW_THERMAL_BATTERY" "$QFORGE_HW_THERMAL_SKIN" "$QFORGE_HW_LED_GROUPS" )
+        printf '%s|%s|%s|%s|%s|%s|%s|%s|%s|%s' "$RETROFORGE_HW_BATTERY" "$RETROFORGE_HW_CHARGER" "$RETROFORGE_HW_BACKLIGHT" \
+            "$RETROFORGE_HW_THERMAL_CPU" "$RETROFORGE_HW_THERMAL_GPU" "$RETROFORGE_HW_FAN" "$RETROFORGE_HW_GPU_DEVFREQ" \
+            "$RETROFORGE_HW_THERMAL_BATTERY" "$RETROFORGE_HW_THERMAL_SKIN" "$RETROFORGE_HW_LED_GROUPS" )
     IFS='|' read -r b c bl tc tg f g tb ts leds <<<"$vals"
     if [ -n "$b" ] && [ -n "$c" ] && [ -n "$bl" ] && [ -n "$tc" ] && [ -n "$tg" ] && [ -n "$f" ] && [ -n "$g" ]; then
         ok "$id pins battery, charger, backlight, cpu/gpu zones, fan, devfreq"
@@ -197,13 +197,13 @@ for conf in "$DEV"/*.conf; do
     [ -n "$leds" ] && [ -z "$lbad" ] && ok "$id LED groups well-formed" || bad "$id LED groups: '$leds'$lbad"
 done
 # device-env exports the pins (the Thor: the backlight detection would get wrong)
-out=$(QFORGE_DEVICE_DIR="$DEV" QFORGE_MODEL="AYN Thor" bash "$ENV_SCRIPT")
-printf '%s\n' "$out" | grep -q '^QFORGE_HW_BACKLIGHT=ae96000.dsi.0$' && ok "device-env exports the Thor's top-screen backlight" \
+out=$(RETROFORGE_DEVICE_DIR="$DEV" RETROFORGE_MODEL="AYN Thor" bash "$ENV_SCRIPT")
+printf '%s\n' "$out" | grep -q '^RETROFORGE_HW_BACKLIGHT=ae96000.dsi.0$' && ok "device-env exports the Thor's top-screen backlight" \
     || bad "device-env: $(printf '%s\n' "$out" | grep HW_BACKLIGHT)"
-out=$(QFORGE_DEVICE_DIR="$DEV" QFORGE_MODEL="MANGMI Air Y Pro" bash "$ENV_SCRIPT")
-printf '%s\n' "$out" | grep -q '^QFORGE_HW_CHARGER=pm8150b-charger$' && ok "device-env exports the Air Y Pro's smb5 charger, not the charge pump" \
+out=$(RETROFORGE_DEVICE_DIR="$DEV" RETROFORGE_MODEL="MANGMI Air Y Pro" bash "$ENV_SCRIPT")
+printf '%s\n' "$out" | grep -q '^RETROFORGE_HW_CHARGER=pm8150b-charger$' && ok "device-env exports the Air Y Pro's smb5 charger, not the charge pump" \
     || bad "device-env: $(printf '%s\n' "$out" | grep HW_CHARGER)"
-leds=$( eval "$(QFORGE_DEVICE_DIR="$DEV" QFORGE_MODEL="MANGMI Pocket Max" bash "$ENV_SCRIPT")"; printf '%s' "$QFORGE_HW_LED_GROUPS" )
+leds=$( eval "$(RETROFORGE_DEVICE_DIR="$DEV" RETROFORGE_MODEL="MANGMI Pocket Max" bash "$ENV_SCRIPT")"; printf '%s' "$RETROFORGE_HW_LED_GROUPS" )
 [ "$leds" = 'ring-left=*:indicator-[0-7] ring-right=*:indicator-[89],*:indicator-1[0-5]' ] \
     && ok "a glob survives device-env's quoting and eval" || bad "Pocket Max LED groups after eval: '$leds'"
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge lock rows — do the manifests' `qforge` rows still name the sources in packages/?
+# retroforge lock rows — do the manifests' `retroforge` rows still name the sources in packages/?
 #
 # BOTH LOCKS, because there are two and only one of them is in the obvious place. The installer
 # medium carries gamescope (installer/ui is a Wayland client and gamescope is its display server,
@@ -31,7 +31,7 @@
 # than fex-emu emitting one package. One-directory-one-row is the wrong mental model and it looks
 # right on 7 of our 8 packages.
 #
-# THE CHECK IS MEMBERSHIP: every qforge row must carry a hash that SOME package in the tree
+# THE CHECK IS MEMBERSHIP: every retroforge row must carry a hash that SOME package in the tree
 # currently produces. A row whose hash no package produces any more is stale, which is exactly the
 # mesa case above — the two siblings kept a digest that had stopped existing the moment mesa's
 # sources moved, so all three rows are caught even though nothing here knows mesa owns them.
@@ -77,7 +77,7 @@ shopt -u nullglob
 declare -A VALID=()
 for pname in "${!HASHOF[@]}"; do VALID["${HASHOF[$pname]}"]=1; done
 
-# --- compare every qforge row -------------------------------------------------------------
+# --- compare every retroforge row -------------------------------------------------------------
 # Field 4 is the provenance class and 1/2/3 reconstruct the filename, exactly as fetchlock.sh does
 # it. Explicit 5-field read so a future column cannot land in the last variable.
 #
@@ -94,7 +94,7 @@ check_lock() {
 
   while read -r name ver arch src sha; do
     case "$name" in ''|'#'*) continue ;; esac
-    [ "$src" = qforge ] || continue
+    [ "$src" = retroforge ] || continue
     rows=$((rows + 1))
     file="$name-$ver-$arch.pkg.tar.zst"
     if [ -z "${VALID["$sha"]:-}" ]; then
@@ -102,10 +102,10 @@ check_lock() {
     fi
   done < "$lock"
 
-  [ "$rows" -gt 0 ] || die "$rel has no qforge rows — refusing to pass trivially"
+  [ "$rows" -gt 0 ] || die "$rel has no retroforge rows — refusing to pass trivially"
 
   if [ -n "$stale" ]; then
-    echo "[lock] $rel: these qforge rows carry a hash NO package in the tree produces:" >&2
+    echo "[lock] $rel: these retroforge rows carry a hash NO package in the tree produces:" >&2
     printf '%s' "$stale" >&2
     echo "  A row's hash is packages/inputhash.sh over its OWNING package's committed sources, and one" >&2
     echo "  PKGBUILD can own several rows — a split package's rows all carry the pkgbase's hash and" >&2
@@ -116,7 +116,7 @@ check_lock() {
     return
   fi
 
-  log "$rel: $rows qforge row(s) carry a hash packages/ still produces"
+  log "$rel: $rows retroforge row(s) carry a hash packages/ still produces"
 }
 
 check_lock "$LOCK" "make relock"

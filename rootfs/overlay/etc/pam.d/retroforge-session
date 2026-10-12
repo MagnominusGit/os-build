@@ -1,0 +1,10 @@
+#%PAM-1.0
+# PAM stack for retroforge-session.service (systemd's PAMName=). The CRITICAL requirement: the session
+# phase must run pam_systemd so logind registers this as a real seat0 login session — that (and
+# player's `wheel` membership) is what stock polkit's active-session rules key on. `system-login`'s
+# session stack includes pam_systemd.so. systemd never calls pam_authenticate for a service, so the
+# auth lines only matter for pam_setcred; pam_permit keeps them from consulting a password.
+auth        required    pam_env.so
+auth        required    pam_permit.so
+account     include     system-login
+session     include     system-login

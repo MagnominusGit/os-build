@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# qforge hardware-staging library — sourced by installer/hw-select-target.sh and
+# retroforge hardware-staging library — sourced by installer/hw-select-target.sh and
 # installer/hw-install.sh. Not executable, not shipped: it exists on the BUILD HOST only.
 #
 # WHAT IT IS FOR. Every hardware gate in the install path runs real install code on a real device,
@@ -19,7 +19,7 @@
 #   mkfs.vfat (dosfstools) the shared ESP and both efi partitions. lib-slotwrite.sh's mkfs_esp and
 #                          mkfs_efi call it by name.
 #   partprobe (parted)     re-reads the table after the carve. carve.sh treats it as best-effort but
-#                          qforge-install's recon() requires it outright, deliberately: a spine
+#                          retroforge-install's recon() requires it outright, deliberately: a spine
 #                          that discovered a missing tool AFTER userdata was gone would have charged
 #                          the user their Android data for an error it could have printed at second
 #                          zero. That asymmetry is the whole point of recon(), so the stager honours

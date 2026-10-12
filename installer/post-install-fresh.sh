@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# qforge internal-install RAUC post-install handler — Phase 4a of
+# retroforge internal-install RAUC post-install handler — Phase 4a of
 # .claude/plans/internal-install.plan.md.
 #
 # Named in the config installer/rauc-session.sh synthesizes, so it runs inside that session, after
 # RAUC has written and unmounted the one slot it knows about. It is a DISTINCT handler from
 # /usr/lib/rauc/post-install.sh rather than a mode of it: that one needs /esp, /efi,
-# `steamos-bootconf this-image` and a running /var to rsync, and on a disk with no qforge on it
+# `steamos-bootconf this-image` and a running /var to rsync, and on a disk with no retroforge on it
 # none of those exist. What the two do share is lib-slotwrite.sh, sourced below, which is where the
 # reasoning for each primitive lives.
 #
 # THE DIVISION OF LABOUR WITH THE SPINE, because it is not obvious and it is the thing to keep:
-# this handler owns the SLOT, qforge-install owns the DISK. So the fsid and the per-slot /var are
+# this handler owns the SLOT, retroforge-install owns the DISK. So the fsid and the per-slot /var are
 # here -- they are true of the bytes RAUC just wrote, whatever disk they landed on -- while the efi
 # partitions, the shared ESP, the partsets, /home and A.conf are the spine's, because they describe
 # a layout RAUC knows nothing about.
@@ -20,10 +20,10 @@
 # exactly the pair btrfs keys its in-kernel device list on: the second filesystem scanned carrying
 # that pair is treated as the first one having MOVED, and its path silently replaces it. On an OTA
 # the collision is A against B. Here it is the internal root against ANY OTHER DISK carrying the
-# same release -- and the user installing internally has one in their hand, since a qforge SD
+# same release -- and the user installing internally has one in their hand, since a retroforge SD
 # card is how they got here. Leave the baked fsid in place and the day they boot internally with
 # that card still in the slot, a mount of one can hand them the other. The label is separately
-# correct on this path (the image is built as qforge-root-A and slot A is what a fresh install
+# correct on this path (the image is built as retroforge-root-A and slot A is what a fresh install
 # writes), and it is set anyway so `blkid` is honest about a filesystem whose fsid just changed.
 set -euo pipefail
 
@@ -36,35 +36,35 @@ die() { printf '[%s] ERROR: %s\n' "$PROG" "$1" >&2; exit 1; }
 # that has no kernel; the first OTA fills it. So this is a constant, not a decision.
 SLOT=A
 
-MNT=${MNT:-/run/qforge/install/root}
-VARMNT=${VARMNT:-/run/qforge/install/var}
+MNT=${MNT:-/run/retroforge/install/root}
+VARMNT=${VARMNT:-/run/retroforge/install/var}
 BTRFSTUNE=${BTRFSTUNE:-btrfstune}
 BTRFS=${BTRFS:-btrfs}
-VAR_SEED_REL=${VAR_SEED_REL:-usr/lib/qforge/var-seed.tar.zst}
+VAR_SEED_REL=${VAR_SEED_REL:-usr/lib/retroforge/var-seed.tar.zst}
 DEVTEST=${DEVTEST:--b}
 
 # The spine tells us where /var goes. It cannot be derived here: RAUC's config names exactly one
 # slot and it is the root, deliberately (see rauc-session.sh), so this process has no view of the
 # partition table at all. Missing is fatal rather than skippable -- a slot with no /var does not
 # boot, and discovering that is a reflash.
-VAR_DEV=${QFORGE_TARGET_VAR_A:-}
-[ -n "$VAR_DEV" ] || die "QFORGE_TARGET_VAR_A is unset -- the spine must name the slot's /var partition"
+VAR_DEV=${RETROFORGE_TARGET_VAR_A:-}
+[ -n "$VAR_DEV" ] || die "RETROFORGE_TARGET_VAR_A is unset -- the spine must name the slot's /var partition"
 
 # lib-slotwrite.sh, resolved by search for the same reason carve.sh resolves genpart.sh that way:
 # on the installer image it is installed beside this file, and in the repo it lives under
 # rootfs/overlay/ because the OTA path ships it. Both are right; neither is a repo-relative constant.
 SELFDIR="$(cd "$(dirname "$0")" && pwd)"
-SLOTWRITE="${QFORGE_SLOTWRITE:-}"
+SLOTWRITE="${RETROFORGE_SLOTWRITE:-}"
 if [ -z "$SLOTWRITE" ]; then
   for c in "$SELFDIR/lib-slotwrite.sh" \
-           /usr/lib/qforge/install/lib-slotwrite.sh \
-           "$SELFDIR/../rootfs/overlay/usr/lib/qforge/install/lib-slotwrite.sh"; do
+           /usr/lib/retroforge/install/lib-slotwrite.sh \
+           "$SELFDIR/../rootfs/overlay/usr/lib/retroforge/install/lib-slotwrite.sh"; do
     [ -r "$c" ] && { SLOTWRITE="$c"; break; }
   done
 fi
 [ -n "$SLOTWRITE" ] && [ -r "$SLOTWRITE" ] \
-  || die "cannot find lib-slotwrite.sh (set QFORGE_SLOTWRITE)"
-# shellcheck source=../rootfs/overlay/usr/lib/qforge/install/lib-slotwrite.sh
+  || die "cannot find lib-slotwrite.sh (set RETROFORGE_SLOTWRITE)"
+# shellcheck source=../rootfs/overlay/usr/lib/retroforge/install/lib-slotwrite.sh
 . "$SLOTWRITE"
 
 # --- which device did RAUC just write? ----------------------------------------------------------
@@ -103,9 +103,9 @@ log "slot $SLOT: root $ROOT_DEV, var $VAR_DEV"
 # was imaged, which btrfstune otherwise refuses.
 "$BTRFSTUNE" -f -U "$(cat /proc/sys/kernel/random/uuid)" "$ROOT_DEV" >/dev/null \
   || die "btrfstune could not re-randomise the fsid of $ROOT_DEV"
-"$BTRFS" filesystem label "$ROOT_DEV" "qforge-root-$SLOT" >/dev/null \
-  || die "cannot label $ROOT_DEV as qforge-root-$SLOT"
-log "fsid randomised, label set to qforge-root-$SLOT"
+"$BTRFS" filesystem label "$ROOT_DEV" "retroforge-root-$SLOT" >/dev/null \
+  || die "cannot label $ROOT_DEV as retroforge-root-$SLOT"
+log "fsid randomised, label set to retroforge-root-$SLOT"
 
 # --- 2. per-slot /var -------------------------------------------------------------------------------
 # The source is a TARBALL here, and that is what makes this the installer case: the OTA path passes

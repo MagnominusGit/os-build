@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+# install-ogui-plugin — put the image's RetroForge OpenGamepadUI plugin where OGUI loads plugins from.
+#
+# OGUI only scans the player's user://plugins (~/.local/share/opengamepadui/plugins), so the copy
+# the image ships read-only (/usr/share/retroforge/opengamepadui/retroforge.zip) does nothing until it is
+# copied there. retroforge-session runs this, as the player, before every start of the shell:
+#   - installs it when there is none, or the installed one is unreadable or OLDER (an OS update
+#     brought a newer plugin);
+#   - never touches a copy of the same or a NEWER version (a later one from the RetroForge plugin
+#     store must survive boots and OS updates that still ship the older one);
+#   - copies through a temporary file and a rename, so OGUI never sees half a zip.
+# Exit 0 when the plugin is in place (installed or kept), 1 when the image's copy is missing or
+# unreadable. Messages go to stderr (the session log); stdout stays empty.
+#
+# TEST SEAMS (tests/test-plugin-install.sh): RETROFORGE_PLUGIN_SRC, RETROFORGE_PLUGIN_DIR.
+import json
+import os
+import re
+import shutil
+import sys
+import tempfile
+import zipfile
+
+SRC = os.environ.get("RETROFORGE_PLUGIN_SRC", "/usr/share/retroforge/opengamepadui/retroforge.zip")
+DST_DIR = os.environ.get("RETROFORGE_PLUGIN_DIR",
+                         os.path.expanduser("~/.local/share/opengamepadui/plugins"))
+META = "plugins/retroforge/plugin.json"
+
+
+def log(msg):
+    print(f"install-ogui-plugin: {msg}", file=sys.stderr)
+
+
+def version(path):
+    """plugin.version of a plugin zip as a comparable tuple, or None when unreadable."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            v = json.loads(z.read(META))["plugin.version"]
+        return tuple(int(n) for n in re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", v).groups())
+    except (OSError, KeyError, ValueError, TypeError, AttributeError, zipfile.BadZipFile):
+        return None
+
+
+def main():
+    src_v = version(SRC)
+    if src_v is None:
+        log(f"no readable plugin in the image at {SRC}")
+        return 1
+    dst = os.path.join(DST_DIR, "retroforge.zip")
+    dst_v = version(dst) if os.path.exists(dst) else None
+    if dst_v is not None and dst_v >= src_v:
+        return 0
+    os.makedirs(DST_DIR, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=DST_DIR, prefix=".retroforge.zip.")
+    try:
+        with os.fdopen(fd, "wb") as out, open(SRC, "rb") as src:
+            shutil.copyfileobj(src, out)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, dst)
+    except OSError as err:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        log(f"could not install the plugin: {err}")
+        return 1
+    log("installed RetroForge plugin %s (was %s)" % (".".join(map(str, src_v)),
+                                                 ".".join(map(str, dst_v)) if dst_v else "none"))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

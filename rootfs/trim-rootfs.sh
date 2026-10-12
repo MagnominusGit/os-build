@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge rootfs trimmer — delete build and documentation artefacts from the release root.
+# retroforge rootfs trimmer — delete build and documentation artefacts from the release root.
 #
 #   rootfs/trim-rootfs.sh <staged-root>
 #
@@ -16,11 +16,11 @@
 # onto a handheld over Wi-Fi. Headers, static libraries and man pages are not reachable from a
 # read-only root that has no compiler and no terminal.
 #
-# The declaration is copied to /usr/lib/qforge/trim.list, next to the seal's, so the image
+# The declaration is copied to /usr/lib/retroforge/trim.list, next to the seal's, so the image
 # states what it no longer has — and rootfs/guard-rootfs.sh re-expands that copy against the
 # built tree and fails the build if anything it names survived.
 #
-# Not called under QFORGE_DEV=1 — see rootfs/assemble-rootfs.sh.
+# Not called under RETROFORGE_DEV=1 — see rootfs/assemble-rootfs.sh.
 set -euo pipefail
 # extglob and globstar are what the `glob` rows are written against; trim.list documents both.
 shopt -s extglob globstar nullglob dotglob
@@ -98,7 +98,7 @@ for g in "${globs[@]}"; do
 done
 
 # State on the image what the image no longer has, exactly as the seal does.
-install -Dm0644 "$LIST" "$STAGE/usr/lib/qforge/trim.list"
+install -Dm0644 "$LIST" "$STAGE/usr/lib/retroforge/trim.list"
 
 after_kib="$(du -sk "$STAGE" | cut -f1)"
 echo "  trimmed: ${#paths[@]} paths, $glob_removed glob matches, $(( (before_kib - after_kib + 512) / 1024 ))MiB freed"

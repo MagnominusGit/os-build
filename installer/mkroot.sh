@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# qforge INSTALLER root bootstrap — lay the installer/recovery root down from packages, into an
+# retroforge INSTALLER root bootstrap — lay the installer/recovery root down from packages, into an
 # empty tree. Phase 6 of .claude/plans/internal-install.plan.md.
 #
 #   installer/mkroot.sh                    # locked: installer/manifest.lock, sha256-verified
-#   QFORGE_RESOLVE=1 installer/mkroot.sh # re-resolve from installer/pkgs.list (this is how the lock
+#   RETROFORGE_RESOLVE=1 installer/mkroot.sh # re-resolve from installer/pkgs.list (this is how the lock
 #                                        # is REGENERATED -- `make relock-installer`). Never ships.
 #
 # Prints the bootstrapped rootfs path on stdout. FORCE=1 re-runs.
 #
 # WHAT THIS IS. The installer image is a standalone medium that boots on the handheld, draws a
-# consent screen on the panel, and writes QForge to the device's internal UFS. It is not the
+# consent screen on the panel, and writes RetroForge to the device's internal UFS. It is not the
 # shipped image and must never drift towards it: no Steam, no `player` user, no SDDM, no Bluetooth,
 # no audio, no FEX. See installer/pkgs.list, which is the declaration this reads.
 #
@@ -47,7 +47,7 @@ DEST="$ROOT/work/installer-base"
 STAGE="$ROOT/work/installer-stage"
 # TEST-ONLY remote access, exactly the split [[wifi-config-is-test-only]] describes for the shipped
 # image: a RELEASE installer has no sshd enabled and no key, because a published recovery medium
-# that anyone can download must not carry a credential anyone can extract. QFORGE_DEV=1 turns it
+# that anyone can download must not carry a credential anyone can extract. RETROFORGE_DEV=1 turns it
 # on for a bring-up medium, and that is the only build that can be logged into.
 #
 # WHY IT IS WORTH HAVING AT ALL. This image has no UART ([[sm8650-no-uart]]), the panel has no
@@ -55,21 +55,21 @@ STAGE="$ROOT/work/installer-stage"
 # unit. So an early failure — the squashfs not mounting, systemd.volatile=state misbehaving without
 # an initrd — is a black panel and no evidence whatsoever. Three assumptions on this medium are
 # reasoned rather than measured, and this is what makes the first one that breaks diagnosable.
-DEV="${QFORGE_DEV:-}"
+DEV="${RETROFORGE_DEV:-}"
 PACMAN_CACHE="$ROOT/work/pacman-cache"
 OVERLAY_REPO="$ROOT/work/repo/aarch64"
-OVERLAY_DB="$OVERLAY_REPO/qforge.db.tar.zst"
-RESOLVE="${QFORGE_RESOLVE:-}"
+OVERLAY_DB="$OVERLAY_REPO/retroforge.db.tar.zst"
+RESOLVE="${RETROFORGE_RESOLVE:-}"
 
 # The FAT label installer/mkimage.sh gives the medium's own ESP, and the /etc/fstab entry below finds
-# it by. It is deliberately NOT one of the `qforge-*` labels an INSTALL carries: a dev card and an
+# it by. It is deliberately NOT one of the `retroforge-*` labels an INSTALL carries: a dev card and an
 # install already share those, which is the whole reason REPLACES_OURS=1 cannot be judged from a dev
 # card ([[internal-install-phase6-plan]]), and an installer that mounted the target's ESP at its own
 # /esp would write its failure log onto the disk it just failed to install. 11 characters exactly,
 # which is all a FAT label has room for.
 ESP_LABEL="NDINSTALLER"
 
-log() { echo "[qforge] $*" >&2; }
+log() { echo "[retroforge] $*" >&2; }
 die() { echo "$*" >&2; exit 1; }
 
 # ---- the declaration ---------------------------------------------------------------------------
@@ -127,16 +127,16 @@ fi
 # explicitly rather than globbed: installer/ also holds the hw-* stagers (build-host only), the test
 # suites, this script, and a __pycache__ that a glob would happily ship.
 INSTALL_FILES=(
-  carve.sh select-target.sh qforge-install rauc-session.sh post-install-fresh.sh
+  carve.sh select-target.sh retroforge-install rauc-session.sh post-install-fresh.sh
   verify-install.sh netcfg release-info confirm-tty confirm-ui
   ui uipad.py uiflow.py uiview.py installer-session save-log.sh
 )
 # ...and three the spine resolves by SEARCH, which live outside installer/ because the shipped image
-# needs them too. qforge-install tries $SELFDIR first, so landing them in the same flat directory
+# needs them too. retroforge-install tries $SELFDIR first, so landing them in the same flat directory
 # is what makes the installer image the case where the search succeeds on its first candidate.
 #   <source>:<name in the flat directory>
 FOREIGN_FILES=(
-  "rootfs/overlay/usr/lib/qforge/install/lib-slotwrite.sh:lib-slotwrite.sh"
+  "rootfs/overlay/usr/lib/retroforge/install/lib-slotwrite.sh:lib-slotwrite.sh"
   "image/genpart.sh:genpart.sh"
   "image/partition-table.txt:partition-table.txt"
   "image/lib-homestage.sh:lib-homestage.sh"
@@ -157,8 +157,8 @@ done
 # the panel's logical output from it. Both fall back if it is absent, but every board would then
 # draw a generic 1920x1080 and call itself "this device" -- the kind of degradation nobody notices
 # until a user reports it.
-DEVICE_ENV="$ROOT/rootfs/overlay/usr/lib/qforge/device-env"
-DEVICES_DIR="$ROOT/rootfs/overlay/usr/lib/qforge/devices"
+DEVICE_ENV="$ROOT/rootfs/overlay/usr/lib/retroforge/device-env"
+DEVICES_DIR="$ROOT/rootfs/overlay/usr/lib/retroforge/devices"
 # InputPlumber's BOARD configs, which are ours and live in the overlay — the prebuilt tarball ships
 # the daemon and its generic configs, not the per-board ones. HW-FOUND 2026-08-24: without these the
 # daemon comes up, recognises none of the handheld MCU gamepads, SDL sees no mappable controller,
@@ -230,12 +230,12 @@ KVER="$(ls "$MODROOT/lib/modules" 2>/dev/null | head -1 || true)"
 # hardware-support set is what produced the ath11k hole.
 UDEV_DIR="$ROOT/rootfs/overlay/usr/lib/udev/rules.d"
 [ -d "$UDEV_DIR" ] || die "no ${UDEV_DIR#"$ROOT"/} — uinput permissions and the pad rules would be missing"
-# The one rule above that is not self-contained: 69-qforge-bootdisk.rules matches through this
+# The one rule above that is not self-contained: 69-retroforge-bootdisk.rules matches through this
 # program. Required, not optional — the rules are copied wholesale, so the rule ships either way and
 # the only choice here is whether its PROGRAM exists. It is also hashed into the cache key with the
 # rules, so editing it rebuilds the medium; hashing the rules alone would let it go stale.
-BOOTDISK_PROG="$ROOT/rootfs/overlay/usr/lib/qforge/on-boot-disk"
-[ -f "$BOOTDISK_PROG" ] || die "no ${BOOTDISK_PROG#"$ROOT"/} — 69-qforge-bootdisk.rules would log a udev error per partition"
+BOOTDISK_PROG="$ROOT/rootfs/overlay/usr/lib/retroforge/on-boot-disk"
+[ -f "$BOOTDISK_PROG" ] || die "no ${BOOTDISK_PROG#"$ROOT"/} — 69-retroforge-bootdisk.rules would log a udev error per partition"
 
 FW_QCOM_DIR="$ROOT/firmware/qcom-fw"
 FW_LINUX_DIR="$ROOT/firmware/linux-fw"
@@ -249,7 +249,7 @@ FW_EXTRA_STAMP="$FW_EXTRA_DIR/.fetched.stamp"
 # The RAUC keyring. The spine refuses outright without a readable one, and correctly: an installer
 # that could not verify a bundle would write unverified bytes to a stranger's internal disk. Same
 # CA the shipped image gets from rootfs/assemble-rootfs.sh, so one bundle verifies against both.
-KEYRING_SRC="$ROOT/ota/rauc/qforge-ca.pem"
+KEYRING_SRC="$ROOT/ota/rauc/retroforge-ca.pem"
 [ -f "$KEYRING_SRC" ] || die "no RAUC CA at ${KEYRING_SRC#"$ROOT"/}"
 
 # ---- the reuse-cache key -------------------------------------------------------------------------
@@ -285,11 +285,11 @@ inputplumber:$(cat "$IP_DIR"/*/*.yaml 2>/dev/null | sha256sum | cut -d' ' -f1)
 udev:$(cat "$UDEV_DIR"/*.rules "$BOOTDISK_PROG" 2>/dev/null | sha256sum | cut -d' ' -f1)
 modules:$KVER:$(sha256sum "$MODROOT/lib/modules/$KVER/modules.dep" | cut -d' ' -f1)
 dev:${DEV:-0}
-otachannel:${QFORGE_OTA_CHANNEL:-none}
-sshkey:$(printf '%s' "${QFORGE_SSH_PUBKEY:-none}" | sha256sum | cut -d' ' -f1)
-wifi:$(printf '%s\n%s\n%s' "${QFORGE_WIFI:-}" "${QFORGE_WIFI_SSID:-none}" "${QFORGE_WIFI_PSK:-none}" | sha256sum | cut -d' ' -f1)"
+otachannel:${RETROFORGE_OTA_CHANNEL:-none}
+sshkey:$(printf '%s' "${RETROFORGE_SSH_PUBKEY:-none}" | sha256sum | cut -d' ' -f1)
+wifi:$(printf '%s\n%s\n%s' "${RETROFORGE_WIFI:-}" "${RETROFORGE_WIFI_SSID:-none}" "${RETROFORGE_WIFI_PSK:-none}" | sha256sum | cut -d' ' -f1)"
 # The credentials are HASHED into the key, never written to it: this marker is installed into the
-# image as /usr/lib/qforge/pkgs, so a plaintext PSK here would ship on the medium. Hashing still
+# image as /usr/lib/retroforge/pkgs, so a plaintext PSK here would ship on the medium. Hashing still
 # busts the cache when either value changes, which is the only thing the key needs to do.
 # Every file that lands in the tree, hashed. These are the installer -- an edit to installer/ui or to
 # a unit changes the image completely while leaving the package set untouched, so without this the
@@ -315,8 +315,8 @@ lock:$(sha256sum "$LOCKFILE" | cut -d' ' -f1)"
 fi
 
 if [ -z "${FORCE:-}" ] \
-   && [ "$(cat "$DEST/usr/lib/qforge/pkgs" 2>/dev/null)" = "$EXPECTED_PKGS" ] \
-   && [ "$(cat "$DEST/usr/lib/qforge/prebuilt.manifest" 2>/dev/null)" = "$EXPECTED_MANIFEST" ]; then
+   && [ "$(cat "$DEST/usr/lib/retroforge/pkgs" 2>/dev/null)" = "$EXPECTED_PKGS" ] \
+   && [ "$(cat "$DEST/usr/lib/retroforge/prebuilt.manifest" 2>/dev/null)" = "$EXPECTED_MANIFEST" ]; then
   log "installer root present: ${DEST#"$ROOT"/} (FORCE=1 to rebuild)"
   echo "$DEST"; exit 0
 fi
@@ -341,12 +341,12 @@ mkdir -p "$STAGE/inputplumber"
 cp -a "$IP_DIR/." "$STAGE/inputplumber/"
 mkdir -p "$STAGE/udev-rules"
 cp -a "$UDEV_DIR/." "$STAGE/udev-rules/"
-# 69-qforge-bootdisk.rules matches through a PROGRAM, and the rules above are copied WHOLESALE, so
+# 69-retroforge-bootdisk.rules matches through a PROGRAM, and the rules above are copied WHOLESALE, so
 # the medium gets that rule whether or not it wants it. It is inert here -- the installer medium's
-# own partitions are not named qforge-*, and the target disk's links are written by nothing this
+# own partitions are not named retroforge-*, and the target disk's links are written by nothing this
 # image reads -- but a rule whose PROGRAM is absent logs a udev worker error for every partition
 # uevent, on a medium whose whole job is to be diagnosable. So the match program travels with it.
-cp -p "$ROOT/rootfs/overlay/usr/lib/qforge/on-boot-disk" "$STAGE/on-boot-disk"
+cp -p "$ROOT/rootfs/overlay/usr/lib/retroforge/on-boot-disk" "$STAGE/on-boot-disk"
 # The firmware trees are NOT copied into the staging directory: they are ~260 MB and would be
 # duplicated on every build. They cross as their own read-only mounts instead (see the docker run).
 cp    "$KEYRING_SRC" "$STAGE/keyring.pem"
@@ -361,45 +361,45 @@ if [ -n "$DEV" ]; then
   # release medium that took the dev code path, and the only thing it has to show for it is the
   # test-only surface. You find that out over SSH, on a hardware trip, at the moment the panel has
   # gone black and the shell was the entire reason for building it. The two credentials failed
-  # differently until 2026-08-25: QFORGE_WIFI=1 with no creds died, this one printed a line the
+  # differently until 2026-08-25: RETROFORGE_WIFI=1 with no creds died, this one printed a line the
   # build then buried under twenty emulated minutes of pacstrap.
   #
-  # QFORGE_DEV_NO_SSH=1 is the way to ask for the other half on purpose -- a medium with the baked
+  # RETROFORGE_DEV_NO_SSH=1 is the way to ask for the other half on purpose -- a medium with the baked
   # Wi-Fi and no way in -- which is a real thing to want when the point is to watch the network
   # screen behave on a board you can reach some other way.
-  if [ -n "${QFORGE_SSH_PUBKEY:-}" ]; then
-    printf '%s\n' "$QFORGE_SSH_PUBKEY" >"$STAGE/authorized_keys"
-  elif [ "${QFORGE_DEV_NO_SSH:-}" = 1 ]; then
-    log "TEST BUILD: no authorized_keys (QFORGE_DEV_NO_SSH=1) — sshd stays disabled on this medium."
+  if [ -n "${RETROFORGE_SSH_PUBKEY:-}" ]; then
+    printf '%s\n' "$RETROFORGE_SSH_PUBKEY" >"$STAGE/authorized_keys"
+  elif [ "${RETROFORGE_DEV_NO_SSH:-}" = 1 ]; then
+    log "TEST BUILD: no authorized_keys (RETROFORGE_DEV_NO_SSH=1) — sshd stays disabled on this medium."
   else
-    die "QFORGE_DEV=1 requires QFORGE_SSH_PUBKEY: sshd is key-only, so a dev medium without one
+    die "RETROFORGE_DEV=1 requires RETROFORGE_SSH_PUBKEY: sshd is key-only, so a dev medium without one
   admits nobody and is a release medium that took the dev path. Source dev.env, or pass
-  QFORGE_DEV_NO_SSH=1 if a medium with the Wi-Fi profile and no shell is what you meant."
+  RETROFORGE_DEV_NO_SSH=1 if a medium with the Wi-Fi profile and no shell is what you meant."
   fi
 
   # A Wi-Fi profile, and it is what makes the sshd above WORTH having. Joining a network otherwise
   # happens through the UI's §4b network screen — so on the one failure this medium exists to
   # diagnose, a dead GUI, there is no way to drive the join and therefore no network and no shell.
-  # USB-C Ethernet covers it, but only if one is to hand. Same QFORGE_WIFI intent knob and same
+  # USB-C Ethernet covers it, but only if one is to hand. Same RETROFORGE_WIFI intent knob and same
   # creds as the dev card (dev.env), so there is one place to set them.
-  if [ "${QFORGE_WIFI:-}" != 0 ] && [ -n "${QFORGE_WIFI_SSID:-}" ] && [ -n "${QFORGE_WIFI_PSK:-}" ]; then
+  if [ "${RETROFORGE_WIFI:-}" != 0 ] && [ -n "${RETROFORGE_WIFI_SSID:-}" ] && [ -n "${RETROFORGE_WIFI_PSK:-}" ]; then
     # Written on the HOST and carried in as a file: the PSK must not be interpolated into the
     # container's single-quoted bash -c (a quote in a passphrase would end the string), and a file
     # keeps it off any process command line. umask 077 because NM IGNORES a profile that is not
     # 0600 root-owned, logging only "ignoring due to permissions".
     ( umask 077; cat >"$STAGE/wifi.nmconnection" <<WIFIEOF
 [connection]
-id=${QFORGE_WIFI_SSID}
+id=${RETROFORGE_WIFI_SSID}
 type=wifi
 autoconnect=true
 
 [wifi]
 mode=infrastructure
-ssid=${QFORGE_WIFI_SSID}
+ssid=${RETROFORGE_WIFI_SSID}
 
 [wifi-security]
 key-mgmt=wpa-psk
-psk=${QFORGE_WIFI_PSK}
+psk=${RETROFORGE_WIFI_PSK}
 
 [ipv4]
 method=auto
@@ -408,33 +408,33 @@ method=auto
 method=auto
 WIFIEOF
     )
-    printf '%s\n' "$QFORGE_WIFI_SSID" >"$STAGE/wifi.ssid"
-    log "TEST BUILD: baking a Wi-Fi profile for '$QFORGE_WIFI_SSID' (the PSK is never logged)"
-  elif [ "${QFORGE_WIFI:-}" = 1 ]; then
-    die "QFORGE_WIFI=1 requires QFORGE_WIFI_SSID + QFORGE_WIFI_PSK"
+    printf '%s\n' "$RETROFORGE_WIFI_SSID" >"$STAGE/wifi.ssid"
+    log "TEST BUILD: baking a Wi-Fi profile for '$RETROFORGE_WIFI_SSID' (the PSK is never logged)"
+  elif [ "${RETROFORGE_WIFI:-}" = 1 ]; then
+    die "RETROFORGE_WIFI=1 requires RETROFORGE_WIFI_SSID + RETROFORGE_WIFI_PSK"
   else
-    log "TEST BUILD: no Wi-Fi profile (set QFORGE_WIFI_SSID + QFORGE_WIFI_PSK in dev.env.local)."
+    log "TEST BUILD: no Wi-Fi profile (set RETROFORGE_WIFI_SSID + RETROFORGE_WIFI_PSK in dev.env.local)."
     log "            Without one the medium is reachable over USB-C Ethernet only."
   fi
 fi
 # THE OTA CHANNEL, AND IT IS DELIBERATELY OUTSIDE THE DEV BLOCK ABOVE. A channel name is not a
 # credential -- unlike the Wi-Fi PSK and the authorized_keys, it neither admits anyone nor leaks
 # anything -- and "a release medium that installs from a beta channel" is a real thing to want, not
-# a test-only affordance. Gating it on QFORGE_DEV would have made the only way to get one a medium
+# a test-only affordance. Gating it on RETROFORGE_DEV would have made the only way to get one a medium
 # that also carries a shell and a PSK.
 #
-# It writes /etc/qforge/ota.conf, which is the SAME override file the operator edits by hand and
+# It writes /etc/retroforge/ota.conf, which is the SAME override file the operator edits by hand and
 # the same one a dev rootfs gets from rootfs/assemble-rootfs.sh -- not a new code path
 # ([[devices-are-operator-reachable]]). Unset means no file, and release-info falls through to its
 # built-in "stable", which is what every medium built before this did.
-if [ -n "${QFORGE_OTA_CHANNEL:-}" ]; then
-  case "$QFORGE_OTA_CHANNEL" in
+if [ -n "${RETROFORGE_OTA_CHANNEL:-}" ]; then
+  case "$RETROFORGE_OTA_CHANNEL" in
     *[!A-Za-z0-9._-]*)
-      die "QFORGE_OTA_CHANNEL='$QFORGE_OTA_CHANNEL' has characters that do not belong in a URL
+      die "RETROFORGE_OTA_CHANNEL='$RETROFORGE_OTA_CHANNEL' has characters that do not belong in a URL
   path. It becomes a path segment in <base>/<channel>/latest.json, which the medium fetches." ;;
   esac
-  printf '%s\n' "$QFORGE_OTA_CHANNEL" >"$STAGE/ota.channel"
-  log "OTA channel pinned to '$QFORGE_OTA_CHANNEL' (this medium will not see 'stable')"
+  printf '%s\n' "$RETROFORGE_OTA_CHANNEL" >"$STAGE/ota.channel"
+  log "OTA channel pinned to '$RETROFORGE_OTA_CHANNEL' (this medium will not see 'stable')"
 fi
 printf '%s\n' "$ESP_LABEL" >"$STAGE/esp-label"
 # The package names alone, as their own file. The reuse-cache marker below is a superset (it also
@@ -476,7 +476,7 @@ done
 if [ -z "$RESOLVE" ]; then
   "$ROOT/rootfs/fetchlock.sh" "$STAGE/install.list" "$LOCKFILE"
 else
-  log "QFORGE_RESOLVE=1 — re-resolving from ${PKGSLIST#"$ROOT"/}, this tree is for relock only"
+  log "RETROFORGE_RESOLVE=1 — re-resolving from ${PKGSLIST#"$ROOT"/}, this tree is for relock only"
 fi
 
 pins_builder_ensure >/dev/null
@@ -560,7 +560,7 @@ ctr run --rm --platform linux/arm64 \
   rm -f /target/etc/os-release
   install -Dm0644 /prebuilt/os-release /target/etc/os-release
   printf "LANG=en_US.UTF-8\n" >/target/etc/locale.conf
-  printf "qforge-installer\n" >/target/etc/hostname
+  printf "retroforge-installer\n" >/target/etc/hostname
   grep -q "^en_US.UTF-8 UTF-8" /target/etc/locale.gen || echo "en_US.UTF-8 UTF-8" >>/target/etc/locale.gen
   chroot /target locale-gen
 
@@ -584,35 +584,35 @@ ctr run --rm --platform linux/arm64 \
       *)   echo "prebuilt $p_name: unknown kind ${p_kind}" >&2; exit 1 ;;
     esac
   done < /prebuilt/prebuilt.manifest
-  install -Dm0644 /prebuilt/prebuilt.manifest /target/usr/lib/qforge/prebuilt.manifest
+  install -Dm0644 /prebuilt/prebuilt.manifest /target/usr/lib/retroforge/prebuilt.manifest
 
   # ---- the installer itself -----------------------------------------------------------------------
   # ONE FLAT DIRECTORY. Every component resolves $SELFDIR / dirname(__file__) first, so this is the
   # whole layout requirement -- and it is what makes the spine`s search succeed on its first
   # candidate here rather than falling through to a path that happens to exist.
-  install -d -m0755 /target/usr/lib/qforge/install
+  install -d -m0755 /target/usr/lib/retroforge/install
   for f in /prebuilt/flat/*; do
     case "$(basename "$f")" in
-      *.txt|*.py) install -m0644 "$f" /target/usr/lib/qforge/install/ ;;
-      lib-*.sh)   install -m0644 "$f" /target/usr/lib/qforge/install/ ;;
-      *)          install -m0755 "$f" /target/usr/lib/qforge/install/ ;;
+      *.txt|*.py) install -m0644 "$f" /target/usr/lib/retroforge/install/ ;;
+      lib-*.sh)   install -m0644 "$f" /target/usr/lib/retroforge/install/ ;;
+      *)          install -m0755 "$f" /target/usr/lib/retroforge/install/ ;;
     esac
   done
   # uipad/uiflow/uiview are imported, never executed -- 0644 above. `ui` IS executed and is not a
   # .py, which is why the extension decides the mode rather than a name list that would drift.
 
-  # $CONFIRM is a FIXED PATH the spine reads (QFORGE_CONFIRM defaults to it), and it points at
+  # $CONFIRM is a FIXED PATH the spine reads (RETROFORGE_CONFIRM defaults to it), and it points at
   # confirm-ui rather than confirm-tty: on this image the UI is already running and owns both the
   # panel and the pad, so a second SDL client would contend with it for gamescope focus -- the
   # failure mode being a consent screen that never appears. confirm-tty stays on the image for a
-  # qforge.install.debug boot, where there is no UI to shim to.
-  ln -sf confirm-ui /target/usr/lib/qforge/install/confirm
+  # retroforge.install.debug boot, where there is no UI to shim to.
+  ln -sf confirm-ui /target/usr/lib/retroforge/install/confirm
 
   # The device registry. Both consumers fall back without it, to a generic 1920x1080 output and a
   # board that calls itself "this device".
-  install -Dm0755 /prebuilt/device-env /target/usr/lib/qforge/device-env
-  install -d -m0755 /target/usr/lib/qforge/devices
-  install -m0644 /prebuilt/devices/*.conf /target/usr/lib/qforge/devices/
+  install -Dm0755 /prebuilt/device-env /target/usr/lib/retroforge/device-env
+  install -d -m0755 /target/usr/lib/retroforge/devices
+  install -m0644 /prebuilt/devices/*.conf /target/usr/lib/retroforge/devices/
 
   # Firmware, all three trees whole -- the same content rootfs/assemble-rootfs.sh puts on the card, from
   # the same sources, so hardware support is identical to the image being installed BY CONSTRUCTION
@@ -626,7 +626,7 @@ ctr run --rm --platform linux/arm64 \
   done
   rm -f /target/usr/lib/firmware/sha256sums.txt /target/usr/lib/firmware/.fetched.stamp
   chmod -R u=rwX,go=rX /target/usr/lib/firmware
-  echo "[qforge] firmware: $(find /target/usr/lib/firmware -type f | wc -l) files, $(du -sh /target/usr/lib/firmware | cut -f1)" >&2
+  echo "[retroforge] firmware: $(find /target/usr/lib/firmware -type f | wc -l) files, $(du -sh /target/usr/lib/firmware | cut -f1)" >&2
 
   # Kernel modules. The 802.11 stack is modular, so without these the firmware above is inert and
   # there is no wlan interface at all. modroot is the tree kernel/build.sh produced with
@@ -635,24 +635,24 @@ ctr run --rm --platform linux/arm64 \
   if [ -d /modroot/lib/modules ]; then
     install -d -m0755 /target/usr/lib/modules
     cp -a /modroot/lib/modules/. /target/usr/lib/modules/
-    echo "[qforge] modules: $(find /target/usr/lib/modules -name \*.ko | wc -l) for kernel $(ls /target/usr/lib/modules | head -1)" >&2
+    echo "[retroforge] modules: $(find /target/usr/lib/modules -name \*.ko | wc -l) for kernel $(ls /target/usr/lib/modules | head -1)" >&2
   else
     echo "no kernel modules mounted at /modroot -- the medium would have no wifi driver" >&2
     exit 1
   fi
 
-  # The overlay udev rules, all of them (see the host half). Without 70-qforge-uinput.rules
+  # The overlay udev rules, all of them (see the host half). Without 70-retroforge-uinput.rules
   # InputPlumber cannot get at /dev/uinput.
   if [ -d /prebuilt/udev-rules ]; then
     install -d -m0755 /target/usr/lib/udev/rules.d
     install -m0644 /prebuilt/udev-rules/*.rules /target/usr/lib/udev/rules.d/
-    echo "[qforge] udev: $(ls /prebuilt/udev-rules/*.rules | wc -l) overlay rules" >&2
+    echo "[retroforge] udev: $(ls /prebuilt/udev-rules/*.rules | wc -l) overlay rules" >&2
   fi
-  # The PROGRAM that 69-qforge-bootdisk.rules matches through, at the absolute path the rule
+  # The PROGRAM that 69-retroforge-bootdisk.rules matches through, at the absolute path the rule
   # names. See the host half for why a medium that never uses the links still carries it.
   # (No apostrophes in here: this whole block is inside a single-quoted bash -c.)
   if [ -f /prebuilt/on-boot-disk ]; then
-    install -Dm0755 /prebuilt/on-boot-disk /target/usr/lib/qforge/on-boot-disk
+    install -Dm0755 /prebuilt/on-boot-disk /target/usr/lib/retroforge/on-boot-disk
   fi
 
   # InputPlumber board configs. Without them the daemon runs but recognises none of the handheld
@@ -663,7 +663,7 @@ ctr run --rm --platform linux/arm64 \
     cp -a /prebuilt/inputplumber/. /target/etc/inputplumber/
     chmod -R u=rwX,go=rX /target/etc/inputplumber
     # \*.yaml, not the quoted form: a single quote here would end the enclosing bash -c string.
-    echo "[qforge] inputplumber: $(find /target/etc/inputplumber -name \*.yaml | wc -l) board configs" >&2
+    echo "[retroforge] inputplumber: $(find /target/etc/inputplumber -name \*.yaml | wc -l) board configs" >&2
   fi
 
   # The RAUC keyring, at the path the spine and /etc/rauc/system.conf both name. 0444: it is a
@@ -671,18 +671,18 @@ ctr run --rm --platform linux/arm64 \
   install -Dm0444 /prebuilt/keyring.pem /target/etc/rauc/keyring.pem
 
   # ---- units --------------------------------------------------------------------------------------
-  # Named, not globbed: installer/units/ also holds qforge-installer-hostkey.service, which is a
+  # Named, not globbed: installer/units/ also holds retroforge-installer-hostkey.service, which is a
   # TEST-BUILD unit and is installed further down only when a dev credential was staged. A glob
   # here would put it on the released medium too — inert, since nothing pulls it in without the
   # sshd drop-in, but a test artifact on a published image is how the next one stops being inert.
-  install -m0644 /prebuilt/units/qforge-installer.service \
-                 /prebuilt/units/qforge-installer-console.service \
+  install -m0644 /prebuilt/units/retroforge-installer.service \
+                 /prebuilt/units/retroforge-installer-console.service \
                  /target/usr/lib/systemd/system/
   mkdir -p /target/etc/systemd/system/multi-user.target.wants
   # ONLY the session unit is enabled. The console unit is started by OnFailure= and enabling it
   # would run the fallback on every boot, including the ones that worked.
-  ln -sf /usr/lib/systemd/system/qforge-installer.service \
-         /target/etc/systemd/system/multi-user.target.wants/qforge-installer.service
+  ln -sf /usr/lib/systemd/system/retroforge-installer.service \
+         /target/etc/systemd/system/multi-user.target.wants/retroforge-installer.service
 
   # ---- a READ-ONLY /etc, and the three things that would write to it ------------------------------
   # The root is squashfs, so /etc cannot be written at runtime and there is NO overlay: the shipped
@@ -704,14 +704,14 @@ ctr run --rm --platform linux/arm64 \
   #    off never touching the medium anyway.
   install -d -m0755 /target/etc/NetworkManager/conf.d
   printf "%s\n" \
-    "# qforge installer: the root is read-only squashfs (installer/mkroot.sh)." \
+    "# retroforge installer: the root is read-only squashfs (installer/mkroot.sh)." \
     "[keyfile]" \
     "path=/run/NetworkManager/system-connections" \
     "" \
     "[main]" \
     "# Do not try to rewrite /etc/resolv.conf; it is a symlink into /run (below)." \
     "rc-manager=unmanaged" \
-    >/target/etc/NetworkManager/conf.d/00-qforge-installer.conf
+    >/target/etc/NetworkManager/conf.d/00-retroforge-installer.conf
 
   # 3. resolv.conf. NM maintains /run/NetworkManager/resolv.conf whatever rc-manager says, so the
   #    symlink is what makes name resolution work; rc-manager=unmanaged above is what stops NM
@@ -733,7 +733,7 @@ ctr run --rm --platform linux/arm64 \
   ln -sf /dev/null /target/etc/systemd/system/systemd-networkd.socket
   ln -sf /dev/null /target/etc/systemd/system/systemd-networkd-wait-online.service
   mkdir -p /target/etc/systemd/system-preset
-  echo "enable NetworkManager.service" >/target/etc/systemd/system-preset/60-qforge-network.preset
+  echo "enable NetworkManager.service" >/target/etc/systemd/system-preset/60-retroforge-network.preset
   ln -sf /usr/lib/systemd/system/NetworkManager.service \
          /target/etc/systemd/system/multi-user.target.wants/NetworkManager.service
   ln -sf /usr/lib/systemd/system/NetworkManager.service \
@@ -757,7 +757,7 @@ ctr run --rm --platform linux/arm64 \
   # way in. VERIFIED on the device before shipping: starting the unit by hand moved the clock from
   # Jul 06 to the correct Aug 24, NTPSynchronized=yes, curl returned HTTP 404 and netcfg went from
   # STATE=no-host to STATE=online.
-  echo "enable systemd-timesyncd.service" >>/target/etc/systemd/system-preset/60-qforge-network.preset
+  echo "enable systemd-timesyncd.service" >>/target/etc/systemd/system-preset/60-retroforge-network.preset
   install -d -m0755 /target/etc/systemd/system/sysinit.target.wants
   ln -sf /usr/lib/systemd/system/systemd-timesyncd.service \
          /target/etc/systemd/system/sysinit.target.wants/systemd-timesyncd.service
@@ -773,10 +773,10 @@ ctr run --rm --platform linux/arm64 \
   # seatd-launch branch is validated only as bare gamescope (bringup-phase2 gate 1b), and it also
   # leaks /run/seatd.sock on an unclean exit, which is the worse property in a tool people re-run
   # after a crash. Reversible in this one line if that ever inverts.
-  echo "enable seatd.service" >>/target/etc/systemd/system-preset/60-qforge-network.preset
+  echo "enable seatd.service" >>/target/etc/systemd/system-preset/60-retroforge-network.preset
   ln -sf /usr/lib/systemd/system/seatd.service \
          /target/etc/systemd/system/multi-user.target.wants/seatd.service
-  # InputPlumber: the unit ships inside the prebuilt tarball, and qforge-installer.service Wants=
+  # InputPlumber: the unit ships inside the prebuilt tarball, and retroforge-installer.service Wants=
   # it. Enable it the same preset-proof way.
   if [ -f /target/usr/lib/systemd/system/inputplumber.service ]; then
     ln -sf /usr/lib/systemd/system/inputplumber.service \
@@ -787,7 +787,7 @@ ctr run --rm --platform linux/arm64 \
   fi
 
   # ---- TEST-ONLY remote access ----------------------------------------------------------------------
-  # Present only when the host staged an authorized_keys, i.e. QFORGE_DEV=1 with a key. A release
+  # Present only when the host staged an authorized_keys, i.e. RETROFORGE_DEV=1 with a key. A release
   # installer leaves sshd installed but never enabled, so it listens on nothing.
   #
   # HOST KEYS GO IN /run, AND THAT IS THE DIFFERENCE FROM THE MAIN IMAGE. rootfs/assemble-rootfs.sh
@@ -814,7 +814,7 @@ ctr run --rm --platform linux/arm64 \
     install -d -m0755 /target/usr/lib/NetworkManager/system-connections
     install -m0600 /prebuilt/wifi.nmconnection \
       "/target/usr/lib/NetworkManager/system-connections/$(cat /prebuilt/wifi.ssid).nmconnection"
-    echo "[qforge] TEST BUILD: Wi-Fi profile baked (autoconnect at boot)" >&2
+    echo "[retroforge] TEST BUILD: Wi-Fi profile baked (autoconnect at boot)" >&2
   fi
 
   # The channel pin. Staged unconditionally by the host half (a channel is not a credential), so
@@ -824,17 +824,17 @@ ctr run --rm --platform linux/arm64 \
   # single-quoted bash -c string, and a single quote ends it. It cost a full rebuild to relearn,
   # which is what the three warnings further up this file were already saying.
   if [ -f /prebuilt/ota.channel ]; then
-    install -d -m0755 /target/etc/qforge
+    install -d -m0755 /target/etc/retroforge
     {
-      echo "# Written by installer/mkroot.sh from QFORGE_OTA_CHANNEL at build time."
-      echo "# The documented override file for qforge-update and release-info, so an operator can"
+      echo "# Written by installer/mkroot.sh from RETROFORGE_OTA_CHANNEL at build time."
+      echo "# The documented override file for retroforge-update and release-info, so an operator can"
       echo "# still repoint this medium by hand: editing it changes where the NEXT check looks."
-      echo "# A medium built without QFORGE_OTA_CHANNEL ships no such file at all and falls"
+      echo "# A medium built without RETROFORGE_OTA_CHANNEL ships no such file at all and falls"
       echo "# through to the built-in stable default."
       echo "OTA_CHANNEL=$(cat /prebuilt/ota.channel)"
-    } >/target/etc/qforge/ota.conf
-    chmod 0644 /target/etc/qforge/ota.conf
-    echo "[qforge] OTA channel pinned: $(cat /prebuilt/ota.channel)" >&2
+    } >/target/etc/retroforge/ota.conf
+    chmod 0644 /target/etc/retroforge/ota.conf
+    echo "[retroforge] OTA channel pinned: $(cat /prebuilt/ota.channel)" >&2
   fi
 
   if [ -f /prebuilt/authorized_keys ]; then
@@ -843,10 +843,10 @@ ctr run --rm --platform linux/arm64 \
 
     install -d -m0755 /target/etc/ssh/sshd_config.d
     printf "%s\n" \
-      "# qforge installer, TEST BUILD ONLY: the root is read-only squashfs, so the host key" \
+      "# retroforge installer, TEST BUILD ONLY: the root is read-only squashfs, so the host key" \
       "# cannot live in /etc. It is generated into tmpfs per boot by the drop-in below." \
       "HostKey /run/ssh/ssh_host_ed25519_key" \
-      >/target/etc/ssh/sshd_config.d/00-qforge-installer.conf
+      >/target/etc/ssh/sshd_config.d/00-retroforge-installer.conf
 
     # The key generator is a COMMITTED unit file (installer/units/), not text printf-ed from here.
     # A unit generated inside this container is a unit tests/test-units.sh never lints, and a
@@ -854,25 +854,25 @@ ctr run --rm --platform linux/arm64 \
     # ([[systemd-execonfailure-is-not-a-directive]]) — so the one unit whose failure mode is "no
     # remote access on the image whose remote access is the whole point" would have been the one
     # nothing checked. It carries its own reasoning; see the file.
-    install -m0644 /prebuilt/units/qforge-installer-hostkey.service \
-                   /target/usr/lib/systemd/system/qforge-installer-hostkey.service
+    install -m0644 /prebuilt/units/retroforge-installer-hostkey.service \
+                   /target/usr/lib/systemd/system/retroforge-installer-hostkey.service
 
     install -d -m0755 /target/etc/systemd/system/sshd.service.d
     printf "%s\n" \
       "[Unit]" \
-      "Requires=qforge-installer-hostkey.service" \
-      "After=qforge-installer-hostkey.service" \
-      >/target/etc/systemd/system/sshd.service.d/00-qforge-installer.conf
+      "Requires=retroforge-installer-hostkey.service" \
+      "After=retroforge-installer-hostkey.service" \
+      >/target/etc/systemd/system/sshd.service.d/00-retroforge-installer.conf
 
     # Mask openssh`s own generator rather than leave it failing. sshd only Wants= it, so its failure
     # would not stop the boot -- it would just put a red unit and a misleading "permission denied"
     # on /etc/ssh in the journal of the one image whose journal is the whole diagnostic.
     ln -sf /dev/null /target/etc/systemd/system/sshdgenkeys.service
 
-    echo "enable sshd.service" >>/target/etc/systemd/system-preset/60-qforge-network.preset
+    echo "enable sshd.service" >>/target/etc/systemd/system-preset/60-retroforge-network.preset
     ln -sf /usr/lib/systemd/system/sshd.service \
            /target/etc/systemd/system/multi-user.target.wants/sshd.service
-    echo "[qforge] TEST BUILD: sshd enabled, key-only root, host key regenerated per boot" >&2
+    echo "[retroforge] TEST BUILD: sshd enabled, key-only root, host key regenerated per boot" >&2
   fi
 
   # ---- /esp, a REAL mount point -------------------------------------------------------------------
@@ -893,16 +893,16 @@ ctr run --rm --platform linux/arm64 \
   # Not fatal on non-zero: an offline run legitimately cannot satisfy every line (/proc, /sys, /dev,
   # ACL ops), and systemd-tmpfiles returns non-zero if ANY line failed.
   if ! systemd-tmpfiles --root=/target --create; then
-    echo "[qforge] systemd-tmpfiles --root exited $? (partial offline application; see above)" >&2
+    echo "[retroforge] systemd-tmpfiles --root exited $? (partial offline application; see above)" >&2
   fi
   if ! journalctl --root=/target --update-catalog; then
-    echo "[qforge] journalctl --root --update-catalog exited $? (no message catalog)" >&2
+    echo "[retroforge] journalctl --root --update-catalog exited $? (no message catalog)" >&2
   fi
 
   # Recorded LAST, so the marker`s presence proves the whole bootstrap ran. A run that died anywhere
   # above leaves none, so the next build re-bootstraps instead of shipping a half-populated root --
   # and installer/genlock.sh refuses to lock a tree without it.
-  install -Dm0644 /prebuilt/pkgs /target/usr/lib/qforge/pkgs
+  install -Dm0644 /prebuilt/pkgs /target/usr/lib/retroforge/pkgs
 ' >&2
 # ^ the container`s stdout (pacman progress) goes to stderr: this script`s stdout must carry ONLY
 #   the rootfs path, which the Makefile and installer/mkimage.sh capture.

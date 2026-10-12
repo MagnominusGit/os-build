@@ -6,7 +6,7 @@
 #
 #   boot/boards.map                              build-time catalog: id / menu name / dtb / bootargs
 #   kernel/dts/qcom/*.dts                        the DTBs that actually ship
-#   rootfs/overlay/usr/lib/qforge/devices/*.conf   the identity the RUNNING system reports
+#   rootfs/overlay/usr/lib/retroforge/devices/*.conf   the identity the RUNNING system reports
 #
 # and then boot/gen-grub-cfg.sh turns the first into a grub.cfg whose per-slot cmdline has to match
 # image/partition-table.txt. A mismatch anywhere is a board that cannot be selected, a menu entry
@@ -20,7 +20,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEVICES="$ROOT/rootfs/overlay/usr/lib/qforge/devices"
+DEVICES="$ROOT/rootfs/overlay/usr/lib/retroforge/devices"
 BOARDS="$ROOT/boot/boards.map"
 TABLE="$ROOT/image/partition-table.txt"
 DTS="$ROOT/kernel/dts/qcom"
@@ -59,15 +59,15 @@ done < "$BOARDS"
 [ "$ncat" -gt 0 ] && ok "$ncat boards in the catalog" || bad "the catalog is empty"
 
 # --- 2. the catalog and the runtime device profiles agree on identity ---------------------------
-# The menuentry id is what the user picks; QFORGE_DEVICE_ID is what device-env reports at
+# The menuentry id is what the user picks; RETROFORGE_DEVICE_ID is what device-env reports at
 # runtime. They are the same identity and must stay spelled the same, or a board is selectable
 # under a name the OS has never heard of.
 CASE="catalog <-> device profiles"
 unset confids; declare -A confids
 for f in "$DEVICES"/*.conf; do
   [ "$(basename "$f")" = "defaults.conf" ] && continue
-  id=$(sed -n 's/^QFORGE_DEVICE_ID=//p' "$f" | head -1 | tr -d "'\"")
-  [ -n "$id" ] && confids["$id"]=1 || bad "$(basename "$f") has no QFORGE_DEVICE_ID"
+  id=$(sed -n 's/^RETROFORGE_DEVICE_ID=//p' "$f" | head -1 | tr -d "'\"")
+  [ -n "$id" ] && confids["$id"]=1 || bad "$(basename "$f") has no RETROFORGE_DEVICE_ID"
 done
 [ "${#confids[@]}" -eq "$ncat" ] \
   && ok "${#confids[@]} device profiles, ${ncat} catalog rows" \
@@ -83,13 +83,13 @@ done
 
 # --- 2b. device-env can actually REACH every profile --------------------------------------------
 # A fourth file has to agree and nothing checked it until a six-board SoC import made the gap
-# obvious. rootfs/overlay/usr/lib/qforge/device-env maps the devicetree `model` string to a profile
+# obvious. rootfs/overlay/usr/lib/retroforge/device-env maps the devicetree `model` string to a profile
 # name with a hand-written case. Miss a board there and it does not fail: it falls through to
 # defaults.conf, so the running system reports device-id `unknown`, exports no SOC_CLASS (powerd
-# loses its underclock table) and no panel dims (qforge-session falls back to a generic
+# loses its underclock table) and no panel dims (retroforge-session falls back to a generic
 # landscape 1920x1080 on the wrong connector). No error, just a subtly wrong session.
 CASE="device-env <-> profiles"
-DEVENV="$ROOT/rootfs/overlay/usr/lib/qforge/device-env"
+DEVENV="$ROOT/rootfs/overlay/usr/lib/retroforge/device-env"
 if [ ! -r "$DEVENV" ]; then
   bad "cannot read $DEVENV"
 else
@@ -155,7 +155,7 @@ MODLINE=$(sed -n '/^MODULES="/,/"$/p' "$ROOT/boot/grub.sh" | tr -d '\\\n')
 if [ -z "$MODLINE" ]; then
   bad "cannot find the MODULES= assignment in boot/grub.sh"
 else
-  for m in probe regexp loadenv qforge; do
+  for m in probe regexp loadenv retroforge; do
     printf '%s' "$MODLINE" | grep -qw -- "$m" \
       && ok "boot/grub.sh embeds $m" \
       || bad "boot/grub.sh does not embed $m -- the config's $m calls are 'unknown command'"
@@ -194,7 +194,7 @@ for slot in A B; do
 
   # the per-slot cmdline. Every entry must name THIS slot's root, var and efi partitions -- one
   # entry pointing at the other slot is a boot that silently mounts the wrong /var.
-  for key in 'root=$rootspec' 'qforge.var=$varspec' 'qforge.efi=$efispec' "qforge.slot=$slot"; do
+  for key in 'root=$rootspec' 'retroforge.var=$varspec' 'retroforge.efi=$efispec' "retroforge.slot=$slot"; do
     n=$(grep -cF -- "$key" "$cfg")
     [ "$n" -eq "$n_entries" ] && ok "grub-$lc.cfg: all $n entries carry $key" \
                               || bad "grub-$lc.cfg: $n of $n_entries entries carry $key"
@@ -203,7 +203,7 @@ for slot in A B; do
   grep -q -- "PARTLABEL=$(part_label "rootfs-$other")" "$cfg" \
     && bad "grub-$lc.cfg references the OTHER slot's root" \
     || ok "grub-$lc.cfg never references the other slot"
-  grep -q -- "qforge.slot=${other^^}" "$cfg" \
+  grep -q -- "retroforge.slot=${other^^}" "$cfg" \
     && bad "grub-$lc.cfg tells the initramfs it is slot ${other^^}" \
     || ok "grub-$lc.cfg never claims to be slot ${other^^}"
 
@@ -343,19 +343,19 @@ for slot in A B; do
   # A's: a config that counted the other slot's attempts would mark a healthy image bad and,
   # worse, let a failing one retry forever.
   other_uc="${other^^}"
-  grep -q "^if qforge_bootattempts $slot; then\$" "$cfg" \
+  grep -q "^if retroforge_bootattempts $slot; then\$" "$cfg" \
     && ok "grub-$lc.cfg counts a boot attempt against image $slot" \
-    || bad "grub-$lc.cfg does not call qforge_bootattempts $slot"
-  grep -q "qforge_bootattempts $other_uc" "$cfg" \
+    || bad "grub-$lc.cfg does not call retroforge_bootattempts $slot"
+  grep -q "retroforge_bootattempts $other_uc" "$cfg" \
     && bad "grub-$lc.cfg counts a boot attempt against the OTHER image ($other_uc)" \
-    || ok "grub-$lc.cfg never names image $other_uc to qforge_bootattempts"
+    || ok "grub-$lc.cfg never names image $other_uc to retroforge_bootattempts"
   # It has to run where its errors can be seen. Its predecessor ran before the terminal was up and
   # a total failure was indistinguishable from success — which is the whole reason it was replaced.
   ln_term=$(grep -n '^terminal_output gfxterm$' "$cfg" | cut -d: -f1)
-  ln_att=$(grep -n '^if qforge_bootattempts ' "$cfg" | cut -d: -f1)
+  ln_att=$(grep -n '^if retroforge_bootattempts ' "$cfg" | cut -d: -f1)
   [ -n "$ln_term" ] && [ -n "$ln_att" ] && [ "$ln_att" -gt "$ln_term" ] \
     && ok "grub-$lc.cfg counts the attempt after terminal_output gfxterm" \
-    || bad "grub-$lc.cfg calls qforge_bootattempts before the terminal is up"
+    || bad "grub-$lc.cfg calls retroforge_bootattempts before the terminal is up"
 
   # Console. rotation is read once, when the video driver builds the framebuffer render target, so
   # a `set rotation=` that lands AFTER terminal_output parses fine, ships, and does nothing — the

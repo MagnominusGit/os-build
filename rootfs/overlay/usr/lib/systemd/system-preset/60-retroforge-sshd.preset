@@ -1,0 +1,9 @@
+# retroforge: enable the SSH server on release. It ships ON now, not gated by any switch — remote
+# access is key-only (no password on any account, no baked key), so a running sshd with no
+# authorized key admits nobody. Keys arrive through the key-delivery daemon (retroforge-pairingd),
+# which is always on for now. /etc/machine-id is empty on a fresh image so systemd
+# runs preset-all on first boot, where the stock 99-default.preset is "disable *"; this
+# higher-priority preset (60 < 99) keeps sshd enabled. A build-time multi-user.target.wants
+# symlink ships alongside as a fallback (cf. 60-retroforge-powerd). Host keys are generated
+# per-device at first start by openssh's own sshdgenkeys.service, not baked here.
+enable sshd.service

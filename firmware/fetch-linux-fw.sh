@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge linux-firmware fetch — stage the OPEN firmware blobs the SM8650 needs at
+# retroforge linux-firmware fetch — stage the OPEN firmware blobs the SM8650 needs at
 # runtime (Adreno GPU, WCN7850 Wi-Fi/BT, Iris VPU). The upstream Holo aarch64 base ships
 # no /lib/firmware, so these must be delivered by us. Sourced from the official
 # linux-firmware repo, pinned by commit + per-file sha256 in firmware/LINUX_FW.pin.
@@ -25,7 +25,7 @@ pin_hdr() { sed -n "s/^$1:[[:space:]]*//p" "$PIN" | head -1; }
 COMMIT="$(pin_hdr commit)"; BASE="$(pin_hdr base)"
 [ -n "$COMMIT" ] && [ -n "$BASE" ] || { echo "pin missing commit/base header" >&2; exit 1; }
 
-echo "[qforge] linux-firmware @ ${COMMIT:0:12} -> ${DEST#"$ROOT"/}"
+echo "[retroforge] linux-firmware @ ${COMMIT:0:12} -> ${DEST#"$ROOT"/}"
 mkdir -p "$DEST"
 n=0 fetched=0
 while read -r src dst sha _rest; do
@@ -50,4 +50,4 @@ while read -r src dst sha _rest; do
   echo "  ok   $src -> $dst"
   fetched=$((fetched + 1))
 done < "$PIN"
-echo "[qforge] $n firmware file(s) present in ${DEST#"$ROOT"/} ($fetched fetched this run)"
+echo "[retroforge] $n firmware file(s) present in ${DEST#"$ROOT"/} ($fetched fetched this run)"

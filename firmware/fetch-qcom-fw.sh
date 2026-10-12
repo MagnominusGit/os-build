@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge qcom-firmware fetch — stage the DEVICE-PROPRIETARY firmware blobs the target
+# retroforge qcom-firmware fetch — stage the DEVICE-PROPRIETARY firmware blobs the target
 # needs at runtime (GPU zap shaders, adsp/cdsp DSP images, AudioReach tplg, ath12k Wi-Fi/BT,
 # Renesas xHCI). These are Qualcomm/vendor blobs republished from each device's Android vendor
 # image to the Nova-Deck/qcom-firmwares repo, pinned by commit in firmware/QCOM_FW.pin.
@@ -32,11 +32,11 @@ REPO="$(pin_hdr repo)"; COMMIT="$(pin_hdr commit)"
 if [ -f "$DEST/.commit" ] && [ -f "$DEST/sha256sums.txt" ] \
    && [ "$(cat "$DEST/.commit" 2>/dev/null)" = "$COMMIT" ] \
    && ( cd "$DEST" && sha256sum -c sha256sums.txt >/dev/null 2>&1 ); then
-  echo "[qforge] qcom-firmware @ ${COMMIT:0:12} already staged -> ${DEST#"$ROOT"/}"
+  echo "[retroforge] qcom-firmware @ ${COMMIT:0:12} already staged -> ${DEST#"$ROOT"/}"
   exit 0
 fi
 
-echo "[qforge] qcom-firmware @ ${COMMIT:0:12} <- $REPO"
+echo "[retroforge] qcom-firmware @ ${COMMIT:0:12} <- $REPO"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 url="$REPO/archive/$COMMIT.tar.gz"
 curl -fsSL -o "$tmp/fw.tar.gz" "$url" \
@@ -55,4 +55,4 @@ rm -rf "$DEST"; mkdir -p "$DEST"
 cp -a "$src"/. "$DEST"/
 n="$(find "$DEST" -type f ! -name sha256sums.txt | wc -l)"
 printf '%s\n' "$COMMIT" > "$DEST/.commit"   # marker: staged commit, checked by the guard above
-echo "[qforge] $n firmware file(s) staged in ${DEST#"$ROOT"/}"
+echo "[retroforge] $n firmware file(s) staged in ${DEST#"$ROOT"/}"

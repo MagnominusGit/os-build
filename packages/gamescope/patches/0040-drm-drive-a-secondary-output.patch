@@ -1,4 +1,4 @@
-From: qforge
+From: retroforge
 Subject: [PATCH] drm: drive a secondary output next to the main one
 
 Dual-screen boards (AYN Thor / Thor Lite, AYANEO Pocket DS) have a
@@ -33,7 +33,7 @@ drm_debug_secondary_pattern flips it between two greys every vblank and
 logs the achieved flip rate, to exercise the commit path. Without
 --secondary-output nothing changes.
 
-(qforge: dual-screen boards, step 2 of the dual-output plan, 2026-10-12.
+(retroforge: dual-screen boards, step 2 of the dual-output plan, 2026-10-12.
 HW spike: separate commits on the two CRTCs of the msm DPU flip
 independently, DSI-1 at 120 Hz and DSI-2 at 60 Hz, no EBUSY.)
 ---

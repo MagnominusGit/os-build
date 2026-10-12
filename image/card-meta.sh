@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge release-card metadata — the small files that travel with a card.
+# retroforge release-card metadata — the small files that travel with a card.
 #
 #   image/card-meta.sh <image-file>   ->  out/images/release-meta/{sha256sums.txt,provenance/}
 #
@@ -12,7 +12,7 @@
 #
 # WHY PROVENANCE TRAVELS WITH THE IMAGE. Without it a card months old cannot be traced to what it
 # installed. rootfs/manifest.lock answers that for every package: third-party rows by sha256, and our
-# own `qforge` rows by packages/inputhash.sh over the sources they were built from. It used to be
+# own `retroforge` rows by packages/inputhash.sh over the sources they were built from. It used to be
 # accompanied by packages/*/artifact.pin, which answered "are these the reviewed BYTES?"; those were
 # part of the artifact-store machinery retired 2026-08-04. A release image now compiles its overlay
 # in the same CI run that publishes it, so the source pins ARE the byte provenance.

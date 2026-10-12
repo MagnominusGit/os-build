@@ -1,4 +1,4 @@
-# qforge release update bundle — builds a RAUC bundle for a device already in the field.
+# retroforge release update bundle — builds a RAUC bundle for a device already in the field.
 #
 # Separate from release-sdcard.yml on purpose: an update ships on its own cadence, and coupling it to
 # card builds would mean either cutting cards nobody asked for or delaying updates until someone did.
@@ -14,7 +14,7 @@
 # rejects. That is the intended difference, not a limitation.
 #
 # WHICH KEY ACTUALLY GOES TO CI, because this was mis-stated for a while and it matters. Not the
-# 20-year root: ~/qforge-pki/ca.key.pem stays offline and never leaves the workstation. CI gets
+# 20-year root: ~/retroforge-pki/ca.key.pem stays offline and never leaves the workstation. CI gets
 # release.cert.pem + release.key.pem — the SIGNING pair, whose cert expires 2028-10-04. Devices
 # trust the CA, not that cert, so if CI is ever compromised the response is to mint a new release
 # cert from the offline root and carry on. No device changes, no keyring update, no reflash. That
@@ -117,8 +117,8 @@ jobs:
           # nothing else. `ota/v0.3.0` -> stable. `ota/v0.3.0-beta.1` -> beta.
           # ============================================================================
           # The channel is the first path segment on the update server, and it is what a
-          # device's OTA_CHANNEL selects — the environment, then /etc/qforge/ota.conf,
-          # then the user-writable ~/.config/qforge/ota.conf (qforge-update's
+          # device's OTA_CHANNEL selects — the environment, then /etc/retroforge/ota.conf,
+          # then the user-writable ~/.config/retroforge/ota.conf (retroforge-update's
           # channel_setting()). There is no Settings picker: that work was dropped with
           # PR #82. So this line is what gives a user something to point at; without a
           # beta directory on the server, naming `beta` is a 404 and the device's update
@@ -127,7 +127,7 @@ jobs:
           # NOT A SEPARATE TAG NAMESPACE (`ota-beta/v*`), which is the obvious alternative
           # and the shape the ota/ + card/ split would suggest. The suffix wins because the
           # VERSION STRING ITSELF then records the channel, and duplicate detection turns on
-          # that string: qforge-update's check compares the offered identity against the
+          # that string: retroforge-update's check compares the offered identity against the
           # running one for INEQUALITY, so two channels publishing the same `0.3.0` would
           # leave a device that switches stable -> beta believing it is already up to date.
           # `0.3.0` and `0.3.0-beta.1` are distinct identities by construction, and the
@@ -193,7 +193,7 @@ jobs:
   sign:
     # Not `prep`: this job deliberately consumes no version string. See the fetch step below.
     needs: build
-    # aarch64, because genbundle.sh runs rauc inside the qforge-build container and that image is
+    # aarch64, because genbundle.sh runs rauc inside the retroforge-build container and that image is
     # built for the target arch. Same expression as image.yml's build job so the two cannot drift
     # onto different runner pools.
     runs-on: ${{ vars.OVERLAY_RUNNER || 'ubuntu-24.04-arm' }}
@@ -202,15 +202,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Straight into out/images/, where genbundle.sh looks. No QFORGE_VERSION here and none
+      # Straight into out/images/, where genbundle.sh looks. No RETROFORGE_VERSION here and none
       # wanted: the bundle's identity comes out of the rootfs.release sidecar that travelled with the
       # image, never out of this job's environment. That is the invariant genbundle.sh was rewritten
       # to enforce, and the split would be the perfect way to violate it — this job could trivially
-      # be handed a version that disagrees with the payload's own /etc/qforge-release.
+      # be handed a version that disagrees with the payload's own /etc/retroforge-release.
       - name: fetch the rootfs
         uses: actions/download-artifact@v8
         with:
-          name: qforge-rootfs
+          name: retroforge-rootfs
           path: out/images
 
       - name: build the toolchain image
@@ -224,7 +224,7 @@ jobs:
           set -euo pipefail
           # $RUNNER_TEMP, never the workspace — the repo tree gets uploaded as artifacts and cached,
           # and a private key that lands in either is a leaked key. Same convention as docs/ci.md
-          # and as PKIDIR locally (~/qforge-pki): outside anything the build can sweep up.
+          # and as PKIDIR locally (~/retroforge-pki): outside anything the build can sweep up.
           if [ -n "${RAUC_CERT_PEM:-}" ] && [ -n "${RAUC_KEY_PEM:-}" ]; then
             pki="$RUNNER_TEMP/pki"
             mkdir -p "$pki" && chmod 700 "$pki"
@@ -259,7 +259,7 @@ jobs:
       - name: upload metadata artifact
         uses: actions/upload-artifact@v7
         with:
-          name: qforge-bundle-meta
+          name: retroforge-bundle-meta
           path: meta/
           if-no-files-found: error
 
@@ -267,7 +267,7 @@ jobs:
       - name: upload the image artifact
         uses: actions/upload-artifact@v7
         with:
-          name: qforge-bundle
+          name: retroforge-bundle
           path: upload/
           if-no-files-found: error
           retention-days: 7
@@ -350,7 +350,7 @@ jobs:
       - name: fetch the bundle
         uses: actions/download-artifact@v8
         with:
-          name: qforge-bundle
+          name: retroforge-bundle
           path: out/images
 
       # $RUNNER_TEMP, never the workspace, for the reason image.yml already keeps the RAUC key
@@ -358,21 +358,21 @@ jobs:
       - name: publish to the update server
         env:
           OTA_SSH_KEY: ${{ secrets.OTA_SSH_KEY }}
-          QFORGE_OTA_HOST: ${{ vars.OTA_HOST || 'updates.qforge.invalid' }}
+          RETROFORGE_OTA_HOST: ${{ vars.OTA_HOST || 'updates.retroforge.invalid' }}
           # `otapub`, NOT the script's own default. ota/publish-bundle.sh defaults to `ubuntu`
           # because its primary caller is a human at a workstation holding the ADMIN key, and that
           # key is not in otapub's authorized_keys. CI is the other caller and names its own
           # principal — the one ota/setup-ci-user.sh created and the secret above authenticates as.
-          QFORGE_OTA_USER: ${{ vars.OTA_USER || 'otapub' }}
+          RETROFORGE_OTA_USER: ${{ vars.OTA_USER || 'otapub' }}
           # Derived in `prep` from the tag's pre-release suffix; that step carries the reasoning.
           # publish-bundle.sh reads this (its $2 default) and it is the ONLY thing that decides
           # which directory devices are offered this bundle from.
-          QFORGE_OTA_CHANNEL: ${{ needs.prep.outputs.channel }}
+          RETROFORGE_OTA_CHANNEL: ${{ needs.prep.outputs.channel }}
         run: |
           set -euo pipefail
           # An empty channel would silently mean `stable` inside publish-bundle.sh — the one
           # direction a mistake here must not go. Fail before the key is written to disk.
-          [ -n "${QFORGE_OTA_CHANNEL:-}" ] || {
+          [ -n "${RETROFORGE_OTA_CHANNEL:-}" ] || {
             echo "::error::no channel came out of the prep job — refusing to fall back to stable"
             exit 1
           }
@@ -380,11 +380,11 @@ jobs:
           printf '%s\n' "$OTA_SSH_KEY" > "$key"
           chmod 600 "$key"
           trap 'shred -u "$key" 2>/dev/null || rm -f "$key"' EXIT
-          bundle="$(ls out/images/qforge-*.raucb)"
+          bundle="$(ls out/images/retroforge-*.raucb)"
           # Build the toolchain image so publish-bundle.sh's keyring gate runs against the PINNED
           # rauc (build/Dockerfile, RAUC_VERSION) rather than whatever the runner's archive holds.
           # Not a detail: ubuntu-latest ships a rauc old enough to predate verity bundle support, so
           # `apt-get install rauc` here would give a gate that fails on every bundle we produce —
           # indistinguishable, from the log, from a genuinely bad signature.
-          docker build -t qforge-build -f build/Dockerfile build
-          QFORGE_OTA_SSH_KEY="$key" ota/publish-bundle.sh "$bundle"
+          docker build -t retroforge-build -f build/Dockerfile build
+          RETROFORGE_OTA_SSH_KEY="$key" ota/publish-bundle.sh "$bundle"

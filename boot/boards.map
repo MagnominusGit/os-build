@@ -1,12 +1,12 @@
-# qforge board catalog for the stage-2 grub.cfg generation (boot/grub.sh).
+# retroforge board catalog for the stage-2 grub.cfg generation (boot/grub.sh).
 #
 # Tab-separated: <device-id>\t<menuentry name>\t<dtb basename>\t<bootargs>
 # One row per board, read verbatim by boot/grub.sh. This is BUILD-TIME data: the
 # DTB and the SoC bootargs only exist to generate grub.cfg menuentries, so they
 # live here in the project boot folder, NOT in the runtime device profiles
-# (rootfs/overlay/usr/lib/qforge/devices/*.conf, which carry no boot data).
+# (rootfs/overlay/usr/lib/retroforge/devices/*.conf, which carry no boot data).
 #
-# <device-id> and <name> mirror QFORGE_DEVICE_ID / QFORGE_DEVICE_NAME in the
+# <device-id> and <name> mirror RETROFORGE_DEVICE_ID / RETROFORGE_DEVICE_NAME in the
 # runtime profiles (the menuentry id/title must match the identity the OS
 # reports); tests/test-stage2-grub.sh cross-checks the two stay in sync. Every
 # <dtb> must exist under kernel/dts/qcom/ and every board DTB must be covered

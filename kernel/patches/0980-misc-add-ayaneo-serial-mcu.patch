@@ -734,7 +734,7 @@ diff -Naur a/drivers/misc/Kconfig b/drivers/misc/Kconfig
 +	  This is a lab tool for a firmware whose command set is not
 +	  documented. It is a root-writable path that pokes undocumented
 +	  firmware commands, so it must NOT be enabled in a shipping image,
-+	  and no qforge build enables it -- which also means it is not
++	  and no retroforge build enables it -- which also means it is not
 +	  compile tested and may need fixing up before it builds.
 +
 +	  If unsure, say N.

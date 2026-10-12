@@ -22,9 +22,9 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SRCDIR="$ROOT/apps/qforge-splash"
-BIN="$SRCDIR/build/qforge-splash.host"
-DEVDIR="$ROOT/rootfs/overlay/usr/lib/qforge/devices"
+SRCDIR="$ROOT/apps/retroforge-splash"
+BIN="$SRCDIR/build/retroforge-splash.host"
+DEVDIR="$ROOT/rootfs/overlay/usr/lib/retroforge/devices"
 ASSET="$ROOT/work/splash/logo.nds1"
 
 PASS=0; FAIL=0
@@ -143,8 +143,8 @@ echo "device registry:"
 geoms=()
 if [[ -d $DEVDIR ]]; then
     while IFS= read -r conf; do
-        w=$(sed -n 's/^[[:space:]]*QFORGE_PANEL_NATIVE_WIDTH=["'"'"']*\([0-9]*\).*/\1/p' "$conf" | head -1)
-        h=$(sed -n 's/^[[:space:]]*QFORGE_PANEL_NATIVE_HEIGHT=["'"'"']*\([0-9]*\).*/\1/p' "$conf" | head -1)
+        w=$(sed -n 's/^[[:space:]]*RETROFORGE_PANEL_NATIVE_WIDTH=["'"'"']*\([0-9]*\).*/\1/p' "$conf" | head -1)
+        h=$(sed -n 's/^[[:space:]]*RETROFORGE_PANEL_NATIVE_HEIGHT=["'"'"']*\([0-9]*\).*/\1/p' "$conf" | head -1)
         [[ -n $w && -n $h ]] && geoms+=("$(basename "$conf" .conf) $w $h")
     done < <(find "$DEVDIR" -name '*.conf' | sort)
 fi
@@ -159,7 +159,7 @@ for g in "${geoms[@]}"; do
     read -r name pw ph <<<"$g"
     for rot in 0 90 180 270; do
         tag="$name ${pw}x${ph} rot=$rot"
-        if ! render "$TMP/o.ppm" "$pw" "$ph" "$rot" "Starting QForge"; then
+        if ! render "$TMP/o.ppm" "$pw" "$ph" "$rot" "Starting RetroForge"; then
             bad "$tag: drawer exited non-zero"; continue
         fi
         # The asset must never be scaled up; the drawer says so and mksplash.sh sizes for it.
@@ -322,9 +322,9 @@ grep -q "bad NDS1 header" "$TMP/e3" && ok "a truncated NDS1 asset is rejected by
 echo
 echo "handover across switch_root:"
 
-RUN="$TMP/run/qforge/splash"
+RUN="$TMP/run/retroforge/splash"
 mkdir -p "$RUN"
-printf 'Starting QForge\n' >"$RUN/status"
+printf 'Starting RetroForge\n' >"$RUN/status"
 
 "$BIN" --backend null --width 640 --height 480 --image "$ASSET" --font "$FONT" \
        --status "$RUN/status" --takeover "$RUN/takeover" >"$TMP/null.log" 2>&1 &
@@ -342,14 +342,14 @@ fi
 # does), but the PATH the drawer was given no longer resolves to it. A path-based implementation
 # reads nothing from here on; a dirfd-based one is unaffected.
 mv "$TMP/run" "$TMP/run-moved"
-RUN="$TMP/run-moved/qforge/splash"
-if [[ -e "$TMP/run/qforge/splash/takeover" ]]; then
+RUN="$TMP/run-moved/retroforge/splash"
+if [[ -e "$TMP/run/retroforge/splash/takeover" ]]; then
     bad "the pivot simulation did not actually break the path"
 else
     ok "the run directory is no longer reachable by its original path"
 fi
 
-# Status must still flow. A regression here is the "splash says Starting QForge forever" half.
+# Status must still flow. A regression here is the "splash says Starting RetroForge forever" half.
 printf 'Installing Steam\n' >"$RUN/status"
 sleep 1
 # Then the handover. A regression here is the half that black-screens the session.
@@ -374,10 +374,10 @@ grep -q "yielding display to 'sddm'" "$TMP/null.log" \
 # The diagnostics themselves: one write() per message, because in the initramfs stderr is
 # /dev/kmsg and every write becomes a separate record. Splitting a message across three writes
 # lost the text entirely on hardware.
-if [[ -s "$TMP/null.log" ]] && ! grep -qE '^qforge-splash: *$' "$TMP/null.log"; then
+if [[ -s "$TMP/null.log" ]] && ! grep -qE '^retroforge-splash: *$' "$TMP/null.log"; then
     ok "log lines carry their message (not split across writes)"
 else
-    bad "empty 'qforge-splash:' lines -- note() is splitting one message into several writes"
+    bad "empty 'retroforge-splash:' lines -- note() is splitting one message into several writes"
 fi
 
 printf '\n%s: %d passed, %d failed\n' "$(basename "$0")" "$PASS" "$FAIL"

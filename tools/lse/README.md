@@ -19,7 +19,7 @@ such a binary dies with SIGILL on its first atomic. The fix is `kernel/patches/0
   handler with the same decoder and LDXR/STXR loops. It keeps itself first for SIGILL (interposes
   `sigaction`/`signal`, chains to the application's handler) and never lets a thread block SIGILL
   (a CPU-raised SIGILL in a thread that blocks it is fatal; libpulse starts its threads that way).
-  `QFORGE_LSE_STATS=1` prints the emulation count per process. Slower than the kernel path
+  `RETROFORGE_LSE_STATS=1` prints the emulation count per process. Slower than the kernel path
   (0.86 us per emulated atomic on an A73, measured) and per-process only; a stopgap.
 
   ```sh

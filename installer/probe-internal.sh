@@ -84,8 +84,8 @@ echo '|---|---|'
 echo "| Captured | $(date -u '+%Y-%m-%dT%H:%M:%SZ') |"
 echo "| Board | \`${model:-?}\` |"
 echo "| Kernel | \`$(uname -r)\` |"
-for k in QFORGE_VARIANT QFORGE_MODE QFORGE_VERSION QFORGE_BUILD; do
-  v="$(sed -n "s/^$k=//p" /etc/qforge-release 2>/dev/null | head -1 | tr -d '"')"
+for k in RETROFORGE_VARIANT RETROFORGE_MODE RETROFORGE_VERSION RETROFORGE_BUILD; do
+  v="$(sed -n "s/^$k=//p" /etc/retroforge-release 2>/dev/null | head -1 | tr -d '"')"
   [ -n "$v" ] && echo "| $k | \`$v\` |"
 done
 echo "| Running root | \`${root_src:-?}\` |"
@@ -120,7 +120,7 @@ echo
 found_internal=0
 for d in $(disks); do
   # The boot medium is not an install target (rule 2), so its table is normally noise here -- but
-  # ONCE QFORGE IS INSTALLED INTERNALLY IT BOOTS FROM THE DISK THE CARVE ACTED ON, and skipping
+  # ONCE RETROFORGE IS INSTALLED INTERNALLY IT BOOTS FROM THE DISK THE CARVE ACTED ON, and skipping
   # it then omits the one table the capture exists for. MEASURED 2026-08-22: a capture taken on an
   # installed AYANEO Pocket ACE carried sdb..sdf and not a single row of sda, the disk in question.
   # So the skip is conditional on the disk carrying no `userdata` -- which keeps a card-booted

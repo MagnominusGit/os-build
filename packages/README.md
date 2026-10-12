@@ -1,7 +1,7 @@
 # packages/
 
 Pacman packages layered on top of the upstream aarch64 base — overlays rebuilt from
-source with qforge patches (`source.pin`) and pinned precompiled tarballs
+source with retroforge patches (`source.pin`) and pinned precompiled tarballs
 (`prebuilt.pin`). (Static files baked straight into the rootfs live under `rootfs/overlay/`,
 not here.)
 
@@ -30,7 +30,7 @@ it on the host, and extracts it into the release base — **adding a package is 
 pin file, no code change**. Any `deps:` a pin declares are pacman-installed into the base
 alongside the prebuilt (e.g. shared libraries the binary links), so a prebuilt's runtime
 deps live with the pin instead of being hardcoded in the install list. The set of installed
-prebuilts **and their deps** is recorded in the base at `/usr/lib/qforge/prebuilt.manifest`,
+prebuilts **and their deps** is recorded in the base at `/usr/lib/retroforge/prebuilt.manifest`,
 which keys the base reuse-cache (bump a pin, or change its deps, → the base rebuilds).
 Current pins: `inputplumber/` (InputPlumber input daemon; `deps: libiio`).
 
@@ -58,7 +58,7 @@ CI is just this directory and its stamps in `actions/cache` — no registry, pin
 costs a gamescope build and nothing else. Change a `source.pin`, a patch or a `PKGBUILD` and the next
 `make overlay` rebuilds that package; change nothing and it does nothing.
 
-`qforge.db` is deliberately **not** pinned: `repo-add` is not byte-reproducible either, so a pin on
+`retroforge.db` is deliberately **not** pinned: `repo-add` is not byte-reproducible either, so a pin on
 it could never hold. Nothing installs *from* the db in a locked build — `fetchlock.sh` hands pacman an
 explicit file list — so it is an index, not an input.
 
@@ -135,7 +135,7 @@ the fleet.
 
 ## From-source overlay packages (`source.pin`)
 
-Holo packages that need a qforge **code** patch are rebuilt from source instead of pulled as
+Holo packages that need a retroforge **code** patch are rebuilt from source instead of pulled as
 binaries. Drop a `packages/<name>/source.pin` plus the patches under `packages/<name>/patches/`:
 
 ```
@@ -188,7 +188,7 @@ not a store: nothing is published or pinned.) A GHCR store keyed by the same inp
 2026-08-04 — with `oras`, an `artifact.pin` per package, and a bot PR carrying published shas — and
 it was retired because it was built for the emulated cost and CI never paid it. See *What CI does
 with these packages* above for the measurements. `work/repo/<arch>/` is a plain pacman repo, so if
-one is ever wanted again, serving that directory over HTTP and repointing the `[qforge]` `Server`
+one is ever wanted again, serving that directory over HTTP and repointing the `[retroforge]` `Server`
 is the cheap version.
 
 ### How these packages are pinned — `inputhash.sh`
@@ -200,7 +200,7 @@ that one formula, and they have to agree byte for byte:
 | reader | what it does with it |
 |---|---|
 | `build-overlay.sh` | incremental-rebuild cache key (`work/repo/<arch>/.stamps/<name>.hash`) |
-| `rootfs/genmanifest.sh` | writes it into `rootfs/manifest.lock` as the `qforge` rows' hash |
+| `rootfs/genmanifest.sh` | writes it into `rootfs/manifest.lock` as the `retroforge` rows' hash |
 | `rootfs/fetchlock.sh` | re-derives it and refuses the install when the lock disagrees |
 | `packages/verify-lock-rows.sh` | the same comparison from committed files only, so it can run **before** a build (`make verify-lock`) |
 
@@ -225,7 +225,7 @@ sha256sum`: that hashes `<hash>  <path>` lines and silently follows the director
 ### Local (checked-in) PKGBUILD — `pkgbuild_local`
 
 When there is **no suitable holo PKGBUILD** to fetch — a version bump holo hasn't taken, or a
-build the holo recipe doesn't cover — point the pin at a qforge-owned PKGBUILD committed next
+build the holo recipe doesn't cover — point the pin at a retroforge-owned PKGBUILD committed next
 to it instead of the `pkgbuild_repo`/`pkgbuild_path`/`pkgbuild_ref` triple:
 
 ```
@@ -254,5 +254,5 @@ Current overlay:
 - `rauc/` — **local PKGBUILD** building rauc `1.15.2` from the upstream release tarball. This is
   holo's own `extra-aarch64/r/rauc/1.14-1` recipe with the version bumped and nothing else
   redesigned — the *only* reason we build it is that 1.14 cannot install a dm-verity bundle on a
-  kernel `>= 6.19` (upstream fixed it first in `v1.15.1`) and we ship 7.1.x. No qforge patches.
+  kernel `>= 6.19` (upstream fixed it first in `v1.15.1`) and we ship 7.1.x. No retroforge patches.
   Unlike the entries above it outranks holo's build by `pkgver`, not just by repo order.

@@ -3,7 +3,7 @@
 #
 #   tests/test-boot-disk.sh
 #
-# WHY THIS FILE EXISTS. Every qforge medium carries the same eight GPT names, so with a card
+# WHY THIS FILE EXISTS. Every retroforge medium carries the same eight GPT names, so with a card
 # inserted in a device installed to internal storage, /dev/disk/by-partlabel/* and
 # /dev/disk/by-label/* resolve to whichever disk udev enumerated first. Four consumers depended on
 # that -- /esp, /home, grow-home's repart target, and rauc's slot devices -- and the consequences
@@ -12,7 +12,7 @@
 # are created by ONE udev rule matching through ONE program, and this suite is the only thing that
 # can exercise that program: it needs two disks, and hardware only ever has the one it booted.
 #
-# It EXECUTES rootfs/overlay/usr/lib/qforge/on-boot-disk -- not a copy -- through the two seams
+# It EXECUTES rootfs/overlay/usr/lib/retroforge/on-boot-disk -- not a copy -- through the two seams
 # that file documents, against a sysfs-shaped fixture. So what passes here is the artifact that
 # ships.
 #
@@ -25,8 +25,8 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROG="$ROOT/rootfs/overlay/usr/lib/qforge/on-boot-disk"
-RULE="$ROOT/rootfs/overlay/usr/lib/udev/rules.d/69-qforge-bootdisk.rules"
+PROG="$ROOT/rootfs/overlay/usr/lib/retroforge/on-boot-disk"
+RULE="$ROOT/rootfs/overlay/usr/lib/udev/rules.d/69-retroforge-bootdisk.rules"
 # The fstab rows and grow-home live in the first-boot-storage stage, now its own sourced helper
 # (issue #43). Named specifically rather than globbed: a glob would keep passing if the block it
 # checks were deleted from the file it was supposed to be in.
@@ -80,11 +80,11 @@ bootinfo() {  # <root device path, or empty for a file with no root= line>
   } >"$T/boot"
 }
 
-# The call udev makes: PROGRAM=="/usr/lib/qforge/on-boot-disk %k".
+# The call udev makes: PROGRAM=="/usr/lib/retroforge/on-boot-disk %k".
 # The argument is optional so the no-argument case below can be exercised: a rule typo'd to
 # PROGRAM=="...on-boot-disk" with no %k is a real way for this to be called bare.
 on_boot_disk() {  # [kernel name]
-  QFORGE_SYSBLOCK="$T/sys/class/block" QFORGE_BOOTINFO="$T/boot" "$PROG" ${1+"$1"}
+  RETROFORGE_SYSBLOCK="$T/sys/class/block" RETROFORGE_BOOTINFO="$T/boot" "$PROG" ${1+"$1"}
 }
 
 echo "booted from the card, internal install present"
@@ -146,7 +146,7 @@ echo "fail-open: the boot disk cannot be determined"
 mkdisk sda 8 ''
 rm -f "$T/boot"
 on_boot_disk sda8 \
-  && ok "no /run/qforge/boot (a dev boot, or an initramfs that degraded) -> linked" \
+  && ok "no /run/retroforge/boot (a dev boot, or an initramfs that degraded) -> linked" \
   || bad "a missing boot handoff refuses every link — /home and /esp would not mount"
 bootinfo ''
 on_boot_disk sda8 \
@@ -176,43 +176,43 @@ on_boot_disk \
 # call sites; each one is a partition this system can address on the wrong disk.
 echo
 echo "every consumer names the scoped link"
-grep -q 'PROGRAM=="/usr/lib/qforge/on-boot-disk %k"' "$RULE" \
+grep -q 'PROGRAM=="/usr/lib/retroforge/on-boot-disk %k"' "$RULE" \
   && ok "the rule matches through on-boot-disk, passing the kernel name" \
   || bad "the rule does not invoke on-boot-disk with %k — the program this suite tests is not the one that runs"
 # 60-persistent-storage.rules is what exports ID_PART_ENTRY_NAME, and udev sorts rule FILES
-# lexically: at 60-qforge-* this file would run BEFORE that import and match an unset variable,
+# lexically: at 60-retroforge-* this file would run BEFORE that import and match an unset variable,
 # creating no links and saying nothing. The prefix IS the mechanism here, so it is asserted.
 case "$(basename "$RULE")" in
   6[1-9]-*|[7-9][0-9]-*) ok "the rule sorts after 60-persistent-storage.rules, so ID_PART_ENTRY_NAME is set when it runs" ;;
   *) bad "$(basename "$RULE") sorts at or before 60-persistent-storage.rules — ID_PART_ENTRY_NAME is unset and nothing is ever linked" ;;
 esac
-grep -q "'/dev/qforge/QFORGE-ESP  /esp" "$ASSEMBLE" \
+grep -q "'/dev/retroforge/RETROFORGE-ESP  /esp" "$ASSEMBLE" \
   && ok "fstab mounts /esp from the scoped link" \
-  || bad "the /esp fstab row does not name /dev/qforge/QFORGE-ESP"
-grep -q "'/dev/qforge/qforge-home  /home" "$ASSEMBLE" \
+  || bad "the /esp fstab row does not name /dev/retroforge/RETROFORGE-ESP"
+grep -q "'/dev/retroforge/retroforge-home  /home" "$ASSEMBLE" \
   && ok "fstab mounts /home from the scoped link" \
-  || bad "the /home fstab row does not name /dev/qforge/qforge-home"
-grep -q '^HOME_DEV=/dev/qforge/qforge-home$' "$ASSEMBLE" \
+  || bad "the /home fstab row does not name /dev/retroforge/retroforge-home"
+grep -q '^HOME_DEV=/dev/retroforge/retroforge-home$' "$ASSEMBLE" \
   && ok "grow-home resolves home through the scoped link before it reparts the parent disk" \
   || bad "grow-home still resolves home by label — it can repart the other disk"
-[ "$(grep -c '^device=/dev/qforge/qforge-root-[AB]$' "$SYSCONF")" = 2 ] \
+[ "$(grep -c '^device=/dev/retroforge/retroforge-root-[AB]$' "$SYSCONF")" = 2 ] \
   && ok "both rauc slots name the scoped link" \
-  || bad "rauc's slot devices are not both /dev/qforge/qforge-root-{A,B}"
-grep -q '^DEVDIR=${DEVDIR:-/dev/qforge}$' "$POSTINST" \
+  || bad "rauc's slot devices are not both /dev/retroforge/retroforge-root-{A,B}"
+grep -q '^DEVDIR=${DEVDIR:-/dev/retroforge}$' "$POSTINST" \
   && ok "the post-install hook defaults to the scoped links" \
   || bad "post-install.sh still defaults DEVDIR to by-partlabel"
-if grep -qE '/dev/disk/by-(part)?label/(qforge|QFORGE)' "${ASSEMBLE_ALL[@]}" "$SYSCONF" "$POSTINST"; then
+if grep -qE '/dev/disk/by-(part)?label/(retroforge|RETROFORGE)' "${ASSEMBLE_ALL[@]}" "$SYSCONF" "$POSTINST"; then
   bad "a consumer still names /dev/disk/by-{part,}label for one of our partitions:"
-  grep -nE '/dev/disk/by-(part)?label/(qforge|QFORGE)' "${ASSEMBLE_ALL[@]}" "$SYSCONF" "$POSTINST" | sed 's/^/       /'
+  grep -nE '/dev/disk/by-(part)?label/(retroforge|RETROFORGE)' "${ASSEMBLE_ALL[@]}" "$SYSCONF" "$POSTINST" | sed 's/^/       /'
 else
   ok "no consumer resolves one of our partitions by bare label any more"
 fi
 
 # --- the fifth consumer, the one udev cannot reach ------------------------------------------------
-# Stage 2 runs before Linux, so /dev/qforge cannot help it -- and it writes the same boot
+# Stage 2 runs before Linux, so /dev/retroforge cannot help it -- and it writes the same boot
 # accounting the four consumers above protect: it increments boot-attempts in
 # \SteamOS\conf\<slot>.conf on the ESP. Its sweep over SIMPLE_FILE_SYSTEM handles used to take the
-# first volume that carried the conf, and every qforge medium carries one, so with two media
+# first volume that carried the conf, and every retroforge medium carries one, so with two media
 # inserted the firmware's enumeration order decided which install got counted. A count landing on
 # the disk we did NOT boot is never cleared, because mark-good clears through /esp -- scoped to the
 # booted disk. It climbs once per boot until steamcl's failsafe rolls back a healthy slot. Observed
@@ -222,7 +222,7 @@ fi
 # job), so these assert the mechanism is still IN the patch that builds the module.
 echo
 echo "stage 2 scopes its ESP sweep to the disk it was loaded from"
-MODPATCH="$ROOT/boot/patches/grub/0002-add-the-qforge-stage-2-module.patch"
+MODPATCH="$ROOT/boot/patches/grub/0002-add-the-retroforge-stage-2-module.patch"
 if [ ! -f "$MODPATCH" ]; then
   bad "missing $(basename "$MODPATCH") — the boot-attempts counter has no module to build"
 else
@@ -252,7 +252,7 @@ echo "the rule's name match covers image/partition-table.txt"
 while read -r _ _ _ _ label _; do
   case "$label" in ''|'#'*|'-') continue ;; esac
   case "$label" in
-    qforge-*|QFORGE-*) ok "$label is matched by the rule's qforge-*|QFORGE-* prefix" ;;
+    retroforge-*|RETROFORGE-*) ok "$label is matched by the rule's retroforge-*|RETROFORGE-* prefix" ;;
     *) bad "$label is in the partition table but matches neither prefix in the rule — it would get no scoped link" ;;
   esac
 done < <(grep -vE '^[[:space:]]*(#|$)' "$TABLE")

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# qforge OTA bundle publisher — Phase 3. Puts a signed RAUC bundle on the update server and flips
+# retroforge OTA bundle publisher — Phase 3. Puts a signed RAUC bundle on the update server and flips
 # the channel pointer at it.
 #
-#   ota/publish-bundle.sh out/images/qforge-0.2.0.raucb [channel]
+#   ota/publish-bundle.sh out/images/retroforge-0.2.0.raucb [channel]
 #
 # Shaped after ota/publish-card.sh — credentials from the environment only, an explicit KEEP
 # retention, and verification at the PUBLIC url rather than trust in the upload — but over SSH/rsync
@@ -11,7 +11,7 @@
 #
 # THE SIGNATURE GATE RUNS FIRST, BEFORE A BYTE MOVES, and it has no override. A bundle is accepted
 # only if it verifies against the CA that is baked into every device's keyring
-# (ota/rauc/qforge-ca.pem, installed as /etc/rauc/keyring.pem by rootfs/assemble-rootfs.sh).
+# (ota/rauc/retroforge-ca.pem, installed as /etc/rauc/keyring.pem by rootfs/assemble-rootfs.sh).
 # Publishing an unsigned or dev-cert bundle would not be a near miss: `make bundle` without PKIDIR
 # mints an EPHEMERAL 7-day cert that is deleted with its tempdir, so the result is a ~4G download
 # every device in the field throws away at the last step, over Wi-Fi, having already asked the user
@@ -37,19 +37,19 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/build/lib-container.sh"
 
-HOST="${QFORGE_OTA_HOST:-updates.qforge.invalid}"
-USER_="${QFORGE_OTA_USER:-ubuntu}"
-SSH_KEY="${QFORGE_OTA_SSH_KEY:-}"
-DOCROOT="${QFORGE_OTA_DOCROOT:-/srv/qforge-ota}"
-BASE_URL="${QFORGE_OTA_URL:-https://$HOST}"
+HOST="${RETROFORGE_OTA_HOST:-updates.retroforge.invalid}"
+USER_="${RETROFORGE_OTA_USER:-ubuntu}"
+SSH_KEY="${RETROFORGE_OTA_SSH_KEY:-}"
+DOCROOT="${RETROFORGE_OTA_DOCROOT:-/srv/retroforge-ota}"
+BASE_URL="${RETROFORGE_OTA_URL:-https://$HOST}"
 # Retention. The instance has ~94G and a bundle is ~4G, so unlike the card bucket (KEEP=1, where the
 # free tier was the constraint) there is room to keep the previous releases: if a published update
 # turns out bad, re-pointing latest.json at the one before it is the fastest fleet-wide fix there is,
 # and it only works if those bytes are still on the server.
-KEEP="${QFORGE_OTA_KEEP:-3}"
+KEEP="${RETROFORGE_OTA_KEEP:-3}"
 
 BUNDLE="${1:-}"
-CHANNEL="${2:-${QFORGE_OTA_CHANNEL:-stable}}"
+CHANNEL="${2:-${RETROFORGE_OTA_CHANNEL:-stable}}"
 
 log()  { printf '[publish] %s\n' "$*" >&2; }
 die()  { printf '[publish] %s\n' "$*" >&2; exit 1; }
@@ -60,7 +60,7 @@ case "$CHANNEL" in
   ''|*[!A-Za-z0-9._-]*) die "channel '$CHANNEL' has characters that do not belong in a URL path" ;;
 esac
 case "$KEEP" in
-  ''|*[!0-9]*) die "QFORGE_OTA_KEEP must be a whole number, got '$KEEP'" ;;
+  ''|*[!0-9]*) die "RETROFORGE_OTA_KEEP must be a whole number, got '$KEEP'" ;;
 esac
 
 BUNDLE_ABS="$(cd "$(dirname "$BUNDLE")" && pwd)/$(basename "$BUNDLE")"
@@ -86,14 +86,14 @@ remote() { ssh "${SSH_OPTS[@]}" "$USER_@$HOST" "$@"; }
 
 # --- 1. the signature gate -----------------------------------------------------------------------
 CONF_REL="rootfs/overlay/etc/rauc/system.conf"
-KEYRING_REL="ota/rauc/qforge-ca.pem"
-[ -f "$ROOT/$CONF_REL" ]    || die "no $CONF_REL — run this from the qforge tree"
-[ -f "$ROOT/$KEYRING_REL" ] || die "no $KEYRING_REL — run this from the qforge tree"
+KEYRING_REL="ota/rauc/retroforge-ca.pem"
+[ -f "$ROOT/$CONF_REL" ]    || die "no $CONF_REL — run this from the retroforge tree"
+[ -f "$ROOT/$KEYRING_REL" ] || die "no $KEYRING_REL — run this from the retroforge tree"
 
 # rauc is not a host tool here (it is version-pinned in build/Dockerfile precisely so the bundle
 # WRITER and the device's installer cannot drift), so fall back to the build container.
 #
-# NOTE THE `-c`: qforge-build's ENTRYPOINT is /bin/bash, so `docker run <img> rauc ...` runs
+# NOTE THE `-c`: retroforge-build's ENTRYPOINT is /bin/bash, so `docker run <img> rauc ...` runs
 # `bash rauc ...` and bash tries to SOURCE the binary — "cannot execute binary file", which reads
 # like a broken image and is not. Everything else in the repo passes it shell scripts, so this is the
 # first caller that has to know.
@@ -101,9 +101,9 @@ rauc_info() { # <extra rauc args...>  — the bundle path is resolved per backen
   if command -v rauc >/dev/null 2>&1; then
     ( cd "$ROOT" && rauc info --conf="$CONF_REL" --keyring="$KEYRING_REL" "$@" "$BUNDLE_ABS" )
   else
-    command -v "$QFORGE_CONTAINER" >/dev/null 2>&1 || die "neither rauc nor $QFORGE_CONTAINER is available; cannot verify the signature, so nothing will be published"
+    command -v "$RETROFORGE_CONTAINER" >/dev/null 2>&1 || die "neither rauc nor $RETROFORGE_CONTAINER is available; cannot verify the signature, so nothing will be published"
     # The bundle's directory is mounted read-only at /bundle so a path outside the repo still works.
-    ctr run --rm -v "$ROOT":/src -v "$(dirname "$BUNDLE_ABS")":/bundle:ro -w /src qforge-build \
+    ctr run --rm -v "$ROOT":/src -v "$(dirname "$BUNDLE_ABS")":/bundle:ro -w /src retroforge-build \
       -c "rauc info --conf=$CONF_REL --keyring=$KEYRING_REL $* /bundle/$NAME"
   fi
 }
@@ -115,7 +115,7 @@ if ! chain="$(rauc_info 2>&1)"; then
   A bundle that fails here fails on the device too, after a multi-gigabyte download the user agreed
   to. If this says 'unsuitable certificate purpose' the --conf above was not applied; if it says
   'signature verification failed' the bundle was signed with a dev cert — rebuild with
-  PKIDIR=\$HOME/qforge-pki make bundle."
+  PKIDIR=\$HOME/retroforge-pki make bundle."
 fi
 log "ok: $(printf '%s\n' "$chain" | grep -m1 'Verified.*signature' | sed 's/^ *//')"
 
@@ -123,24 +123,24 @@ log "ok: $(printf '%s\n' "$chain" | grep -m1 'Verified.*signature' | sed 's/^ */
 # Not from the caller, not from the build tree, not from the filename. Same principle as Phase 2:
 # genbundle.sh reads the version out of the image it wraps, and this reads it back out of the bundle
 # that image is inside. The name a release is published under can then never be one it does not
-# carry. `shell` output rather than json so this needs no jq, and so [meta.qforge] fields surface
+# carry. `shell` output rather than json so this needs no jq, and so [meta.retroforge] fields surface
 # through the same parser if the bundle carries them.
 meta="$(rauc_info --output-format=shell 2>/dev/null)" || die "could not read the bundle manifest"
 mf() { printf '%s\n' "$meta" | sed -n "s/^$1='\(.*\)'$/\1/p" | tail -1; }
 
 VERSION="$(mf RAUC_MF_VERSION)"
 COMPATIBLE="$(mf RAUC_MF_COMPATIBLE)"
-# Decorative, and absent from bundles built before the Phase 2 manifest gained [meta.qforge]. The
+# Decorative, and absent from bundles built before the Phase 2 manifest gained [meta.retroforge]. The
 # client identifies an update by `version` alone (genbundle.sh guarantees it is never empty and never
 # the literal `dev`), so these two are for a human reading latest.json, not for the update logic.
-BUILD="$(mf RAUC_META_QFORGE_BUILD)"
-GIT="$(mf RAUC_META_QFORGE_GIT)"
-MODE="$(mf RAUC_META_QFORGE_MODE)"
+BUILD="$(mf RAUC_META_RETROFORGE_BUILD)"
+GIT="$(mf RAUC_META_RETROFORGE_GIT)"
+MODE="$(mf RAUC_META_RETROFORGE_MODE)"
 
-[ "$COMPATIBLE" = qforge ] || die "bundle compatible is '$COMPATIBLE', not 'qforge' — no device would install it"
+[ "$COMPATIBLE" = retroforge ] || die "bundle compatible is '$COMPATIBLE', not 'retroforge' — no device would install it"
 
 # THE SECOND GATE, and the signature does not imply it. A dev image carries Wi-Fi credentials and an
-# authorized_keys, and `QFORGE_DEV=1 PKIDIR=~/qforge-pki make bundle` — the normal, correct way
+# authorized_keys, and `RETROFORGE_DEV=1 PKIDIR=~/retroforge-pki make bundle` — the normal, correct way
 # to build a bundle for testing on your own hardware — produces one signed with the REAL release key.
 # To a signature check that is indistinguishable from a shippable release, because the signature is
 # over the bytes and says nothing about their provenance. Only the mode stamp the payload carries can
@@ -154,7 +154,7 @@ case "$MODE" in
   dev) die "REFUSED: this bundle's payload was built as a DEV image (mode=dev).
   A dev image carries Wi-Fi credentials and an authorized_keys, and it is signed with the same
   release key as a shippable one, so nothing downstream would catch this. Build without
-  QFORGE_DEV=1 — note that release builds are CI's job (see .github/workflows/image.yml)." ;;
+  RETROFORGE_DEV=1 — note that release builds are CI's job (see .github/workflows/image.yml)." ;;
   *) die "REFUSED: this bundle does not say how it was built (mode='${MODE:-<absent>}').
   Bundles assembled before the mode stamp existed cannot answer it, and 'cannot answer' means no.
   Re-assemble the rootfs and re-bundle; the answer is a property of the build, not metadata that
@@ -166,7 +166,7 @@ esac
 # The client builds the download URL from latest.json's `bundle` field and nothing else, so the file
 # on the server has to be named for the version inside it. genbundle.sh already names it this way;
 # this catches a hand-renamed file, which would otherwise publish a pointer at a 404.
-[ "$NAME" = "qforge-$VERSION.raucb" ] || die "filename/version mismatch: '$NAME' should be 'qforge-$VERSION.raucb'
+[ "$NAME" = "retroforge-$VERSION.raucb" ] || die "filename/version mismatch: '$NAME' should be 'retroforge-$VERSION.raucb'
   The version comes from inside the bundle; renaming the file does not change it."
 
 SIZE="$(stat -c %s "$BUNDLE_ABS")"
@@ -183,7 +183,7 @@ remote "mkdir -p '$DEST'" || die "cannot create $DEST on $HOST (is the docroot o
 avail="$(remote "df -kP '$DEST' | awk 'NR==2{print \$4}'")"
 need=$(( (SIZE / 1024) + 524288 ))
 [ "${avail:-0}" -ge "$need" ] || die "not enough room on $HOST: need $((need / 1024)) MiB at $DEST, have $((avail / 1024)) MiB
-  Lower QFORGE_OTA_KEEP (currently $KEEP) and re-run, or prune by hand."
+  Lower RETROFORGE_OTA_KEEP (currently $KEEP) and re-run, or prune by hand."
 
 # .part, then rename. rsync --partial --inplace so an interrupted multi-GB transfer resumes
 # where it stopped; the rename is within one filesystem, so it is atomic and a device can never see a
@@ -221,7 +221,7 @@ remote_sha="$(remote "sha256sum '$DEST/$NAME' | cut -d' ' -f1" || true)"
   latest.json was NOT flipped, so the fleet is unaffected and still sees the previous release.
   Check for a second publish running against the same file (ps aux | grep rsync), then delete
   '$DEST/$NAME' on the server and re-run. Do not leave it: it serves nobody, but it counts against
-  QFORGE_OTA_KEEP (currently $KEEP) and the re-run re-sends in full regardless."
+  RETROFORGE_OTA_KEEP (currently $KEEP) and the re-run re-sends in full regardless."
 log "ok: server-side sha256 matches"
 
 # --- 4. prove it is readable from the internet -----------------------------------------------------
@@ -286,7 +286,7 @@ if [ "$KEEP" -ge 1 ]; then
 set -eu
 cd "$DEST" 2>/dev/null || exit 0
 keep=$(sed -n 's/.*"bundle": *"\([^"]*\)".*/\1/p' latest.json 2>/dev/null || true)
-ls -1 qforge-*.raucb 2>/dev/null | sort -V | head -n "-$KEEP" | while read -r old; do
+ls -1 retroforge-*.raucb 2>/dev/null | sort -V | head -n "-$KEEP" | while read -r old; do
   [ "$old" = "$keep" ] && continue
   echo "[publish] pruning $old"
   rm -f -- "$old"

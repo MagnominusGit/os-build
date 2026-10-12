@@ -48,10 +48,10 @@ RUN_GID="$(id -g)"
 # script outright (the seal not having run is not a finding, it is a broken invocation), so every
 # case needs them even though none of them is what is under test.
 mkstage() {
-  local s="$1" db="$1/usr/lib/qforge/pkgdb/pacman-7.0-1"
+  local s="$1" db="$1/usr/lib/retroforge/pkgdb/pacman-7.0-1"
   install -d "$db" "$s/etc" "$s/usr/bin"
-  printf 'pkg pacman\n'                  >"$s/usr/lib/qforge/seal.list"
-  printf 'path /usr/share/doc\n'         >"$s/usr/lib/qforge/trim.list"
+  printf 'pkg pacman\n'                  >"$s/usr/lib/retroforge/seal.list"
+  printf 'path /usr/share/doc\n'         >"$s/usr/lib/retroforge/trim.list"
   printf '%%NAME%%\npacman\n'            >"$db/desc"
   printf '%%FILES%%\nusr/bin/pacman\n'   >"$db/files"
   printf 'root:x:0:0::/root:/bin/bash\n' >"$s/etc/passwd"
@@ -195,7 +195,7 @@ guard8() { bash "$GUARD" "$1" 2>&1 | sed -n '/^  8\. system UID\/GID allocation$
 idstage() {  # idstage <dir> <extra group line>
   mkstage "$1"
   install -d "$1/usr/lib/sysusers.d"
-  printf 'g adm 999 -\nu sddm 967 "SDDM" -\n' >"$1/usr/lib/sysusers.d/01-qforge-enforce-ids.conf"
+  printf 'g adm 999 -\nu sddm 967 "SDDM" -\n' >"$1/usr/lib/sysusers.d/01-retroforge-enforce-ids.conf"
   printf 'sddm:x:967:967::/:/bin/false\n' >>"$1/etc/passwd"
   printf 'adm:x:999:\nsddm:x:967:\n%s' "$2" >>"$1/etc/group"
 }

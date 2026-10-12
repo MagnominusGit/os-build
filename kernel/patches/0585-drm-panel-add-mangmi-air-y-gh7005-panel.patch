@@ -1,6 +1,6 @@
 Subject: [PATCH] drm/panel: add the Mangmi GH7005 1280x960 DSI panel
 
-qforge: Makefile hunk regenerated behind this tree's own panel entries (0505-0580); the driver
+retroforge: Makefile hunk regenerated behind this tree's own panel entries (0505-0580); the driver
 is ROCKNIX SM6115 0005 unchanged.
 
 IPS panel of the Mangmi Air Y. 

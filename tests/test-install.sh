@@ -16,7 +16,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LIB="$ROOT/rootfs/overlay/usr/lib/qforge/install/lib-slotwrite.sh"
+LIB="$ROOT/rootfs/overlay/usr/lib/retroforge/install/lib-slotwrite.sh"
 GENPART="$ROOT/image/genpart.sh"
 TABLE="$ROOT/image/partition-table.txt"
 
@@ -37,14 +37,14 @@ T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 # The indices from a REAL captured layout rather than 1..8: the Pocket-FIT-shaped case from the
 # plan's Phase 0, where our ESP fills a hole at p3 and the rest land at 7..13. A test that only ever
 # exercised 1..8 would pass against a parts.env writer that ignored its arguments.
-MAP_FIXTURE='QFORGE-ESP=3
-qforge-efi-A=7
-qforge-efi-B=8
-qforge-root-A=9
-qforge-root-B=10
-qforge-var-A=11
-qforge-var-B=12
-qforge-home=13'
+MAP_FIXTURE='RETROFORGE-ESP=3
+retroforge-efi-A=7
+retroforge-efi-B=8
+retroforge-root-A=9
+retroforge-root-B=10
+retroforge-var-A=11
+retroforge-var-B=12
+retroforge-home=13'
 
 # --- 1. the genpart map -> parts.env keys -------------------------------------------------------
 CASE="genpart map -> parts.env keys"
@@ -74,7 +74,7 @@ CASE="a name with no key is fatal"
   || ok "refuses a GPT name it has no key for"
 
 CASE="a non-numeric index is fatal"
-( printf 'qforge-home=xyz\n' | parts_env_from_genpart_map >/dev/null 2>&1 ) \
+( printf 'retroforge-home=xyz\n' | parts_env_from_genpart_map >/dev/null 2>&1 ) \
   && bad "a non-numeric index was accepted" \
   || ok "refuses a non-numeric index"
 
@@ -180,7 +180,7 @@ CASE="write_parts_env with no mountpoint"
 # OTA path's arguments, on a target chosen by bootconf. These cases drive them directly, with plain
 # directories standing in for mountpoints, which is all either function needs.
 
-# A stand-in for /usr/lib/qforge/boot of a freshly written root.
+# A stand-in for /usr/lib/retroforge/boot of a freshly written root.
 mkboot() {  # <dir> <tag>
   local d="$1" tag="$2"
   mkdir -p "$d/fonts"
@@ -247,7 +247,7 @@ CASE="write_efi_partition with a bad slot name"
 
 # --- 6. mint_partsets ---------------------------------------------------------------------------
 # Installer-only: the OTA path COPIES the partsets off the running /efi, because they describe the
-# disk it already booted from. The installer is writing a disk with no qforge on it, so nothing
+# disk it already booted from. The installer is writing a disk with no retroforge on it, so nothing
 # exists to copy and the uuids come from the GPT it just laid down. Nothing else covers this.
 U_ESP=1a2b3c4d-1111-2222-3333-444455556666
 U_EFIA=2b3c4d5e-1111-2222-3333-444455556667
@@ -348,7 +348,7 @@ CASE="refresh_esp_stage1 with a missing hasher"
 # is ABSENT yields two empty strings inside $(...) that compare EQUAL, so nothing is ever refreshed
 # and a new root boots against the old stage 1. Callers assert the tool before touching anything;
 # this proves the seam they assert through is the one the function reads.
-( SHA256=qforge-no-such-hasher refresh_esp_stage1 "$T/esp-h" "$BOOT" >/dev/null 2>&1
+( SHA256=retroforge-no-such-hasher refresh_esp_stage1 "$T/esp-h" "$BOOT" >/dev/null 2>&1
   [ "$(cat "$T/esp-h/EFI/BOOT/bootaa64.efi" 2>/dev/null)" = "STEAMCL-1" ] ) \
   && ok "a first write still lands (the not-present arm does not consult the hasher)" \
   || bad "the empty-ESP write depends on the hasher"
@@ -386,17 +386,17 @@ grep -q 'tar -p --numeric-owner' "$LIB" \
 CASE="the seed round-trips the modes that matter"
 if command -v zstd >/dev/null 2>&1; then
   V="$T/varstage"
-  mkdir -p "$V/lib/overlays/etc/upper" "$V/lib/qforge" "$V/tmp"
+  mkdir -p "$V/lib/overlays/etc/upper" "$V/lib/retroforge" "$V/tmp"
   chmod 1777 "$V/tmp"
   printf '7070e56b\n'   >"$V/lib/overlays/etc/upper/machine-id"
   printf 'ssh-ed25519\n' >"$V/lib/overlays/etc/upper/ssh_host_ed25519_key"
   chmod 0600 "$V/lib/overlays/etc/upper/ssh_host_ed25519_key"
-  printf 'a\n'          >"$V/lib/qforge/slot"
-  printf 'de:ad\n'      >"$V/lib/qforge/mac-wifi"
+  printf 'a\n'          >"$V/lib/retroforge/slot"
+  printf 'de:ad\n'      >"$V/lib/retroforge/mac-wifi"
 
   seed="$T/var-seed.tar.zst"
   tar --numeric-owner --xattrs --acls --zstd \
-      --exclude=./lib/qforge/slot --exclude=./lib/qforge/mac-wifi \
+      --exclude=./lib/retroforge/slot --exclude=./lib/retroforge/mac-wifi \
       -cf "$seed" -C "$V" . 2>/dev/null
   M="$T/seedmnt"; mkdir -p "$M"
   tar -p --numeric-owner --xattrs --acls -xf "$seed" -C "$M" 2>/dev/null
@@ -414,18 +414,18 @@ if command -v zstd >/dev/null 2>&1; then
     && ok "the machine-id rides across (the derived Wi-Fi MAC depends on it)" \
     || bad "machine-id did not survive the seed"
   # The two exclusions, which are what stop every installed device sharing an identity.
-  [ ! -e "$M/lib/qforge/slot" ] \
+  [ ! -e "$M/lib/retroforge/slot" ] \
     && ok "no baked-in slot witness (seed_var writes it after unpacking)" \
-    || bad "the seed carried lib/qforge/slot"
-  [ ! -e "$M/lib/qforge/mac-wifi" ] \
+    || bad "the seed carried lib/retroforge/slot"
+  [ ! -e "$M/lib/retroforge/mac-wifi" ] \
     && ok "no baked-in mac-wifi (else every install shares one Wi-Fi MAC)" \
-    || bad "the seed carried lib/qforge/mac-wifi"
+    || bad "the seed carried lib/retroforge/mac-wifi"
 else
   skip "zstd is not installed -- the /var seed round-trip did not run"
 fi
 
 # --- 9. genpart.sh + the table, from the SHIPPED layout -----------------------------------------
-# Both files are installed verbatim into /usr/lib/qforge/install/ of the built root, and
+# Both files are installed verbatim into /usr/lib/retroforge/install/ of the built root, and
 # rootfs/guard-rootfs.sh diffs them against image/ at build time. Byte-identity is not the whole
 # claim though: the shipped copies also have to WORK from that directory, which is a different
 # thing and is what genpart.sh's `TABLE=$SELFDIR/partition-table.txt` seam exists for. A copy that
@@ -434,7 +434,7 @@ fi
 # So: reproduce the shipped layout in a tmpdir and assert the output is identical to the repo
 # invocation. Neither mode touches a disk without a target argument, so this needs no sgdisk.
 CASE="the shipped layout resolves its own table"
-SHIPPED="$T/usr-lib-qforge-install"; mkdir -p "$SHIPPED"
+SHIPPED="$T/usr-lib-retroforge-install"; mkdir -p "$SHIPPED"
 cp "$GENPART" "$SHIPPED/genpart.sh"
 cp "$TABLE"   "$SHIPPED/partition-table.txt"
 chmod 0555 "$SHIPPED/genpart.sh"
@@ -470,14 +470,14 @@ CASE="the table is resolved next to the script, not through the cwd"
   && ok "works with the cwd elsewhere" \
   || bad "the shipped genpart.sh depends on the cwd"
 
-CASE="QFORGE_PARTITION_TABLE still overrides"
+CASE="RETROFORGE_PARTITION_TABLE still overrides"
 # The other half of the seam: the installer needs to be able to point genpart at a table it chose.
 # A copy that hardcoded $SELFDIR would pass every case above and remove that lever.
 printf '# empty table\n' >"$T/empty-table.txt"
-alt_out=$(QFORGE_PARTITION_TABLE="$T/empty-table.txt" bash "$SHIPPED/genpart.sh" 2>/dev/null)
+alt_out=$(RETROFORGE_PARTITION_TABLE="$T/empty-table.txt" bash "$SHIPPED/genpart.sh" 2>/dev/null)
 [ "$alt_out" != "$ship_out" ] \
   && ok "an overridden table changes the output" \
-  || bad "QFORGE_PARTITION_TABLE was ignored by the shipped copy"
+  || bad "RETROFORGE_PARTITION_TABLE was ignored by the shipped copy"
 
 # --- 10. the append floor is MANDATORY (Phase 3) ------------------------------------------------
 # Through Phase 2 the floor was opt-in, which was right while every caller passed --append with no
@@ -509,8 +509,8 @@ done
 CASE="the append floor is required, not optional"
 append_script=$(bash "$SHIPPED/genpart.sh" --append 2>/dev/null)
 run_append() {  # <floor, or UNSET> [ceil, or UNSET] -> rc, with stderr merged onto stdout
-  ( case "$1" in UNSET) unset QFORGE_APPEND_FLOOR ;; *) export QFORGE_APPEND_FLOOR="$1" ;; esac
-    case "${2-100000000}" in UNSET) unset QFORGE_APPEND_CEIL ;; *) export QFORGE_APPEND_CEIL="${2-100000000}" ;; esac
+  ( case "$1" in UNSET) unset RETROFORGE_APPEND_FLOOR ;; *) export RETROFORGE_APPEND_FLOOR="$1" ;; esac
+    case "${2-100000000}" in UNSET) unset RETROFORGE_APPEND_CEIL ;; *) export RETROFORGE_APPEND_CEIL="${2-100000000}" ;; esac
     DISK="$T/nodisk.img" PATH="$T/nobin:$PATH" bash -euo pipefail -c "$append_script" ) 2>&1
 }
 mkdir -p "$T/nobin"
@@ -519,7 +519,7 @@ out=$(run_append UNSET); rc=$?
 [ "$rc" -ne 0 ] \
   && ok "no floor -> refuses (rc=$rc)" \
   || bad "an append with NO floor was accepted -- sgdisk would place our eight anywhere"
-printf '%s\n' "$out" | grep -q 'QFORGE_APPEND_FLOOR' \
+printf '%s\n' "$out" | grep -q 'RETROFORGE_APPEND_FLOOR' \
   && ok "the refusal names the variable the caller has to set" \
   || bad "refused without saying the floor is what is missing: $out"
 # Which check fired matters: a run that died on the GPT probe would also be non-zero, and would
@@ -536,14 +536,14 @@ for bogus in 16GiB 2048MiB ' ' -1 0x800 ''; do
   # Non-zero alone is not the assertion. Under a reverted guard these runs die on the GPT probe
   # instead and every one of them reads green -- measured during the mutation check, not supposed.
   # So match the message: the numeric gate has to be what rejected it.
-  { [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -qE 'must be a sector number|QFORGE_APPEND_FLOOR: required'; } \
+  { [ "$rc" -ne 0 ] && printf '%s\n' "$out" | grep -qE 'must be a sector number|RETROFORGE_APPEND_FLOOR: required'; } \
     && ok "floor '$bogus' -> refused by the numeric gate" \
     || bad "floor '$bogus' was not refused by the floor check (rc=$rc): $out"
 done
 # ...and the numeric one gets past the floor gate, or the case above proves only that everything
 # fails. It dies later, at the missing sgdisk, which is exactly how far this test can honestly go.
 out=$(run_append 2048)
-printf '%s\n' "$out" | grep -qE 'QFORGE_APPEND_FLOOR|must be a sector number' \
+printf '%s\n' "$out" | grep -qE 'RETROFORGE_APPEND_FLOOR|must be a sector number' \
   && bad "a plain sector number was rejected by the floor gate: $out" \
   || ok "a plain sector number passes the gate (the run then needs a real sgdisk)"
 
@@ -601,17 +601,17 @@ STUB_TABLE='   1            2048           34815   16.0 MiB    8300  oem-early
 FLOOR=16812032
 CEIL=62949375
 try_window() {  # <floor> <ceil> [rows] [dead-indices] -> the run's output
-  ( export QFORGE_APPEND_FLOOR="$1" QFORGE_APPEND_CEIL="$2"
-    # The emitted script resolves lib-gpt.sh from /usr/lib/qforge/install by default -- that is
+  ( export RETROFORGE_APPEND_FLOOR="$1" RETROFORGE_APPEND_CEIL="$2"
+    # The emitted script resolves lib-gpt.sh from /usr/lib/retroforge/install by default -- that is
     # the shipped location, and it is not where the repo copy lives. genpart.sh exports this same
     # variable when it applies the script itself.
     STUB_ROWS="${3-$STUB_TABLE}" STUB_DEAD="${4-}" DISK="$T/nodisk.img" PATH="$T/stub:$PATH" \
-    QFORGE_LIB_GPT="$ROOT/image/lib-gpt.sh" \
+    RETROFORGE_LIB_GPT="$ROOT/image/lib-gpt.sh" \
     bash -euo pipefail -c "$append_script" ) 2>&1
 }
 
 out=$(run_append "$FLOOR" UNSET)
-printf '%s\n' "$out" | grep -q 'QFORGE_APPEND_CEIL' \
+printf '%s\n' "$out" | grep -q 'RETROFORGE_APPEND_CEIL' \
   && ok "a floor without a ceiling is refused" \
   || bad "the ceiling is not required -- home would run to the end of the disk: $out"
 out=$(run_append "$FLOOR" 4096MiB)
@@ -670,12 +670,12 @@ printf '%s\n' "$out" | grep -q 'the layout needs' \
 
 CASE="the shipped copy carries the mandatory form"
 # Byte-identity with image/ is asserted elsewhere; what is asserted here is that the emitted text
-# is the MANDATORY shape, so a revert to the opt-in `[ -n "${QFORGE_APPEND_FLOOR:-}" ] && ...`
+# is the MANDATORY shape, so a revert to the opt-in `[ -n "${RETROFORGE_APPEND_FLOOR:-}" ] && ...`
 # guard fails a test rather than quietly restoring luck-based containment.
-printf '%s\n' "$append_script" | grep -q 'QFORGE_APPEND_FLOOR:?' \
+printf '%s\n' "$append_script" | grep -q 'RETROFORGE_APPEND_FLOOR:?' \
   && ok "the emitted script hard-requires the floor" \
   || bad "the emitted append script no longer requires a floor"
-printf '%s\n' "$append_script" | grep -q 'QFORGE_APPEND_FLOOR:-' \
+printf '%s\n' "$append_script" | grep -q 'RETROFORGE_APPEND_FLOOR:-' \
   && bad "the opt-in floor guard is back -- an unset floor would be accepted again" \
   || ok "no opt-in floor guard remains"
 
@@ -742,7 +742,7 @@ sess_dir() { SESS_RUNDIR="$T/run.$1"; rm -rf "$SESS_RUNDIR"; mkdir -p "$SESS_RUN
 sess_run() {  # runs rauc-session.sh in the sandbox sess_dir last named
   local rundir="$SESS_RUNDIR"
   env PATH="$STUBS:$PATH" STUBDIR="$rundir" \
-      QFORGE_INSTALL_RUN="$rundir" DEVTEST=-e OWN_TIMEOUT=5 \
+      RETROFORGE_INSTALL_RUN="$rundir" DEVTEST=-e OWN_TIMEOUT=5 \
       KEYRING="${SESS_KEYRING:-$T/keyring.pem}" POST_INSTALL="${SESS_POST:-$FRESH}" \
       ${STUB_OWNER_PID:+STUB_OWNER_PID="$STUB_OWNER_PID"} \
       "$SESSION" "${1:-$T/target-root}" "${2:-https://example.invalid/b.raucb}" 2>&1
@@ -863,11 +863,11 @@ CASE="rauc-session: fail-closed on the tools it does not carry"
 # `#!/usr/bin/env bash` and tests nothing.
 for seam in RAUC DBUS_DAEMON GDBUS; do
   rundir="$T/run.miss.$seam"; mkdir -p "$rundir"
-  out="$(env PATH="$STUBS:$PATH" STUBDIR="$rundir" QFORGE_INSTALL_RUN="$rundir" DEVTEST=-e OWN_TIMEOUT=3 \
-             KEYRING="$T/keyring.pem" POST_INSTALL="$FRESH" "$seam=qforge-absent-$seam" \
+  out="$(env PATH="$STUBS:$PATH" STUBDIR="$rundir" RETROFORGE_INSTALL_RUN="$rundir" DEVTEST=-e OWN_TIMEOUT=3 \
+             KEYRING="$T/keyring.pem" POST_INSTALL="$FRESH" "$seam=retroforge-absent-$seam" \
              "$SESSION" "$T/target-root" b.raucb 2>&1)" \
     && bad "an absent $seam was not noticed" \
-    || { printf '%s\n' "$out" | grep -q "qforge-absent-$seam is not on PATH" \
+    || { printf '%s\n' "$out" | grep -q "retroforge-absent-$seam is not on PATH" \
            && ok "refuses when $seam is absent, and names it" \
            || bad "an absent $seam produced the wrong error: $out"; }
 done
@@ -916,19 +916,19 @@ fresh_run() {  # runs post-install-fresh.sh in the sandbox fresh_dir last named
   local rundir="$FRESH_RUNDIR"
   env PATH="$FRESH_STUBS:$PATH" STUBDIR="$rundir" \
       MNT="$rundir/root" VARMNT="$rundir/var" DEVTEST=-e \
-      QFORGE_SLOTWRITE="$LIB" VAR_SEED_REL="$FRESH_SEED_REL" \
+      RETROFORGE_SLOTWRITE="$LIB" VAR_SEED_REL="$FRESH_SEED_REL" \
       "$@" "$FRESH" 2>&1
 }
 # The seed the handler must find inside the root it just wrote. Pre-created under the mount stub's
 # directory because the stub does not really mount anything; what is being asserted is that the
 # handler looks for it THERE -- in the new root -- and not on the installer medium.
-FRESH_SEED_REL=usr/lib/qforge/var-seed.tar.zst
+FRESH_SEED_REL=usr/lib/retroforge/var-seed.tar.zst
 
 CASE="post-install-fresh: refusals before anything destructive"
 fresh_dir novar
 out="$( fresh_run env RAUC_TARGET_SLOTS=1 RAUC_SLOT_DEVICE_1="$T/target-root" )" \
   && bad "ran without being told where /var goes" \
-  || { printf '%s\n' "$out" | grep -q 'QFORGE_TARGET_VAR_A' \
+  || { printf '%s\n' "$out" | grep -q 'RETROFORGE_TARGET_VAR_A' \
          && ok "refuses when the spine did not name the /var partition" \
          || bad "the wrong error: $out"; }
 [ -s "$FRESH_RUNDIR/calls" ] \
@@ -936,14 +936,14 @@ out="$( fresh_run env RAUC_TARGET_SLOTS=1 RAUC_SLOT_DEVICE_1="$T/target-root" )"
   || ok "nothing was called before the refusal"
 
 fresh_dir noslots
-out="$( fresh_run env QFORGE_TARGET_VAR_A="$T/target-var" )" \
+out="$( fresh_run env RETROFORGE_TARGET_VAR_A="$T/target-var" )" \
   && bad "ran outside a rauc transaction" \
   || { printf '%s\n' "$out" | grep -q 'RAUC_TARGET_SLOTS' \
          && ok "refuses when not run by rauc" || bad "the wrong error: $out"; }
 : >"$T/target-var"
 
 fresh_dir twoslots
-out="$( fresh_run env QFORGE_TARGET_VAR_A="$T/target-var" RAUC_TARGET_SLOTS='1 2' \
+out="$( fresh_run env RETROFORGE_TARGET_VAR_A="$T/target-var" RAUC_TARGET_SLOTS='1 2' \
                      RAUC_SLOT_DEVICE_1="$T/target-root" RAUC_SLOT_DEVICE_2="$T/target-root" )" \
   && bad "accepted two target slots -- the config declares one and this handler assumes it" \
   || ok "refuses when rauc reports more than one target slot"
@@ -951,7 +951,7 @@ out="$( fresh_run env QFORGE_TARGET_VAR_A="$T/target-var" RAUC_TARGET_SLOTS='1 2
 CASE="post-install-fresh: the integer indirection"
 mkdir -p "$T/fresh-seed-src"
 fresh_dir slot7
-out="$( fresh_run env QFORGE_TARGET_VAR_A="$T/target-var" RAUC_TARGET_SLOTS=7 \
+out="$( fresh_run env RETROFORGE_TARGET_VAR_A="$T/target-var" RAUC_TARGET_SLOTS=7 \
                      RAUC_SLOT_DEVICE_7="$T/target-root" )"
 rc=$?
 [ $rc -eq 0 ] && ok "resolves the device through RAUC_SLOT_DEVICE_<n> for a non-obvious n" \
@@ -966,11 +966,11 @@ if [ -n "$tune_line" ] && [ -n "$mount_line" ] && [ "$tune_line" -lt "$mount_lin
 else
   bad "btrfstune did not run before the first mount (tune=$tune_line mount=$mount_line)"
 fi
-printf '%s\n' "$calls" | grep -q '^btrfs filesystem label .* qforge-root-A' \
-  && ok "labels the slot qforge-root-A" \
+printf '%s\n' "$calls" | grep -q '^btrfs filesystem label .* retroforge-root-A' \
+  && ok "labels the slot retroforge-root-A" \
   || bad "the slot was not labelled: $calls"
-printf '%s\n' "$calls" | grep -q '^mkfs.ext4 .*qforge-var-A' \
-  && ok "reformats the slot's /var as qforge-var-A" \
+printf '%s\n' "$calls" | grep -q '^mkfs.ext4 .*retroforge-var-A' \
+  && ok "reformats the slot's /var as retroforge-var-A" \
   || bad "/var was not reformatted: $calls"
 printf '%s\n' "$calls" | grep -q "^tar .*$FRESH_SEED_REL" \
   && ok "seeds /var from the tarball inside the root RAUC just wrote, not from the installer medium" \
@@ -1040,7 +1040,7 @@ case "$out" in *mmcblk*) bad "part_uuid leaked the disk name into its answer: $o
   *) ok "the answer names no disk, so the p-infix spelling cannot enter it" ;; esac
 
 # --- 16. image/lib-homestage.sh — one /home layout, two writers --------------------------------
-# make-sdcard.sh builds this tree into a card image at build time and qforge-install builds it
+# make-sdcard.sh builds this tree into a card image at build time and retroforge-install builds it
 # onto an internal disk on the device. Both call the same function, so the layout is asserted once
 # here: an empty `player` home, owned by the session user, with nothing to unpack into it.
 HOMESTAGE="$ROOT/image/lib-homestage.sh"
@@ -1066,7 +1066,7 @@ CASE="lib-homestage: a missing home root is fatal, not silent"
   && bad "staged a home under a root that does not exist" \
   || ok "refuses a home root that does not exist"
 
-# --- 17. installer/qforge-install — the spine (Phase 4c) ----------------------------------------
+# --- 17. installer/retroforge-install — the spine (Phase 4c) ----------------------------------------
 # WHAT IS AT RISK. Every other file in this install has a narrow job with its own suite; this one's
 # entire content is an ORDER, and the two things the order buys cannot be checked anywhere else:
 #
@@ -1081,7 +1081,7 @@ CASE="lib-homestage: a missing home root is fatal, not silent"
 #
 # Neither can be checked on hardware without doing the destructive thing first, so they are checked
 # here, against the real script, with every external command stubbed and recording its arguments.
-SPINE="$ROOT/installer/qforge-install"
+SPINE="$ROOT/installer/retroforge-install"
 CONFIRM_TTY="$ROOT/installer/confirm-tty"
 for f in "$SPINE" "$CONFIRM_TTY"; do
   [ -x "$f" ] || { echo "missing input: $f" >&2; exit 1; }
@@ -1118,21 +1118,21 @@ printf '%s\n' "carve.sh $*" >>"$SP_CALLS"
 # number the spine invented -- the 0 GiB that shipped was exactly such a number.
 if [ "${1:-}" = plan ]; then
   [ "${SP_PLAN_RC:-0}" = 0 ] || exit "$SP_PLAN_RC"
-  printf 'CEIL=%s\nNEW_END=%s\nQFORGE_MIB=%s\nQFORGE_GIB=%s\nREPLACES_OURS=%s\n' \
+  printf 'CEIL=%s\nNEW_END=%s\nRETROFORGE_MIB=%s\nRETROFORGE_GIB=%s\nREPLACES_OURS=%s\n' \
     499999999 100000000 "$(( ${SP_PLAN_GIB:-72} * 1024 ))" "${SP_PLAN_GIB:-72}" \
     "${SP_PLAN_REPLACES:-0}"
   exit 0
 fi
 [ "${SP_CARVE_RC:-0}" = 0 ] || exit "$SP_CARVE_RC"
 cat <<MAP
-QFORGE-ESP=3
-qforge-efi-A=7
-qforge-efi-B=8
-qforge-root-A=9
-qforge-root-B=10
-qforge-var-A=11
-qforge-var-B=12
-qforge-home=13
+RETROFORGE-ESP=3
+retroforge-efi-A=7
+retroforge-efi-B=8
+retroforge-root-A=9
+retroforge-root-B=10
+retroforge-var-A=11
+retroforge-var-B=12
+retroforge-home=13
 MAP
 EOF
   # rauc-session.sh answers to two shapes and must be told apart by argv, because telling them apart
@@ -1144,7 +1144,7 @@ if [ "${1:-}" = --info ]; then
   printf '%s\n' "rauc-session --info $2" >>"$SP_CALLS"
   exit "${SP_INFO_RC:-0}"
 fi
-printf '%s\n' "rauc-session install $1 $2 var=${QFORGE_TARGET_VAR_A:-<unset>}" >>"$SP_CALLS"
+printf '%s\n' "rauc-session install $1 $2 var=${RETROFORGE_TARGET_VAR_A:-<unset>}" >>"$SP_CALLS"
 exit "${SP_RAUC_RC:-0}"
 EOF
   # sgdisk answers -i with a per-index GUID in UPPER case, so the lower-casing in part_uuid is
@@ -1155,7 +1155,7 @@ if [ "${1:-}" = -i ]; then
   printf 'Partition unique GUID: AAAAAAAA-BBBB-CCCC-DDDD-%012d\n' "$2"
   exit 0
 fi
-if [ "${1:-}" = -p ]; then printf '  13  100  200  8.0 GiB  qforge-home\n'; exit 0; fi
+if [ "${1:-}" = -p ]; then printf '  13  100  200  8.0 GiB  retroforge-home\n'; exit 0; fi
 exit 0
 EOF
   # blkid answers ONE question -- does this partition hold a filesystem -- and $SP_HOME_FSTYPE is
@@ -1184,7 +1184,7 @@ conf=""; img=""
 while [ $# -gt 0 ]; do
   case "$1" in --conf-dir) conf="$2"; shift 2 ;; --image) img="$2"; shift 2 ;; *) shift ;; esac
 done
-[ -n "$conf" ] && [ -n "$img" ] && { mkdir -p "$conf"; printf 'title: qforge %s\n' "$img" >"$conf/$img.conf"; }
+[ -n "$conf" ] && [ -n "$img" ] && { mkdir -p "$conf"; printf 'title: retroforge %s\n' "$img" >"$conf/$img.conf"; }
 exit 0
 EOF
   chmod +x "$SP_STUBS"/*
@@ -1192,12 +1192,12 @@ EOF
   # The freshly written root, as it will look mounted read-only: the boot software the efi and ESP
   # steps take their files from, plus the bootconf binary. Pre-seeded rather than produced by the
   # mount stub, so the real primitives copy real bytes.
-  mkdir -p "$SP_RUN/root-a/usr/lib/qforge/boot/fonts" "$SP_RUN/root-a/usr/bin"
+  mkdir -p "$SP_RUN/root-a/usr/lib/retroforge/boot/fonts" "$SP_RUN/root-a/usr/bin"
   for i in steamcl.efi steamcl-version grubaa64.efi grub-a.cfg grub-b.cfg grubenv; do
-    printf '%s\n' "$i" >"$SP_RUN/root-a/usr/lib/qforge/boot/$i"
+    printf '%s\n' "$i" >"$SP_RUN/root-a/usr/lib/retroforge/boot/$i"
   done
-  printf 'font\n' >"$SP_RUN/root-a/usr/lib/qforge/boot/fonts/default.pf2"
-  printf 'font\n' >"$SP_RUN/root-a/usr/lib/qforge/boot/fonts/dejavu-mono.pf2"
+  printf 'font\n' >"$SP_RUN/root-a/usr/lib/retroforge/boot/fonts/default.pf2"
+  printf 'font\n' >"$SP_RUN/root-a/usr/lib/retroforge/boot/fonts/dejavu-mono.pf2"
   cp "$SP_STUBS/steamos-bootconf" "$SP_RUN/root-a/usr/bin/steamos-bootconf"
 
   # The partition "devices". DEVTEST is -e in the sandbox, so a regular file stands in for a block
@@ -1242,16 +1242,16 @@ spine_run() {  # extra args passed through to the spine
       SP_INFO_RC="$SP_INFO_RC" SP_RAUC_RC="$SP_RAUC_RC" SP_CARVE_RC="$SP_CARVE_RC" \
       SP_HOME_FSTYPE="$SP_HOME_FSTYPE" \
       SP_PLAN_RC="$SP_PLAN_RC" SP_PLAN_GIB="$SP_PLAN_GIB" SP_PLAN_REPLACES="$SP_PLAN_REPLACES" \
-      QFORGE_INSTALL_RUN="$SP_RUN" DEVTEST=-e REQUIRE_ROOT=0 FAT_ASSERT=0 \
+      RETROFORGE_INSTALL_RUN="$SP_RUN" DEVTEST=-e REQUIRE_ROOT=0 FAT_ASSERT=0 \
       PARTUUID_DIR="$SP_PART" DISKTEST=-e \
       PLAYER_UID="$(id -u)" PLAYER_GID="$(id -g)" \
       KEYRING="$SP_KEYRING" SGDISK="${SP_SGDISK:-sgdisk}" \
-      QFORGE_CONFIRM="${SP_CONFIRM_OVERRIDE:-$SP_CONFIRM}" \
-      QFORGE_SELECT_TARGET="$SP_STUBS/select-target.sh" \
-      QFORGE_CARVE="$SP_STUBS/carve.sh" \
-      QFORGE_RAUC_SESSION="$SP_STUBS/rauc-session.sh" \
-      QFORGE_SLOTWRITE="$LIB" \
-      QFORGE_HOMESTAGE="$ROOT/image/lib-homestage.sh" \
+      RETROFORGE_CONFIRM="${SP_CONFIRM_OVERRIDE:-$SP_CONFIRM}" \
+      RETROFORGE_SELECT_TARGET="$SP_STUBS/select-target.sh" \
+      RETROFORGE_CARVE="$SP_STUBS/carve.sh" \
+      RETROFORGE_RAUC_SESSION="$SP_STUBS/rauc-session.sh" \
+      RETROFORGE_SLOTWRITE="$LIB" \
+      RETROFORGE_HOMESTAGE="$ROOT/image/lib-homestage.sh" \
       "$SPINE" --bundle https://example.invalid/b.raucb \
       --userdata-gib 16 "$@" 2>&1
 }
@@ -1260,7 +1260,7 @@ spine_run() {  # extra args passed through to the spine
 # which is an answer in itself for most of the cases below.
 # DID THE DISK GET WRITTEN? Not the same question as "was carve.sh called", since 2026-08-21:
 # `carve.sh plan` is a read-only query the spine makes BEFORE drawing the consent screen, because
-# the screen has to quote the space QForge ends up with and only carve.sh can compute it. Every
+# the screen has to quote the space RetroForge ends up with and only carve.sh can compute it. Every
 # "nothing was written" assertion below therefore has to name the destructive invocations, or it
 # fires on a query and the four ordering guards go red for the wrong reason. They did, once.
 carve_wrote() { grep -qE 'carve\.sh (fresh|reinstall|uninstall) ' "$SP/calls"; }
@@ -1338,7 +1338,7 @@ fi
 CASE="spine: var-a is the handler's and var-b is never touched"
 grep -q 'rauc-session install .* var=' "$SP/calls" \
   && ok "the spine names the /var partition for the handler (it cannot derive it: the config declares one slot)" \
-  || bad "QFORGE_TARGET_VAR_A was not passed to the session"
+  || bad "RETROFORGE_TARGET_VAR_A was not passed to the session"
 grep -q "var=$SP_PART/aaaaaaaa-bbbb-cccc-dddd-000000000011" "$SP/calls" \
   && ok "and it is var-A's partuuid path, resolved from the carve's index" \
   || bad "the var device is not the resolved partuuid"
@@ -1445,12 +1445,12 @@ spine_dir bypass
 SP_CONFIRM_OVERRIDE=/bin/true
 printf 'yes\n' >"$SP_RUN/consent.txt"
 printf 'yes\n' >"$SP/consent.txt"
-export QFORGE_CONSENT=1 QFORGE_YES=1 QFORGE_ASSUME_YES=1 QFORGE_FORCE=1 \
-       QFORGE_INSTALL_CONFIRMED=1 CONFIRMED=1 ASSUME_YES=1 FORCE=1 YES=1
+export RETROFORGE_CONSENT=1 RETROFORGE_YES=1 RETROFORGE_ASSUME_YES=1 RETROFORGE_FORCE=1 \
+       RETROFORGE_INSTALL_CONFIRMED=1 CONFIRMED=1 ASSUME_YES=1 FORCE=1 YES=1
 out="$(spine_run)" && bad "one of the bypass variables satisfied the gate" \
-  || ok "none of QFORGE_CONSENT/YES/ASSUME_YES/FORCE/CONFIRMED means consent"
-unset QFORGE_CONSENT QFORGE_YES QFORGE_ASSUME_YES QFORGE_FORCE \
-      QFORGE_INSTALL_CONFIRMED CONFIRMED ASSUME_YES FORCE YES
+  || ok "none of RETROFORGE_CONSENT/YES/ASSUME_YES/FORCE/CONFIRMED means consent"
+unset RETROFORGE_CONSENT RETROFORGE_YES RETROFORGE_ASSUME_YES RETROFORGE_FORCE \
+      RETROFORGE_INSTALL_CONFIRMED CONFIRMED ASSUME_YES FORCE YES
 if carve_wrote; then bad "the carve ran"; else ok "and nothing was written"; fi
 # Comments stripped first: the spine EXPLAINS the ban at length ("no consent.txt, no --yes"), and
 # an assertion that could not tell the prohibition from the thing prohibited would fail on its own
@@ -1478,17 +1478,17 @@ else
   bad "the quoted size did not change with the disk"
 fi
 
-CASE="spine: an Android disk and a QForge disk cannot produce each other's screen"
+CASE="spine: an Android disk and a RetroForge disk cannot produce each other's screen"
 printf '%s\n' "$facts_wipe" | grep -qx 'SCREEN=android-wipe' \
-  && ok "a disk with no qforge on it renders the userdata-wipe screen" \
+  && ok "a disk with no retroforge on it renders the userdata-wipe screen" \
   || bad "an Android disk did not produce the android-wipe screen"
 spine_dir reinst
 SP_SEL_MODE=reinstall
 out="$(spine_run --intent reinstall)" || bad "the reinstall path failed: $out"
 facts_re="$(cat "$SP_FACTS" 2>/dev/null || true)"
 printf '%s\n' "$facts_re" | grep -qx 'SCREEN=reinstall' \
-  && ok "a disk that already carries qforge renders the /home choice instead" \
-  || bad "a qforge disk did not produce the reinstall screen"
+  && ok "a disk that already carries retroforge renders the /home choice instead" \
+  || bad "a retroforge disk did not produce the reinstall screen"
 if printf '%s\n' "$facts_re" | grep -q 'UD_GIB_NOW'; then
   bad "the reinstall screen quotes a userdata size -- there is no userdata to destroy on that path and the wipe text would be flatly false"
 else
@@ -1518,10 +1518,10 @@ grep -qx 'HOME_ACTION=erase' "$SP_FACTS" \
   || bad "the screen did not say /home was being erased"
 
 CASE="spine: the free-space figure comes from carve.sh, not from select-target's CEIL"
-# THE 0 GiB BUG, 2026-08-21. The screen derived the space QForge gets as
+# THE 0 GiB BUG, 2026-08-21. The screen derived the space RetroForge gets as
 # (CEIL - UD_START)/GiB - UD_GIB. CEIL stops at whatever follows userdata, which on a disk that
-# already carries qforge is our OWN ESP -- so the expression yields 0 while the carve went on to
-# hand QForge 90853 MiB. The number now comes from `carve.sh plan`, which derives it from
+# already carries retroforge is our OWN ESP -- so the expression yields 0 while the carve went on to
+# hand RetroForge 90853 MiB. The number now comes from `carve.sh plan`, which derives it from
 # effective_ceiling, the rule that is right.
 spine_dir plan_number
 SP_SEL_MODE=reinstall; SP_PLAN_GIB=88; SP_PLAN_REPLACES=1
@@ -1532,10 +1532,10 @@ grep -q 'carve.sh plan ' "$SP/calls" \
 sp_before 'carve.sh plan' 'confirm ' \
   && ok "and asks BEFORE the screen is drawn, which is the only time the answer is useful" \
   || bad "the plan was fetched after consent was taken"
-grep -qx 'QFORGE_GIB=88' "$SP_FACTS" \
+grep -qx 'RETROFORGE_GIB=88' "$SP_FACTS" \
   && ok "the screen quotes 88 GiB -- carve's figure, not a ceiling that stops at our own ESP" \
-  || bad "QFORGE_GIB is not carve's figure: $(grep QFORGE_GIB "$SP_FACTS" 2>/dev/null)"
-grep -qx 'QFORGE_GIB=0' "$SP_FACTS" \
+  || bad "RETROFORGE_GIB is not carve's figure: $(grep RETROFORGE_GIB "$SP_FACTS" 2>/dev/null)"
+grep -qx 'RETROFORGE_GIB=0' "$SP_FACTS" \
   && bad "the 0 GiB bug is back" \
   || ok "and it is not 0"
 # `plan` must not write. If it ever does, the whole ordering guarantee is void: it runs BEFORE
@@ -1548,11 +1548,11 @@ CASE="spine: a plan it could not obtain says so, rather than inventing a number"
 spine_dir plan_missing
 SP_SEL_MODE=reinstall; SP_PLAN_RC=1
 out="$(spine_run --intent fresh)" || bad "run failed: $out"
-grep -qx 'QFORGE_GIB=unknown' "$SP_FACTS" \
+grep -qx 'RETROFORGE_GIB=unknown' "$SP_FACTS" \
   && ok "an unavailable plan degrades to 'unknown' -- 'we could not tell' and a confident 0 must not look the same" \
-  || bad "a failed plan did not produce unknown: $(grep QFORGE_GIB "$SP_FACTS" 2>/dev/null)"
+  || bad "a failed plan did not produce unknown: $(grep RETROFORGE_GIB "$SP_FACTS" 2>/dev/null)"
 
-CASE="spine + confirm-tty: a fresh install over an existing qforge says it is destroying /home"
+CASE="spine + confirm-tty: a fresh install over an existing retroforge says it is destroying /home"
 # THE SERIOUS HALF OF THE SAME FINDING. `fresh` on a disk we already own destroys the existing
 # /home -- carve.sh has always printed "it is being replaced, /home included", but it printed it
 # AFTER consent, where nobody could act on it. Worse, the screen reassured "your game library is
@@ -1565,9 +1565,9 @@ grep -qx 'REPLACES_OURS=1' "$SP_FACTS" \
   && ok "the facts record that an existing install is being replaced" \
   || bad "REPLACES_OURS is not set on a fresh-over-ours disk"
 screen="$("$ROOT/installer/confirm-tty" --facts "$SP_FACTS" --sequence NESW </dev/null 2>&1 >/dev/null || true)"
-printf '%s\n' "$screen" | grep -qi 'DELETES THE QFORGE INSTALL ALREADY ON THIS DISK' \
+printf '%s\n' "$screen" | grep -qi 'DELETES THE RETROFORGE INSTALL ALREADY ON THIS DISK' \
   && ok "and the screen says so, in its own block" \
-  || bad "the screen does not disclose that an existing qforge install is destroyed"
+  || bad "the screen does not disclose that an existing retroforge install is destroyed"
 printf '%s\n' "$screen" | grep -qi 'games' \
   && ok "in the user's terms -- 'games' is the word that stops someone, not '/home'" \
   || bad "the screen never mentions games"
@@ -1583,7 +1583,7 @@ screen="$("$ROOT/installer/confirm-tty" --facts "$SP_FACTS" --sequence NESW </de
 printf '%s\n' "$screen" | grep -q 'your game library is safe' \
   && ok "a stock Android disk still gets it -- there the games really are on the card" \
   || bad "the reassurance was lost on the disk where it is true"
-printf '%s\n' "$screen" | grep -qi 'DELETES THE QFORGE INSTALL ALREADY' \
+printf '%s\n' "$screen" | grep -qi 'DELETES THE RETROFORGE INSTALL ALREADY' \
   && bad "a stock Android disk rendered the replace-existing block" \
   || ok "and it does not claim to be replacing an install that is not there"
 
@@ -1628,7 +1628,7 @@ CASE="spine: intent is the user's, never inferred from the disk"
 spine_dir intent
 SP_SEL_MODE=reinstall
 out="$(spine_run)" && bad "it picked an intent for a disk that admits three different answers" \
-  || ok "a disk that already carries qforge refuses to default -- reinstall, resize and remove all fit it, and two of those guesses erase something the user wanted kept"
+  || ok "a disk that already carries retroforge refuses to default -- reinstall, resize and remove all fit it, and two of those guesses erase something the user wanted kept"
 if carve_wrote; then bad "it wrote anyway"; else ok "and nothing was written"; fi
 spine_dir intent2
 SP_SEL_MODE=fresh
@@ -1671,10 +1671,10 @@ CASE="spine: it fails closed on a missing tool"
 # the seam, exactly as tests/test-post-install.sh reaches its die(): point one of the tool names at
 # something that does not exist. It is the same loop and the same refusal.
 spine_dir notool
-SP_SGDISK=qforge-no-such-tool
+SP_SGDISK=retroforge-no-such-tool
 out="$(spine_run)" && bad "ran with one of its tools absent" \
   || ok "a missing tool is found at second zero, not after userdata is gone"
-printf '%s' "$out" | grep -q 'qforge-no-such-tool' \
+printf '%s' "$out" | grep -q 'retroforge-no-such-tool' \
   && ok "and it names what is missing, rather than failing later at the use site" \
   || bad "the error does not name the missing tool: $out"
 if carve_wrote; then bad "the carve ran anyway"; else ok "and nothing was written"; fi
@@ -1721,11 +1721,11 @@ CASE="spine + ui + confirm-ui: the GAMEPAD renderer satisfies the same gate"
 spine_dir gamepad
 UI_SOCK="$T/ui-e2e.sock"
 printf 'SHOWN\n' >"$T/ui-events"
-QFORGE_UI_SOCK="$UI_SOCK" QFORGE_UI_EVENTS="$T/ui-events" QFORGE_UI_DEADLINE=60 \
+RETROFORGE_UI_SOCK="$UI_SOCK" RETROFORGE_UI_EVENTS="$T/ui-events" RETROFORGE_UI_DEADLINE=60 \
   PYTHONPYCACHEPREFIX="$T/pycache" "$ROOT/installer/ui" >"$T/ui-e2e.log" 2>&1 &
 ui_pid=$!
 for _ in $(seq 1 500); do [ -S "$UI_SOCK" ] && break; sleep 0.02; done
-export QFORGE_UI_SOCK="$UI_SOCK"
+export RETROFORGE_UI_SOCK="$UI_SOCK"
 SP_CONFIRM_OVERRIDE="$ROOT/installer/confirm-ui"
 out="$(spine_run)" \
   && ok "the answer the UI collected on the pad is accepted on the first attempt" \
@@ -1736,7 +1736,7 @@ out="$(spine_run)" \
 grep -q 'consent requested for ' "$T/ui-e2e.log" \
   && ok "and it was the UI that drew the screen, not the shim -- the shim only carried the answer" \
   || bad "the UI never saw the request: $(cat "$T/ui-e2e.log")"
-unset SP_CONFIRM_OVERRIDE QFORGE_UI_SOCK
+unset SP_CONFIRM_OVERRIDE RETROFORGE_UI_SOCK
 kill "$ui_pid" 2>/dev/null; wait "$ui_pid" 2>/dev/null
 
 CASE="confirm-tty: renders the numbers the spine measured"
@@ -1748,7 +1748,7 @@ SECTOR=512
 UD_INDEX=11
 UD_GIB_NOW=96
 UD_GIB_AFTER=16
-QFORGE_GIB=80
+RETROFORGE_GIB=80
 HOME_ACTION=create
 EOF
 wipe_render="$("$CONFIRM_TTY" --facts "$T/facts-wipe" --sequence SWNE </dev/null 2>&1 || true)"

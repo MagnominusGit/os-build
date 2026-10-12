@@ -1,4 +1,4 @@
-# QForge
+# RetroForge
 
 **A retro-emulation OS for Qualcomm Snapdragon handhelds.**
 
@@ -9,7 +9,7 @@ emulation machine: boot straight into a gamepad UI, pick a system, pick a game, 
 
 ## Status
 
-QForge is at **Phase 0**: the base system boots to a gamescope session on the supported SoCs, with
+RetroForge is at **Phase 0**: the base system boots to a gamescope session on the supported SoCs, with
 a liveness placeholder (`vkcube`) where the shell will be. Not yet a usable product.
 
 | Phase | What lands |
@@ -23,12 +23,12 @@ a liveness placeholder (`vkcube`) where the shell will be. Not yet a usable prod
 
 You need an **unlockable bootloader**, a spare **SD card**, and the device already running the
 **[ROCKNIX ABL](https://github.com/ROCKNIX/abl)** — the custom bootloader that can start a Linux
-system on these handhelds at all. QForge does not ship one; on a stock Android bootloader a card
-simply does nothing. QForge runs from the card and does not touch your Android install.
+system on these handhelds at all. RetroForge does not ship one; on a stock Android bootloader a card
+simply does nothing. RetroForge runs from the card and does not touch your Android install.
 
 ## Supported devices
 
-<!-- AUTO-GENERATED from rootfs/overlay/usr/lib/qforge/devices/*.conf — regenerate with /ecc:update-docs -->
+<!-- AUTO-GENERATED from rootfs/overlay/usr/lib/retroforge/devices/*.conf — regenerate with /ecc:update-docs -->
 
 | Board | SoC | Profile |
 |---|---|---|
@@ -60,15 +60,15 @@ simply does nothing. QForge runs from the card and does not touch your Android i
 
 <!-- END AUTO-GENERATED -->
 
-No board has been validated on QForge itself yet. The kernel, device trees and per-board data are
+No board has been validated on RetroForge itself yet. The kernel, device trees and per-board data are
 the ones the upstream project validated (see *Acknowledgements*), so the table is what the hardware
-layer supports, not a claim about QForge builds.
+layer supports, not a claim about RetroForge builds.
 
 > **SM8250 boards have no sensor DSP.** The `slpi.mbn` firmware for that SoC is published in no
 > open source, so every Snapdragon 865 board is without its accelerometer — no auto-rotation.
 
 > **SM6115 (MANGMI Air X, Air Y) and the MANGMI Air Y Pro are ports in progress** — brought over from
-> ROCKNIX's trees on 2026-10-09 and not yet booted on QForge. Its Steam story is also different: Valve's arm64 client
+> ROCKNIX's trees on 2026-10-09 and not yet booted on RetroForge. Its Steam story is also different: Valve's arm64 client
 > builds after 2026-04-15 need ARMv8.1 LSE atomics, which the Air X's Cortex-A73/A53 cores lack.
 
 One image serves every device: the running system identifies the board and configures itself.
@@ -80,7 +80,7 @@ One image serves every device: the running system identifies the board and confi
 An immutable, A/B-updatable aarch64 Linux distribution built on SteamOS 3 "Holo" packages, on
 Qualcomm mobile silicon (**SM6115 / SM8250 / SM8550 / SM8650**). The root is read-only, bootstrapped from
 packages into a sealed Btrfs image; updates are RAUC bundles installed to the inactive slot behind a
-custom `qforge-bootctl` bootloader backend. No Steam client, no x86 emulation, no Android container.
+custom `retroforge-bootctl` bootloader backend. No Steam client, no x86 emulation, no Android container.
 
 The build is **unified** — one image for every supported SoC, one kernel carrying the union of
 drivers and DTBs. There is no `SOC` argument.
@@ -89,7 +89,7 @@ drivers and DTBs. There is no `SOC` argument.
 
 Everything goes through the top-level `Makefile`, which wires the per-stage scripts into one
 incremental graph and pins where each stage runs. Kernel, rootfs assembly, boot packaging and
-bundling all cross-compile inside the `qforge-build` Docker image. **Never invoke the stage
+bundling all cross-compile inside the `retroforge-build` Docker image. **Never invoke the stage
 scripts by hand.**
 
 ```sh
@@ -106,7 +106,7 @@ Dev vs release is selected by **environment**, not by a make knob, and it must b
 set -a; . ./dev.env; set +a
 ```
 
-`QFORGE_DEV=1` is the developer path: Wi-Fi creds, an SSH key and the dev package set baked in. See
+`RETROFORGE_DEV=1` is the developer path: Wi-Fi creds, an SSH key and the dev package set baked in. See
 `make help` and the header of the `Makefile` for every knob.
 
 ### Repository layout
@@ -126,7 +126,7 @@ device.
 | `kernel/` | Unified kernel: config fragments, patches, all device trees, firmware embed list |
 | `firmware/` | Vendor firmware fetch/verify recipes + their pins |
 | `boot/` | Two-stage UEFI boot: steamcl (stage 1) + GRUB (stage 2), both built from pinned sources |
-| `apps/qforge-splash/` | The boot splash drawer |
+| `apps/retroforge-splash/` | The boot splash drawer |
 | `tests/` | Every offline suite. `make test` runs the host ones; the signing and disk suites need a container |
 | `build/` | Where the build itself is pinned: the cross-compile `Dockerfile`, the builder digest and the repo snapshot |
 
@@ -135,13 +135,13 @@ Most of those directories carry their own `README.md` documenting them file-by-f
 ### Adding a board
 
 Three pieces of data, all discovered automatically: a DTS under `kernel/dts/qcom/`, a device
-profile under `rootfs/overlay/usr/lib/qforge/devices/` plus its `model` case in `device-env`, and —
+profile under `rootfs/overlay/usr/lib/retroforge/devices/` plus its `model` case in `device-env`, and —
 if the gamepad is not already covered — an InputPlumber config. An unmatched board falls through
 to `defaults.conf` and still boots.
 
 ## Acknowledgements
 
-QForge is a derived work. Its build system, A/B update path, installer, hardware layer and most of
+RetroForge is a derived work. Its build system, A/B update path, installer, hardware layer and most of
 its tooling started as a copy of **[Nova-Deck/os-build](https://github.com/Nova-Deck/os-build)**
 (GPL-2.0-or-later), adapted for a retro-emulation focus. The notices of that work travel with it.
 
@@ -153,12 +153,12 @@ the device-by-device bring-up this class of hardware depends on.
 **Armada** showed that a console-style handheld experience on this hardware was a real target, and
 the boot splash's design derives from its `armada-splash`.
 
-Thanks also to Valve and Collabora, whose aarch64 Arch port QForge builds on, and to the Mesa,
+Thanks also to Valve and Collabora, whose aarch64 Arch port RetroForge builds on, and to the Mesa,
 gamescope, InputPlumber, OpenGamepadUI and RAUC projects.
 
 ## License
 
-QForge's own code is **GPL-2.0-or-later**. The full text of GPL-2.0 is in [LICENSE](LICENSE); "or
+RetroForge's own code is **GPL-2.0-or-later**. The full text of GPL-2.0 is in [LICENSE](LICENSE); "or
 later" is stated here and applies to everything in this repository that is ours — you may use this
 work under GPL-2.0 or, at your option, any later version published by the Free Software Foundation.
 
@@ -170,9 +170,9 @@ the LICENSE file alone would misrepresent them:
 | `kernel/patches/*` | derivatives of Linux — **GPL-2.0-only**, not "or later" |
 | `boot/patches/grub/*` | derivatives of GRUB — **GPL-3.0-or-later** |
 | `packages/*/patches/*` | each carries the license of the project it patches |
-| `apps/qforge-splash/src/stb_truetype.h` | stb_truetype v1.26, **public domain** (Sean Barrett), vendored verbatim |
+| `apps/retroforge-splash/src/stb_truetype.h` | stb_truetype v1.26, **public domain** (Sean Barrett), vendored verbatim |
 
-`apps/qforge-splash` is a from-scratch implementation whose design is derived from Armada's
+`apps/retroforge-splash` is a from-scratch implementation whose design is derived from Armada's
 `armada-splash` (GPL-2.0-or-later).
 
 ## Firmware

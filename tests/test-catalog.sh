@@ -1,32 +1,32 @@
 #!/usr/bin/env bash
-# Offline test for the emulator catalog the QForge plugin downloads from (plan Phase 4, part 4).
+# Offline test for the emulator catalog the RetroForge plugin downloads from (plan Phase 4, part 4).
 #
 #   tests/test-catalog.sh                    # offline: shape and cross-checks against the image
-#   QFORGE_NET_TEST=1 tests/test-catalog.sh  # also asks GitHub that every pin still matches
+#   RETROFORGE_NET_TEST=1 tests/test-catalog.sh  # also asks GitHub that every pin still matches
 #
 # WHY THIS EXISTS. The catalog decides which emulator build a player gets, so a bad row is a
 # broken game for everyone who downloads after it:
 #
 #   - a rolling tag (DuckStation's `latest` / `preview`) replaces its asset in place, so a pin on
 #     one silently ships an untested build: pins must be numbered releases -- unless the entry says
-#     so with "channel": "nightly" (Cemu, user decision 2026-10-07): then no sha256 (qforge-emu
+#     so with "channel": "nightly" (Cemu, user decision 2026-10-07): then no sha256 (retroforge-emu
 #     checks GitHub's own digest), "size" is an estimate, and the tag must be the rolling one;
 #   - the sha256 is what the plugin checks the download against (and must match GitHub's per-asset
 #     digest): a malformed one would make every install fail, or, if skipped, verify nothing;
-#   - an emulator the image cannot launch (no /usr/share/qforge/emulators/<emu>/emulator.json), or one serving a
+#   - an emulator the image cannot launch (no /usr/share/retroforge/emulators/<emu>/emulator.json), or one serving a
 #     system launch.conf maps elsewhere, would download fine and then never start;
 #   - a plain-http URL would let anyone on the path swap the AppImage;
 #   - an "unpack" entry (PortMaster, a zip unpacked into the player's home) with a target outside
-#     the home, or "self_update" on an AppImage, would be refused by qforge-emu at every install.
+#     the home, or "self_update" on an AppImage, would be refused by retroforge-emu at every install.
 #
 # Launch details (format, binary, args, first-run seed) live in the image's emulator.json, NOT here: the
 # catalog only says what to download and how to verify it.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CATALOG="${QFORGE_CATALOG:-$ROOT/rootfs/overlay/usr/share/qforge/catalog.json}"
-LAUNCH_CONF="$ROOT/rootfs/overlay/etc/qforge/launch.conf"
-EMU_DATA_DIR="$ROOT/rootfs/overlay/usr/share/qforge/emulators"
+CATALOG="${RETROFORGE_CATALOG:-$ROOT/rootfs/overlay/usr/share/retroforge/catalog.json}"
+LAUNCH_CONF="$ROOT/rootfs/overlay/etc/retroforge/launch.conf"
+EMU_DATA_DIR="$ROOT/rootfs/overlay/usr/share/retroforge/emulators"
 
 for f in "$CATALOG" "$LAUNCH_CONF"; do
   [ -f "$f" ] || { echo "missing input: $f" >&2; exit 1; }
@@ -34,11 +34,11 @@ done
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
 
 # The checks are in Python (JSON + regex); each prints "ok|FAIL <TAB> case <TAB> message".
-out="$(QFORGE_NET_TEST="${QFORGE_NET_TEST:-0}" python3 - "$CATALOG" "$LAUNCH_CONF" "$EMU_DATA_DIR" <<'PY'
+out="$(RETROFORGE_NET_TEST="${RETROFORGE_NET_TEST:-0}" python3 - "$CATALOG" "$LAUNCH_CONF" "$EMU_DATA_DIR" <<'PY'
 import json, os, re, sys, urllib.request
 
 catalog_path, launch_conf, emu_conf_dir = sys.argv[1:4]
-net = os.environ.get("QFORGE_NET_TEST") == "1"
+net = os.environ.get("RETROFORGE_NET_TEST") == "1"
 
 def ok(case, msg):  print(f"ok\t{case}\t{msg}")
 def bad(case, msg): print(f"FAIL\t{case}\t{msg}")
@@ -63,7 +63,7 @@ else:
     bad(case, "has no 'emulators' object")
     sys.exit(0)
 
-# system -> emulator, last match wins (as in qforge-launch)
+# system -> emulator, last match wins (as in retroforge-launch)
 launch = {}
 for line in open(launch_conf):
     m = re.match(r"^([a-z0-9_]+)=([a-z0-9_-]+)\s*$", line)
@@ -95,7 +95,7 @@ def check_github(case, e, rx):
         if re.fullmatch(r"sha256:[0-9a-f]{64}", str(a.get("digest"))):
             ok(case, f"GitHub publishes a sha256 digest for {a['name']} (the nightly is checked against it)")
         else:
-            bad(case, f"no sha256 digest on {a['name']}: qforge-emu would refuse every install")
+            bad(case, f"no sha256 digest on {a['name']}: retroforge-emu would refuse every install")
         if isinstance(a.get("size"), int) and e["size"] / 2 <= a["size"] <= e["size"] * 2:
             ok(case, f"size estimate {e['size']} is near today's {a['size']}")
         else:
@@ -129,8 +129,8 @@ for emu, e in emus.items():
     extra = set(e) - REQUIRED - OPTIONAL - {"channel"}
     if extra:
         bad(case, f"unknown fields {sorted(extra)} (launch settings belong in the image's emulator.json)")
-    # Optional data files qforge-emu fetches after an install (RPCS3's config database): https only,
-    # a normalised path under $HOME. qforge-emu skips a bad entry; the catalog must not carry one.
+    # Optional data files retroforge-emu fetches after an install (RPCS3's config database): https only,
+    # a normalised path under $HOME. retroforge-emu skips a bad entry; the catalog must not carry one.
     data = e.get("data", [])
     good = isinstance(data, list) and all(
         isinstance(d, dict) and set(d) == {"url", "to"} and isinstance(d["url"], str)
@@ -144,7 +144,7 @@ for emu, e in emus.items():
         bad(case, f"bad data entries {data!r}: each needs an https url and a relative path, nothing else")
 
     # An unpacked archive (PortMaster): a folder under the player's home and the version file in it,
-    # both normalised relative paths; self_update only on one (qforge-emu refuses it otherwise).
+    # both normalised relative paths; self_update only on one (retroforge-emu refuses it otherwise).
     unpack = e.get("unpack")
     rel = lambda p: (isinstance(p, str) and p and not p.startswith("/")
                      and os.path.normpath(p) == p and ".." not in p.split("/"))
@@ -160,9 +160,9 @@ for emu, e in emus.items():
             bad(case, "self_update must be true, on a pinned unpacked archive only")
 
     if os.path.isfile(os.path.join(emu_conf_dir, emu, "emulator.json")):
-        ok(case, f"the image can launch it (/usr/share/qforge/emulators/{emu}/emulator.json)")
+        ok(case, f"the image can launch it (/usr/share/retroforge/emulators/{emu}/emulator.json)")
     else:
-        bad(case, f"no /usr/share/qforge/emulators/{emu}/emulator.json: it would download and never start")
+        bad(case, f"no /usr/share/retroforge/emulators/{emu}/emulator.json: it would download and never start")
     systems = e["systems"]
     if isinstance(systems, list) and systems:
         wrong = [s for s in systems if launch.get(s) != emu]
@@ -176,7 +176,7 @@ for emu, e in emus.items():
     tag = e["tag"]
     if channel is not None:
         if channel not in CHANNELS:
-            bad(case, f"unknown channel {channel!r} (qforge-emu knows {sorted(CHANNELS)})")
+            bad(case, f"unknown channel {channel!r} (retroforge-emu knows {sorted(CHANNELS)})")
         elif "sha256" in e:
             bad(case, "a nightly entry has no sha256: its build changes, GitHub's digest is checked")
         elif tag.lower() in ROLLING:

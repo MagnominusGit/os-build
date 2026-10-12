@@ -8,7 +8,7 @@
 # an invented directive therefore looks correct in review, passes every test that only reads it as
 # text, and simply does not do the thing it says it does.
 #
-# qforge shipped exactly that: qforge-boot-good.service used `ExecOnFailure=`, which is not a
+# retroforge shipped exactly that: retroforge-boot-good.service used `ExecOnFailure=`, which is not a
 # systemd directive, so the failed-boot demote -- the OS half of the A/B rollback design, and the
 # ONLY rollback trigger while the stage-2 counter is unwired -- never ran. Nothing caught it,
 # because nothing ever asked systemd what it thought of the file.

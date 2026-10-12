@@ -66,7 +66,7 @@ read -r rt_name rt_size rt_type _ rt_label _ < <(rows | sed -n 2p)
 # those, and an installer whose /esp matched the TARGET's would write its failure log onto the disk
 # it just failed to install.
 case "$esp_label" in
-  [Nn][Oo][Vv][Aa][Dd][Ee][Cc][Kk]*) bad "the ESP label is a qforge-* one — it would collide with the target" ;;
+  [Nn][Oo][Vv][Aa][Dd][Ee][Cc][Kk]*) bad "the ESP label is a retroforge-* one — it would collide with the target" ;;
   *) ok "the ESP label does not collide with an install's labels" ;;
 esac
 grep -q 'NDINSTALLER' "$ROOT/installer/mkroot.sh" \
@@ -94,25 +94,25 @@ else
 
   # The debug arg is what hands the panel to a getty instead of gamescope. It must be on the debug
   # entries and on NOTHING else, or every boot skips the GUI.
-  d_with=$(grep -c 'qforge.install.debug' "$cfg")
+  d_with=$(grep -c 'retroforge.install.debug' "$cfg")
   [ "$d_with" -eq "$debug" ] \
-    && ok "qforge.install.debug appears on exactly the debug entries" \
-    || bad "$d_with lines carry qforge.install.debug but there are $debug debug entries"
+    && ok "retroforge.install.debug appears on exactly the debug entries" \
+    || bad "$d_with lines carry retroforge.install.debug but there are $debug debug entries"
 
   for want in "rootfstype=squashfs" "systemd.volatile=state" "root=PARTUUID=$UUID" "rootwait" " ro "; do
     grep -q -- "$want" "$cfg" && ok "the kernel line carries '$want'" \
       || bad "the kernel line is missing '$want'"
   done
   # Slot machinery must NOT leak in from the shipped generator: there is one root here, and a
-  # qforge.slot= on the cmdline would have the OS looking for a slot that does not exist.
-  for unwanted in "qforge.slot=" "qforge.var=" "qforge.efi=" "rootfstype=btrfs" "slotroot"; do
+  # retroforge.slot= on the cmdline would have the OS looking for a slot that does not exist.
+  for unwanted in "retroforge.slot=" "retroforge.var=" "retroforge.efi=" "rootfstype=btrfs" "slotroot"; do
     grep -q -- "$unwanted" "$cfg" \
       && bad "the config carries '$unwanted' — that is slot machinery, and this medium has no slots" \
       || ok "no '$unwanted'"
   done
   # Boot-attempt counting demotes a slot that cannot boot. There is nothing to demote to here, so
   # it could only ever stop the recovery medium from starting.
-  grep -q 'qforge_bootattempts' "$cfg" \
+  grep -q 'retroforge_bootattempts' "$cfg" \
     && bad "the config counts boot attempts — the medium would refuse itself" \
     || ok "no boot-attempt counting"
 
@@ -202,13 +202,13 @@ fi
 CASE="mkimage guards"
 # The argument is positional and both trees are directories full of a Linux system, so picking the
 # wrong one is a one-word mistake that would produce an "installer" with no install code on it.
-grep -q 'ID=qforge-installer' "$MKIMAGE" \
+grep -q 'ID=retroforge-installer' "$MKIMAGE" \
   && ok "refuses a tree that does not identify as the installer" \
   || bad "mkimage.sh does not check which tree it was handed"
-grep -q 'usr/lib/qforge/pkgs' "$MKIMAGE" \
+grep -q 'usr/lib/retroforge/pkgs' "$MKIMAGE" \
   && ok "refuses a half-finished bootstrap (checks the completion marker)" \
   || bad "mkimage.sh does not check the bootstrap completed"
-grep -q 'QFORGE_PARTITION_TABLE' "$MKIMAGE" \
+grep -q 'RETROFORGE_PARTITION_TABLE' "$MKIMAGE" \
   && ok "points genpart.sh at the medium table, not the shipped one" \
   || bad "mkimage.sh does not override the partition table — it would lay the 8-partition layout"
 # steamcl is the A/B slot chooser. On a one-root medium its conf files would be fiction.
@@ -228,14 +228,14 @@ grep -q 'grubenv' "$MKIMAGE" && grep -qE '^[^#]*mcopy.*grubenv' "$MKIMAGE" \
 
 CASE="the Wi-Fi template is on the medium"
 # The no-Wi-Fi screen tells the operator to copy wifi.conf.example, and until 2026-08-24 nothing
-# ever put one on a card. netcfg reads /esp/qforge/wifi.conf, so the template has to sit beside
+# ever put one on a card. netcfg reads /esp/retroforge/wifi.conf, so the template has to sit beside
 # that path, on the boot partition that is typed 0700 so Windows and macOS will show it.
-grep -q 'qforge/wifi.conf.example' "$MKIMAGE" \
-  && ok "mkimage writes it to /qforge/ on the boot partition" \
+grep -q 'retroforge/wifi.conf.example' "$MKIMAGE" \
+  && ok "mkimage writes it to /retroforge/ on the boot partition" \
   || bad "the file the screen tells the user to copy is not put on the medium"
-grep -q 'fatdir "$esp" qforge' "$MKIMAGE" \
+grep -q 'fatdir "$esp" retroforge' "$MKIMAGE" \
   && ok "and creates the folder netcfg reads wifi.conf from" \
-  || bad "the qforge folder is not created"
+  || bad "the retroforge folder is not created"
 grep -q 'die "missing' "$MKIMAGE" && grep -q 'WIFI_EXAMPLE' "$MKIMAGE" \
   && ok "a missing template fails the build rather than shipping bad instructions" \
   || bad "the template can go missing silently"
@@ -244,10 +244,10 @@ CASE="the medium says which build it is"
 # Until this landed, every installer image ever built answered identically: the same NAME, the same
 # ID, no version, no date. That is the first question asked at the fallback console -- the thing
 # that exists for the moment something has gone wrong -- and the medium could not answer it.
-grep -q '>"$BASE/etc/qforge-release"' "$MKIMAGE" \
-  && ok "mkimage writes /etc/qforge-release, the path the shipped image uses too" \
+grep -q '>"$BASE/etc/retroforge-release"' "$MKIMAGE" \
+  && ok "mkimage writes /etc/retroforge-release, the path the shipped image uses too" \
   || bad "no per-build identity is written into the tree"
-for f in QFORGE_VARIANT QFORGE_BUILD QFORGE_VERSION QFORGE_GIT QFORGE_MODE; do
+for f in RETROFORGE_VARIANT RETROFORGE_BUILD RETROFORGE_VERSION RETROFORGE_GIT RETROFORGE_MODE; do
   grep -q "echo \"$f=" "$MKIMAGE" && ok "$f is stamped" || bad "$f is missing from the stamp"
 done
 # REWRITTEN, NEVER APPENDED. The tree is cached between builds, so `>>` would stack a fresh block on
@@ -259,16 +259,16 @@ grep -q '>>"$BASE/etc/os-release"' "$MKIMAGE" \
 grep -q 'cat "$OSRELEASE_SRC"' "$MKIMAGE" \
   && ok "and the static half comes from installer/os-release rather than a second copy of it" \
   || bad "the rewritten os-release does not start from the committed file"
-# THE MODE COMES FROM THE TREE. `QFORGE_DEV=1 make installer-root` followed by a plain
+# THE MODE COMES FROM THE TREE. `RETROFORGE_DEV=1 make installer-root` followed by a plain
 # `make installer` must not stamp `release` on a medium carrying an authorized_keys and a Wi-Fi PSK;
 # mkroot folds `dev:0|1` into the reuse marker precisely so this half can read it back.
-grep -q "grep -qx 'dev:1' \"\$BASE/usr/lib/qforge/pkgs\"" "$MKIMAGE" \
+grep -q "grep -qx 'dev:1' \"\$BASE/usr/lib/retroforge/pkgs\"" "$MKIMAGE" \
   && ok "the dev/release mode is read out of the root's own reuse marker" \
   || bad "the mode is not derived from the tree"
 # Non-comment lines only: the block above EXPLAINS why it does not read that variable, and a naive
 # grep reads its own rationale as the violation.
-grep -qE '^[^#]*QFORGE_DEV' "$MKIMAGE" \
-  && bad "mkimage reads QFORGE_DEV — a stale environment could disagree with what was baked in" \
+grep -qE '^[^#]*RETROFORGE_DEV' "$MKIMAGE" \
+  && bad "mkimage reads RETROFORGE_DEV — a stale environment could disagree with what was baked in" \
   || ok "and never from the environment, which cannot disagree with the tree"
 grep -q 'installer.release' "$MKIMAGE" \
   && ok "the same fields land beside the image, so a publisher need not open a squashfs to name it" \
@@ -281,14 +281,14 @@ grep -qE '^(VERSION_ID|BUILD_ID|VERSION)=' "$ROOT/installer/os-release" \
 # And the identity has to reach the container at all.
 grep -qE '^installer:.*' "$ROOT/Makefile" \
   && grep -A3 '^installer:' "$ROOT/Makefile" | grep -q '$(ID_ENV)' \
-  && ok "the Makefile forwards \$(ID_ENV), or QFORGE_VERSION would never reach the stamp" \
+  && ok "the Makefile forwards \$(ID_ENV), or RETROFORGE_VERSION would never reach the stamp" \
   || bad "make installer does not pass ID_ENV into the container"
 
 CASE="the medium carries no Steam seed -- /home is staged empty on the device"
 # The distro ships no Steam client, so there is no tree for the medium to carry: the spine stages an
 # empty player home with image/lib-homestage.sh exactly as make-sdcard.sh does for a card. A seed
 # that crept back in would be 1.4 GiB on the medium and a pin for the spine to refuse against.
-grep -qE '^[^#]*(steam[-]seed|SEED_SRC|QFORGE_SEED_)' "$MKIMAGE" "$ROOT/installer/mkroot.sh" \
+grep -qE '^[^#]*(steam[-]seed|SEED_SRC|RETROFORGE_SEED_)' "$MKIMAGE" "$ROOT/installer/mkroot.sh" \
   && bad "mkimage/mkroot still stage a Steam seed onto the medium" \
   || ok "nothing stages a Steam seed or its pin onto the medium"
 grep -qE '^installer:.*SEED' "$ROOT/Makefile" \

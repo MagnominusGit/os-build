@@ -16,8 +16,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OV="$ROOT/rootfs/overlay"
 CONF="$OV/etc/ksmbd/ksmbd.conf"
-LAYOUT="$OV/usr/share/user-tmpfiles.d/qforge-home.conf"
-PRESET="$OV/usr/lib/systemd/system-preset/60-qforge-shares.preset"
+LAYOUT="$OV/usr/share/user-tmpfiles.d/retroforge-home.conf"
+PRESET="$OV/usr/lib/systemd/system-preset/60-retroforge-shares.preset"
 WANTS="$OV/etc/systemd/system/multi-user.target.wants"
 AVAHI="$OV/etc/avahi/services/smb.service"
 KCONF="$ROOT/kernel/kernel.config"
@@ -68,7 +68,7 @@ for u in ksmbd.service avahi-daemon.service; do
   grep -qx "enable $u" "$PRESET" && ok "preset enables $u" || bad "preset does not enable $u"
   [ "$(readlink "$WANTS/$u" 2>/dev/null)" = "/usr/lib/systemd/system/$u" ] && ok "build-time multi-user.target.wants/$u fallback" || bad "no multi-user.target.wants/$u link"
 done
-grep -q 'RequiresMountsFor=/home' "$OV/usr/lib/systemd/system/ksmbd.service.d/qforge.conf" 2>/dev/null \
+grep -q 'RequiresMountsFor=/home' "$OV/usr/lib/systemd/system/ksmbd.service.d/retroforge.conf" 2>/dev/null \
   && ok "ksmbd waits for /home (a separate nofail partition)" || bad "ksmbd.service is not ordered after /home"
 
 # =================================================================================================

@@ -1,4 +1,4 @@
-# qforge INSTALLER image — the declared package set. Phase 6 of
+# retroforge INSTALLER image — the declared package set. Phase 6 of
 # .claude/plans/internal-install.plan.md.
 #
 # Read by installer/mkroot.sh (which lays the root down from it) and by `make relock-installer`
@@ -29,7 +29,7 @@
 base
 
 # ---- what the spine calls BY NAME ----------------------------------------------------------------
-# qforge-install's recon() checks each of these at second zero, before the carve, precisely
+# retroforge-install's recon() checks each of these at second zero, before the carve, precisely
 # because a missing tool discovered later costs the user their Android data to reach an error that
 # was always knowable. Four of them are absent from the SHIPPED image, which is why
 # installer/lib-hwstage.sh exists to stage them onto a dev card — see that file, and

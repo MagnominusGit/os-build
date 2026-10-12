@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# qforge internal install — the CONSENT SCREEN, gamepad rendering. Phase 5/§4d of
+# retroforge internal install — the CONSENT SCREEN, gamepad rendering. Phase 5/§4d of
 # .claude/plans/internal-install.plan.md.
 #
 #   confirm-ui --facts <file> --sequence <NESW>
@@ -37,14 +37,14 @@ import os
 import socket
 import sys
 
-# Test seams, in the spirit of qforge-update's: tests/test-ui.sh redirects the socket into a
+# Test seams, in the spirit of retroforge-update's: tests/test-ui.sh redirects the socket into a
 # sandbox and executes THIS file. What runs under test is the artifact that ships.
-SOCK = os.environ.get("QFORGE_UI_SOCK", "/run/qforge/installer-ui.sock")
+SOCK = os.environ.get("RETROFORGE_UI_SOCK", "/run/retroforge/installer-ui.sock")
 # The wait for the UI to ACCEPT is bounded — it is either up or it is not. The wait for the ANSWER
 # is not, deliberately: the person is reading a screen that tells them their Android data is about
 # to be destroyed, and a consent gate that expires while it is being read is a gate that teaches
 # people to answer without reading.
-CONNECT_TIMEOUT = float(os.environ.get("QFORGE_UI_CONNECT_TIMEOUT", "15"))
+CONNECT_TIMEOUT = float(os.environ.get("RETROFORGE_UI_CONNECT_TIMEOUT", "15"))
 
 EXIT_ABORT = 3      # the user said no. A legitimate answer.
 EXIT_NO_UI = 4      # we could not ask. Not an answer at all, and it must not look like one.

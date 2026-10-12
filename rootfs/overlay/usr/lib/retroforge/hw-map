@@ -1,0 +1,221 @@
+#!/bin/bash
+# retroforge hw-map — resolve this board's hardware into ONE standard tree, /run/retroforge/hw, so every
+# consumer (the OpenGamepadUI plugin's Hardware card, scripts, daemons) reads the same paths on
+# every board instead of carrying its own list of sysfs names.
+#
+# What a board calls its battery, charger, backlight, thermal zones, fan and LEDs is the kernel's
+# business and differs per devicetree (the Air X battery is power_supply/battery next to a
+# bq256xx-battery decoy that only knows charge_full_design; a Pocket S2 names things differently
+# again). The board profile (/usr/lib/retroforge/devices/<id>.conf, via device-env) may pin any of
+# them with RETROFORGE_HW_*; anything left empty is detected here by the rules below, which are the
+# ones that hold on every board we have seen. A pinned name the board turns out not to have (a
+# driver that renamed its node, a DTS that changed) is logged and detected instead, so a stale pin
+# costs a warning, not the link. Either way the result is the same tree:
+#
+#   /run/retroforge/hw/battery        -> /sys/class/power_supply/<battery>     (capacity, status, ...)
+#   /run/retroforge/hw/charger        -> /sys/class/power_supply/<charger>     (online, status)
+#   /run/retroforge/hw/backlight      -> /sys/class/backlight/<panel>          (brightness, max_brightness)
+#   /run/retroforge/hw/thermal/<role> -> /sys/class/thermal/thermal_zoneN      (temp, in millidegrees)
+#                                    roles: cpu gpu battery skin, each only when a zone fits
+#   /run/retroforge/hw/thermal/all/<type> -> every zone, by its type name
+#   /run/retroforge/hw/fan            -> /sys/class/hwmon/hwmonN               (fan1_input rpm, pwm1)
+#   /run/retroforge/hw/gpu            -> the GPU's devfreq directory            (cur_freq, min/max_freq)
+#   /run/retroforge/hw/cpu            -> /sys/devices/system/cpu                (cpufreq/policy*/...)
+#   /run/retroforge/hw/soc            -> /sys/devices/soc0                      (machine, family, soc_id,
+#                                                                            revision, serial_number)
+#   /run/retroforge/hw/leds/<group>/NN -> /sys/class/leds/<led>, NN = 01.. in natural order
+#   /run/retroforge/hw/hw.env         what was resolved, as KEY=value (sourceable; RETROFORGE_HW_*)
+#
+# A consumer tests for a link and reads through it; a missing link means the board has no such
+# thing. Links point INTO sysfs, so the values are always live and no daemon has to copy them.
+#
+# Runs as root from retroforge-hw.service at boot, and again from the udev rule in
+# 70-retroforge-hw.rules whenever a power_supply/backlight/leds/thermal/hwmon device appears late.
+# The tree is rebuilt beside the old one and swapped in, so a reader never sees a half tree.
+#
+# TEST SEAMS (tests/test-hw-map.sh): RETROFORGE_HW_SYS (sysfs root), RETROFORGE_HW_RUN (the tree to
+# write), RETROFORGE_HW_DEVICE_ENV (device-env to eval, "" = none).
+set -euo pipefail
+
+SYS=${RETROFORGE_HW_SYS:-/sys}
+RUN=${RETROFORGE_HW_RUN:-/run/retroforge/hw}
+DEVICE_ENV=${RETROFORGE_HW_DEVICE_ENV-/usr/lib/retroforge/device-env}
+
+# Board profile: device-env prints VAR=value lines quoted with printf %q, so eval is sound.
+if [ -n "$DEVICE_ENV" ] && [ -x "$DEVICE_ENV" ]; then
+    eval "$("$DEVICE_ENV" 2>/dev/null || true)"
+fi
+: "${RETROFORGE_HW_BATTERY:=}" "${RETROFORGE_HW_CHARGER:=}" "${RETROFORGE_HW_BACKLIGHT:=}"
+: "${RETROFORGE_HW_THERMAL_CPU:=}" "${RETROFORGE_HW_THERMAL_GPU:=}" "${RETROFORGE_HW_THERMAL_BATTERY:=}"
+: "${RETROFORGE_HW_THERMAL_SKIN:=}" "${RETROFORGE_HW_FAN:=}" "${RETROFORGE_HW_GPU_DEVFREQ:=}" "${RETROFORGE_HW_LED_GROUPS:=}"
+: "${RETROFORGE_DEVICE_ID:=unknown}" "${RETROFORGE_DEVICE_NAME:=unknown}" "${RETROFORGE_SOC_CLASS:=}"
+
+tmp="$RUN.tmp.$$"
+rm -rf "$tmp"
+mkdir -p "$tmp/thermal/all" "$tmp/leds"
+trap 'rm -rf "$tmp"' EXIT
+
+attr() { # attr <dir> <file>: the file's first line, "" when unreadable
+    local v; IFS= read -r v < "$1/$2" 2>/dev/null || v=""; printf '%s' "$v"
+}
+link() { # link <name-under-tree> <target-dir>: only when the target exists
+    [ -d "$2" ] || return 1
+    mkdir -p "$(dirname "$tmp/$1")"
+    ln -sfn "$2" "$tmp/$1"
+}
+resolved=()
+note() { resolved+=("$1=$2"); }
+pin_missing() { # pin_missing <field> <value>: a pinned node that is not on this board
+    printf 'retroforge hw-map: %s=%s is not on this board -- detecting instead\n' "$1" "$2" >&2
+}
+
+# --- battery: the profile's, else the first power_supply of type Battery that reports a capacity
+# (a charger's companion "battery" node that knows only charge_full_design is not a battery) ----
+bat=""
+if [ -n "$RETROFORGE_HW_BATTERY" ]; then
+    if [ -d "$SYS/class/power_supply/$RETROFORGE_HW_BATTERY" ]; then bat="$SYS/class/power_supply/$RETROFORGE_HW_BATTERY"
+    else pin_missing RETROFORGE_HW_BATTERY "$RETROFORGE_HW_BATTERY"; fi
+fi
+if [ -z "$bat" ]; then
+    for p in "$SYS"/class/power_supply/*/; do
+        p=${p%/}; [ -d "$p" ] || continue
+        [ "$(attr "$p" type)" = Battery ] || continue
+        [ -r "$p/capacity" ] || continue
+        bat=$p; break
+    done
+fi
+[ -n "$bat" ] && link battery "$bat" && note RETROFORGE_HW_BATTERY "$(basename "$bat")" || note RETROFORGE_HW_BATTERY ""
+
+# --- charger: the profile's, else the first non-Battery supply with `online`, preferring one that
+# also reports a charging `status` (the charger IC over a bare Type-C source) ---------------------
+chg=""
+if [ -n "$RETROFORGE_HW_CHARGER" ]; then
+    if [ -d "$SYS/class/power_supply/$RETROFORGE_HW_CHARGER" ]; then chg="$SYS/class/power_supply/$RETROFORGE_HW_CHARGER"
+    else pin_missing RETROFORGE_HW_CHARGER "$RETROFORGE_HW_CHARGER"; fi
+fi
+if [ -z "$chg" ]; then
+    first=""
+    for p in "$SYS"/class/power_supply/*/; do
+        p=${p%/}; [ -d "$p" ] || continue
+        [ "$(attr "$p" type)" != Battery ] || continue
+        [ -r "$p/online" ] || continue
+        [ -n "$first" ] || first=$p
+        if [ -r "$p/status" ]; then chg=$p; break; fi
+    done
+    [ -n "$chg" ] || chg=$first
+fi
+[ -n "$chg" ] && link charger "$chg" && note RETROFORGE_HW_CHARGER "$(basename "$chg")" || note RETROFORGE_HW_CHARGER ""
+
+# --- backlight: the profile's, else the first one --------------------------------------------
+bl=""
+if [ -n "$RETROFORGE_HW_BACKLIGHT" ]; then
+    if [ -d "$SYS/class/backlight/$RETROFORGE_HW_BACKLIGHT" ]; then bl="$SYS/class/backlight/$RETROFORGE_HW_BACKLIGHT"
+    else pin_missing RETROFORGE_HW_BACKLIGHT "$RETROFORGE_HW_BACKLIGHT"; fi
+fi
+if [ -z "$bl" ]; then
+    for p in "$SYS"/class/backlight/*/; do p=${p%/}; [ -d "$p" ] && { bl=$p; break; }; done
+fi
+[ -n "$bl" ] && link backlight "$bl" && note RETROFORGE_HW_BACKLIGHT "$(basename "$bl")" || note RETROFORGE_HW_BACKLIGHT ""
+
+# --- thermal: every zone under all/<type>; the roles by the profile's type name, else the first
+# zone (in zone-number order) whose type matches the role's pattern. (No bash-4 arrays: the test
+# runs this under the host's bash, which on macOS is 3.2.) --------------------------------------
+zones=$(ls -d "$SYS"/class/thermal/thermal_zone* 2>/dev/null | sort -V || true)
+for z in $zones; do
+    [ -d "$z" ] || continue
+    t=$(attr "$z" type); [ -n "$t" ] || continue
+    name=$t; n=2
+    while [ -e "$tmp/thermal/all/$name" ]; do name="$t-$n"; n=$((n+1)); done
+    link "thermal/all/$name" "$z"
+done
+thermal_role() { # thermal_role <role> <profile type> <regex over the type name>
+    local role=$1 want=$2 re=$3 z="" t ty
+    local key; key="RETROFORGE_HW_THERMAL_$(printf '%s' "$role" | tr '[:lower:]' '[:upper:]')"
+    if [ -n "$want" ]; then
+        for t in $zones; do
+            [ -d "$t" ] && [ "$(attr "$t" type)" = "$want" ] && { z=$t; break; }
+        done
+        [ -n "$z" ] || pin_missing "$key" "$want"
+    fi
+    if [ -z "$z" ]; then
+        for t in $zones; do
+            [ -d "$t" ] || continue
+            ty=$(attr "$t" type)
+            [[ "$ty" =~ $re ]] && { z=$t; break; }
+        done
+    fi
+    if [ -n "$z" ] && link "thermal/$role" "$z"; then note "$key" "$(attr "$z" type)"
+    else note "$key" ""; fi
+}
+thermal_role cpu     "$RETROFORGE_HW_THERMAL_CPU"     '^(cpu|soc)'
+thermal_role gpu     "$RETROFORGE_HW_THERMAL_GPU"     '^gpu'
+thermal_role battery "$RETROFORGE_HW_THERMAL_BATTERY" '^batt'
+thermal_role skin    "$RETROFORGE_HW_THERMAL_SKIN"    '(skin|xo-therm|quiet|case)'
+# --- fan: the profile's hwmon name, else the first hwmon with a fan1_input or a pwm1 ---------
+# (a pwm-fan without a tachometer -- the SM8250 boards, the Air X/Y -- has pwm1 and no fan1_input)
+fan=""
+if [ -n "$RETROFORGE_HW_FAN" ]; then
+    for h in "$SYS"/class/hwmon/hwmon*/; do
+        h=${h%/}; [ -d "$h" ] || continue
+        [ "$(attr "$h" name)" = "$RETROFORGE_HW_FAN" ] && { fan=$h; break; }
+    done
+    [ -n "$fan" ] || pin_missing RETROFORGE_HW_FAN "$RETROFORGE_HW_FAN"
+fi
+if [ -z "$fan" ]; then
+    for h in "$SYS"/class/hwmon/hwmon*/; do
+        h=${h%/}; [ -d "$h" ] || continue
+        if [ -r "$h/fan1_input" ] || [ -e "$h/pwm1" ]; then fan=$h; break; fi
+    done
+fi
+[ -n "$fan" ] && link fan "$fan" && note RETROFORGE_HW_FAN "$(attr "$fan" name)" || note RETROFORGE_HW_FAN ""
+
+# --- gpu devfreq + cpu ------------------------------------------------------------------------
+gpu=""
+if [ -n "$RETROFORGE_HW_GPU_DEVFREQ" ]; then
+    if [ -d "$SYS/class/devfreq/$RETROFORGE_HW_GPU_DEVFREQ" ]; then gpu="$SYS/class/devfreq/$RETROFORGE_HW_GPU_DEVFREQ"
+    else pin_missing RETROFORGE_HW_GPU_DEVFREQ "$RETROFORGE_HW_GPU_DEVFREQ"; fi
+fi
+if [ -z "$gpu" ]; then
+    for d in "$SYS"/class/devfreq/*gpu*/; do d=${d%/}; [ -d "$d" ] && { gpu=$d; break; }; done
+fi
+[ -n "$gpu" ] && link gpu "$gpu" && note RETROFORGE_HW_GPU "$(basename "$gpu")" || note RETROFORGE_HW_GPU ""
+link cpu "$SYS/devices/system/cpu" || true
+
+# --- soc: the SoC's identity from Qualcomm socinfo (machine "SM8550", family, soc_id, revision,
+# serial_number -- the per-unit number ROCKNIX reads as the device serial) -----------------------
+link soc "$SYS/devices/soc0" && note RETROFORGE_HW_SOC "$(attr "$SYS/devices/soc0" machine)" || note RETROFORGE_HW_SOC ""
+
+# --- LEDs: "group=glob[,glob]..." from the profile; a lone power-led is the default group -----
+groups=$RETROFORGE_HW_LED_GROUPS
+[ -n "$groups" ] || { [ -d "$SYS/class/leds/power-led" ] && groups="power=power-led"; }
+summary=""
+for spec in $groups; do
+    role=${spec%%=*}; globs=${spec#*=}
+    [ -n "$role" ] && [ "$role" != "$spec" ] || continue
+    i=0
+    for g in ${globs//,/ }; do
+        for l in $(cd "$SYS/class/leds" 2>/dev/null && ls -d $g 2>/dev/null | sort -V); do
+            [ -d "$SYS/class/leds/$l" ] || continue
+            i=$((i+1)); link "leds/$role/$(printf '%02d' "$i")" "$SYS/class/leds/$l"
+        done
+    done
+    if [ "$i" -gt 0 ]; then summary="$summary${summary:+ }$role=$i"
+    else printf 'retroforge hw-map: LED group %s matched nothing (%s)\n' "$role" "$globs" >&2; fi
+done
+note RETROFORGE_HW_LED_GROUPS "$summary"
+
+{
+    printf '# retroforge hw-map: this board\x27s hardware behind the standard paths of /run/retroforge/hw\n'
+    printf '%s=%q\n' RETROFORGE_DEVICE_ID "$RETROFORGE_DEVICE_ID" RETROFORGE_DEVICE_NAME "$RETROFORGE_DEVICE_NAME" RETROFORGE_SOC_CLASS "$RETROFORGE_SOC_CLASS"
+    for kv in "${resolved[@]}"; do printf '%s=%q\n' "${kv%%=*}" "${kv#*=}"; done
+    printf '%s=%q\n' RETROFORGE_HW_RESOLVED_AT "$(date +%s)"
+} > "$tmp/hw.env"
+chmod -R a+rX "$tmp"
+
+mkdir -p "$(dirname "$RUN")"
+old="$RUN.old.$$"
+[ -e "$RUN" ] && mv "$RUN" "$old"
+mv "$tmp" "$RUN"
+rm -rf "$old"
+trap - EXIT
+echo "retroforge hw-map: $(grep -v '^#' "$RUN/hw.env" | grep -v '^RETROFORGE_DEVICE\|RESOLVED_AT\|SOC_CLASS' | tr '\n' ' ')" >&2

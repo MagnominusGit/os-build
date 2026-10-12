@@ -1,0 +1,403 @@
+#!/bin/sh
+# retroforge gamescope-session — boot the device into a gamescope compositor (the session layer).
+#
+# This is the SESSION PLUMBING: a long-running gamescope on the DRM/KMS backend that hosts the
+# gamepad shell (RETROFORGE_SESSION_CMD, set in /etc/retroforge/session.conf). It reuses the
+# exact seat + rotation path the Phase-2 smoke validated on HW (docs/bringup-phase2.md).
+set -eu
+
+# Per-board facts (SoC, panel, output-mm) from the device-env registry — the SAME source
+# retroforge-powerd reads, resolved from the devicetree model. Sourced BEFORE
+# session.conf so session.conf stays the top override layer. Best-effort: an absent/failing helper
+# falls through to device-env's own defaults (or leaves the vars unset), never aborts the session.
+DEV_ENV=/usr/lib/retroforge/device-env
+if [ -x "$DEV_ENV" ]; then eval "$("$DEV_ENV" 2>/dev/null)" || true; fi
+
+CONF=/etc/retroforge/session.conf
+[ -r "$CONF" ] && . "$CONF"
+: "${RETROFORGE_SESSION_CMD:=vkcube --wsi xcb}"
+: "${RETROFORGE_GAMESCOPE_EXTRA:=}"
+
+# --- Internal panel -> landscape LOGICAL output (--prefer-output / -W / -H / -r) ------------------
+# All from the device-env registry now (replaces the old runtime sysfs auto-detect). The
+# composite rotation keeps gamescope's LOGICAL output in landscape (g_nOutputWidth/Height
+# unswapped) and rotates only the final scanout store, so the logical canvas (-W/-H) the client fills
+# must be the panel's PORTRAIT native mode SWAPPED to landscape: W <- native height, H <- native width.
+# session.conf may override any of these (it is sourced after device-env). Multi-panel boards are a
+# conf decision (PRIMARY_CONNECTOR + that panel's native dims), not a runtime largest-area pick. A
+# board with no declared dims (unknown model, or a conf not yet filled — e.g. Pocket S1K) falls back
+# to a generic landscape 1920x1080.
+if [ -z "${RETROFORGE_GAMESCOPE_W:-}" ] || [ -z "${RETROFORGE_GAMESCOPE_H:-}" ]; then
+  if [ -n "${RETROFORGE_PANEL_NATIVE_WIDTH:-}" ] && [ -n "${RETROFORGE_PANEL_NATIVE_HEIGHT:-}" ]; then
+    if [ "${RETROFORGE_PANEL_ORIENTATION:-portrait}" = landscape ]; then
+      # A landscape-native panel (MANGMI Air Y Pro): the native mode IS the logical canvas, and
+      # with no connector orientation to honour gamescope rotates nothing.
+      RETROFORGE_GAMESCOPE_W=$RETROFORGE_PANEL_NATIVE_WIDTH
+      RETROFORGE_GAMESCOPE_H=$RETROFORGE_PANEL_NATIVE_HEIGHT
+    else
+      RETROFORGE_GAMESCOPE_W=$RETROFORGE_PANEL_NATIVE_HEIGHT   # swap portrait native -> landscape logical
+      RETROFORGE_GAMESCOPE_H=$RETROFORGE_PANEL_NATIVE_WIDTH
+    fi
+  else
+    RETROFORGE_GAMESCOPE_W=1920; RETROFORGE_GAMESCOPE_H=1080
+  fi
+fi
+# Pin the panel's DRM connector (device-env RETROFORGE_PRIMARY_CONNECTOR, e.g. DSI-1).
+: "${RETROFORGE_GAMESCOPE_OUTPUT:=${RETROFORGE_PRIMARY_CONNECTOR:-}}"
+# -r default = the panel's FIRST declared refresh rate (comma-separated list, e.g. "60,120");
+# gamescope clamps to the nearest supported. Falls back to 60.
+if [ -z "${RETROFORGE_GAMESCOPE_REFRESH:-}" ]; then
+  _rr=${RETROFORGE_PANEL_REFRESH_RATES:-}
+  RETROFORGE_GAMESCOPE_REFRESH=${_rr%%,*}
+  : "${RETROFORGE_GAMESCOPE_REFRESH:=60}"
+fi
+
+# Physical output size for gamescope's DPI/scale, from device-env (e.g. "177x100"); exported only
+# when the board declares one. Consumed by our gamescope fake-output-mm patch
+# (packages/gamescope/patches/0003), which reports it as the wl_output physical size instead of the
+# connector/EDID mm — this, NOT the panel DTS mm, is what the shell's UI auto-scale reads
+# (measured with SteamUI; see usr/lib/retroforge/devices/defaults.conf). WIDTHxHEIGHT in
+# the LANDSCAPE (logical) orientation, aspect-matched to -W/-H. Board declares none -> real panel mm.
+if [ -n "${RETROFORGE_GAMESCOPE_FAKE_OUTPUT_MM:-}" ]; then
+  export GAMESCOPE_FAKE_OUTPUT_MM="$RETROFORGE_GAMESCOPE_FAKE_OUTPUT_MM"
+fi
+
+# Force the real DRM/KMS backend: a stray WAYLAND_DISPLAY/DISPLAY makes gamescope try to nest under
+# a (non-existent) parent compositor and fail with "Failed to connect to wayland socket".
+unset WAYLAND_DISPLAY DISPLAY
+# retroforge-session.service logs player in through PAM (pam_systemd), so we run inside a real logind session: logind has
+# created /run/user/1000 (player-owned, 0700) and set XDG_RUNTIME_DIR + the user D-Bus session bus at
+# /run/user/1000/bus in our environment already. Default them defensively (e.g. for a manual `sudo -u
+# player` run) but do NOT mkdir /run/user/1000 — the player user can't create dirs under /run; it must
+# already exist (logind/pam_systemd makes it). gamescope drops its Wayland socket here, and the shell
+# and emulators reach the session bus via DBUS_SESSION_BUS_ADDRESS.
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${XDG_RUNTIME_DIR}/bus}"
+if [ ! -d "$XDG_RUNTIME_DIR" ]; then
+  echo "retroforge-session: $XDG_RUNTIME_DIR missing — is the player user manager (user@$(id -u)) up?" >&2
+  exit 1
+fi
+
+# Keep the gamescope WSI Vulkan layer ON, matching the upstream gamescope session
+# (which exports ENABLE_GAMESCOPE_WSI=1). The FROG WSI layer is the STANDARD
+# present path: it carries the framerate limiter / frame pacing, latency control, adaptive-sync hints
+# AND HDR — so turning it off (implicit-sync fallback) degrades all of those, not just HDR. It is not
+# a free toggle. Overridable from the env / session.conf; defaults to on.
+#
+# KNOWN CAVEAT (docs/bringup-phase2.md step 1e): with WSI on, RE-LAUNCHING gamescope after a
+# prior instance intermittently wedges — the next client blocks forever in drm_syncobj_array_wait_timeout
+# on a buffer-release fence that never signals (a userspace explicit-sync / linux-drm-syncobj race, NOT
+# stale GPU/DRM-master state; a graceful SIGTERM teardown wedges the same ~50% as SIGKILL and dmesg shows
+# zero GPU faults). A true power-on (L1) is always clean (10/10); only re-launch (L2) is affected. The
+# release product boots gamescope ONCE per power-on, so this should not bite in normal use. Residual
+# risk: Restart=on-failure or a deliberate session restart takes the L2 path — if that proves a real
+# problem, set ENABLE_GAMESCOPE_WSI=0 (implicit sync, 8/8 clean re-launch) at the cost of the WSI
+# features above. Distinct from the earlier crash ValveSoftware/gamescope#1520 (fixed pre-3.16.17).
+export ENABLE_GAMESCOPE_WSI="${ENABLE_GAMESCOPE_WSI:-1}"
+# The shell's render mode, per board (device-env RETROFORGE_UI_VIEWPORT_RENDER); the RetroForge OGUI
+# plugin reads it at startup.
+export RETROFORGE_UI_VIEWPORT_RENDER="${RETROFORGE_UI_VIEWPORT_RENDER:-0}"
+# And the game display's default size, which Settings > Display > Game resolution calls "Default".
+export RETROFORGE_GAMESCOPE_NESTED_W="${RETROFORGE_GAMESCOPE_NESTED_W:-}" RETROFORGE_GAMESCOPE_NESTED_H="${RETROFORGE_GAMESCOPE_NESTED_H:-}"
+
+# Composite rotation is UPSTREAM as of gamescope 3.16.28 (commit 38fb50fc, our PR #2228 merged
+# verbatim); we no longer carry a patch for it, so this needs nothing from the from-source overlay
+# beyond the version. It replaced the ROCKNIX --use-rotation-shader patch. No flag is needed:
+# gamescope reads the panel orientation from the DRM
+# connector (our DTS declares rotation=<90>, published as the connector "panel orientation") and
+# AUTO-ENGAGES compositor rotation when the primary plane can't do that rotation at scanout — which
+# is the case here (the msm DPU can't ROTATE_90 a LINEAR plane). The scene stays in logical landscape
+# space and only the final store is rotated, so -W/-H below remain the landscape logical size.
+# (--force-composition-rotation exists to force this path, but we rely on auto-detect.)
+# NOTE: --immediate-flips is deliberately NOT passed — it is a no-op on this HW. The msm DPU does not
+# advertise DRM_CAP_ATOMIC_ASYNC_PAGE_FLIP, so gamescope logs "Immediate flips are not supported by
+# the KMS driver" and drops the async flag (SupportsTearing()==false).
+GS_ARGS="--backend drm -W $RETROFORGE_GAMESCOPE_W -H $RETROFORGE_GAMESCOPE_H -r $RETROFORGE_GAMESCOPE_REFRESH"
+# A smaller game display (device-env RETROFORGE_GAMESCOPE_NESTED_W/H): gamescope -w/-h sizes the game
+# Xwayland, and the panel plane scales its frames up. Both or neither; `if`, not `&&` (set -eu).
+if [ -n "${RETROFORGE_GAMESCOPE_NESTED_W:-}" ] && [ -n "${RETROFORGE_GAMESCOPE_NESTED_H:-}" ]; then
+  GS_ARGS="$GS_ARGS -w $RETROFORGE_GAMESCOPE_NESTED_W -h $RETROFORGE_GAMESCOPE_NESTED_H"
+fi
+# Pin the chosen connector (DRM name, e.g. DSI-1) so gamescope scans out the intended panel on
+# multi-panel devices. -O takes a comma-separated preference list; a single name is fine.
+if [ -n "$RETROFORGE_GAMESCOPE_OUTPUT" ]; then
+  GS_ARGS="$GS_ARGS --prefer-output $RETROFORGE_GAMESCOPE_OUTPUT"
+fi
+# Dual-screen boards (device-env RETROFORGE_SECONDARY_CONNECTOR, e.g. DSI-2): gamescope drives that
+# panel as its second output (packages/gamescope/patches/0040). Single-panel boards: no flag.
+if [ -n "${RETROFORGE_SECONDARY_CONNECTOR:-}" ]; then
+  GS_ARGS="$GS_ARGS --secondary-output $RETROFORGE_SECONDARY_CONNECTOR"
+  # Its digitizer (device-env RETROFORGE_SECONDARY_TOUCHSCREEN, an input device name) drives the
+  # window on that panel (patches/0043).
+  if [ -n "${RETROFORGE_SECONDARY_TOUCHSCREEN:-}" ]; then
+    GS_ARGS="$GS_ARGS --secondary-touch-device $RETROFORGE_SECONDARY_TOUCHSCREEN"
+  fi
+fi
+
+# Seat access: let libseat AUTO-PICK its backend — inside our logind session it selects the
+# LOGIND backend, exactly like SteamOS (which enables seatd but never forces it). This is
+# load-bearing for privileges: gamescope must take the seat/VT *through logind* so logind marks the
+# session ACTIVE; polkit's stock `subject.active` checks (Wi-Fi allow_active, timezone active+wheel)
+# then pass. Forcing LIBSEAT_BACKEND=seatd here made gamescope grab the VT behind logind's back, so
+# the session stayed INACTIVE and every privileged OOBE action (timezone) was denied — HW-confirmed
+# 2026-07-01. seatd.service stays enabled as an unused fallback (harmless); do NOT
+# set LIBSEAT_BACKEND/SEATD_SOCK or libseat will prefer seatd again.
+
+# --- gamescope startup handshake + shell-specific flags -----------------------------------------
+# gamescope runs STANDALONE in the background, reports its nested displays over the startup socket
+# (-R), and we then attach the shell to those displays. -T is the stats pipe (GAMESCOPE_STATS)
+# mangoapp reads. RETROFORGE_GAMESCOPE_SHELL_ARGS carries the flags the chosen shell needs on top
+# (session.conf sets it alongside RETROFORGE_SESSION_CMD): OpenGamepadUI drives gamescope through
+# its Steam-mode X atoms, so it wants `--steam`,
+# and two nested Xwaylands (UI + game) are the gamepad-shell layout gamescope sessions use.
+: "${RETROFORGE_GAMESCOPE_SHELL_ARGS:=--xwayland-count 2}"
+GS_RUNDIR="$(mktemp -d "${XDG_RUNTIME_DIR}/gamescope.XXXXXX")"
+GS_STARTUP="${GS_RUNDIR}/startup.socket"
+GS_STATS="${GS_RUNDIR}/stats.pipe"
+mkfifo "$GS_STARTUP" "$GS_STATS"
+export GAMESCOPE_STATS="$GS_STATS"
+GS_ARGS="$GS_ARGS $RETROFORGE_GAMESCOPE_SHELL_ARGS -R $GS_STARTUP -T $GS_STATS"
+
+# --- Control FILES the shell and gamescope must AGREE on --------------------------------------------
+# gamescope creates both of these itself, but ONLY into its own environment, which reaches the
+# processes IT spawns (mangoapp) and NOT the shell: gamescope runs in the BACKGROUND and the shell
+# is started by this script, i.e. a SIBLING of gamescope. So they are created HERE, before gamescope
+# starts: gamescope adopts our paths, mangoapp inherits them from gamescope, and the shell (and every
+# game it launches) inherits them from this script. One path, three processes.
+#   MANGOHUD_CONFIGFILE    — the performance overlay state (`preset=N`); mangoapp re-reads it on
+#                            reload_config. Seeded `no_display` so the overlay starts hidden.
+#   GAMESCOPE_LIMITER_FILE — the frame-rate cap: gamescope writes the limiter flag, the gamescope WSI
+#                            layer inside the GAME process reads it.
+export MANGOHUD_CONFIGFILE="${GS_RUNDIR}/mangoapp.conf"
+echo "no_display" >"$MANGOHUD_CONFIGFILE"
+export GAMESCOPE_LIMITER_FILE="${GS_RUNDIR}/limiter"
+: >"$GAMESCOPE_LIMITER_FILE"
+
+# --mangoapp: gamescope spawns the `mangoapp` performance overlay as an in-session window, inheriting
+# GAMESCOPE_STATS + MANGOHUD_CONFIGFILE from this script. Our from-source build (packages/mangohud).
+GS_ARGS="$GS_ARGS --mangoapp"
+
+# Persist the user's resolution/refresh pick across boots (gamescope writes it here).
+export GAMESCOPE_MODE_SAVE_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/gamescope/modes.cfg"
+mkdir -p "$(dirname "$GAMESCOPE_MODE_SAVE_FILE")" 2>/dev/null || true
+
+# gamescope, the shell and emulators open a large number of fds (pipes, shader caches); raise the
+# soft limit so we don't hit EMFILE under load.
+ulimit -n 524288 2>/dev/null || true
+
+# Power-off / reboot sentinels. THIS SCRIPT IS THE CONSUMER; a shell that wants the host to power the
+# device off touches one and exits cleanly, so the session is torn down BEFORE logind starts killing
+# things. See the block near the end of this file for what happens when one appears.
+#
+# XDG_RUNTIME_DIR rather than /tmp (which is where the upstream session puts them): it is per-user,
+# already private, and cleared with the session. The /tmp fallback is only for a session started
+# without logind having provided one — the client still needs a writable path or it cannot signal at
+# all, and silently losing the ability to power off is worse than using /tmp.
+RETROFORGE_SENTINEL_DIR="${XDG_RUNTIME_DIR:-/tmp}"
+export RETROFORGE_REBOOT_SENTINEL="${RETROFORGE_SENTINEL_DIR}/retroforge-reboot-sentinel"
+export RETROFORGE_SHUTDOWN_SENTINEL="${RETROFORGE_SENTINEL_DIR}/retroforge-shutdown-sentinel"
+# Clear anything left behind before the client can see it. A sentinel outlives its session if the
+# client is killed after touching one but before exiting cleanly — and a leftover would turn the NEXT
+# session's ordinary shell restart into a power-off.
+rm -f "$RETROFORGE_REBOOT_SENTINEL" "$RETROFORGE_SHUTDOWN_SENTINEL" 2>/dev/null || true
+
+# Tear gamescope + the rundir down whenever this script exits (client returned, or a signal).
+#
+# WAIT for gamescope to actually exit, do not just signal it. SDDM's autologin starts the next
+# session the moment this script returns, and while the old gamescope lives it still holds
+# /dev/dri/card0: the new gamescope's logind TakeDevice then fails EBUSY ("Could not open KMS
+# device"), the handshake below times out, and SDDM does not relogin after that -- a client crash
+# left a permanently black screen (upstream HW 2026-10-04, the old gamescope took ~0.7 s to go).
+# Exited means gone OR a zombie: its fds are closed either way, and a zombie child still answers
+# `kill -0`. Bounded, and no SIGKILL: gamescope can ignore SIGTERM outright, and hanging here would
+# block the relogin just as surely. tests/test-session.sh runs this.
+: "${RETROFORGE_GAMESCOPE_STOP_TIMEOUT:=10}"
+GS_PID=""
+gs_running() {
+  [ -e "/proc/$1" ] && ! grep -q '^State:[[:space:]]*Z' "/proc/$1/status" 2>/dev/null
+}
+cleanup() {
+  if [ -n "$GS_PID" ]; then
+    kill "$GS_PID" 2>/dev/null || true
+    ticks=$((RETROFORGE_GAMESCOPE_STOP_TIMEOUT * 10))
+    while [ "$ticks" -gt 0 ] && gs_running "$GS_PID"; do
+      sleep 0.1
+      ticks=$((ticks - 1))
+    done
+    ! gs_running "$GS_PID" \
+      || echo "retroforge-session: gamescope ($GS_PID) still running ${RETROFORGE_GAMESCOPE_STOP_TIMEOUT}s after SIGTERM -- exiting anyway" >&2
+    GS_PID=""
+  fi
+  rm -rf "$GS_RUNDIR" 2>/dev/null || true
+  # Withdraw the A/B readiness marker (see below). Removing it here is what makes its continued
+  # existence mean "the SAME session is still up" rather than "a session started once".
+  rm -f /run/retroforge/session/ready 2>/dev/null || true
+}
+trap cleanup EXIT HUP INT TERM
+
+# Background gamescope (no `--` client) and wait for the startup handshake: gamescope writes
+# "<x-display> <wayland-display>" to the startup socket once it is up. Word-splitting on GS_ARGS is
+# intentional (sh, not bash).
+gamescope $GS_ARGS $RETROFORGE_GAMESCOPE_EXTRA &
+GS_PID=$!
+
+# `timeout … head -n1` gives a bounded, POSIX-sh-safe read (no bash `read -t`): opening the FIFO for
+# read blocks until gamescope opens it for write, and timeout caps the wait if gamescope never comes
+# up. `set --` splits the line on whitespace regardless of spacing.
+if handshake="$(timeout 20 head -n1 "$GS_STARTUP")"; then
+  # shellcheck disable=SC2086  # intentional word-split of the handshake line
+  set -- $handshake
+  export DISPLAY="${1:-}"
+  # The shell finds gamescope's private Wayland socket via GAMESCOPE_WAYLAND_DISPLAY; its UI and every
+  # game render through gamescope's nested Xwayland (DISPLAY). WAYLAND_DISPLAY is deliberately NOT
+  # exported, so SDL games stay on Xwayland, which is the model gamescope's focus handling expects.
+  export GAMESCOPE_WAYLAND_DISPLAY="${2:-}"
+  # A/B trial-boot health signal (Phase 4b). Getting here proves the whole display path came up:
+  # drm/msm took DRM master, the panel modeset, mesa initialised, both Xwaylands started, libseat
+  # got an active seat via logind and the PAM login worked. retroforge-boot-good.path watches for
+  # this file and confirms the boot 30s later, if the EXIT trap above has not removed it again.
+  # Best-effort: a session must never fail because the marker could not be written.
+  mkdir -p /run/retroforge/session 2>/dev/null || true
+  printf '%s\n' "$GS_PID" >/run/retroforge/session/ready 2>/dev/null || true
+else
+  echo "retroforge-session: gamescope did not report a startup display within 20s — aborting" >&2
+  exit 1
+fi
+
+# Attach the client to gamescope's nested displays. When it returns, the EXIT trap stops gamescope
+# and the session ends (retroforge-session.service restarts it). Propagate the client's exit status.
+#
+# The client runs in the BACKGROUND and we `wait` for it, so a stop reaches it. PAMName= puts this
+# whole session in the logind session scope, not the service's cgroup, so systemd's stop signals
+# only this script (the main PID) — never the client or gamescope. sh holds a trapped signal until a
+# FOREGROUND command returns, so with the client in the foreground the TERM trap never ran, nothing
+# told the shell to quit, and every `systemctl stop/restart retroforge-session` sat out TimeoutStopSec
+# (90 s) before a SIGKILL (HW 2026-10-03). `wait` returns as soon as a trapped signal arrives.
+# stdin goes through fd 3: a non-interactive sh points a background job's stdin at /dev/null
+# BEFORE its own redirections, so dash turns `<&0` into /dev/null; `<&3` is the session's tty1.
+#
+# Running games go FIRST, while gamescope is still up. OGUI does not stop them when it quits: its
+# per-game reaper is re-parented to PID 1 and the game keeps running until gamescope goes, then
+# loses its display and aborts — no clean shutdown, a core dump, and ~15 s of an orphaned emulator
+# holding the GPU while the next session starts (HW 2026-10-03, DuckStation). They are stopped the
+# way OGUI's own Exit stops them (Reaper.reap), the signal pattern retroforge-launch is built for, and
+# found by executable so a game outliving a crashed OGUI is stopped too.
+: "${RETROFORGE_OGUI_REAPER:=/usr/share/opengamepadui/reaper}"
+: "${RETROFORGE_GAME_STOP_TIMEOUT:=10}"   # s for running games to shut down before they are killed
+GAME_STOP_TIMEOUT=$RETROFORGE_GAME_STOP_TIMEOUT
+descendants() {        # depth first, like OGUI's Reaper.pstree()
+  for _d in $(ps -o pid= --ppid "$1" 2>/dev/null); do echo "$_d"; descendants "$_d"; done
+  return 0
+}
+game_reapers() {       # one OGUI reaper per running game
+  for _p in /proc/[0-9]*; do
+    [ "$(readlink "$_p/exe" 2>/dev/null)" = "$RETROFORGE_OGUI_REAPER" ] && echo "${_p#/proc/}"
+  done
+  return 0
+}
+stop_games() {
+  _reapers=$(game_reapers)
+  [ -n "$_reapers" ] || return 0
+  echo "retroforge-session: stopping running game(s) before the shell" >&2
+  for _r in $_reapers; do
+    # Leaves inward, `kill -TERM -- -PID` then `kill -TERM PID` for each process under the reaper.
+    for _p in $(descendants "$_r" | tac); do
+      kill -TERM -- "-$_p" 2>/dev/null || true
+      kill -TERM "$_p" 2>/dev/null || true
+    done
+  done
+  _t=0
+  while [ "$_t" -lt $((GAME_STOP_TIMEOUT * 10)) ]; do
+    _alive=""
+    for _r in $_reapers; do kill -0 "$_r" 2>/dev/null && _alive=1; done
+    [ -n "$_alive" ] || return 0
+    sleep 0.1; _t=$((_t + 1))
+  done
+  echo "retroforge-session: game(s) still running after ${GAME_STOP_TIMEOUT}s — killing them" >&2
+  for _r in $_reapers; do
+    for _p in $(descendants "$_r"); do kill -KILL "$_p" 2>/dev/null || true; done
+    kill -KILL "$_r" 2>/dev/null || true
+  done
+  return 0
+}
+
+CLIENT_PID=""
+stop_session() {
+  trap - HUP INT TERM
+  stop_games
+  if [ -n "$CLIENT_PID" ]; then
+    kill -TERM "$CLIENT_PID" 2>/dev/null || true
+    wait "$CLIENT_PID" 2>/dev/null || true
+  fi
+  exit 143   # 128 + SIGTERM; the EXIT trap then stops gamescope
+}
+trap stop_session HUP INT TERM
+
+# The RetroForge OpenGamepadUI plugin (ROM library, Settings > Emulators) ships read-only in the image;
+# OGUI only loads plugins from the player's folder, so copy it there when missing or older. Never a
+# reason not to start the shell.
+: "${RETROFORGE_PLUGIN_INSTALLER:=/usr/lib/retroforge/install-ogui-plugin}"
+if [ -x "$RETROFORGE_PLUGIN_INSTALLER" ]; then
+  "$RETROFORGE_PLUGIN_INSTALLER" || echo "retroforge-session: the RetroForge plugin could not be installed" >&2
+fi
+
+set +e
+exec 3<&0
+# Without the CAP_WAKE_ALARM pam_systemd puts in every login session's ambient set (systemd >= 254).
+# The shell passes it on to every game, and the kernel lets a process read another's
+# /proc/<pid>/fdinfo only if it holds all of that process's capabilities: mangoapp (started by
+# gamescope, whose own file capability drops ambient ones) then got EACCES on the game's GPU fdinfo
+# and aborted every few seconds -- a blinking, frozen Performance Overlay (HW 2026-10-04). Nothing in
+# the session sets wake alarms.
+setpriv --inh-caps=-all --ambient-caps=-all $RETROFORGE_SESSION_CMD <&3 3<&- &
+CLIENT_PID=$!
+exec 3<&-
+wait "$CLIENT_PID"
+status=$?
+set -e
+trap cleanup HUP INT TERM
+# The client exited on its own (power action, or a crash): a game it left running still has to go
+# before gamescope does.
+stop_games
+
+# The client asked for a power action on its way out. It did NOT call logind — it touched a sentinel
+# and exited cleanly precisely so the host could finish tearing the session down first, which is the
+# race the whole mechanism exists to avoid. Acting on it here is the other half of that bargain.
+#
+# if/elif because this is a three-way choice and reboot must WIN over poweroff when both files
+# somehow exist — matching upstream, which tests reboot first and never reaches the shutdown branch.
+# (Not, as an earlier version of this comment claimed, to dodge `set -e`: a failing test that is the
+# first command of an &&-list is explicitly exempt, so `[ -e X ] && a=reboot` would not abort here.
+# The real `set -e` trap with that form is being the LAST command of a script or function, where the
+# non-zero list result becomes the exit status — which is not this position.)
+if [ -e "$RETROFORGE_REBOOT_SENTINEL" ]; then
+  power_action=reboot
+elif [ -e "$RETROFORGE_SHUTDOWN_SENTINEL" ]; then
+  power_action=poweroff
+else
+  power_action=""
+fi
+# Consume BOTH whichever matched, and BEFORE acting: a sentinel that survives a failed action would
+# power the device off at the end of the next session, long after anyone asked.
+rm -f "$RETROFORGE_REBOOT_SENTINEL" "$RETROFORGE_SHUTDOWN_SENTINEL" 2>/dev/null || true
+
+if [ -n "$power_action" ]; then
+  echo "retroforge-session: client requested ${power_action}; stopping gamescope, then handing off" >&2
+  # Stop gamescope before the handoff, so the compositor is not still holding DRM master when
+  # systemd starts killing things. cleanup is idempotent (guarded kill, rm -f), and the EXIT trap
+  # runs it again on the way out.
+  cleanup
+  # A FAILURE HERE MUST BE LOUD. If polkit refuses this, the client has already exited believing the
+  # device is going down, and the only remaining behaviour is systemd restarting the session — which
+  # looks like "shutdown does nothing". Say which action failed and why rather than exiting quietly
+  # into that.
+  if ! systemctl "$power_action"; then
+    rc=$?
+    echo "retroforge-session: systemctl ${power_action} FAILED (exit ${rc}) — the session will be" >&2
+    echo "retroforge-session: restarted by systemd instead of the device going down. Check that this" >&2
+    echo "retroforge-session: session is logind-active and authorised for org.freedesktop.login1." >&2
+    status=$rc
+  fi
+fi
+
+exit "$status"

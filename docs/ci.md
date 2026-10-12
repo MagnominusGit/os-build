@@ -60,12 +60,12 @@ time, which is what brought back the `warm` cache. It keeps none of the store's 
 no pin, no bot. The stamps decide freshness, and `fetchlock.sh` checks the lock rows against the
 commit's sources the same as ever.
 
-The signing job checks the committed keyring (`ota/rauc/qforge-ca.pem`) against the committed
+The signing job checks the committed keyring (`ota/rauc/retroforge-ca.pem`) against the committed
 release certificate (`ota/rauc/release.cert.pem`). Both are public, so it runs on a fork's PR
 with access to nothing. The private half — does the signing *key* match that cert — announces
 itself as skipped there and runs wherever a PKI is mounted:
 
-    PKIDIR=~/qforge-pki make test-signing
+    PKIDIR=~/retroforge-pki make test-signing
 
 ## Today: the release image builds
 
@@ -83,7 +83,7 @@ different cadences:
 |---|---|---|---|
 | `release-sdcard.yml` | `card/v*` tag, or manual | `R2_*` (push-only, public bucket) | Cloudflare R2 + a GitHub Release carrying checksums/provenance |
 | `release-installer.yml` | `installer/v*` tag, or manual | `R2_*`, same environment as the card | R2 under `installer/<version>/` (keeps 2) + a GitHub Release |
-| `release-bundle.yml` | `ota/v*` tag, or manual | `RAUC_CERT_PEM`/`RAUC_KEY_PEM` and `OTA_SSH_KEY`, in `release-signing` | the update server named by `vars.OTA_HOST` — **none exists yet**; the default is the placeholder `updates.qforge.invalid`, so a tagged publish goes red (see `docs/ota.md`) |
+| `release-bundle.yml` | `ota/v*` tag, or manual | `RAUC_CERT_PEM`/`RAUC_KEY_PEM` and `OTA_SSH_KEY`, in `release-signing` | the update server named by `vars.OTA_HOST` — **none exists yet**; the default is the placeholder `updates.retroforge.invalid`, so a tagged publish goes red (see `docs/ota.md`) |
 
 **The tag namespaces are separate on purpose.** A bundle ships far more often than a card, so each
 gets its own namespace rather than sharing a bare `v*`. That also fixes a real inversion: while
@@ -97,7 +97,7 @@ a public R2 bucket (`ota/publish-card.sh`, retention N=1 to stay inside the 10 G
 the Release carries only `sha256sums.txt`, `manifest.lock` and the link.
 
 **CI is the only thing that PUBLISHES a release image**, because the R2 and signing credentials live
-here. Building one is not restricted: `make sdcard` with no `QFORGE_DEV` produces a real release
+here. Building one is not restricted: `make sdcard` with no `RETROFORGE_DEV` produces a real release
 image on a dev box, which is how a release image's first boot gets tested on hardware.
 
 The blocker that once made a release build impossible on a clean runner is worth recording. A clean

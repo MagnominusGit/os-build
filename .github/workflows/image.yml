@@ -1,4 +1,4 @@
-# qforge image builder — the shared rootfs stage behind every RELEASE artifact.
+# retroforge image builder — the shared rootfs stage behind every RELEASE artifact.
 #
 # workflow_call only: this builds nothing on its own schedule. .github/workflows/release-sdcard.yml
 # and release-bundle.yml call it on their own triggers, which is the whole reason it exists — the two
@@ -8,7 +8,7 @@
 # WHAT MAKES CI THE PRODUCER OF A RELEASE IMAGE is the CREDENTIALS, not a build gate. Signing a
 # bundle needs the release key in a protected environment, and publishing either artifact needs a
 # key that lives in one; none of them is reachable from a dev box. Building one locally is fine and
-# supported — `make sdcard` with no QFORGE_DEV produces a real release image, which is how OOBE
+# supported — `make sdcard` with no RETROFORGE_DEV produces a real release image, which is how OOBE
 # gets tested on hardware without waiting for a run here. There used to be a hard gate
 # (packages/*/artifact.pin, enforced by packages/verify-pins.sh) that made a local release build
 # impossible; it was retired 2026-08-04 along with the overlay store — see
@@ -45,7 +45,7 @@
 # THE OVERLAY STARTS FROM main's CACHE AND REBUILDS WHAT MOVED. Cold, the whole set is ~30
 # minutes on a native aarch64 runner. The build job restores work/repo/aarch64 from the
 # actions/cache entry overlay.yml's `warm` job saves on main, and build-overlay.sh's per-package
-# input-hash stamps (sources + builder pin, the formula the lock's `qforge` rows use) rebuild
+# input-hash stamps (sources + builder pin, the formula the lock's `retroforge` rows use) rebuild
 # exactly the packages whose inputs differ — the dev box's incremental build, on CI.
 # Only main ever writes an entry a release can read (caches are ref-scoped; see the restore step).
 # This is not the GHCR store retired 2026-08-04: no registry, no secret, no pin, no bot.
@@ -121,8 +121,8 @@ jobs:
     # alone is a large fraction of the old budget. 360 is GitHub's hard ceiling for a job.
     timeout-minutes: 350
     env:
-      # QFORGE_VERSION is the ONLY version knob the build has. The Makefile's ID_ENV forwards it
-      # into the rootfs container, rootfs/assemble-rootfs.sh stamps it into /etc/qforge-release,
+      # RETROFORGE_VERSION is the ONLY version knob the build has. The Makefile's ID_ENV forwards it
+      # into the rootfs container, rootfs/assemble-rootfs.sh stamps it into /etc/retroforge-release,
       # and ota/genbundle.sh reads it back out of the assembled image to name the bundle. Absent,
       # the artifact ships identifying itself as `dev`.
       #
@@ -131,7 +131,7 @@ jobs:
       # removed 2026-08-03. A plain `VERSION` workflow variable outlived it as publish-card.sh's
       # first argument and went with the upload in 2026-08-11; the R2 path prefix is now named in
       # release-sdcard.yml's publish job, from the same prep output that feeds this input.
-      QFORGE_VERSION: ${{ inputs.version }}
+      RETROFORGE_VERSION: ${{ inputs.version }}
       ARTIFACT: ${{ inputs.artifact }}
     steps:
       - uses: actions/checkout@v7
@@ -175,7 +175,7 @@ jobs:
       #
       # WHY THIS IS SAFE TO REUSE. A stamp is packages/inputhash.sh over the package's committed
       # sources AND the builder pin, so build-overlay.sh rebuilds exactly the packages whose inputs
-      # moved and trusts the rest — the same rule the lock's `qforge` rows are checked against.
+      # moved and trusts the rest — the same rule the lock's `retroforge` rows are checked against.
       # The key below only picks WHICH repo to start from: an exact hit is a full set built from
       # these sources; a restore-keys fallback is the previous set, and the stamps sort it out.
       #
@@ -210,7 +210,7 @@ jobs:
       - name: build the toolchain image
         run: make toolchain
 
-      # No QFORGE_DEV: this is a release build by construction, which is what makes
+      # No RETROFORGE_DEV: this is a release build by construction, which is what makes
       # the pin gate apply. Setting it would silently produce a dev image with Wi-Fi creds baked in.
 
       - name: build ${{ inputs.artifact }}
@@ -229,7 +229,7 @@ jobs:
             # $RUNNER_TEMP, never the workspace — the repo tree gets uploaded as artifacts and
             # cached, and a private key that lands in either is a leaked key. This is the convention
             # docs/ci.md already set for this secret; it also mirrors how PKIDIR works locally
-            # (~/qforge-pki), i.e. outside anything the build can sweep up.
+            # (~/retroforge-pki), i.e. outside anything the build can sweep up.
             if [ -n "${RAUC_CERT_PEM:-}" ] && [ -n "${RAUC_KEY_PEM:-}" ]; then
               pki="$RUNNER_TEMP/pki"
               mkdir -p "$pki" && chmod 700 "$pki"
@@ -354,7 +354,7 @@ jobs:
         if: inputs.artifact != 'rootfs'
         uses: actions/upload-artifact@v7
         with:
-          name: qforge-${{ inputs.artifact }}-meta
+          name: retroforge-${{ inputs.artifact }}-meta
           path: meta/
           if-no-files-found: error
 
@@ -369,7 +369,7 @@ jobs:
       - name: upload the image artifact
         uses: actions/upload-artifact@v7
         with:
-          name: qforge-${{ inputs.artifact }}
+          name: retroforge-${{ inputs.artifact }}
           path: upload/
           if-no-files-found: error
           retention-days: 7

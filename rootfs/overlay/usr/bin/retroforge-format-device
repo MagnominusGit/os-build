@@ -1,0 +1,16 @@
+#!/usr/bin/bash
+# retroforge-format-device — format a NAMED device; its sibling retroforge-format-sdcard is the
+# no-argument "the SD card" form. Both land in the same privileged script, which applies the same
+# refusals to both — a device named here is still rejected unless it is a removable SD card this
+# system is not running from, so passing a name buys the caller nothing it could not have had from
+# retroforge-format-sdcard.
+#
+# The arguments are forwarded verbatim: the script's own parser is the one contract
+# (`--device <dev> --label '<name>' --force [--enable-duplicate-detection]`, plus a
+# `--supports-duplicate-detection` probe), and re-implementing a subset of it here would be a second
+# place for the two to disagree about what --label means.
+# Logged BEFORE pkexec, not after. pkexec's own journal line records what it EXECUTED, so a call
+# that pkexec declines — or one that never gets that far — leaves nothing, and "nobody called us"
+# and "we were called and refused" would look identical from the device.
+logger -t retroforge-format-device -p user.notice -- "invoked: $*"
+exec /usr/bin/pkexec /usr/lib/retroforge/storage/format-device.sh "$@"

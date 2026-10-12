@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge RAUC signing self-test — Phase 4b pass 2.
+# retroforge RAUC signing self-test — Phase 4b pass 2.
 #
 #   ota/rauc/verify-signing.sh [system.conf]      (default: rootfs/overlay/etc/rauc/system.conf)
 #
@@ -22,7 +22,7 @@
 #     `bundle-formats=` accepts. Both files say they must agree; nothing checked that they did.
 #   - a signature from an UNRELATED CA is rejected. Without this a permissive keyring -- or a
 #     verification step that silently no-ops -- would pass every assertion above.
-#   - that ota/rauc/qforge-ca.pem is the CA behind ota/rauc/release.cert.pem. Both are
+#   - that ota/rauc/retroforge-ca.pem is the CA behind ota/rauc/release.cert.pem. Both are
 #     committed and both are public, so this half needs NO private key and runs everywhere,
 #     including on every CI push. A keyring committed from a CA that did not sign the release cert
 #     is a device that will reject every future bundle, and nothing else in the repo would notice.
@@ -38,22 +38,22 @@
 # What proves this file's own negatives bite: tests/test-verify-signing.sh, which feeds it
 # deliberately broken configs and profiles and requires it to go RED for each one.
 #
-# Needs rauc + openssl, so it runs inside qforge-build:
-#   docker run --rm -v "$PWD":/src -w /src qforge-build ota/rauc/verify-signing.sh
+# Needs rauc + openssl, so it runs inside retroforge-build:
+#   docker run --rm -v "$PWD":/src -w /src retroforge-build ota/rauc/verify-signing.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CONF="${1:-$ROOT/rootfs/overlay/etc/rauc/system.conf}"
 TEMPLATE="$ROOT/ota/rauc/manifest.raucm.in"
 
-# Test seams, as qforge-bootctl and post-install.sh document their own. RELEASE_EXT is THE cert
+# Test seams, as retroforge-bootctl and post-install.sh document their own. RELEASE_EXT is THE cert
 # profile, shared with ota/gen-signing-ca.sh so neither can drift; PKIDIR matches that script's.
 RELEASE_EXT="${RELEASE_EXT:-$ROOT/ota/rauc/release.ext}"
 RELEASE_CERT="${RELEASE_CERT:-$ROOT/ota/rauc/release.cert.pem}"
-KEYRING="${KEYRING:-$ROOT/ota/rauc/qforge-ca.pem}"
+KEYRING="${KEYRING:-$ROOT/ota/rauc/retroforge-ca.pem}"
 PKIDIR="${PKIDIR:-$ROOT/out/pki}"
 
-command -v rauc    >/dev/null 2>&1 || { echo "rauc not found (run inside qforge-build)" >&2; exit 1; }
+command -v rauc    >/dev/null 2>&1 || { echo "rauc not found (run inside retroforge-build)" >&2; exit 1; }
 command -v openssl >/dev/null 2>&1 || { echo "openssl not found" >&2; exit 1; }
 [ -f "$CONF" ]     || { echo "no system.conf: $CONF" >&2; exit 1; }
 [ -f "$TEMPLATE" ] || { echo "no manifest template: $TEMPLATE" >&2; exit 1; }
@@ -68,7 +68,7 @@ umask 077
 mint_ca() { # <prefix>
   openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 \
     -keyout "$work/$1-ca.key" -out "$work/$1-ca.pem" \
-    -subj "/O=qforge-selftest/CN=$1 CA" \
+    -subj "/O=retroforge-selftest/CN=$1 CA" \
     -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
     -addext "keyUsage=critical,keyCertSign,cRLSign" >/dev/null 2>&1
 }
@@ -79,7 +79,7 @@ mint_ca() { # <prefix>
 mint_signer() { # <prefix>
   openssl req -newkey rsa:2048 -nodes -sha256 \
     -keyout "$work/$1.key" -out "$work/$1.csr" \
-    -subj "/O=qforge-selftest/CN=$1 release" >/dev/null 2>&1
+    -subj "/O=retroforge-selftest/CN=$1 release" >/dev/null 2>&1
   openssl x509 -req -in "$work/$1.csr" -CA "$work/$1-ca.pem" -CAkey "$work/$1-ca.key" \
     -CAcreateserial -days 1 -sha256 -extfile "$RELEASE_EXT" -out "$work/$1.pem" >/dev/null 2>&1
 }
@@ -103,7 +103,7 @@ for want in "CA:FALSE" "Digital Signature" "Code Signing"; do
        exit 1 ;;
   esac
 done
-echo "[qforge] cert profile ${RELEASE_EXT#"$ROOT"/}: CA:FALSE + digitalSignature + codeSigning"
+echo "[retroforge] cert profile ${RELEASE_EXT#"$ROOT"/}: CA:FALSE + digitalSignature + codeSigning"
 
 # A 1 MiB payload: this exercises the signing and format path, which does not care what the image
 # is. Using the real 6.4G rootfs would make the check too slow to leave in the build. It must be
@@ -129,7 +129,7 @@ verify() { # <keyring> -> rauc's own stderr on failure
   rauc info --conf="$CONF" --keyring="$1" "$work/selftest.raucb" 2>&1
 }
 
-echo "[qforge] rauc signing self-test against ${CONF#"$ROOT"/}"
+echo "[retroforge] rauc signing self-test against ${CONF#"$ROOT"/}"
 
 if ! out="$(verify "$work/trusted-ca.pem")"; then
   echo "  FAIL  a bundle signed by a codeSigning cert was REJECTED by the shipped system.conf" >&2
@@ -148,7 +148,7 @@ fi
 echo "  ok    unrelated CA rejected"
 
 # The committed keyring against the local PKI. Everything above is self-consistent by construction
-# — it mints both ends — so none of it can notice that ota/rauc/qforge-ca.pem came from a CA
+# — it mints both ends — so none of it can notice that ota/rauc/retroforge-ca.pem came from a CA
 # whose key we no longer have. That mistake ships a device which rejects every bundle we will ever
 # sign, and the only cure is a reflash. Skipped loudly rather than silently in CI, where the key is
 # absent by design: a check that quietly does nothing is the thing this whole file argues against.

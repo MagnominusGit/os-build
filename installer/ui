@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-# qforge internal install — the on-device UI. Phase 5 of .claude/plans/internal-install.plan.md.
+# retroforge internal install — the on-device UI. Phase 5 of .claude/plans/internal-install.plan.md.
 #
 #   installer/ui [--socket <path>]
 #
 # The installer's front end: one SDL2 client on a gamescope compositor, driven by the gamepad. It is
-# a VIEW over installer/qforge-install, which stays the testable spine — this file decides what is
+# a VIEW over installer/retroforge-install, which stays the testable spine — this file decides what is
 # on screen and nothing about what is written to a disk.
 #
 # WHY ONE CLIENT, AND WHAT THE SOCKET IS FOR. The spine takes consent by executing $CONFIRM (§4d),
@@ -28,7 +28,7 @@
 # event boundary in pad_token(), and no button letter travels any further into this file or onto
 # the screen. See §4d.
 #
-# TEST SEAMS, in the spirit of qforge-update's: tests/test-ui.sh executes THIS file and
+# TEST SEAMS, in the spirit of retroforge-update's: tests/test-ui.sh executes THIS file and
 # redirects the socket and the input source into a sandbox. What runs under test is what ships.
 import json
 import os
@@ -38,7 +38,7 @@ import time
 
 # THE SIBLING MODULES ARE FOUND BY DIRECTORY, not by installed name. installer/ui is executed as a
 # script, so sys.path[0] is already its directory — but the suite loads it as a module from the repo
-# root, where it is not, and Phase 6 installs the whole set into /usr/lib/qforge/install/. One
+# root, where it is not, and Phase 6 installs the whole set into /usr/lib/retroforge/install/. One
 # line covers all three, and it has to come before the imports below.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -48,11 +48,11 @@ from uiflow import (                                                           #
     ConnectingScreen, NetJoin, NetworkScreen, PreflightScreen, ProgressScreen, SpineRun,
     VerifyRun, gather_preflight, net_diagnose, release_facts)
 
-SOCK_PATH = os.environ.get("QFORGE_UI_SOCK", "/run/qforge/installer-ui.sock")
+SOCK_PATH = os.environ.get("RETROFORGE_UI_SOCK", "/run/retroforge/installer-ui.sock")
 # A file of one token per line drives the UI instead of a pad, and selects the null view. This is
 # the headless seam the plan's Tests section asks for ("no SDL window; the model is separable from
 # the view"), and it is why nothing in this file imports pygame at module scope.
-EVENTS_FILE = os.environ.get("QFORGE_UI_EVENTS", "")
+EVENTS_FILE = os.environ.get("RETROFORGE_UI_EVENTS", "")
 
 # =================================================================================================
 # the consent screen — §4d, the gamepad half of the contract
@@ -161,20 +161,20 @@ class ConsentScreen:
                 % (
                     f.get("UD_GIB_NOW", "?"),
                     f.get("UD_GIB_AFTER", "?"),
-                    "QForge will use the rest of the disk."
-                    if f.get("QFORGE_GIB", "unknown") == "unknown"
-                    else "QForge will use the remaining %s GiB." % f.get("QFORGE_GIB"),
+                    "RetroForge will use the rest of the disk."
+                    if f.get("RETROFORGE_GIB", "unknown") == "unknown"
+                    else "RetroForge will use the remaining %s GiB." % f.get("RETROFORGE_GIB"),
                 ),
             ),
         ]
-        # `fresh` on a disk that is ALREADY ours is a supported mode, and it destroys the qforge
+        # `fresh` on a disk that is ALREADY ours is a supported mode, and it destroys the retroforge
         # /home holding the games. The tty screen learned this on hardware on 2026-08-21 while
         # reassuring the operator that their game library was safe. Do not let this renderer repeat
         # it: the reassurance below is true only when the games are on the SD card.
         if f.get("REPLACES_OURS") == "1":
             home = f.get("HOME_GIB", "unknown")
             blocks.append((
-                "This also deletes the QForge install already here",
+                "This also deletes the RetroForge install already here",
                 "A fresh install replaces all of it, /home included -- your installed games, saves "
                 "and settings. %s It is NOT recoverable. To keep them, cancel and choose Repair."
                 % ("Its size could not be read."
@@ -195,10 +195,10 @@ class ConsentScreen:
             ))
         blocks.append((
             "Afterwards",
-            "The device boots QForge from internal storage by default. Hold Volume Up at startup "
+            "The device boots RetroForge from internal storage by default. Hold Volume Up at startup "
             "to reach the bootloader menu and choose Android, at any time.",
         ))
-        return {"title": "Install QForge on this device's internal storage", "blocks": blocks}
+        return {"title": "Install RetroForge on this device's internal storage", "blocks": blocks}
 
     def _reinstall(self, f):
         home = f.get("HOME_GIB", "unknown")
@@ -206,8 +206,8 @@ class ConsentScreen:
             ("Target", "%s  (%s)" % (f.get("DISK", "?"), f.get("WWID", "?"))),
             (
                 "Android is not touched",
-                "This rewrites QForge's system partitions. Android's data was already resized "
-                "when QForge was first installed, and nothing here changes it.",
+                "This rewrites RetroForge's system partitions. Android's data was already resized "
+                "when RetroForge was first installed, and nothing here changes it.",
             ),
         ]
         if f.get("HOME_ACTION") == "erase":
@@ -223,7 +223,7 @@ class ConsentScreen:
                 "/home is left exactly as it is -- %s GiB in use. Only the system partitions are "
                 "rewritten." % home,
             ))
-        return {"title": "Repair the QForge install on this device", "blocks": blocks}
+        return {"title": "Repair the RetroForge install on this device", "blocks": blocks}
 
 
 class NoInputScreen:
@@ -310,7 +310,7 @@ class IdleScreen:
         low = self.reason.lower()
         if "not ours" in low or "remove the other os" in low:
             advice = ("Another operating system is installed on this device's internal disk. "
-                      "QForge will not install alongside it, because the firmware would then "
+                      "RetroForge will not install alongside it, because the firmware would then "
                       "have two systems to choose between and no way to be told which. Remove "
                       "that installation first, then run this installer again.")
         elif "running system" in low:
@@ -318,7 +318,7 @@ class IdleScreen:
                       "nothing for it to install onto. Boot it from an SD card instead.")
         else:
             advice = ("If you expected this device to be installable, this is a fault worth "
-                      "reporting: power off, take the medium out, and read qforge-install.log "
+                      "reporting: power off, take the medium out, and read retroforge-install.log "
                       "on it for the full reason.")
         blocks = [
             ("No disk to install onto",
@@ -330,7 +330,7 @@ class IdleScreen:
         blocks.append(("What to do", advice))
         return {
             "screen": "idle",
-            "title": "QForge installer",
+            "title": "RetroForge installer",
             "blocks": blocks,
             "diamonds": [],
             "prompt": "",
@@ -415,7 +415,7 @@ class ConfirmServer:
 # =================================================================================================
 # The command behind the one button that says "Power off". §5 chose power-off over reboot until
 # Phase 0 item 4 answers the ABL scan order, so this is the decided action, not a placeholder.
-POWEROFF = os.environ.get("QFORGE_UI_POWEROFF", "systemctl poweroff")
+POWEROFF = os.environ.get("RETROFORGE_UI_POWEROFF", "systemctl poweroff")
 
 
 def power_off(source):
@@ -723,7 +723,7 @@ def main(argv):
         base = PreflightScreen(facts) if net.get("STATE") == "online" else NetworkScreen(net)
     try:
         return run(server, view, source, base,
-                   deadline=float(os.environ.get("QFORGE_UI_DEADLINE", "0")))
+                   deadline=float(os.environ.get("RETROFORGE_UI_DEADLINE", "0")))
     finally:
         source.close()
         view.close()

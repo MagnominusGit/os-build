@@ -1,0 +1,79 @@
+# Confirms an A/B trial boot. Started ONLY by retroforge-boot-good.path -- hence no [Install].
+#
+# THE SIGNAL is gamescope's startup handshake, plus the session still being alive 30s later.
+#
+# Reaching that handshake proves, in one shot: drm/msm bound and took DRM master, the panel
+# modeset, mesa initialised, both nested Xwaylands came up, libseat got an active seat through
+# logind, and retroforge-session.service's PAM login worked. It is the earliest instant at which "the screen is
+# showing something" is actually true. The weaker candidates all mark a black screen good:
+# graphical.target reached only proves retroforge-session.service was STARTED, and an active logind session is
+# the same problem one layer up. The stricter one -- waiting for the shell's UI -- would roll back
+# a healthy OS over first-boot setup, an offline first boot, or a shell-side failure.
+#
+# The 30s re-check is not padding. retroforge-session.service sets Restart=always, so a session that
+# dies immediately is restarted forever; without the delay a boot stuck in that loop would mark
+# itself good on its first iteration. --require-marker re-tests the marker after the sleep, and
+# retroforge-session's EXIT trap removes it, so "still there" means "the same session stayed up".
+#
+# THE CONFIRMATION IS STEAMOS-STYLE NOW (Phase 5): mark-good runs `steamos-bootconf set-mode
+# booted`, which clears the image's boot-attempts counter (the stage-2 retroforge module bumped it
+# before the kernel booted), so stock steamcl's failsafe and RAUC get-state stop counting this
+# boot as a failure.
+#
+# THE FAILURE PATH DEMOTES, through OnFailure= in [Unit]. If this unit fails -- the marker vanished
+# under the 30s re-check, or the confirmation could not be written -- retroforge-boot-bad.service
+# marks the RUNNING image bad (`set-state self bad` -> set-mode reboot-other + image-invalid=1), so
+# the NEXT boot tries the other slot. That is the OS half of "is this slot OK?"; the bootloader
+# never decides it. (set-mode booted on a later, recovered session re-promotes the image --
+# mark-good clears image-invalid too, since `booted` itself does not.)
+#
+# It is a separate unit rather than an Exec*= line here because systemd has no per-service
+# "run this on failure" verb. The obvious-looking ExecOnFailure= does not exist: systemd logs
+# "Unknown key name" and ignores it, and the demote silently never happens. That is exactly how
+# this shipped once already.
+#
+# THIS IS ONE OF TWO ROLLBACK TRIGGERS, both live. The other is the stage-2 boot-attempts counter
+# that steamcl's failsafe acts on: our grub.cfg calls `retroforge_bootattempts <slot>` on every boot
+# (docs/phase5.md), HW-validated 2026-08-02, so a slot that never reaches this unit at all -- no
+# session, no path unit firing -- is still demoted, at >=6 attempts.
+#
+# NOTE FOR ANYONE TESTING THAT COUNTER: this unit's set-mode booted CLEARS boot-attempts, so a
+# healthy boot erases the evidence. Mask this unit before the test reboot, or the counter reads 0
+# whether or not the bootloader is counting.
+#
+# THERE IS DELIBERATELY NO TIMEOUT THAT MARKS GOOD ANYWAY. If the session never comes up, the
+# path unit never fires and the image is never confirmed. That is the property this whole
+# mechanism exists for; a backstop timer would defeat it.
+#
+# Known gap: gamescope up with the shell wedged shows a blank compositor and still confirms. A
+# second marker touched by the shell once its UI is up would tighten this.
+[Unit]
+Description=retroforge confirm this A/B trial boot (session came up and stayed up)
+Documentation=file:///usr/bin/retroforge-bootctl
+ConditionPathExists=/run/retroforge/boot
+OnFailure=retroforge-boot-bad.service
+
+[Service]
+Type=oneshot
+# RemainAfterExit is load-bearing, not tidiness. A .path unit re-arms the instant its triggered
+# unit leaves the active state, and PathExists is level-triggered -- the marker is still there --
+# so a plain oneshot retriggers itself the moment it exits. Measured on hardware before this
+# line: one sleep-30/mark-good cycle every 30s for the entire uptime of the device. Staying
+# `active (exited)` is what makes the unit fire once per boot.
+#
+# The failure path deliberately still retries: `mark-good --require-marker` exits non-zero when
+# the marker vanished under it, so the unit lands in `failed` (not active), the path re-arms, and
+# the next session that comes up gets its own 30s trial. That is the crash-loop case the sleep
+# exists for -- it must not be spent on the first iteration and then abandoned. Every failed
+# iteration also demotes the image (OnFailure=, above), so the wedge is bounded: the next reboot
+# tries the other slot rather than retrying the broken one indefinitely.
+#
+# THE 30s WAIT IS INSIDE mark-good, NOT AN ExecStartPre=/usr/bin/sleep 30. It was the latter until
+# 2026-08-10, when a Pocket S2 powered off ~2s after the session came up: systemd SIGTERMed the
+# sleep, scored the control process as `Failed with result 'signal'`, showed a failed unit at
+# shutdown, and fired OnFailure= below. The demote was refused only because the shutdown
+# transaction was already queued -- luck. mark-good --wait traps the signal and returns 0 without
+# confirming or demoting, because "the operator switched the device off" is not a health verdict.
+# See the mark-good comment in retroforge-bootctl.
+RemainAfterExit=yes
+ExecStart=/usr/bin/retroforge-bootctl mark-good --require-marker --wait 30

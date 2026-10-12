@@ -14,7 +14,7 @@ The dialog is drawn. `xwininfo` shows it mapped, IsViewable, InputOutput,
 opaque, fullscreen, with a live commit queue. It is nonetheless never presented,
 because it never becomes the global focus window.
 
-`qforge-session` passes `--steam`, which flips
+`retroforge-session` passes `--steam`, which flips
 `cv_backend_virtual_connector_strategy` from `SingleApplication` to
 `SteamControlled` (`main.cpp`). That makes `controlledFocus` true for the whole
 session, and `pick_primary_focus_and_override()`'s
@@ -67,7 +67,7 @@ diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
  		}
  	}
 
-+	// qforge: last-resort global focus for Steam's own windows under SteamControlled.
++	// retroforge: last-resort global focus for Steam's own windows under SteamControlled.
 +	//
 +	// The fallback above is deliberately withheld from the global pass while focus is controlled, so
 +	// that a game cannot take the screen from whatever Steam asked for. That leaves focusControlWindow

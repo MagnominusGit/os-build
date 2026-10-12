@@ -3,7 +3,7 @@ From: Philippe Simons <simons.philippe@gmail.com>
 Date: Fri, 2 Jan 2026 21:22:34 +0100
 Subject: [PATCH] input:joystick: add mangmi airx driver
 
-qforge: ROCKNIX SM6115 0009 at its 2026-10-06 state (Air X + Air Y variants). Makefile hunk
+retroforge: ROCKNIX SM6115 0009 at its 2026-10-06 state (Air X + Air Y variants). Makefile hunk
 re-rolled against 0755 (JOYSTICK_MANGMI_POCKET_MAX sits between MAGELLAN and MAPLE here).
 
 The MCU sends a 16-byte frame every ~4 ms.

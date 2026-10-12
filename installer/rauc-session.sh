@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# qforge internal-install RAUC session — Phase 4a of .claude/plans/internal-install.plan.md.
+# retroforge internal-install RAUC session — Phase 4a of .claude/plans/internal-install.plan.md.
 #
 #   installer/rauc-session.sh <target-root-dev> <bundle-url-or-path>
 #
-# Streams a signed bundle into ONE partition on a disk that carries no qforge, from an installer
+# Streams a signed bundle into ONE partition on a disk that carries no retroforge, from an installer
 # medium that is not a slot of the system being built. Everything here exists because `rauc install`
 # cannot be pointed at a foreign disk from the command line.
 #
 # WHY A WHOLE SESSION AND NOT A FLAG. With the service enabled -- and ours is, the OTA path is a
-# D-Bus conversation (rootfs/overlay/usr/bin/qforge-update) -- the install subcommand's `-c/--conf`
+# D-Bus conversation (rootfs/overlay/usr/bin/retroforge-update) -- the install subcommand's `-c/--conf`
 # and `--override-boot-slot` are compiled OUT: _reference/rauc/src/main.c's entries_install puts
 # both behind `#if ENABLE_SERVICE == 0`, and the client half just forwards a bundle path to
 # whatever already owns de.pengutronix.rauc. So the config the install runs under is the config of
@@ -56,14 +56,14 @@ die() { printf '[%s] ERROR: %s\n' "$PROG" "$1" >&2; exit 1; }
 # assertion a sandbox cannot keep -- an unprivileged test has no block device to offer -- and it is
 # the same pair post-install.sh documents: everything a wrong answer destroys lives behind the
 # device argument, so treat RUNDIR and DEVTEST as related.
-RUNDIR=${QFORGE_INSTALL_RUN:-/run/qforge/install}
+RUNDIR=${RETROFORGE_INSTALL_RUN:-/run/retroforge/install}
 RAUC=${RAUC:-rauc}
 DBUS_DAEMON=${DBUS_DAEMON:-dbus-daemon}
 GDBUS=${GDBUS:-gdbus}
 KEYRING=${KEYRING:-/etc/rauc/keyring.pem}
-POST_INSTALL=${POST_INSTALL:-/usr/lib/qforge/install/post-install-fresh.sh}
+POST_INSTALL=${POST_INSTALL:-/usr/lib/retroforge/install/post-install-fresh.sh}
 DEVTEST=${DEVTEST:--b}
-COMPATIBLE=${COMPATIBLE:-qforge}
+COMPATIBLE=${COMPATIBLE:-retroforge}
 # How long to wait for the service to take the bus name. Generous: a cold installer medium is
 # reading rauc and glib off squashfs on flash storage.
 OWN_TIMEOUT=${OWN_TIMEOUT:-30}
@@ -72,7 +72,7 @@ BUS_NAME=de.pengutronix.rauc
 
 # --info is the SOURCE-VERIFICATION mode the spine runs before it touches the partition table
 # (plan §3 rule 11: sources verified before the first sgdisk). It exists HERE rather than as a
-# `rauc info` call in qforge-install because the config is the whole mechanism of this file, and a
+# `rauc info` call in retroforge-install because the config is the whole mechanism of this file, and a
 # verify that ran under a config of its own would be verifying something other than what the install
 # will do -- bundle-formats, the keyring path and check-purpose all decide whether a bundle is
 # acceptable, and all three would be a second copy waiting to drift. So the config is synthesized
@@ -150,7 +150,7 @@ mkdir -p "$MOUNTPREFIX" || die "cannot create $MOUNTPREFIX"
 CONF="$RUNDIR/rauc.conf"
 cat >"$CONF" <<EOF || die "cannot write $CONF"
 # Synthesized by $PROG. Not a copy of /etc/rauc/system.conf and deliberately not derived from it:
-# that file describes a RUNNING qforge with two slots and a bootloader, and this describes one
+# that file describes a RUNNING retroforge with two slots and a bootloader, and this describes one
 # partition on a disk that has never booted. See the header of $PROG for what each omission buys.
 [system]
 compatible=$COMPATIBLE
@@ -197,7 +197,7 @@ fi
 # activation directory dbus-daemon cannot start anything at all, so a stock rauc.service cannot be
 # activated onto this bus and win the name with a config that is not this one -- the failure that
 # would put the bundle wherever THAT config says slot A is, rather than in the partition this
-# script was handed. The shipped image names its slots /dev/qforge/qforge-root-{A,B} now
+# script was handed. The shipped image names its slots /dev/retroforge/retroforge-root-{A,B} now
 # (docs/archive/phase5.md), so the specific wrong destination has changed and the hazard has not: the
 # whole point of synthesizing a config is that the destination comes from our argument, and any
 # path where some other config wins is a path where it does not.
@@ -236,7 +236,7 @@ cleanup() {
 trap cleanup EXIT
 
 # `--print-pid` TAKES A FILE DESCRIPTOR, NOT A PATH. Measured on the Pocket ACE 2026-08-21, first
-# run: `--print-pid=/run/qforge/install/dbus.pid` gets `Invalid file descriptor` and exit 1. The
+# run: `--print-pid=/run/retroforge/install/dbus.pid` gets `Invalid file descriptor` and exit 1. The
 # path spelling is `--pidfile=`, which is a different thing again -- the daemon writes it whenever
 # it likes, so a caller reading it back has to wait. The bare form prints the forked daemon's pid
 # on stdout before the parent exits, which is both the pid and the readiness signal, so it is what

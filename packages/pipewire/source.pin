@@ -1,4 +1,4 @@
-# pipewire 1.6.1 — built FROM SOURCE via a QForge-owned copy of Arch's 1:1.6.1-1 recipe
+# pipewire 1.6.1 — built FROM SOURCE via a RetroForge-owned copy of Arch's 1:1.6.1-1 recipe
 # (packages/pipewire/PKGBUILD, plus its two install scriptlets), replacing the pinned snapshot's
 # 1:1.6.0-1 on the image and in the installer.
 #

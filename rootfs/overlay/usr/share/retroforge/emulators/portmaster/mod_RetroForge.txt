@@ -1,0 +1,88 @@
+#!/bin/bash
+#
+# SPDX-License-Identifier: MIT
+#
+## Modular - RetroForge
+#
+# Sourced by ports after control.txt: `[ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source ...`
+# (CFW_NAME is os-release's NAME, "RetroForge"). RetroForge's launcher copies this file into PortMaster's
+# folder at every launch, from /usr/share/retroforge/emulators/portmaster/: edits here do not last.
+#
+# Ports run as the player, without root: there is no sudo, so control.txt leaves $ESUDO empty. The
+# folder below holds RetroForge's `mount` and `umount`, which mount a port's squashfs runtime (Godot,
+# Weston, mono, Java ...) with squashfuse and turn `mount --bind` into a symlink. With them a
+# port's mounts and unmounts both work, so PM_CAN_MOUNT keeps PortMaster's default (Y).
+case ":$PATH:" in
+  *:/usr/lib/retroforge/portmaster/bin:*) ;;
+  *) export PATH="/usr/lib/retroforge/portmaster/bin:$PATH" ;;
+esac
+
+# Libraries PortMaster's runtimes expect under an older name: LÖVE 11.5 (its splash, its port
+# patcher, LÖVE ports) links libtheoradec.so.1, the image has libtheora 1.2's libtheoradec.so.2
+# with the same symbols (version libtheoradec_1.0). Last on the path: a port's own libs win.
+case ":${LD_LIBRARY_PATH-}:" in
+  *:/usr/lib/retroforge/portmaster/lib:*) ;;
+  *) export LD_LIBRARY_PATH="${LD_LIBRARY_PATH:+$LD_LIBRARY_PATH:}/usr/lib/retroforge/portmaster/lib" ;;
+esac
+
+# gptokeyb2 grabs the pad (a .gptk's `exclusive = true`) through the fd its preloaded libinterpose
+# reports: the last one ANY open() returned. Under the image's sdl2-compat (SDL3) that is not the
+# pad, the grab misses and the game reads the pad too (Shattered Pixel Dungeon: its own right-stick
+# pointer on top of gptokeyb2's mouse). RetroForge's interposer reports the pad's event node; it is
+# preloaded first so its interpose_get_fd() wins, and libinterpose stays preloaded behind it:
+# gptokeyb2 links it (NEEDED) and fails to start without it.
+GPTOKEYB2="${GPTOKEYB2-}"
+GPTOKEYB2="${GPTOKEYB2//LD_PRELOAD=${controlfolder-}\//LD_PRELOAD=/usr/lib/retroforge/portmaster/libretroforge-gptk-interpose.so:${controlfolder-}/}"
+export GPTOKEYB2
+
+# SDL on Xwayland makes its GL contexts through EGL, not GLX. Ports ask SDL for GLES (Godot's frt,
+# gl4es, most engines): over GLX ES profiles on Xwayland under gamescope they present black frames
+# (A Key(s) Path, Godot 3 GLES2 on the ACE: a flickering boot splash, then black, sound playing).
+# SDL_VIDEO_FORCE_EGL is SDL3's name (the image's SDL2 is sdl2-compat over it), the X11 one SDL2's.
+export SDL_VIDEO_FORCE_EGL=1 SDL_VIDEO_X11_FORCE_EGL=1
+
+# Godot ports: full screen at the panel's size (device_info.txt reads it from DRM, landscape).
+GODOT2_OPTS="-r ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} -f"
+GODOT_OPTS="--resolution ${DISPLAY_WIDTH}x${DISPLAY_HEIGHT} -f"
+
+# control.txt knows no RetroForge pad GUID, so get_controls reads the whole gamecontrollerdb.txt
+# (~470 KB) into sdl_controllerconfig; ports export it as SDL_GAMECONTROLLERCONFIG, past the
+# kernel's 128 KiB per-string limit, and every exec after fails with E2BIG ("Argument list too
+# long"). SDL still gets every mapping from SDL_GAMECONTROLLERCONFIG_FILE. PortMaster's own
+# mod_EmuELEC.txt does the same. Wrapped once (this file can be sourced twice).
+if declare -f get_controls >/dev/null && ! declare -f _retroforge_get_controls >/dev/null; then
+  eval "_retroforge_get_controls() $(declare -f get_controls | tail -n +2)"
+  get_controls() {
+    _retroforge_get_controls "$@"
+    if [ "${#sdl_controllerconfig}" -gt 100000 ]; then sdl_controllerconfig=""; fi
+  }
+fi
+
+pm_platform_helper() {
+  if [ -e "$PM_PIPE" ]; then
+    PortMasterDialogExit
+  fi
+  # gamescope makes every game full screen and gives it focus: nothing to do (ROCKNIX's sway needs
+  # a helper here).
+  printf ""
+}
+
+# Ports in PortMaster's Weston runtime (Godot 4, Java ...) run `westonwrap.sh <backend> <renderer>
+# <shell> <gllib> <command...>`, which sources this file before anything else. Its Weston needs
+# its own seatd and the DRM/input devices: as the player, under gamescope, it dies ("client is not
+# active") and the port hangs on the launch screen. gamescope's Xwayland and Mesa's EGL are
+# already what the command needs, so do what westonwrap itself does on ROCKNIX with Mesa
+# ("bypassing weston setup entirely"): run the command here and leave with its exit code.
+# `westonwrap.sh cleanup` has nothing to clean then.
+if [[ "${0##*/}" == westonwrap*.sh ]]; then
+  [ "${1-}" = cleanup ] && exit 0
+  # The port's own libraries and preloads, passed to westonwrap for its command (run_user_command),
+  # but behind the image's /usr/lib: Weston ports bundle fallbacks for bare firmwares (libs_extra:
+  # libEGL, libGL, an old libfreetype ...) that would shadow Mesa and newer system libraries their
+  # system dependencies need (Warzone 2100: the image's harfbuzz wants FT_Get_Transform, missing
+  # from the bundled freetype). A soname the image lacks still comes from the port.
+  [ -n "${WRAPPED_LIBRARY_PATH-}" ] && export LD_LIBRARY_PATH="/usr/lib:$WRAPPED_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  [ -n "${WRAPPED_PRELOAD-}" ] && export LD_PRELOAD="$WRAPPED_PRELOAD${LD_PRELOAD:+:$LD_PRELOAD}"
+  eval "${*:5}"
+  exit $?
+fi

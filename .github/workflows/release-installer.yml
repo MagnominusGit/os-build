@@ -1,4 +1,4 @@
-# qforge release INSTALLER — the recovery medium that installs QForge onto a device's internal
+# retroforge release INSTALLER — the recovery medium that installs RetroForge onto a device's internal
 # storage. Phase 6 of .claude/plans/internal-install.plan.md.
 #
 # TAG NAMESPACE: `installer/v*`, its own, for the reason card/ and ota/ have theirs — three
@@ -104,13 +104,13 @@ jobs:
       - name: fetch the medium
         uses: actions/download-artifact@v8
         with:
-          name: qforge-installer
+          name: retroforge-installer
           path: upload
 
       - name: fetch the metadata
         uses: actions/download-artifact@v8
         with:
-          name: qforge-installer-meta
+          name: retroforge-installer-meta
           path: meta
 
       - name: upload the medium to R2
@@ -123,10 +123,10 @@ jobs:
           R2_PUBLIC_BASE: ${{ vars.R2_PUBLIC_BASE }}
           VERSION: ${{ needs.prep.outputs.version }}
           # A SEPARATE PREFIX FROM THE CARDS, so the two retentions cannot prune each other.
-          QFORGE_R2_KIND: installer
+          RETROFORGE_R2_KIND: installer
           # TWO, not the card's one: a medium is small, and an older one stays a working recovery
           # tool — it needs nothing from the server but the OS bundle.
-          QFORGE_CARD_KEEP: '2'
+          RETROFORGE_CARD_KEEP: '2'
         run: ota/publish-card.sh "$VERSION" upload/installer.img.gz meta
 
   release:
@@ -139,7 +139,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          name: qforge-installer-meta
+          name: retroforge-installer-meta
           path: meta
       - name: cut the release
         env:
@@ -149,9 +149,9 @@ jobs:
         run: |
           set -euo pipefail
           {
-            echo "## qforge installer \`$VERSION\`"
+            echo "## retroforge installer \`$VERSION\`"
             echo
-            echo 'Writes QForge to a device'"'"'s internal storage, alongside Android. Flash it to'
+            echo 'Writes RetroForge to a device'"'"'s internal storage, alongside Android. Flash it to'
             echo 'an SD card, boot the device from it, and follow the screens.'
             echo
             echo '```bash'
@@ -160,11 +160,11 @@ jobs:
             echo '```'
             echo
             echo '**Before you boot it:** the medium'"'"'s first partition is a plain FAT volume that'
-            echo 'Windows and macOS both show. Copy `qforge/wifi.conf.example` to'
-            echo '`qforge/wifi.conf` and put your network name and password in it — the installer'
-            echo 'downloads QForge over the network and has no way to ask you for them. A USB-C'
+            echo 'Windows and macOS both show. Copy `retroforge/wifi.conf.example` to'
+            echo '`retroforge/wifi.conf` and put your network name and password in it — the installer'
+            echo 'downloads RetroForge over the network and has no way to ask you for them. A USB-C'
             echo 'Ethernet adapter needs no file at all. If an install fails, that same partition is'
-            echo 'where `qforge-install.log` comes out.'
+            echo 'where `retroforge-install.log` comes out.'
             echo
             echo '**What it destroys:** Android'"'"'s user data on the target device. Android itself'
             echo 'still boots, factory-reset, with the space you choose on screen. The installer'
@@ -174,6 +174,6 @@ jobs:
             echo "pinned to one; the OS itself is the only download during an install."
           } > notes.md
           gh release create "$GITHUB_REF_NAME" \
-            --title "qforge installer $VERSION" \
+            --title "retroforge installer $VERSION" \
             --notes-file notes.md \
             meta/sha256sums.txt meta/provenance/manifest.lock

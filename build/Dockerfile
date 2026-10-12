@@ -1,4 +1,4 @@
-# qforge-build — cross-compile build environment for the whole pipeline on x86_64
+# retroforge-build — cross-compile build environment for the whole pipeline on x86_64
 # hosts (kernel, rootfs/sdcard assembly, boot packaging, RAUC
 # bundle). Carries the aarch64 toolchain plus every container stage's deps; source and
 # artifacts stay on the host via a bind mount (work/ and out/ are gitignored). Re-runnable.

@@ -1,0 +1,33 @@
+{
+  "notes": [
+    "ClownMDEmu (Mega Drive, Mega CD): pkgforge-dev's sharun repackaging of clownmdemu-frontend 1.6.12 (SDL3 + Dear ImGui). Replaces ares (2026-10-10, too heavy for these SoCs); 32X is dropped (ClownMDEmu has none, and no light standalone emulator ships for aarch64).",
+    "Mega CD needs no BIOS: ClownMDEmu has its own boot ROM and serves the BIOS calls itself. A bare path is loaded as a cartridge or a disc by its contents (CHD, CUE/BIN, ISO).",
+    "-u: one user folder per system, ~/.config/clownmdemu/<system> (configuration.ini there). Its 'Save Data' folder is linked to ~/saves/<system> by user-tmpfiles.d/retroforge-home.conf, since ClownMDEmu has no save-path setting.",
+    "Seed: rewinding off (on by default: a rewind buffer every frame, CPU and memory for a feature with no pad binding worth having). Only that key: with a configuration.ini present ClownMDEmu binds no keyboard keys, which a handheld does not miss.",
+    "Pad: SDL3 gamepad API with a fixed layout (Mega Drive A/B/C on X/A/B, X/Y/Z on LB/Y/RB, Mode on Back); nothing to bind. Exit: SIGTERM becomes SDL's quit event and the frontend's normal exit (saves written, config saved).",
+    "gui_args: the Mega Drive folder's settings (Open has no system)."
+  ],
+  "format": "appimage-sharun",
+  "binary": "bin/clownmdemu",
+  "args": [
+    "-f",
+    "-u",
+    "/home/player/.config/clownmdemu/{system}",
+    "{rom}"
+  ],
+  "gui_args": [
+    "-u",
+    "/home/player/.config/clownmdemu/md"
+  ],
+  "env": {},
+  "seed": [
+    {
+      "file": "configuration.ini",
+      "to": ".config/clownmdemu/md/configuration.ini"
+    },
+    {
+      "file": "configuration.ini",
+      "to": ".config/clownmdemu/segacd/configuration.ini"
+    }
+  ]
+}

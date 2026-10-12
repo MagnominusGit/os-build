@@ -50,8 +50,8 @@ for b in "${sha:0:63}" "${sha}0" "${sha^^}" "sha256:$sha" \
          "registry.gitlab.steamos.cloud/holo/holo-core-aarch64-preview/base-devel@sha256:$sha"; do
   run builder.pin "$b" pins_builder_sha >/dev/null && bad "accepted '$b'" || ok "refuses '${b:0:40}…'"
 done
-[ "$(run builder.pin "$sha" pins_builder_ref)" = "qforge/builder:$sha" ] \
-  && ok "ref is keyed on the tarball sha" || bad "ref is not qforge/builder:<sha>"
+[ "$(run builder.pin "$sha" pins_builder_ref)" = "retroforge/builder:$sha" ] \
+  && ok "ref is keyed on the tarball sha" || bad "ref is not retroforge/builder:<sha>"
 
 # The builder URL is derived, never written: the description must name the snapshot's tarball.
 printf '%s\n' "$BASE/mash-20260305" > "$TMP/build/snapshot.pin"

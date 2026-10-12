@@ -1,4 +1,4 @@
-# scx-scheds — sched_ext userspace schedulers, built FROM SOURCE via a qforge-owned PKGBUILD.
+# scx-scheds — sched_ext userspace schedulers, built FROM SOURCE via a retroforge-owned PKGBUILD.
 # holo has no scx-scheds package at all, so there is no PKGBUILD to curl from the monorepo;
 # build-overlay.sh sees `pkgbuild_local` in source.pin and uses this checked-in recipe.
 #
@@ -196,7 +196,7 @@ package() {
   # rewritten to the ones we do. Left as a normal config file under /etc so it stays user-editable.
   #
   # No --autopower: it used to follow the power profile through the power-profiles-daemon names
-  # qforge-powerd answered; those profiles (and the names) were dropped on 2026-10-03, and
+  # retroforge-powerd answered; those profiles (and the names) were dropped on 2026-10-03, and
   # --autopower with nobody answering falls back to reading the cpufreq governor, which is not a
   # power policy here.
   #

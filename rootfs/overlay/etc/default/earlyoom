@@ -1,11 +1,11 @@
-# qforge — the earlyoom operator override file, deliberately EMPTY of defaults.
+# retroforge — the earlyoom operator override file, deliberately EMPTY of defaults.
 #
 # This path belongs to the earlyoom package, which ships it containing an active
 #
 #   EARLYOOM_ARGS="-r 3600 -n --avoid '(^|/)(init|systemd|Xorg|sshd)$'"
 #
 # We overwrite it with this comments-only version. WHY: earlyoom.service expands $EARLYOOM_ARGS
-# AFTER qforge's own settings (see /usr/lib/systemd/system/earlyoom.service.d/qforge.conf), and
+# AFTER retroforge's own settings (see /usr/lib/systemd/system/earlyoom.service.d/retroforge.conf), and
 # earlyoom parses with getopt, where the LAST occurrence of an option wins outright — a second
 # --avoid REPLACES the first rather than adding to it. So the packaged defaults did not merge with
 # our policy, they silently displaced the parts they overlapped.
@@ -21,7 +21,7 @@
 # tuned for this device.
 #
 # THIS FILE IS STILL THE OPERATOR SURFACE, and that is the point of emptying it rather than deleting
-# it. Setting EARLYOOM_ARGS below overrides qforge's policy — it is expanded last, so it wins on
+# it. Setting EARLYOOM_ARGS below overrides retroforge's policy — it is expanded last, so it wins on
 # any option it names, and leaves the rest of the policy in place. That is the supported way to
 # retune earlyoom on a device over SSH without editing /usr.
 #
@@ -30,14 +30,14 @@
 # changes the packaged defaults, a device that has been edited will not see the change.
 
 # Options to pass to earlyoom. Unset by default — policy lives in
-# /usr/lib/systemd/system/earlyoom.service.d/qforge.conf.
+# /usr/lib/systemd/system/earlyoom.service.d/retroforge.conf.
 #
 # Examples:
 #
-# Memory report every minute (0 disables reports entirely, which is qforge's default):
+# Memory report every minute (0 disables reports entirely, which is retroforge's default):
 # EARLYOOM_ARGS="-r 60"
 #
-# Act at 5% available memory instead of qforge's absolute 400 MB threshold:
+# Act at 5% available memory instead of retroforge's absolute 400 MB threshold:
 # EARLYOOM_ARGS="-m 5"
 #
 # See `earlyoom -h` for the full option list.

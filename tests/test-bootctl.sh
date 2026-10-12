@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Offline test for /usr/bin/qforge-bootctl — above all, for its RAUC backend contract.
+# Offline test for /usr/bin/retroforge-bootctl — above all, for its RAUC backend contract.
 #
 #   tests/test-bootctl.sh
 #
@@ -14,7 +14,7 @@
 # IT ALSO ENUMERATES THE CONTRACT. A subcommand RAUC calls but this tool does not dispatch must
 # fail here, not on hardware — see `backend-is-complete`.
 #
-# HOW IT WORKS: the real, shipped qforge-bootctl is executed — not a copy, not a sed-mangled
+# HOW IT WORKS: the real, shipped retroforge-bootctl is executed — not a copy, not a sed-mangled
 # variant. It exposes three environment seams (BOOTINFO, SESSION_MARKER, BC) that exist for this
 # and are documented as such at the top of the tool. steamos-bootconf itself is stubbed on disk
 # with a faithful mini-implementation (see the stub's header comment for which bootconf behaviours
@@ -22,8 +22,8 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BOOTCTL="$ROOT/rootfs/overlay/usr/bin/qforge-bootctl"
-[ -f "$BOOTCTL" ] || { echo "no qforge-bootctl: $BOOTCTL" >&2; exit 1; }
+BOOTCTL="$ROOT/rootfs/overlay/usr/bin/retroforge-bootctl"
+[ -f "$BOOTCTL" ] || { echo "no retroforge-bootctl: $BOOTCTL" >&2; exit 1; }
 
 PASS=0; FAIL=0; CASE=""; SB=""
 OUT=""; RC=0
@@ -349,7 +349,7 @@ expect_sel B
 done_
 
 t "set-state-self-bad-demotes-the-running-image"
-# What qforge-boot-good.service's ExecOnFailure runs when the confirmation fails.
+# What retroforge-boot-good.service's ExecOnFailure runs when the confirmation fails.
 bc set-state self bad
 expect_rc 0
 expect_conf A image-invalid 1
@@ -357,7 +357,7 @@ expect_sel A
 done_
 
 t "set-state-self-bad-on-a-dev-boot-exits-0"
-# The health unit can fire on a cmdline-fallback boot too (ConditionPathExists=/run/qforge/boot
+# The health unit can fire on a cmdline-fallback boot too (ConditionPathExists=/run/retroforge/boot
 # is true there); the demote must be harmless, not an error.
 set_self dev
 bc set-state self bad
@@ -413,7 +413,7 @@ expect_has "no session marker"
 done_
 
 t "mark-good-is-a-no-op-that-exits-0-on-a-degraded-boot"
-# Load-bearing: qforge-boot-good.service is RemainAfterExit=yes, so a non-zero exit re-arms the
+# Load-bearing: retroforge-boot-good.service is RemainAfterExit=yes, so a non-zero exit re-arms the
 # level-triggered .path into a failing mark-good every 30s for the rest of the device's uptime.
 # The handoff names no slot on a cmdline-fallback boot, so that is the guard: nothing to confirm.
 seed_boot '' cmdline
@@ -441,9 +441,9 @@ done_
 echo "== mark-good --wait: a shutdown mid-re-check is not a verdict =="
 #
 # HW 2026-08-10, Pocket S2: the re-check delay used to be ExecStartPre=/usr/bin/sleep 30 in
-# qforge-boot-good.service. Powering the device off inside that window -- i.e. every OOBE test --
+# retroforge-boot-good.service. Powering the device off inside that window -- i.e. every OOBE test --
 # SIGTERMed the sleep, so systemd scored the unit `Failed with result 'signal'` and fired
-# OnFailure=qforge-boot-bad.service. The demote lost the race to the shutdown transaction that
+# OnFailure=retroforge-boot-bad.service. The demote lost the race to the shutdown transaction that
 # time; nothing guaranteed it would. These cases pin the replacement: the wait lives in the tool
 # and a signal during it means NO VERDICT -- exit 0, nothing confirmed, nothing demoted.
 
@@ -512,13 +512,13 @@ done_
 t "the-shipped-unit-passes--wait-and-carries-no-sleep-of-its-own"
 # The tool growing --wait is worthless if the unit still sleeps in an ExecStartPre, so assert the
 # artifact that ships, not just the tool. This is the drift that would silently restore the bug.
-UNIT="$ROOT/rootfs/overlay/usr/lib/systemd/system/qforge-boot-good.service"
+UNIT="$ROOT/rootfs/overlay/usr/lib/systemd/system/retroforge-boot-good.service"
 grep -qE '^ExecStart=.*mark-good .*--wait 30' "$UNIT" \
   && ok "boot-good ExecStart passes --wait 30" || bad "boot-good does not pass --wait 30"
 grep -qE '^ExecStartPre=.*sleep' "$UNIT" \
   && bad "boot-good still sleeps in ExecStartPre -- the signal lands on the sleep again" \
   || ok "boot-good has no ExecStartPre sleep"
-BADUNIT="$ROOT/rootfs/overlay/usr/lib/systemd/system/qforge-boot-bad.service"
+BADUNIT="$ROOT/rootfs/overlay/usr/lib/systemd/system/retroforge-boot-bad.service"
 grep -qE '^ExecCondition=' "$BADUNIT" \
   && ok "boot-bad is gated by an ExecCondition" || bad "boot-bad has no shutdown guard"
 grep -qE '^ExecCondition=.*is-system-running' "$BADUNIT" \

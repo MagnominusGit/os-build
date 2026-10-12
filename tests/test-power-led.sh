@@ -10,7 +10,7 @@
 # that means "fault" on every other handheld. multi_max_intensity moves off 511 and the mix scales
 # to a quarter of what was asked for, which reads as a failing LED rather than a wrong constant.
 #
-# So this drives the REAL rootfs/overlay/usr/lib/qforge/power-led against a fabricated
+# So this drives the REAL rootfs/overlay/usr/lib/retroforge/power-led against a fabricated
 # /sys/class/leds tree and asserts on the ATTRIBUTE CONTENTS afterwards, never on exit status —
 # the script exits 0 on every path by design, including the ones where it did nothing.
 #
@@ -18,7 +18,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LEDSCRIPT="$ROOT/rootfs/overlay/usr/lib/qforge/power-led"
+LEDSCRIPT="$ROOT/rootfs/overlay/usr/lib/retroforge/power-led"
 
 PASS=0; FAIL=0
 ok()   { printf '  ok   %s\n' "$1"; PASS=$((PASS + 1)); }
@@ -50,7 +50,7 @@ run() {  # run [conf-lines...] -> stderr on stdout
     local conf="$TMP/power-led.conf"
     : >"$conf"
     for line in "$@"; do printf '%s\n' "$line" >>"$conf"; done
-    QFORGE_SYSFS_ROOT="$TMP/sys" QFORGE_POWER_LED_CONF="$conf" bash "$LEDSCRIPT" 2>&1
+    RETROFORGE_SYSFS_ROOT="$TMP/sys" RETROFORGE_POWER_LED_CONF="$conf" bash "$LEDSCRIPT" 2>&1
 }
 
 mi() { cat "$TMP/sys/class/leds/power-led/multi_intensity" 2>/dev/null; }
@@ -87,28 +87,28 @@ out=$(run)
 
 # --- operator overrides.
 make_led
-run "QFORGE_POWER_LED=off" >/dev/null
-check "QFORGE_POWER_LED=off leaves it dark" "$(mi)" "0 0 0"
-check "QFORGE_POWER_LED=off leaves brightness 0" "$(br)" "0"
+run "RETROFORGE_POWER_LED=off" >/dev/null
+check "RETROFORGE_POWER_LED=off leaves it dark" "$(mi)" "0 0 0"
+check "RETROFORGE_POWER_LED=off leaves brightness 0" "$(br)" "0"
 
 make_led
-run "QFORGE_POWER_LED_COLOR='255 191 0'" >/dev/null
+run "RETROFORGE_POWER_LED_COLOR='255 191 0'" >/dev/null
 check "custom colour is honoured"            "$(mi)" "511 382 0"
 
 make_led
-run "QFORGE_POWER_LED_BRIGHTNESS=100" >/dev/null
+run "RETROFORGE_POWER_LED_BRIGHTNESS=100" >/dev/null
 check "brightness override reaches full"     "$(br)" "511"
 
 # --- malformed overrides are refused loudly and change nothing. A typo'd colour must not land as a
 # half-written mix.
 make_led
-out=$(run "QFORGE_POWER_LED_COLOR='0 255'")
+out=$(run "RETROFORGE_POWER_LED_COLOR='0 255'")
 check "short colour writes nothing"          "$(mi)" "0 0 0"
 [[ $out == *"NOT applied"* ]] && ok "short colour is reported" \
                              || bad "short colour is reported (got: $out)"
 
 make_led
-out=$(run "QFORGE_POWER_LED_BRIGHTNESS=250")
+out=$(run "RETROFORGE_POWER_LED_BRIGHTNESS=250")
 check "out-of-range percent writes nothing"  "$(br)" "0"
 [[ $out == *"NOT applied"* ]] && ok "out-of-range percent is reported" \
                               || bad "out-of-range percent is reported (got: $out)"

@@ -1,4 +1,4 @@
-# rauc — built FROM SOURCE at 1.15.2 via a qforge-owned PKGBUILD (packages/rauc/PKGBUILD),
+# rauc — built FROM SOURCE at 1.15.2 via a retroforge-owned PKGBUILD (packages/rauc/PKGBUILD),
 # NOT fetched from the holo monorepo. holo HAS a rauc recipe, but only at 1.14
 # (holo-core-aarch64-preview extra-aarch64/r/rauc/1.14-1) — and 1.14 cannot install a dm-verity
 # bundle on kernel >= 6.19, which is every kernel we ship. Our PKGBUILD IS that holo recipe with
@@ -16,7 +16,7 @@
 #                  pkgrel = integer[.integer]). Belt-and-braces here: 1.15.2 already outranks
 #                  holo's 1.14 by pkgver, so the suffix only matters if holo ever ships 1.15.2-1.
 #
-# No `patches:` — we carry zero qforge patches against rauc; the whole point of this recipe is
+# No `patches:` — we carry zero retroforge patches against rauc; the whole point of this recipe is
 # the upstream version, unmodified.
 #
 # To bump rauc: edit pkgver in packages/rauc/PKGBUILD, replace both checksums (sha512sum and

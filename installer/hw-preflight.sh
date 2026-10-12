@@ -16,12 +16,12 @@
 #     eight ("plan on a stock disk wrote nothing at all").
 #   * the UI code reached here is gather_preflight() + PreflightScreen.describe(), which run those
 #     two and read /sys/block. There is no write path in it, and the spine is never invoked.
-# Staged files live in /run/qforge/probe — tmpfs, gone at the next boot.
+# Staged files live in /run/retroforge/probe — tmpfs, gone at the next boot.
 #
 # WHAT THIS CANNOT SHOW FROM A DEV CARD, so nobody plans the trip twice: the `REPLACES_OURS=1`
-# screen — a disk that ALREADY carries qforge, whose destroy list names qforge-home. Reaching it
+# screen — a disk that ALREADY carries retroforge, whose destroy list names retroforge-home. Reaching it
 # needs a device booted from removable media with our eight on internal, and a dev card carries the
-# SAME `qforge-*` filesystem labels as the install, so /esp and /home cross-mount onto the target
+# SAME `retroforge-*` filesystem labels as the install, so /esp and /home cross-mount onto the target
 # (seen during the §4a gate, 2026-08-21). The installer image gets its own labels; until then that
 # path is Phase 6 hardware step 6 and its only coverage is tests/test-carve.sh, against a fixture
 # that has been carved for real. A device booted FROM internal cannot be its own target either —
@@ -39,7 +39,7 @@ host="${1:-}"
 [ -n "$host" ] || { echo "usage: ${0##*/} <user@host>   (e.g. root@192.168.1.143)" >&2; exit 2; }
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROBE=/run/qforge/probe
+PROBE=/run/retroforge/probe
 
 # shellcheck source=lib-hwstage.sh
 . "$ROOT/installer/lib-hwstage.sh"
@@ -68,17 +68,17 @@ scp "${SSHOPTS[@]}" -q \
   "$ROOT/image/genpart.sh" \
   "$ROOT/image/lib-gpt.sh" \
   "$ROOT/image/partition-table.txt" \
-  "$ROOT/rootfs/overlay/usr/lib/qforge/install/lib-slotwrite.sh" \
+  "$ROOT/rootfs/overlay/usr/lib/retroforge/install/lib-slotwrite.sh" \
   "$host:$PROBE/"
 ssh "${SSHOPTS[@]}" "$host" "chmod +x $PROBE/sgdisk $PROBE/mdir $PROBE/*.sh $PROBE/ui $PROBE/netcfg $PROBE/release-info"
 
 ssh "${SSHOPTS[@]}" "$host" 'bash -s' <<'REMOTE'
 set -u
-P=/run/qforge/probe
+P=/run/retroforge/probe
 export PATH="$P:$PATH"
-export QFORGE_SELECT_TARGET="$P/select-target.sh"
-export QFORGE_CARVE="$P/carve.sh"
-export QFORGE_DEVICE_ENV=/usr/lib/qforge/device-env
+export RETROFORGE_SELECT_TARGET="$P/select-target.sh"
+export RETROFORGE_CARVE="$P/carve.sh"
+export RETROFORGE_DEVICE_ENV=/usr/lib/retroforge/device-env
 # Left EMPTY on purpose — and since Phase 6 that no longer means "no bundle". release-info resolves
 # the channel manifest, so what the probe prints is what a medium would print: the release the
 # configured channel serves to THIS machine, which is the whole point of running the screen here
@@ -86,9 +86,9 @@ export QFORGE_DEVICE_ENV=/usr/lib/qforge/device-env
 #
 # It stays a probe regardless: this renders describe() and never runs the UI loop, so no press
 # reaches anything. Nothing below writes to the disk.
-export QFORGE_INSTALL_BUNDLE=""
-export QFORGE_NETCFG="$P/netcfg"
-export QFORGE_RELEASE_INFO="$P/release-info"
+export RETROFORGE_INSTALL_BUNDLE=""
+export RETROFORGE_NETCFG="$P/netcfg"
+export RETROFORGE_RELEASE_INFO="$P/release-info"
 
 # §4b, and DIAGNOSE ONLY. `netcfg join` is the mode that talks to NetworkManager; it is deliberately
 # not run here, so this stays a probe rather than something that reconfigures a device's network
@@ -99,7 +99,7 @@ echo
 
 python3 - <<'PY'
 import os, sys
-sys.path.insert(0, "/run/qforge/probe")
+sys.path.insert(0, "/run/retroforge/probe")
 import uiflow
 
 print("=" * 78)
@@ -147,8 +147,8 @@ print("\n" + "=" * 78)
 print("the size knob, on real geometry")
 for token in ("RIGHT", "RIGHT", "LEFT"):
     pf.handle(token)
-    print("  %-6s -> android %3s GiB   qforge %s GiB   destroys %d"
-          % (token, pf.gib, pf.plan["QFORGE_GIB"], len(pf.plan["destroy"])))
+    print("  %-6s -> android %3s GiB   retroforge %s GiB   destroys %d"
+          % (token, pf.gib, pf.plan["RETROFORGE_GIB"], len(pf.plan["destroy"])))
 
 # And what the bottom button would do. PRINTED, NOT ACTED ON: nothing here runs the UI loop, so a
 # ("start", N) here means the screen is satisfied with what it resolved, not that anything began.
@@ -158,4 +158,4 @@ print("\n  the bottom button would return %r (printed only -- this probe runs no
 PY
 REMOTE
 
-echo "[qforge] staged files remain under $PROBE (tmpfs); they vanish at reboot" >&2
+echo "[retroforge] staged files remain under $PROBE (tmpfs); they vanish at reboot" >&2

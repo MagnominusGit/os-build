@@ -4,7 +4,7 @@
 #   tests/test-verify-lock.sh
 #
 # WHY THIS EXISTS. packages/verify-lock-rows.sh is the fast gate: it decides, from committed files
-# in about a second, whether a `qforge` row names sources the tree can still produce. The slow
+# in about a second, whether a `retroforge` row names sources the tree can still produce. The slow
 # gates (rootfs/fetchlock.sh, installer/mkroot.sh's resolve) make the same call correctly but only
 # from inside a build, which is far too late to be useful — installer/v0.0.8 spent 56 minutes
 # building a kernel to reach a verdict available here immediately.
@@ -43,17 +43,17 @@ mk_tree() {
   mkdir -p "$t/packages" "$t/rootfs" "$t/installer" "$t/build"
   for d in "$ROOT"/packages/*/; do ln -s "${d%/}" "$t/packages/$(basename "${d%/}")"; done
   cp "$ROOT/packages/inputhash.sh" "$ROOT/packages/verify-lock-rows.sh" "$t/packages/"
-  # The builder pin is an input to every qforge row's hash (inputhash.sh reads it via lib-pins.sh).
+  # The builder pin is an input to every retroforge row's hash (inputhash.sh reads it via lib-pins.sh).
   cp "$ROOT/build/lib-pins.sh" "$ROOT/build/lib-container.sh" "$ROOT/build/snapshot.pin" "$ROOT/build/builder.pin" "$t/build/"
   cp "$ROOT/rootfs/manifest.lock" "$t/rootfs/manifest.lock"
   cp "$ROOT/installer/manifest.lock" "$t/installer/manifest.lock"
   printf '%s\n' "$t"
 }
 
-# Rewrite the first qforge row's hash in $1 to something no package produces.
+# Rewrite the first retroforge row's hash in $1 to something no package produces.
 stale_first_row() {
   awk -v bogus="$BOGUS" '
-    !done && $4 == "qforge" { $5 = bogus; done = 1 }
+    !done && $4 == "retroforge" { $5 = bogus; done = 1 }
     { print }
   ' "$1" > "$1.tmp" && mv "$1.tmp" "$1"
 }
@@ -77,8 +77,8 @@ for lock in rootfs installer; do
   stale_first_row "$t/$lock/manifest.lock"
   out="$(run "$t")"; rc=$?
 
-  if [ "$rc" -ne 0 ]; then ok "$lock/manifest.lock: a stale qforge row fails the check"
-  else bad "$lock/manifest.lock: a stale qforge row PASSED — this lock is not covered"; fi
+  if [ "$rc" -ne 0 ]; then ok "$lock/manifest.lock: a stale retroforge row fails the check"
+  else bad "$lock/manifest.lock: a stale retroforge row PASSED — this lock is not covered"; fi
 
   if printf '%s' "$out" | grep -q "$lock/manifest.lock:"; then
     ok "$lock/manifest.lock: the report names the lock that is wrong"
@@ -93,17 +93,17 @@ for lock in rootfs installer; do
     printf '%s\n' "$out" | sed 's/^/       /'
   fi
 
-  # --- 3. a lock with no qforge rows must not pass trivially --------------------------------
+  # --- 3. a lock with no retroforge rows must not pass trivially --------------------------------
   # Deleting rows is the shape a bad merge takes, and "zero rows checked" reads as success
   # everywhere else.
   t="$(mk_tree "empty-$lock")"
-  grep -v ' qforge ' "$t/$lock/manifest.lock" > "$t/$lock/manifest.lock.tmp" \
+  grep -v ' retroforge ' "$t/$lock/manifest.lock" > "$t/$lock/manifest.lock.tmp" \
     && mv "$t/$lock/manifest.lock.tmp" "$t/$lock/manifest.lock"
   out="$(run "$t")"; rc=$?
   if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -q 'refusing to pass trivially'; then
-    ok "$lock/manifest.lock: a lock with no qforge rows is refused"
+    ok "$lock/manifest.lock: a lock with no retroforge rows is refused"
   else
-    bad "$lock/manifest.lock: a lock with no qforge rows passed"
+    bad "$lock/manifest.lock: a lock with no retroforge rows passed"
   fi
 done
 

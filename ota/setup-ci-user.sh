@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# qforge OTA publishing principal — RUNS ON THE INSTANCE, as root. Creates the unprivileged user
+# retroforge OTA publishing principal — RUNS ON THE INSTANCE, as root. Creates the unprivileged user
 # GitHub Actions publishes as, and hands it the docroot. Ship the whole ota/ tree and run it from
 # there, the same way setup-server.sh is run:
 #
-#   tar cz ota | ssh -i <admin key> ubuntu@updates.qforge.invalid \
+#   tar cz ota | ssh -i <admin key> ubuntu@updates.retroforge.invalid \
 #                    'sudo tar xz -C /tmp && sudo bash /tmp/ota/setup-ci-user.sh'
 #
 # Idempotent and re-runnable: a second run is a no-op that still re-reports the state it found.
@@ -17,7 +17,7 @@
 # set of bytes CI is allowed to publish anyway.
 #
 # WHY NOT A FORCED COMMAND, which is the reflex answer and is what was originally proposed.
-# `command="rrsync /srv/qforge-ota"` covers rsync and nothing else, and publish-bundle.sh is not
+# `command="rrsync /srv/retroforge-ota"` covers rsync and nothing else, and publish-bundle.sh is not
 # an rsync wrapper: it runs `mkdir -p`, `df -kP`, `mv -f && chmod`, `sha256sum` and a `bash -s`
 # prune over ssh, in that order, with the pointer flip LAST. Every one of those would have to be
 # whitelisted by a wrapper that then becomes a second, unversioned copy of the publish protocol —
@@ -39,14 +39,14 @@
 # `mkdir` for a NEW channel while the existing one works fine.
 set -euo pipefail
 
-DOCROOT="${QFORGE_OTA_DOCROOT:-/srv/qforge-ota}"
-OWNER="${QFORGE_OTA_OWNER:-otapub}"
+DOCROOT="${RETROFORGE_OTA_DOCROOT:-/srv/retroforge-ota}"
+OWNER="${RETROFORGE_OTA_OWNER:-otapub}"
 # Who else may write the docroot. The human admin account, so the workstation publish path and the
 # documented by-hand rollback keep working after this script re-owns the tree.
-COPUBLISHER="${QFORGE_OTA_COPUBLISHER:-ubuntu}"
+COPUBLISHER="${RETROFORGE_OTA_COPUBLISHER:-ubuntu}"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-PUBKEY_SRC="${QFORGE_OTA_CI_PUBKEY:-$HERE/ci-publish.pub}"
+PUBKEY_SRC="${RETROFORGE_OTA_CI_PUBKEY:-$HERE/ci-publish.pub}"
 
 say()  { printf '[ci-user] %s\n' "$*"; }
 warn() { printf '[ci-user] WARNING: %s\n' "$*" >&2; }
@@ -134,7 +134,7 @@ else
   # Written whole rather than appended: this account has exactly one key by design, and an append
   # that runs twice with a rotated key leaves the OLD one authorized — the precise failure a key
   # rotation is performed to prevent.
-  printf '# qforge CI publishing key. Installed by ota/setup-ci-user.sh from ota/ci-publish.pub.\n' >"$AUTH"
+  printf '# retroforge CI publishing key. Installed by ota/setup-ci-user.sh from ota/ci-publish.pub.\n' >"$AUTH"
   printf '# The matching PRIVATE key is the OTA_SSH_KEY secret in the release-signing environment.\n' >>"$AUTH"
   printf '%s\n' "$ENTRY" >>"$AUTH"
   chown "$OWNER:$OWNER" "$AUTH"

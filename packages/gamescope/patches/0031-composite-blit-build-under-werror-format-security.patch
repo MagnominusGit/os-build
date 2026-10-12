@@ -1,4 +1,4 @@
-From: qforge
+From: retroforge
 Subject: [PATCH] composite-blit: build under -Werror=format-security
 
 0027's decline() logs its reason through a generic lambda, so the

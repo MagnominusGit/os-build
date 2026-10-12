@@ -1,11 +1,11 @@
 #!/bin/sh
-# qforge internal install — the installer's SESSION: gamescope on the panel with installer/ui as
+# retroforge internal install — the installer's SESSION: gamescope on the panel with installer/ui as
 # its only client. Phase 5 of .claude/plans/internal-install.plan.md.
 #
-#   installer-session          (started by qforge-installer.service)
+#   installer-session          (started by retroforge-installer.service)
 #
-# THIS IS NOT qforge-session. That one is the main image's shell session: it runs inside the logind session
-# qforge-session.service opens as the `player` user, and it runs gamescope in the background with the shell as
+# THIS IS NOT retroforge-session. That one is the main image's shell session: it runs inside the logind session
+# retroforge-session.service opens as the `player` user, and it runs gamescope in the background with the shell as
 # its SIBLING so the two can share control files and the stats channel. None of that applies here.
 # There is no user, no logind session and nothing to hand a control channel to, so this is the
 # plain shape:
@@ -16,7 +16,7 @@
 # gamescope AS ROOT via seatd-launch, no logind session and no display manager at all, opening
 # /dev/dri/card0 with the panel at its native mode and scanning out on the first modeset commit;
 # gate 1c is a Vulkan client rendering upright under it. The installer's situation is that one,
-# not the main image's -- which is why the installer needs no qforge-session.service: what that
+# not the main image's -- which is why the installer needs no retroforge-session.service: what that
 # login unit contributes to the main image (an ACTIVE seat0
 # logind session so stock polkit's allow_active authorizes Wi-Fi) is meaningless for a tool that
 # runs as root.
@@ -27,7 +27,7 @@
 # NO --use-rotation-shader. Our patched gamescope carries upstream PR #2228 composite rotation and
 # auto-engages it off the DRM connector's panel orientation, so the flag the plan mentions is from
 # the ROCKNIX-patch era and no longer exists. The logical canvas stays landscape; -W/-H below are
-# the panel's portrait native mode swapped, exactly as qforge-session derives them.
+# the panel's portrait native mode swapped, exactly as retroforge-session derives them.
 #
 # NO PLYMOUTH anywhere near this: plymouthd holds DRM master and starves gamescope of it. The
 # installer boots to a black panel for a few seconds instead, deliberately.
@@ -39,15 +39,15 @@ die() { log "ERROR: $*"; exit 1; }
 
 SELFDIR=$(cd "$(dirname "$0")" && pwd)
 # Every one of these is a test seam as well as an override point; tests/test-ui.sh drives this
-# file with all of them redirected into a sandbox, exactly as test-update.sh drives qforge-update.
-DEVICE_ENV=${QFORGE_DEVICE_ENV:-/usr/lib/qforge/device-env}
-GAMESCOPE=${QFORGE_GAMESCOPE:-gamescope}
-SEATD_LAUNCH=${QFORGE_SEATD_LAUNCH:-seatd-launch}
-SEATD_SOCKET=${QFORGE_SEATD_SOCK:-/run/seatd.sock}
-SEATD_PGREP=${QFORGE_SEATD_PGREP:-pgrep}
-UI=${QFORGE_UI:-$SELFDIR/ui}
-DRYRUN=${QFORGE_INSTALLER_DRYRUN:-0}
-XDG_DIR=${QFORGE_XDG_RUNTIME_DIR:-/run/qforge/xdg}
+# file with all of them redirected into a sandbox, exactly as test-update.sh drives retroforge-update.
+DEVICE_ENV=${RETROFORGE_DEVICE_ENV:-/usr/lib/retroforge/device-env}
+GAMESCOPE=${RETROFORGE_GAMESCOPE:-gamescope}
+SEATD_LAUNCH=${RETROFORGE_SEATD_LAUNCH:-seatd-launch}
+SEATD_SOCKET=${RETROFORGE_SEATD_SOCK:-/run/seatd.sock}
+SEATD_PGREP=${RETROFORGE_SEATD_PGREP:-pgrep}
+UI=${RETROFORGE_UI:-$SELFDIR/ui}
+DRYRUN=${RETROFORGE_INSTALLER_DRYRUN:-0}
+XDG_DIR=${RETROFORGE_XDG_RUNTIME_DIR:-/run/retroforge/xdg}
 
 [ -x "$UI" ] || die "no installer UI at $UI"
 
@@ -87,22 +87,22 @@ else
     log "no device-env at $DEVICE_ENV -- falling back to a generic landscape output"
 fi
 
-if [ -n "${QFORGE_PANEL_NATIVE_WIDTH:-}" ] && [ -n "${QFORGE_PANEL_NATIVE_HEIGHT:-}" ]; then
+if [ -n "${RETROFORGE_PANEL_NATIVE_WIDTH:-}" ] && [ -n "${RETROFORGE_PANEL_NATIVE_HEIGHT:-}" ]; then
     # Swap portrait native -> landscape logical. The composite-rotation patch keeps gamescope's
     # logical output landscape and rotates only the final scanout store.
-    GS_W=$QFORGE_PANEL_NATIVE_HEIGHT
-    GS_H=$QFORGE_PANEL_NATIVE_WIDTH
+    GS_W=$RETROFORGE_PANEL_NATIVE_HEIGHT
+    GS_H=$RETROFORGE_PANEL_NATIVE_WIDTH
 else
     GS_W=1920
     GS_H=1080
 fi
-_rr=${QFORGE_PANEL_REFRESH_RATES:-}
+_rr=${RETROFORGE_PANEL_REFRESH_RATES:-}
 GS_R=${_rr%%,*}
 [ -n "$GS_R" ] || GS_R=60
 
 set -- --backend drm -W "$GS_W" -H "$GS_H" -r "$GS_R"
-if [ -n "${QFORGE_PRIMARY_CONNECTOR:-}" ]; then
-    set -- "$@" --prefer-output "$QFORGE_PRIMARY_CONNECTOR"
+if [ -n "${RETROFORGE_PRIMARY_CONNECTOR:-}" ]; then
+    set -- "$@" --prefer-output "$RETROFORGE_PRIMARY_CONNECTOR"
 fi
 
 # --- the seat -------------------------------------------------------------------------------------
@@ -127,7 +127,7 @@ fi
 # /run/seatd.sock root:seat 0770. Whether the installer image enables it too is Phase 6's choice,
 # and this file should not care: if a seat daemon is there, take the seat from it; if not, launch
 # one. Forcing LIBSEAT_BACKEND is safe HERE precisely because there is no logind session to prefer
-# -- the opposite of qforge-session, where forcing it broke polkit's allow_active.
+# -- the opposite of retroforge-session, where forcing it broke polkit's allow_active.
 #
 # The UI is gamescope's OWN CHILD (`--`), not a sibling: when it exits, gamescope exits, and the
 # unit's ExecStopPost gets to collect the log. That is also the model bring-up validated.

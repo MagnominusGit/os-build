@@ -43,21 +43,21 @@ pkg/
 /.makepkg/
 # ... but our own apps' SOURCE is repo content, not a makepkg build dir.
 # (An excluded directory's children cannot be re-included, so the dir itself is negated.)
-!/apps/qforge-splash/src/
-!/apps/qforge-sigdefer/src/
-!/apps/qforge-gptk-interpose/src/
-!/apps/qforge-hidemenu/src/
+!/apps/retroforge-splash/src/
+!/apps/retroforge-sigdefer/src/
+!/apps/retroforge-gptk-interpose/src/
+!/apps/retroforge-hidemenu/src/
 
 # The splash drawer's compiled output. Unlike build/ at the repo root, THIS build/ is an
 # artifact directory: `make splash` writes an aarch64 binary and the test suite writes a host
 # one beside it.
-/apps/qforge-splash/build/
-# The sigdefer shim's compiled output (apps/qforge-sigdefer).
-/apps/qforge-sigdefer/build/
-# The PortMaster gptokeyb2 interposer's compiled output (apps/qforge-gptk-interpose).
-/apps/qforge-gptk-interpose/build/
-# The melonDS second-window menu shim's compiled output (apps/qforge-hidemenu).
-/apps/qforge-hidemenu/build/
+/apps/retroforge-splash/build/
+# The sigdefer shim's compiled output (apps/retroforge-sigdefer).
+/apps/retroforge-sigdefer/build/
+# The PortMaster gptokeyb2 interposer's compiled output (apps/retroforge-gptk-interpose).
+/apps/retroforge-gptk-interpose/build/
+# The melonDS second-window menu shim's compiled output (apps/retroforge-hidemenu).
+/apps/retroforge-hidemenu/build/
 
 # Device-proprietary firmware, fetched on demand from the pinned Nova-Deck/qcom-firmwares
 # repo + verified against its sha256sums.txt (never committed here — only in that repo).
@@ -83,7 +83,7 @@ cosign.key
 # The negation works only because no parent directory of this path is itself excluded. Verify
 # with `git status --short`: the keyring must appear as `??` (untracked). Note `git check-ignore
 # -v` is NOT the check -- it prints this negation line and exits 0 for a file it does not ignore.
-!/ota/rauc/qforge-ca.pem
+!/ota/rauc/retroforge-ca.pem
 # ...and ONE more, on the same reasoning: the release SIGNING certificate is public too (a cert is
 # what you hand out; the key is what you keep), and committing it is what lets CI prove the keyring
 # above is the CA behind the cert that signs releases -- a check that otherwise needs the private
@@ -93,7 +93,7 @@ cosign.key
 # ota/rauc/ is asserted to contain no PRIVATE KEY by tests/test-verify-signing.sh, so the
 # exception is policed by a test and not by care.
 !/ota/rauc/release.cert.pem
-# Dev-card Wi-Fi credentials for throwaway dev cards (QFORGE_DEV=1) — never committed.
+# Dev-card Wi-Fi credentials for throwaway dev cards (RETROFORGE_DEV=1) — never committed.
 # ./dev.env IS tracked and holds no secrets; it sources this file when it exists. The split is
 # what lets a fresh clone run `set -a; . ./dev.env; set +a` with nothing to edit, while a PSK
 # never sits in a tracked file (where --skip-worktree would not survive a stash or a rebase).

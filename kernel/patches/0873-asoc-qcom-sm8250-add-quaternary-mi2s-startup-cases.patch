@@ -1,6 +1,6 @@
 Subject: [PATCH] ASoC: qcom: sm8250: add QUATERNARY_MI2S_RX/TX startup cases
 
-qforge: ROCKNIX SM6115 patch carried verbatim; it applies with fuzz 0 on top of 0870/0871 (sm8250.c) resp. 0895 (q6afe.c), checked 2026-10-09.
+retroforge: ROCKNIX SM6115 patch carried verbatim; it applies with fuzz 0 on top of 0870/0871 (sm8250.c) resp. 0895 (q6afe.c), checked 2026-10-09.
 
 Mangmi Air X (SM6115) routes ES8326 headphone playback through
 QUAT_MI2S_RX on SD1 (gpio3) and mic capture through QUAT_MI2S_TX

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Offline test for qforge-launch: how a ROM card starts an emulator AppImage, and how it stops.
+# Offline test for retroforge-launch: how a ROM card starts an emulator AppImage, and how it stops.
 #
 #   tests/test-launch.sh
 #
-# WHY THIS EXISTS. Each rule in qforge-launch was a crash on hardware (DuckStation, Pocket Max,
+# WHY THIS EXISTS. Each rule in retroforge-launch was a crash on hardware (DuckStation, Pocket Max,
 # 2026-10-03), and none of them shows in a quick manual run that never presses Exit:
 #
 #   - exec'ing the AppImage / AppRun: Qt finds no platform plugin and aborts at start.
@@ -19,13 +19,13 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-LAUNCH="$ROOT/rootfs/overlay/usr/bin/qforge-launch"
-LAUNCH_CONF="$ROOT/rootfs/overlay/etc/qforge/launch.conf"
-SEED_DIR="$ROOT/rootfs/overlay/usr/share/qforge/emulators"
+LAUNCH="$ROOT/rootfs/overlay/usr/bin/retroforge-launch"
+LAUNCH_CONF="$ROOT/rootfs/overlay/etc/retroforge/launch.conf"
+SEED_DIR="$ROOT/rootfs/overlay/usr/share/retroforge/emulators"
 DS_DEF="$SEED_DIR/duckstation/emulator.json"
 DS_SEED="$SEED_DIR/duckstation/settings.ini"
 AX_SEED="$SEED_DIR/armsx2/PCSX2.ini"
-LAYOUT="$ROOT/rootfs/overlay/usr/share/user-tmpfiles.d/qforge-home.conf"
+LAYOUT="$ROOT/rootfs/overlay/usr/share/user-tmpfiles.d/retroforge-home.conf"
 
 PASS=0; FAIL=0; CASE=""
 ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
@@ -99,7 +99,7 @@ EOF
 
 # The AppImage: with --appimage-mount it "mounts" (a directory holding the emulator), prints the
 # path and serves until SIGHUP, like the type-2 runtime. A bash script cannot trap a signal it
-# inherited as ignored, so it keeps qforge-launch's SIGTERM disposition just as the real runtime
+# inherited as ignored, so it keeps retroforge-launch's SIGTERM disposition just as the real runtime
 # does; its SigIgn mask is logged to check that. Anything else is an exec of the AppImage itself.
 cat > "$T/emus/duckstation/0.1-test.AppImage" <<EOF
 #!/bin/bash
@@ -126,12 +126,12 @@ ROM="$T/roms/psx/Crash Team Racing (USA).chd"
 : > "$ROM"
 
 export PATH="$T/bin:$PATH"
-export QFORGE_LAUNCH_CONF="$LAUNCH_CONF" QFORGE_EMU_DATA_DIR="$SEED_DIR"
-export QFORGE_EMU_DIR="$T/emus" QFORGE_MOUNTS="$T/mounts"
+export RETROFORGE_LAUNCH_CONF="$LAUNCH_CONF" RETROFORGE_EMU_DATA_DIR="$SEED_DIR"
+export RETROFORGE_EMU_DIR="$T/emus" RETROFORGE_MOUNTS="$T/mounts"
 # The launcher seeds first-run settings into $HOME: never let a test run reach the real one.
 export HOME="$T/home"
 unset XDG_CONFIG_HOME  # the player conf must be found under $HOME/.config
-export QFORGE_LAUNCH_STATUS="$T/launch.status.default"
+export RETROFORGE_LAUNCH_STATUS="$T/launch.status.default"
 mkdir -p "$HOME"
 
 reset_logs() { rm -f "$T"/{emu,appimage,fusermount}.log "$T/stop-emu" "$T/one-term-seen"; }
@@ -166,24 +166,24 @@ code() { "$LAUNCH" "$@" >/dev/null 2>&1; echo $?; }
 [ "$(code 'psx;rm' "$ROM")" = 2 ] && ok "a system name with shell characters: exit 2" || bad "accepted system 'psx;rm'"
 [ "$(code psx "$T/roms/psx/missing.chd")" = 2 ] && ok "a missing ROM: exit 2" || bad "a missing ROM did not exit 2"
 [ "$(code nosuchsystem "$ROM")" = 2 ] && ok "a system launch.conf does not map: exit 2" || bad "an unmapped system did not exit 2"
-[ "$(QFORGE_EMU_DIR="$T/none" code psx "$ROM")" = 3 ] \
+[ "$(RETROFORGE_EMU_DIR="$T/none" code psx "$ROM")" = 3 ] \
   && ok "emulator not installed (no current): exit 3" || bad "a missing emulator did not exit 3"
 
 # =================================================================================================
 CASE="launch failure status (for the plugin's popup)"
-# OGUI runs games through its reaper and never sees qforge-launch's exit code, so an exit-3 failure
-# is also written to $QFORGE_LAUNCH_STATUS; the plugin's EXIT hook reads it and shows a popup.
+# OGUI runs games through its reaper and never sees retroforge-launch's exit code, so an exit-3 failure
+# is also written to $RETROFORGE_LAUNCH_STATUS; the plugin's EXIT hook reads it and shows a popup.
 ST="$T/launch.status"
 echo "stale" > "$ST"
-QFORGE_LAUNCH_STATUS="$ST" QFORGE_EMU_DIR="$T/none" "$LAUNCH" psx "$ROM" >/dev/null 2>&1
+RETROFORGE_LAUNCH_STATUS="$ST" RETROFORGE_EMU_DIR="$T/none" "$LAUNCH" psx "$ROM" >/dev/null 2>&1
 [ "$(cat "$ST" 2>/dev/null)" = "not-installed duckstation" ] \
   && ok "emulator not installed: status 'not-installed duckstation'" || bad "status was '$(cat "$ST" 2>/dev/null)'"
 echo "stale" > "$ST"
-QFORGE_LAUNCH_STATUS="$ST" QFORGE_EMU_DIR="$T/none" "$LAUNCH" --gui duckstation >/dev/null 2>&1
+RETROFORGE_LAUNCH_STATUS="$ST" RETROFORGE_EMU_DIR="$T/none" "$LAUNCH" --gui duckstation >/dev/null 2>&1
 [ "$(cat "$ST" 2>/dev/null)" = "not-installed duckstation" ] \
   && ok "--gui of a missing emulator: same status" || bad "status was '$(cat "$ST" 2>/dev/null)'"
 echo "stale" > "$ST"
-QFORGE_LAUNCH_STATUS="$ST" "$LAUNCH" psx "$T/roms/psx/missing.chd" >/dev/null 2>&1
+RETROFORGE_LAUNCH_STATUS="$ST" "$LAUNCH" psx "$T/roms/psx/missing.chd" >/dev/null 2>&1
 [ ! -e "$ST" ] && ok "a bad invocation (exit 2) clears the status and writes none" || bad "status left: '$(cat "$ST")'"
 
 # =================================================================================================
@@ -202,7 +202,7 @@ ini() { awk -v sec="[$1]" -v key="$2" '$0 == sec {in_s=1; next} /^\[/ {in_s=0}
   || bad "duckstation seed lacks ConfirmPowerOff = false: OGUI's Exit and a session stop hang on 'are you sure?'"
 [ "$(ini Main SaveStateOnExit)" = true ] && ok "duckstation seed: resume state saved on exit (off by default)" \
   || bad "duckstation seed lacks SaveStateOnExit = true: closing a game keeps no save state"
-[ "$(ini AutoUpdater CheckAtStartup)" = false ] && ok "duckstation seed: self-updater off (QForge ships the version)" || bad "duckstation seed leaves DuckStation's auto-updater on"
+[ "$(ini AutoUpdater CheckAtStartup)" = false ] && ok "duckstation seed: self-updater off (RetroForge ships the version)" || bad "duckstation seed leaves DuckStation's auto-updater on"
 [ "$(ini GPU Renderer)" = Vulkan ] && ok "duckstation seed: Vulkan (Turnip)" || bad "duckstation seed renderer is not Vulkan"
 [ "$(ini InputSources SDL)" = true ] && [ "$(ini Pad1 Cross)" = SDL-0/A ] && [ "$(ini Pad1 Start)" = SDL-0/Start ] \
   && ok "duckstation seed: Port 1 mapped to the InputPlumber pad (SDL-0)" || bad "duckstation seed has no SDL-0 mapping for Port 1 (the wizard that would make one is skipped)"
@@ -244,7 +244,7 @@ axini() { awk -v sec="[$1]" -v key="$2" '$0 == sec {in_s=1; next} /^\[/ {in_s=0}
 [ "$(axini UI ConfirmShutdown)" = false ] && ok "armsx2 seed: no exit confirmation (a SIGTERM would wait on a dialog)" \
   || bad "armsx2 seed lacks ConfirmShutdown = false: OGUI's Exit could hang on 'are you sure?'"
 [ "$(axini EmuCore SaveStateOnShutdown)" = true ] && ok "armsx2 seed: resume state saved on exit" || bad "armsx2 seed lacks SaveStateOnShutdown = true"
-[ "$(axini AutoUpdater CheckAtStartup)" = false ] && ok "armsx2 seed: self-updater off (QForge ships the version)" || bad "armsx2 seed leaves ARMSX2's auto-updater on"
+[ "$(axini AutoUpdater CheckAtStartup)" = false ] && ok "armsx2 seed: self-updater off (RetroForge ships the version)" || bad "armsx2 seed leaves ARMSX2's auto-updater on"
 [ -z "$(axini EmuCore/GS Renderer)" ] && ok "armsx2 seed: renderer left on Automatic (forcing it shows a warning at every start)" \
   || bad "armsx2 seed forces a renderer: ARMSX2 warns 'Graphics API is not set to Automatic' at every start"
 [ -z "$(axini Filenames BIOS)" ] && ok "armsx2 seed: no BIOS file named (Auto picks one from ~/bios/ps2)" || bad "armsx2 seed names a BIOS file the player may not have"
@@ -264,7 +264,7 @@ AX_DEF="$SEED_DIR/armsx2/emulator.json"
 [ "$(jget "$AX_DEF" seed)" = '[{"file": "PCSX2.ini", "to": ".config/ARMSX2/inis/PCSX2.ini"}]' ] \
   && ok "armsx2 seeds ~/.config/ARMSX2/inis/PCSX2.ini (where ARMSX2 reads it)" || bad "armsx2 seed: $(jget "$AX_DEF" seed)"
 
-# Dolphin (2026-10-05): INI keys "Key = Value" in /usr/share/qforge/emulators/dolphin/*.ini.
+# Dolphin (2026-10-05): INI keys "Key = Value" in /usr/share/retroforge/emulators/dolphin/*.ini.
 DL_DIR="$SEED_DIR/dolphin"
 dlini() { awk -v sec="[$2]" -v key="$3" '$0 == sec {in_s=1; next} /^\[/ {in_s=0}
   in_s { i = index($0, " = "); if (i && substr($0, 1, i - 1) == key) { print substr($0, i + 3); exit } }' "$DL_DIR/$1"; }
@@ -296,8 +296,8 @@ CASE="every emulator definition"
 # the definition was validated; a bad one is exit 2.
 for def in "$SEED_DIR"/*/emulator.json; do
   emu="$(basename "$(dirname "$def")")"
-  [ "$(QFORGE_EMU_DIR="$T/none" code --gui "$emu")" = 3 ] && ok "$emu: emulator.json is accepted" \
-    || bad "$emu: emulator.json refused: $(QFORGE_EMU_DIR="$T/none" "$LAUNCH" --gui "$emu" 2>&1 | tail -1)"
+  [ "$(RETROFORGE_EMU_DIR="$T/none" code --gui "$emu")" = 3 ] && ok "$emu: emulator.json is accepted" \
+    || bad "$emu: emulator.json refused: $(RETROFORGE_EMU_DIR="$T/none" "$LAUNCH" --gui "$emu" 2>&1 | tail -1)"
   python3 -c 'import json,os,sys; d=json.load(open(sys.argv[1])); sys.exit(any(not os.path.isfile(os.path.join(sys.argv[2], s["file"])) for s in d.get("seed", [])))' \
     "$def" "$(dirname "$def")" && ok "$emu: every seeded file is in the image" || bad "$emu seeds a file that is not in the image"
 done
@@ -341,10 +341,10 @@ lacks snes9x/snes9x.conf 'Button 8$' "binding on Guide (b8)"
 # Snes9x runs its whole exit inside its SIGTERM handler: the sigdefer shim moves it to the main
 # loop, and sharun only passes LD_PRELOAD on when SHARUN_ALLOW_LD_PRELOAD is set.
 python3 -c 'import json,sys; e=json.load(open(sys.argv[1]))["env"]
-sys.exit(not (e.get("LD_PRELOAD") == "/usr/lib/qforge/libqforge-sigdefer.so" and e.get("SHARUN_ALLOW_LD_PRELOAD") == "1"))' \
+sys.exit(not (e.get("LD_PRELOAD") == "/usr/lib/retroforge/libretroforge-sigdefer.so" and e.get("SHARUN_ALLOW_LD_PRELOAD") == "1"))' \
   "$SEED_DIR/snes9x/emulator.json" && ok "snes9x: the sigdefer shim is preloaded, through sharun" || bad "snes9x: sigdefer shim not preloaded (LD_PRELOAD + SHARUN_ALLOW_LD_PRELOAD)"
 python3 -c 'import json,sys; e=json.load(open(sys.argv[1]))["env"]
-sys.exit(not (e.get("LD_PRELOAD") == "/usr/lib/qforge/libqforge-hidemenu.so" and e.get("SHARUN_ALLOW_LD_PRELOAD") == "1"))' \
+sys.exit(not (e.get("LD_PRELOAD") == "/usr/lib/retroforge/libretroforge-hidemenu.so" and e.get("SHARUN_ALLOW_LD_PRELOAD") == "1"))' \
   "$SEED_DIR/melonds/emulator.json" && ok "melonds: the hidemenu shim is preloaded, through sharun" || bad "melonds: hidemenu shim not preloaded (LD_PRELOAD + SHARUN_ALLOW_LD_PRELOAD)"
 # Dual-screen boards: melonDS's second window and Azahar's separate windows go to the second panel
 # (gamescope 0041), and both need one more SIGTERM to exit with that window open.
@@ -452,7 +452,7 @@ bad_def() {  # bad_def <what> <python edit of d>: write it, expect exit 2 and no
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); exec(sys.argv[2]); json.dump(d, open(sys.argv[3], "w"))' \
     "$DS_DEF" "$2" "$BAD/duckstation/emulator.json"
   rm -f "$HOME/.config/x.ini"
-  [ "$(QFORGE_EMU_DATA_DIR="$BAD" code psx "$ROM")" = 2 ] && [ ! -e "$HOME/.config/x.ini" ] \
+  [ "$(RETROFORGE_EMU_DATA_DIR="$BAD" code psx "$ROM")" = 2 ] && [ ! -e "$HOME/.config/x.ini" ] \
     && ok "$1 is refused (exit 2)" || bad "$1 was accepted"
 }
 bad_def "a seed to an absolute path" 'd["seed"] = [{"file": "settings.ini", "to": "/etc/passwd"}]'
@@ -486,7 +486,7 @@ bad_def "an exit_resend that is not a number" 'd["exit_resend"] = "2"'
 bad_def "an exit_resend that is a boolean" 'd["exit_resend"] = True'
 bad_def "an exit_resend over the cap" 'd["exit_resend"] = 600'
 printf '{not json' > "$BAD/duckstation/emulator.json"
-[ "$(QFORGE_EMU_DATA_DIR="$BAD" code psx "$ROM")" = 2 ] && ok "a definition that is not JSON is refused (exit 2)" || bad "broken JSON was accepted"
+[ "$(RETROFORGE_EMU_DATA_DIR="$BAD" code psx "$ROM")" = 2 ] && ok "a definition that is not JSON is refused (exit 2)" || bad "broken JSON was accepted"
 
 # =================================================================================================
 CASE="normal run, game closed by the emulator"
@@ -516,7 +516,7 @@ ign="$(sed -n 's/^SigIgn:[[:space:]]*//p' "$T/appimage.log")"
 touch "$T/stop-emu"
 reap_launcher "$lpid"; rc=$?
 [ "$rc" = 7 ] && ok "the launcher exits with the emulator's status" || bad "launcher exited $rc, the emulator 7"
-[ ! -e "$QFORGE_LAUNCH_STATUS" ] && ok "a launch that ran leaves no failure status" || bad "status after a normal run: $(cat "$QFORGE_LAUNCH_STATUS")"
+[ ! -e "$RETROFORGE_LAUNCH_STATUS" ] && ok "a launch that ran leaves no failure status" || bad "status after a normal run: $(cat "$RETROFORGE_LAUNCH_STATUS")"
 # The fake fusermount3 succeeds at once, so the launcher may exit before the fake runtime has run
 # its HUP trap (the real fusermount3 -u fails until the runtime is gone, which the launcher waits for).
 wait_for 'grep -qx hup "$T/appimage.log"' \
@@ -554,15 +554,15 @@ rm -f "$T/print-early"
 # =================================================================================================
 CASE="pkgforge AppImage: hardcoded /tmp paths"
 # Dolphin's pkgforge AppImage only finds its Sys folder through /tmp/<name> -> <mount>/share, a link
-# its AppRun hook makes; qforge-launch skips AppRun, so it makes the links itself (HW 2026-10-05).
-export QFORGE_TMP_LINK_DIR="$T/tmplinks"; mkdir -p "$QFORGE_TMP_LINK_DIR" "$QFORGE_TMP_LINK_DIR/Taken"
+# its AppRun hook makes; retroforge-launch skips AppRun, so it makes the links itself (HW 2026-10-05).
+export RETROFORGE_TMP_LINK_DIR="$T/tmplinks"; mkdir -p "$RETROFORGE_TMP_LINK_DIR" "$RETROFORGE_TMP_LINK_DIR/Taken"
 SHARUN="$T/data-sharun"; mkdir -p "$SHARUN/duckstation"; cp "$DS_SEED" "$SHARUN/duckstation/"
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["format"] = "appimage-sharun"; json.dump(d, open(sys.argv[2], "w"))' \
   "$DS_DEF" "$SHARUN/duckstation/emulator.json"
 printf '%s\n' '#!/bin/sh' '_tmp_bin=""' '_tmp_lib=Taken' '_tmp_share=Gxbwc' '_tmp_share=../evil' \
   'ln -sfn "$APPDIR"/share /tmp/hostile' > "$T/sharun-hook"
 reset_logs
-QFORGE_EMU_DATA_DIR="$SHARUN" start_launcher
+RETROFORGE_EMU_DATA_DIR="$SHARUN" start_launcher
 wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
 self="$(field self)"; mnt="${self%/usr/bin/duckstation-qt}"
 [ "$(field vk)" = /usr/share/vulkan/icd.d/freedreno_icd.aarch64.json ] && [ "$(field sharun_sys)" = 1 ] \
@@ -570,31 +570,31 @@ self="$(field self)"; mnt="${self%/usr/bin/duckstation-qt}"
   || bad "sharun Vulkan env: VK_DRIVER_FILES='$(field vk)' SHARUN_ALLOW_SYS_VKICD='$(field sharun_sys)'"
 [ "$(field no_updates)" = 1 ] && ok "appimage-sharun turns pkgforge's self-updater off (DISABLE_AUTO_UPDATES=1): versions are pinned" \
   || bad "the sharun format does not set DISABLE_AUTO_UPDATES=1"
-[ "$(readlink "$QFORGE_TMP_LINK_DIR/Gxbwc")" = "$mnt/share" ] \
+[ "$(readlink "$RETROFORGE_TMP_LINK_DIR/Gxbwc")" = "$mnt/share" ] \
   && ok "/tmp/<name> from the hook links to <mount>/share before the emulator starts" \
-  || bad "no link to the mounted share: $(ls -l "$QFORGE_TMP_LINK_DIR" 2>&1 | tr '\n' ' ')"
-[ -d "$QFORGE_TMP_LINK_DIR/Taken" ] && [ ! -L "$QFORGE_TMP_LINK_DIR/Taken" ] && grep -q "Taken exists and is not a link of ours" "$T/launch.err" \
+  || bad "no link to the mounted share: $(ls -l "$RETROFORGE_TMP_LINK_DIR" 2>&1 | tr '\n' ' ')"
+[ -d "$RETROFORGE_TMP_LINK_DIR/Taken" ] && [ ! -L "$RETROFORGE_TMP_LINK_DIR/Taken" ] && grep -q "Taken exists and is not a link of ours" "$T/launch.err" \
   && ok "an existing non-link /tmp/<name> is left alone, with a warning" || bad "an existing directory was replaced or not reported"
-[ "$(ls "$QFORGE_TMP_LINK_DIR" | sort | tr '\n' ' ')" = "Gxbwc Taken " ] \
+[ "$(ls "$RETROFORGE_TMP_LINK_DIR" | sort | tr '\n' ' ')" = "Gxbwc Taken " ] \
   && ok "the hook is read as data: empty, '../' names and its commands make nothing" \
-  || bad "unexpected entries: $(ls "$QFORGE_TMP_LINK_DIR" | tr '\n' ' ')"
+  || bad "unexpected entries: $(ls "$RETROFORGE_TMP_LINK_DIR" | tr '\n' ' ')"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
-[ ! -e "$QFORGE_TMP_LINK_DIR/Gxbwc" ] && [ ! -L "$QFORGE_TMP_LINK_DIR/Gxbwc" ] \
+[ ! -e "$RETROFORGE_TMP_LINK_DIR/Gxbwc" ] && [ ! -L "$RETROFORGE_TMP_LINK_DIR/Gxbwc" ] \
   && ok "the links go away with the mount (no dangling /tmp entries)" || bad "the /tmp link outlived the game"
 echo 01-path-mapping-hardcoded.src.hook > "$T/sharun-hook-name"; reset_logs
-QFORGE_EMU_DATA_DIR="$SHARUN" start_launcher; wait_for emu_up
+RETROFORGE_EMU_DATA_DIR="$SHARUN" start_launcher; wait_for emu_up
 self="$(field self)"; mnt="${self%/usr/bin/duckstation-qt}"
-[ "$(readlink "$QFORGE_TMP_LINK_DIR/Gxbwc")" = "$mnt/share" ] \
+[ "$(readlink "$RETROFORGE_TMP_LINK_DIR/Gxbwc")" = "$mnt/share" ] \
   && ok "the hook is also read under its .src.hook name (PPSSPP's own anylinux build)" \
-  || bad "no link from bin/01-path-mapping-hardcoded.src.hook: $(ls -l "$QFORGE_TMP_LINK_DIR" 2>&1 | tr '\n' ' ')"
+  || bad "no link from bin/01-path-mapping-hardcoded.src.hook: $(ls -l "$RETROFORGE_TMP_LINK_DIR" 2>&1 | tr '\n' ' ')"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
-rm -f "$T/sharun-hook-name" "$QFORGE_TMP_LINK_DIR/Gxbwc"; reset_logs
+rm -f "$T/sharun-hook-name" "$RETROFORGE_TMP_LINK_DIR/Gxbwc"; reset_logs
 start_launcher; wait_for emu_up
-[ ! -e "$QFORGE_TMP_LINK_DIR/Gxbwc" ] && [ -z "$(field vk)" ] \
+[ ! -e "$RETROFORGE_TMP_LINK_DIR/Gxbwc" ] && [ -z "$(field vk)" ] \
   && ok "a plain appimage gets neither: links and Vulkan env belong to the sharun format" \
   || bad "the plain appimage format made sharun links or set VK_DRIVER_FILES"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
-rm -f "$T/sharun-hook"; unset QFORGE_TMP_LINK_DIR
+rm -f "$T/sharun-hook"; unset RETROFORGE_TMP_LINK_DIR
 
 # =================================================================================================
 CASE="one-time install (emulator.json install)"
@@ -605,26 +605,26 @@ python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["install"] = [{"f
   "unless": ".config/fake/fw-ok", "args": ["--fake-install", "{file}"]}]; json.dump(d, open(sys.argv[2], "w"))' \
   "$DS_DEF" "$INST/duckstation/emulator.json"
 ST="$T/launch.status"; reset_logs
-rc=$(QFORGE_EMU_DATA_DIR="$INST" QFORGE_LAUNCH_STATUS="$ST" code psx "$ROM")
+rc=$(RETROFORGE_EMU_DATA_DIR="$INST" RETROFORGE_LAUNCH_STATUS="$ST" code psx "$ROM")
 [ "$rc" = 3 ] && [ "$(cat "$ST" 2>/dev/null)" = "missing-file duckstation bios/psx/fw.bin" ] && [ ! -e "$T/emu.log" ] \
   && ok "the player's file is missing: exit 3, status 'missing-file <emu> <path>', no game started" \
   || bad "missing install file: rc=$rc status='$(cat "$ST" 2>/dev/null)' emu ran=$([ -e "$T/emu.log" ] && echo yes || echo no)"
-QFORGE_EMU_DATA_DIR="$INST" "$LAUNCH" --gui duckstation 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+RETROFORGE_EMU_DATA_DIR="$INST" "$LAUNCH" --gui duckstation 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
 wait_for emu_up && [ ! -e "$T/install.log" ] && ok "--gui opens without it (and installs nothing)" || bad "--gui did not start without the install file"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
 mkdir -p "$HOME/bios/psx"; : > "$HOME/bios/psx/fw.bin"
-rc=$(QFORGE_EMU_DATA_DIR="$INST" QFORGE_LAUNCH_STATUS="$ST" code psx "$ROM")
+rc=$(RETROFORGE_EMU_DATA_DIR="$INST" RETROFORGE_LAUNCH_STATUS="$ST" code psx "$ROM")
 [ "$rc" = 3 ] && [ "$(cat "$ST" 2>/dev/null)" = "install-failed duckstation" ] && ! emu_up \
   && grep -q "^install --fake-install $HOME/bios/psx/fw.bin$" "$T/install.log" \
   && ok "the install ran (binary from the mount, {file} = ~/<from>) but left no marker: install-failed, no game" \
   || bad "failed install: rc=$rc status='$(cat "$ST" 2>/dev/null)' log='$(cat "$T/install.log" 2>/dev/null)'"
 [ ! -s "$T/mounts" ] && ok "and the mount is released" || bad "a failed install left the mount: $(cat "$T/mounts")"
 touch "$T/install-works"; : > "$T/install.log"; reset_logs
-QFORGE_EMU_DATA_DIR="$INST" start_launcher
+RETROFORGE_EMU_DATA_DIR="$INST" start_launcher
 wait_for emu_up && [ -f "$HOME/.config/fake/fw-ok" ] && [ "$(grep -c '^install' "$T/install.log")" = 1 ] \
   && ok "a working install runs once before the game, which then starts" || bad "install then game: $(cat "$T/launch.err")"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
-QFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
+RETROFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
 [ "$(grep -c '^install' "$T/install.log")" = 1 ] && ok "with the marker present it never runs again" || bad "the install ran again"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
 # RPCS3's installer installs the firmware, then aborts (SIGABRT) on its way out: the marker is
@@ -633,7 +633,7 @@ python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["install"] = [{"f
   "unless": ".config/fake/fw-ok", "args": ["--fake-install", "{file}"]}]; json.dump(d, open(sys.argv[2], "w"))' \
   "$DS_DEF" "$INST/duckstation/emulator.json"
 rm -rf "$HOME/.config/fake"; : > "$T/install.log"; touch "$T/install-crash"; reset_logs
-( ulimit -c unlimited; QFORGE_EMU_DATA_DIR="$INST" exec "$LAUNCH" psx "$ROM" 2>"$T/launch.err" ) & lpid=$!; echo "$lpid" >> "$T/pids"
+( ulimit -c unlimited; RETROFORGE_EMU_DATA_DIR="$INST" exec "$LAUNCH" psx "$ROM" 2>"$T/launch.err" ) & lpid=$!; echo "$lpid" >> "$T/pids"
 wait_for emu_up && [ -f "$HOME/.config/fake/fw-ok" ] && grep -q "but ~/.config/fake/fw-ok is there: installed" "$T/launch.err" \
   && ok "an installer that crashes after a good install: the marker is there, the game starts" \
   || bad "crashing installer: $(cat "$T/launch.err")"
@@ -642,7 +642,7 @@ touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs; rm -f "$T/ins
 
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["args"] = ["-C", "saves=/home/player/saves/{system}", "{rom}"]
 d["install"] = []; json.dump(d, open(sys.argv[2], "w"))' "$DS_DEF" "$INST/duckstation/emulator.json"
-reset_logs; QFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
+reset_logs; RETROFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
 [ "$(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' '|')" = "-C|saves=/home/player/saves/psx|$ROM|" ] \
   && ok "{system} in args becomes the card's system (mGBA: one emulator, per-system folders)" \
   || bad "{system} not substituted: $(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' '|')"
@@ -651,27 +651,27 @@ touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["args"] = ["-f", "{rom}"]; d["install"] = []
 d["system_args"] = {"psx": ["--system", "Play Station", "--saves={system}"], "md": ["--system", "Mega Drive"]}
 json.dump(d, open(sys.argv[2], "w"))' "$DS_DEF" "$INST/duckstation/emulator.json"
-reset_logs; QFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
+reset_logs; RETROFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
 [ "$(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' '|')" = "--system|Play Station|--saves=psx|-f|$ROM|" ] \
   && ok "system_args: the card's system's own arguments come first, {system} substituted, other systems' not used" \
   || bad "system_args: $(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' '|')"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["args"] = ["-f", "{rom}"]; d["install"] = []
 d["system_args"] = {"md": ["--system", "Mega Drive"]}; json.dump(d, open(sys.argv[2], "w"))' "$DS_DEF" "$INST/duckstation/emulator.json"
-reset_logs; QFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
+reset_logs; RETROFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
 [ "$(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' '|')" = "-f|$ROM|" ] \
   && ok "system_args: a system without an entry gets none" || bad "system_args (none): $(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' '|')"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["gui_args"] = ["{system}"]; json.dump(d, open(sys.argv[2], "w"))' \
   "$DS_DEF" "$INST/duckstation/emulator.json"
-[ "$(QFORGE_EMU_DATA_DIR="$INST" code --gui duckstation)" = 2 ] && ok "{system} in gui_args is refused (exit 2): Open has no system" || bad "gui_args with {system} accepted"
+[ "$(RETROFORGE_EMU_DATA_DIR="$INST" code --gui duckstation)" = 2 ] && ok "{system} in gui_args is refused (exit 2): Open has no system" || bad "gui_args with {system} accepted"
 # OGUI's Exit during the install: no game afterwards, no status (the player chose to leave).
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["args"] = ["{rom}"]; d["install"] = [{"from": "bios/psx/fw.bin",
   "unless": ".config/fake/slow-ok", "args": ["--fake-install", "{file}"]}]; json.dump(d, open(sys.argv[2], "w"))' \
   "$DS_DEF" "$INST/duckstation/emulator.json"
 touch "$T/install-slow"; rm -f "$ST" "$T/install-running"; reset_logs
 # Under a stand-in reaper, as in "OGUI Exit" below: reap() signals the launcher too.
-QFORGE_EMU_DATA_DIR="$INST" QFORGE_LAUNCH_STATUS="$ST" setsid bash -c 'echo $$ >> "$2/pids"; "$0" psx "$1"; echo "$?" > "$2/install-rc"' \
+RETROFORGE_EMU_DATA_DIR="$INST" RETROFORGE_LAUNCH_STATUS="$ST" setsid bash -c 'echo $$ >> "$2/pids"; "$0" psx "$1"; echo "$?" > "$2/install-rc"' \
   "$LAUNCH" "$ROM" "$T" 2>"$T/launch.err" &
 reaper=$!; echo "$reaper" >> "$T/pids"
 wait_for '[ -f "$T/install-running" ]' || bad "the slow install never started"
@@ -686,7 +686,7 @@ wait_for '[ ! -s "$T/mounts" ]' && ok "and the mount is released" || bad "an int
 # core_dumps false (for an emulator that crashes on every Exit): RLIMIT_CORE 0; default unchanged.
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["install"] = []; d["core_dumps"] = False; json.dump(d, open(sys.argv[2], "w"))' \
   "$DS_DEF" "$INST/duckstation/emulator.json"
-reset_logs; ( ulimit -c unlimited; QFORGE_EMU_DATA_DIR="$INST" exec "$LAUNCH" psx "$ROM" 2>"$T/launch.err" ) & lpid=$!; echo "$lpid" >> "$T/pids"
+reset_logs; ( ulimit -c unlimited; RETROFORGE_EMU_DATA_DIR="$INST" exec "$LAUNCH" psx "$ROM" 2>"$T/launch.err" ) & lpid=$!; echo "$lpid" >> "$T/pids"
 wait_for emu_up; [ "$(field core)" = 0 ] && ok "core_dumps false: the emulator runs with no core file (RLIMIT_CORE 0)" || bad "core_dumps false: ulimit -c is '$(field core)'"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
 ( ulimit -c unlimited; exec "$LAUNCH" psx "$ROM" 2>"$T/launch.err" ) & lpid=$!; echo "$lpid" >> "$T/pids"
@@ -694,13 +694,13 @@ wait_for emu_up; [ "$(field core)" = unlimited ] && ok "by default the emulator 
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["core_dumps"] = "no"; json.dump(d, open(sys.argv[2], "w"))' \
   "$DS_DEF" "$INST/duckstation/emulator.json"
-[ "$(QFORGE_EMU_DATA_DIR="$INST" code psx "$ROM")" = 2 ] && ok "core_dumps must be a boolean (exit 2)" || bad "core_dumps \"no\" accepted"
+[ "$(RETROFORGE_EMU_DATA_DIR="$INST" code psx "$ROM")" = 2 ] && ok "core_dumps must be a boolean (exit 2)" || bad "core_dumps \"no\" accepted"
 for broken in '[{"from": "a", "unless": "b", "args": ["x"]}]' '[{"from": "../a", "unless": "b", "args": ["{file}"]}]' \
               '[{"from": "bios/a b.pup", "unless": "b", "args": ["{file}"]}]' '[{"from": "a", "unless": "b", "args": ["{file}", "{system}"]}]' \
               '[{"from": "a", "args": ["{file}"]}]' '[{"from": "a", "unless": "b", "args": ["{file}", "{rom}"]}]'; do
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["install"] = json.loads(sys.argv[3]); json.dump(d, open(sys.argv[2], "w"))' \
     "$DS_DEF" "$INST/duckstation/emulator.json" "$broken"
-  [ "$(QFORGE_EMU_DATA_DIR="$INST" code psx "$ROM")" = 2 ] && ok "install refused (exit 2): $broken" || bad "install accepted: $broken"
+  [ "$(RETROFORGE_EMU_DATA_DIR="$INST" code psx "$ROM")" = 2 ] && ok "install refused (exit 2): $broken" || bad "install accepted: $broken"
 done
 
 # =================================================================================================
@@ -711,11 +711,11 @@ echo "dual-screen settings" > "$DUAL/duckstation/settings-dual.ini"
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1]));
 d["seed"] = [dict(s, dual_screen_file="settings-dual.ini") for s in d["seed"]]; json.dump(d, open(sys.argv[2], "w"))' \
   "$DS_DEF" "$DUAL/duckstation/emulator.json"
-fake_device_env() { printf '#!/bin/sh\necho "QFORGE_SECONDARY_CONNECTOR=%s"\n' "$1" > "$T/device-env"; chmod +x "$T/device-env"; }
+fake_device_env() { printf '#!/bin/sh\necho "RETROFORGE_SECONDARY_CONNECTOR=%s"\n' "$1" > "$T/device-env"; chmod +x "$T/device-env"; }
 for board in dual single; do
   [ "$board" = dual ] && fake_device_env "'DSI-2'" || fake_device_env "''"
   rm -rf "$HOME"; mkdir -p "$HOME"; reset_logs
-  QFORGE_EMU_DATA_DIR="$DUAL" QFORGE_DEVICE_ENV="$T/device-env" start_launcher
+  RETROFORGE_EMU_DATA_DIR="$DUAL" RETROFORGE_DEVICE_ENV="$T/device-env" start_launcher
   wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
   touch "$T/stop-emu"; reap_launcher "$lpid"
   want="$DS_SEED"; [ "$board" = dual ] && want="$DUAL/duckstation/settings-dual.ini"
@@ -730,7 +730,7 @@ python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["exit_resend"] = 
   "$DS_DEF" "$RESEND/duckstation/emulator.json"
 : > "$T/two-terms"
 reset_logs
-QFORGE_EMU_DATA_DIR="$RESEND" start_launcher
+RETROFORGE_EMU_DATA_DIR="$RESEND" start_launcher
 wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
 epid="$(field pid)"
 kill -TERM "$epid"; kill -TERM "$lpid"  # OGUI's Exit: the emulator and the launcher both get SIGTERM
@@ -756,7 +756,7 @@ rm -f "$T/two-terms" "$T/one-term-seen"
 # the resend, and the launcher is still there to release the mount.
 : > "$T/deaf"
 reset_logs
-QFORGE_EMU_DATA_DIR="$RESEND" start_launcher
+RETROFORGE_EMU_DATA_DIR="$RESEND" start_launcher
 wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
 epid="$(field pid)"
 kill -TERM "$epid"; kill -TERM "$lpid"
@@ -823,7 +823,7 @@ EOF
 chmod +x "$T/bin/taskset"
 pinned_run() {  # one launch with --cpus big and the fake topology; prints the taskset list or "none"
   rm -f "$T/taskset.log"; reset_logs
-  QFORGE_CPU_ROOT="$T/cpu" "$LAUNCH" --cpus big psx "$ROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+  RETROFORGE_CPU_ROOT="$T/cpu" "$LAUNCH" --cpus big psx "$ROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
   wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
   touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
   sed -n 's/^cpus=//p' "$T/taskset.log" 2>/dev/null | grep . || echo none
@@ -848,7 +848,7 @@ mkcpus 0-3 0:1024 1:1024 2:1024 3:1024
 # Without --cpus (and nothing in the image can ask for it) nothing is pinned.
 mkcpus 0-7 0:284 1:284 2:284 3:284 4:871 5:871 6:871 7:1024
 rm -f "$T/taskset.log"; reset_logs
-QFORGE_CPU_ROOT="$T/cpu" start_launcher; wait_for emu_up; touch "$T/stop-emu"; reap_launcher "$lpid"
+RETROFORGE_CPU_ROOT="$T/cpu" start_launcher; wait_for emu_up; touch "$T/stop-emu"; reap_launcher "$lpid"
 [ ! -e "$T/taskset.log" ] && ok "no --cpus: no taskset (pinning is never the default)" || bad "pinned without --cpus"
 [ "$(code --cpus fast psx "$ROM")" = 2 ] && ok "--cpus fast (unknown value) is refused: exit 2" || bad "accepted --cpus fast"
 [ "$(code --cpus)" = 2 ] && ok "--cpus with no value: exit 2" || bad "accepted a bare --cpus"
@@ -858,12 +858,12 @@ grep -qs 'CPUS\|taskset' "$SEED_DIR"/*/emulator.json && bad "an emulator definit
 
 # =================================================================================================
 CASE="player's emulator default (CPUS=)"
-# Settings > Emulators writes ~/.config/qforge/emulators/<emu>.conf; a game's --cpus overrides it
-# (Game settings > QForge: emulator default / on = --cpus big / off = --cpus all).
-PCONF="$HOME/.config/qforge/emulators/duckstation.conf"
+# Settings > Emulators writes ~/.config/retroforge/emulators/<emu>.conf; a game's --cpus overrides it
+# (Game settings > RetroForge: emulator default / on = --cpus big / off = --cpus all).
+PCONF="$HOME/.config/retroforge/emulators/duckstation.conf"
 cpus_run() {  # one launch with the given arguments and the fake topology; prints the taskset list or "none"
   rm -f "$T/taskset.log"; reset_logs
-  QFORGE_CPU_ROOT="$T/cpu" "$LAUNCH" "$@" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+  RETROFORGE_CPU_ROOT="$T/cpu" "$LAUNCH" "$@" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
   wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
   touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
   sed -n 's/^cpus=//p' "$T/taskset.log" 2>/dev/null | grep . || echo none
@@ -897,7 +897,7 @@ CASE="emulator GUI (--gui)"
 [ "$(code --gui ../duckstation)" = 2 ] && ok "--gui with a path in the name: exit 2" || bad "accepted --gui ../duckstation"
 [ "$(code --gui nosuchemu)" = 2 ] && ok "--gui with no conf for the emulator: exit 2" || bad "accepted an unknown emulator"
 [ "$(code --gui duckstation "$ROM")" = 2 ] && ok "--gui with a ROM too: exit 2" || bad "accepted --gui duckstation <rom>"
-[ "$(QFORGE_EMU_DIR="$T/none" code --gui duckstation)" = 3 ] \
+[ "$(RETROFORGE_EMU_DIR="$T/none" code --gui duckstation)" = 3 ] \
   && ok "--gui of an emulator that is not installed: exit 3" || bad "--gui of a missing emulator did not exit 3"
 [ "$(jget "$DS_DEF" gui_args)" = '["-bigpicture", "-fullscreen"]' ] \
   && ok "duckstation gui_args: Big Picture (pad-driven), no -batch (it would quit with no game)" || bad "duckstation gui_args: $(jget "$DS_DEF" gui_args)"
@@ -923,7 +923,7 @@ reap_launcher "$lpid"; rc=$?
 wait_for 'grep -qx hup "$T/appimage.log"' && grep -q -- "^-u $T/mnt" "$T/fusermount.log" 2>/dev/null \
   && ok "--gui: the mount is released after the emulator exits" || bad "--gui: the mount was not released"
 rm -f "$T/taskset.log"; reset_logs
-QFORGE_CPU_ROOT="$T/cpu" "$LAUNCH" --cpus big --gui duckstation 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+RETROFORGE_CPU_ROOT="$T/cpu" "$LAUNCH" --cpus big --gui duckstation 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
 wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
 touch "$T/stop-emu"; reap_launcher "$lpid"
 [ "$(sed -n 's/^cpus=//p' "$T/taskset.log" 2>/dev/null)" = "4,5,6,7" ] \
@@ -931,7 +931,7 @@ touch "$T/stop-emu"; reap_launcher "$lpid"
 
 # =================================================================================================
 CASE="folder of scripts (PortMaster)"
-# PortMaster is no AppImage: qforge-emu unpacks it into ~/roms/ports/PortMaster. --gui runs its own
+# PortMaster is no AppImage: retroforge-emu unpacks it into ~/roms/ports/PortMaster. --gui runs its own
 # PortMaster.sh from there; a ports card's "ROM" is the port's own launch script, run with bash
 # (PortMaster installs ports as <Name>.sh beside its folder; their mode is not ours to trust).
 SD="$T/defs-scripts"; mkdir -p "$SD/fakepm"
@@ -939,14 +939,14 @@ cat > "$SD/fakepm/emulator.json" <<'EOF'
 {"format": "scripts", "root": "roms/ports/FakePM", "binary": "FakePM.sh", "args": ["{rom}"], "gui_args": ["--gui-arg"]}
 EOF
 echo "ports=fakepm" > "$T/launch-ports.conf"
-sl() { QFORGE_EMU_DATA_DIR="$SD" QFORGE_LAUNCH_CONF="$T/launch-ports.conf" "$LAUNCH" "$@"; }
+sl() { RETROFORGE_EMU_DATA_DIR="$SD" RETROFORGE_LAUNCH_CONF="$T/launch-ports.conf" "$LAUNCH" "$@"; }
 rm -rf "$HOME"; mkdir -p "$HOME/roms/ports"
 PORT="$HOME/roms/ports/A Port.sh"; cp "$T/fake-emu" "$PORT"; chmod 644 "$PORT"
 st="$T/launch.status.scripts"; rm -f "$st"
-QFORGE_LAUNCH_STATUS="$st" sl --gui fakepm >/dev/null 2>&1; rc=$?
+RETROFORGE_LAUNCH_STATUS="$st" sl --gui fakepm >/dev/null 2>&1; rc=$?
 [ "$rc" = 3 ] && [ "$(cat "$st" 2>/dev/null)" = "not-installed fakepm" ] \
   && ok "not unpacked yet: exit 3, status 'not-installed fakepm'" || bad "rc=$rc status=$(cat "$st" 2>/dev/null)"
-QFORGE_LAUNCH_STATUS="$st" sl ports "$PORT" >/dev/null 2>&1; rc=$?
+RETROFORGE_LAUNCH_STATUS="$st" sl ports "$PORT" >/dev/null 2>&1; rc=$?
 [ "$rc" = 3 ] && [ "$(cat "$st" 2>/dev/null)" = "not-installed fakepm" ] \
   && ok "a port card without PortMaster: exit 3, not-installed (ports need its control files)" || bad "port without PortMaster: rc=$rc"
 mkdir -p "$HOME/roms/ports/FakePM"; cp "$T/fake-emu" "$HOME/roms/ports/FakePM/FakePM.sh"; chmod 755 "$HOME/roms/ports/FakePM/FakePM.sh"
@@ -968,8 +968,8 @@ wait_for emu_up || bad "the port never started: $(cat "$T/launch.err")"
 ogui_reap "$lpid"; reap_launcher "$lpid"
 grep -qx term "$T/emu.log" && ok "OGUI's Exit reaches the port" || bad "the port never got SIGTERM"
 
-CASE="folder of scripts: QForge's hook files (sync)"
-# mod_QForge.txt / libgl_QForge.txt live in the image and are copied into PortMaster's folder at
+CASE="folder of scripts: RetroForge's hook files (sync)"
+# mod_RetroForge.txt / libgl_RetroForge.txt live in the image and are copied into PortMaster's folder at
 # every launch: an image update must reach an existing install, unlike a seed, which never
 # overwrites. A file already identical is left alone.
 printf 'hook v1\n' > "$SD/fakepm/mod_Test.txt"
@@ -982,10 +982,10 @@ touch -d '2001-01-01' "$HOOK"; sync_run
 [ "$(stat -c %Y "$HOOK")" = "$(date -d 2001-01-01 +%s)" ] && ok "an identical hook file is left alone" || bad "an identical hook was rewritten"
 printf 'player edit\n' > "$HOOK"; printf 'hook v2\n' > "$SD/fakepm/mod_Test.txt"; sync_run
 [ "$(cat "$HOOK")" = "hook v2" ] && ok "a different one is replaced by the image's (an image update reaches existing installs)" || bad "hook is '$(cat "$HOOK")'"
-[ -z "$(find "$HOME/roms/ports/FakePM" -name '*qforge*')" ] && ok "no temporary file left" || bad "left: $(find "$HOME/roms/ports/FakePM" -name '*qforge*')"
+[ -z "$(find "$HOME/roms/ports/FakePM" -name '*retroforge*')" ] && ok "no temporary file left" || bad "left: $(find "$HOME/roms/ports/FakePM" -name '*retroforge*')"
 
 CASE="folder of scripts: runtimes a port left mounted"
-# A port's runtime is a squashfuse mount (QForge's mount stand-in) that outlives the port when
+# A port's runtime is a squashfuse mount (RetroForge's mount stand-in) that outlives the port when
 # OGUI's Exit skips the port's own umount: the launcher releases every mount the registry lists.
 REG="$T/pm-mounts"; mkdir -p "$T/rt1" "$T/rt2"
 printf '%s\t%s\n' "$T/rt1" /x/godot.squashfs "$T/gone" /x/weston.squashfs > "$REG"
@@ -998,7 +998,7 @@ awk -v m="\$m" '\$2 != m' "$T/mounts" > "$T/mounts.new" && mv "$T/mounts.new" "$
 EOF
 chmod +x "$T/bin/fusermount"; rm -f "$T/fusermount2.log"
 reset_logs
-QFORGE_PM_MOUNTS="$REG" sl ports "$PORT" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+RETROFORGE_PM_MOUNTS="$REG" sl ports "$PORT" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
 wait_for emu_up || bad "the port never started: $(cat "$T/launch.err")"
 grep -q "rt1" "$T/fusermount2.log" 2>/dev/null && bad "released a mount while the port still ran" || ok "nothing is released while the port runs"
 ogui_reap "$lpid"; reap_launcher "$lpid"

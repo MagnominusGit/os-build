@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge internal-install carve — the DESTRUCTIVE half, Phase 3/4 of
+# retroforge internal-install carve — the DESTRUCTIVE half, Phase 3/4 of
 # .claude/plans/internal-install.plan.md.
 #
 #   installer/carve.sh fresh     <disk> <userdata-gib>   # shrink userdata, append our eight
@@ -8,8 +8,8 @@
 #   installer/carve.sh uninstall <disk>                  # remove our eight, give userdata its span back
 #
 # `plan` is `fresh` up to but not including the first delete. It answers the two questions the
-# consent screen cannot answer for itself -- how much space QForge ends up with, and whether an
-# existing qforge install (and its /home) is about to be replaced -- and it answers them from THIS
+# consent screen cannot answer for itself -- how much space RetroForge ends up with, and whether an
+# existing retroforge install (and its /home) is about to be replaced -- and it answers them from THIS
 # script's arithmetic, which is the only one that is right. See the block at the mode itself.
 #
 # On success it prints the name=index map on stdout and exits 0 -- the same shape genpart.sh emits,
@@ -34,36 +34,36 @@
 set -euo pipefail
 
 SELFDIR="$(cd "$(dirname "$0")" && pwd)"
-SELECT="${QFORGE_SELECT_TARGET:-$SELFDIR/select-target.sh}"
+SELECT="${RETROFORGE_SELECT_TARGET:-$SELFDIR/select-target.sh}"
 
 # lib-slotwrite.sh, for `part_dev` alone. It is a shipped library and this script is installer-only,
 # so it is resolved by search, exactly as genpart.sh is below. Sourced rather than reimplemented
 # because "turn an index into a device path" is the one rule every write in the install depends on
 # (the `p` infix we cannot test), and a private second copy of it here is how the two halves of the
 # installer end up disagreeing about which partition they are addressing.
-SLOTWRITE="${QFORGE_SLOTWRITE:-}"
+SLOTWRITE="${RETROFORGE_SLOTWRITE:-}"
 if [ -z "$SLOTWRITE" ]; then
   for c in "$SELFDIR/lib-slotwrite.sh" \
-           /usr/lib/qforge/install/lib-slotwrite.sh \
-           "$SELFDIR/../rootfs/overlay/usr/lib/qforge/install/lib-slotwrite.sh"; do
+           /usr/lib/retroforge/install/lib-slotwrite.sh \
+           "$SELFDIR/../rootfs/overlay/usr/lib/retroforge/install/lib-slotwrite.sh"; do
     [ -r "$c" ] && { SLOTWRITE="$c"; break; }
   done
 fi
 
-# genpart.sh is SHIPPED (into /usr/lib/qforge/install/) while this script is installer-only, so
+# genpart.sh is SHIPPED (into /usr/lib/retroforge/install/) while this script is installer-only, so
 # the two do not always sit together. Resolved by search rather than by a repo-relative path, for
 # the same reason genpart resolves its table next to itself.
-GENPART="${QFORGE_GENPART:-}"
+GENPART="${RETROFORGE_GENPART:-}"
 if [ -z "$GENPART" ]; then
-  for c in "$SELFDIR/genpart.sh" /usr/lib/qforge/install/genpart.sh "$SELFDIR/../image/genpart.sh"; do
+  for c in "$SELFDIR/genpart.sh" /usr/lib/retroforge/install/genpart.sh "$SELFDIR/../image/genpart.sh"; do
     [ -x "$c" ] && { GENPART="$c"; break; }
   done
 fi
 
 # lib-gpt.sh, shipped beside genpart.sh and resolved the same way.
-LIBGPT="${QFORGE_LIB_GPT:-}"
+LIBGPT="${RETROFORGE_LIB_GPT:-}"
 if [ -z "$LIBGPT" ]; then
-  for c in "$SELFDIR/lib-gpt.sh" /usr/lib/qforge/install/lib-gpt.sh "$SELFDIR/../image/lib-gpt.sh"; do
+  for c in "$SELFDIR/lib-gpt.sh" /usr/lib/retroforge/install/lib-gpt.sh "$SELFDIR/../image/lib-gpt.sh"; do
     [ -r "$c" ] && { LIBGPT="$c"; break; }
   done
 fi
@@ -71,8 +71,8 @@ fi
 # The GPT names of our eight, in layout order. Deletion is BY NAME and only by name: an index is
 # never trusted from a caller or from arithmetic, because the difference between deleting p9 and
 # deleting p8 is the difference between our ESP and somebody's `abl`.
-OUR_NAMES=(QFORGE-ESP qforge-efi-A qforge-efi-B qforge-root-A qforge-root-B \
-           qforge-var-A qforge-var-B qforge-home)
+OUR_NAMES=(RETROFORGE-ESP retroforge-efi-A retroforge-efi-B retroforge-root-A retroforge-root-B \
+           retroforge-var-A retroforge-var-B retroforge-home)
 
 ANDROID_FLOOR_GIB="${ANDROID_FLOOR_GIB:-1}"
 
@@ -91,14 +91,14 @@ usage() {
 INTENT="$1"; DISK="$2"
 command -v sgdisk >/dev/null 2>&1 || die "sgdisk not found"
 command -v sfdisk >/dev/null 2>&1 || die "sfdisk not found -- the table cannot be read without it"
-[ -n "$GENPART" ] && [ -x "$GENPART" ] || die "cannot find genpart.sh (set QFORGE_GENPART)"
-[ -n "$LIBGPT" ] && [ -r "$LIBGPT" ] || die "cannot find lib-gpt.sh (set QFORGE_LIB_GPT)"
-[ -x "$SELECT" ] || die "cannot find select-target.sh (set QFORGE_SELECT_TARGET)"
+[ -n "$GENPART" ] && [ -x "$GENPART" ] || die "cannot find genpart.sh (set RETROFORGE_GENPART)"
+[ -n "$LIBGPT" ] && [ -r "$LIBGPT" ] || die "cannot find lib-gpt.sh (set RETROFORGE_LIB_GPT)"
+[ -x "$SELECT" ] || die "cannot find select-target.sh (set RETROFORGE_SELECT_TARGET)"
 [ -n "$SLOTWRITE" ] && [ -r "$SLOTWRITE" ] \
-  || die "cannot find lib-slotwrite.sh (set QFORGE_SLOTWRITE)"
+  || die "cannot find lib-slotwrite.sh (set RETROFORGE_SLOTWRITE)"
 # Sourced AFTER die() and say() exist: the library only defines its own fallbacks when the caller
 # has none, and this script's `carve: ` prefix is what its suite asserts.
-# shellcheck source=../rootfs/overlay/usr/lib/qforge/install/lib-slotwrite.sh
+# shellcheck source=../rootfs/overlay/usr/lib/retroforge/install/lib-slotwrite.sh
 . "$SLOTWRITE"
 # shellcheck source=../image/lib-gpt.sh
 . "$LIBGPT"
@@ -175,7 +175,7 @@ drop_residue() {
 # 0x10000), and it is addressed BY DISK OFFSET rather than through a partition node. That is the
 # point and not an incidental choice: the node is exactly what the stale signature prevents from
 # existing, so anything that needed /dev/disk/by-partuuid here could never run.
-WIPE_HEAD_MIB="${QFORGE_WIPE_HEAD_MIB:-1}"
+WIPE_HEAD_MIB="${RETROFORGE_WIPE_HEAD_MIB:-1}"
 wipe_our_heads() {
   local name idx start count
   count=$(( WIPE_HEAD_MIB * 1048576 / SECTOR ))
@@ -200,7 +200,7 @@ delete_ours() {  # deletes every partition of ours that exists, by name; prints 
     say "  removed p$idx $name"
     removed=$(( removed + 1 ))
   done
-  say "  ${removed} qforge partition(s) removed"
+  say "  ${removed} retroforge partition(s) removed"
 }
 
 # Delete userdata and put it back at <end>, at its ORIGINAL start, index and type GUID. The type is
@@ -260,7 +260,7 @@ recreate_userdata() {  # <index> <start> <end> <type-guid>
 # inside a partition being destroyed anyway, and it covers f2fs's checkpoint area as well as the
 # superblock pair rather than only what mount happens to read first. Independent implementations of
 # this same shrink settle on the same figure, which is weak evidence but not none.
-WIPE_MIB="${QFORGE_WIPE_MIB:-8}"
+WIPE_MIB="${RETROFORGE_WIPE_MIB:-8}"
 invalidate_userdata_fs() {  # <index> <start-sector> <end-sector>
   local idx="$1" start="$2" end="$3" count dev
   count=$(( WIPE_MIB * 1048576 / SECTOR ))
@@ -332,7 +332,7 @@ case "$INTENT" in
       [ -n "$(index_of "$name")" ] || missing="$missing $name"
     done
     [ -z "$missing" ] \
-      || die "not a complete qforge install, missing:$missing -- run a fresh install instead"
+      || die "not a complete retroforge install, missing:$missing -- run a fresh install instead"
     say "[carve] reinstall: the eight are present, no partition table is written"
     for name in "${OUR_NAMES[@]}"; do printf '%s=%s\n' "$name" "$(index_of "$name")"; done
     ;;
@@ -348,18 +348,18 @@ case "$INTENT" in
       || die "userdata must keep at least ${ANDROID_FLOOR_GIB} GiB for Android, asked for ${GIB}"
     NEW_END=$(( UD_START + GIB * PER_GIB - 1 ))
     [ "$NEW_END" -lt "$CEIL" ] \
-      || die "a ${GIB} GiB userdata reaches $NEW_END, past the ceiling $CEIL -- nothing left for QForge"
+      || die "a ${GIB} GiB userdata reaches $NEW_END, past the ceiling $CEIL -- nothing left for RetroForge"
     WINDOW=$(( CEIL - NEW_END ))
     [ "$WINDOW" -ge "$(( MIN_MIB * PER_MIB ))" ] \
       || die "a ${GIB} GiB userdata leaves $(( WINDOW / PER_MIB )) MiB, and the layout needs ${MIN_MIB} MiB"
 
     # `plan` STOPS HERE, having written nothing. It exists because the consent screen has to quote
     # the resulting free space (plan §4d) and that number is only correct if it comes from this
-    # arithmetic: QFORGE_MIB is derived from effective_ceiling, and select-target's CEIL is the
+    # arithmetic: RETROFORGE_MIB is derived from effective_ceiling, and select-target's CEIL is the
     # WRONG input for it on a disk we already own -- it stops at our own ESP and yields zero.
     #
     # MEASURED, not theorised: on the Pocket ACE 2026-08-21 the consent screen told the operator
-    # "QForge will use the remaining 0 GiB" while this code went on to give it 90853 MiB. The
+    # "RetroForge will use the remaining 0 GiB" while this code went on to give it 90853 MiB. The
     # screen was deriving from CEIL. That is what this mode exists to stop, and it is why the number
     # is fetched from here rather than recomputed in the spine -- a second copy of the ceiling rule
     # is exactly how the two halves end up disagreeing again.
@@ -368,12 +368,12 @@ case "$INTENT" in
     # the existing /home, and the screen has to say so. carve.sh has always PRINTED that line; it
     # printed it after consent had been taken, where nobody could act on it.
     if [ "$INTENT" = plan ]; then
-      printf 'CEIL=%s\nNEW_END=%s\nQFORGE_MIB=%s\nQFORGE_GIB=%s\nREPLACES_OURS=%s\n' \
+      printf 'CEIL=%s\nNEW_END=%s\nRETROFORGE_MIB=%s\nRETROFORGE_GIB=%s\nREPLACES_OURS=%s\n' \
         "$CEIL" "$NEW_END" "$(( WINDOW / PER_MIB ))" "$(( WINDOW / PER_GIB ))" \
         "$([ "$STATE" = fresh ] && printf 0 || printf 1)"
       # ONE `DESTROY=` LINE PER PARTITION THIS CARVE WILL DESTROY, for §5's pre-flight screen, which
       # has to show "the full list of partitions about to be destroyed" before anything is written.
-      # It is emitted HERE, by the mode that will perform the carve, for the same reason QFORGE_GIB
+      # It is emitted HERE, by the mode that will perform the carve, for the same reason RETROFORGE_GIB
       # is: the alternative is the UI reading the table and applying its own idea of which partitions
       # are ours, which is a second copy of a rule that has already drifted once and cost a hardware
       # run. The list is exactly what the two destructive calls below touch -- recreate_userdata's
@@ -397,15 +397,15 @@ case "$INTENT" in
 
     say "[carve] fresh install on $DISK"
     say "  userdata p$UD_INDEX: $(( (UD_END - UD_START + 1) / PER_GIB )) GiB -> ${GIB} GiB (Android is factory reset)"
-    say "  qforge gets $(( WINDOW / PER_MIB )) MiB, sectors $(( NEW_END + 1 ))..$CEIL"
-    [ "$STATE" = fresh ] || say "  this disk already carries a qforge install; it is being replaced, /home included"
+    say "  retroforge gets $(( WINDOW / PER_MIB )) MiB, sectors $(( NEW_END + 1 ))..$CEIL"
+    [ "$STATE" = fresh ] || say "  this disk already carries a retroforge install; it is being replaced, /home included"
 
     drop_residue
     delete_ours
     recreate_userdata "$UD_INDEX" "$UD_START" "$NEW_END" "$UD_TYPE"
     invalidate_userdata_fs "$UD_INDEX" "$UD_START" "$NEW_END"
     settle
-    QFORGE_APPEND_FLOOR=$(( NEW_END + 1 )) QFORGE_APPEND_CEIL="$CEIL" "$GENPART" --append "$DISK"
+    RETROFORGE_APPEND_FLOOR=$(( NEW_END + 1 )) RETROFORGE_APPEND_CEIL="$CEIL" "$GENPART" --append "$DISK"
     # Before the settle, not after: the settle is what gives udev its chance to probe these
     # partitions, and it must not find a stale signature when it does.
     wipe_our_heads
@@ -418,7 +418,7 @@ case "$INTENT" in
     # where something does follow, the restored partition is byte-identical to the factory one, and
     # on a board where nothing does it additionally absorbs space that was unallocated to begin with.
     [ "$STATE" = reinstall ] \
-      || die "$DISK carries no qforge install -- nothing to uninstall"
+      || die "$DISK carries no retroforge install -- nothing to uninstall"
     say "[carve] uninstall on $DISK"
     say "  userdata p$UD_INDEX: $(( (UD_END - UD_START + 1) / PER_GIB )) GiB -> $(( (CEIL - UD_START + 1) / PER_GIB )) GiB (Android is factory reset again)"
 

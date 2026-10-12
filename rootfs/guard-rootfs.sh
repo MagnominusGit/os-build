@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge sealed-root guard — assert on the BUILT TREE (Phase 4a step 4).
+# retroforge sealed-root guard — assert on the BUILT TREE (Phase 4a step 4).
 #
 #   rootfs/guard-rootfs.sh <staged-root>
 #
@@ -19,7 +19,7 @@
 # here and there adds content. (The one gap: this asserts the tree, not the image bytes — reading
 # a btrfs image back would need a mount, which the unprivileged build deliberately avoids.)
 #
-# RELEASE ONLY, like the seal itself. A QFORGE_DEV tree keeps the package manager on purpose
+# RELEASE ONLY, like the seal itself. A RETROFORGE_DEV tree keeps the package manager on purpose
 # and carries DEV_PKGS that the lock does not describe, so most of this would be asserting the
 # wrong thing. rootfs/assemble-rootfs.sh calls this only on the release path.
 #
@@ -35,7 +35,7 @@
 #   5. the trim's declaration is fully applied — nothing rootfs/conf/trim.list names survived
 #   6. the first-boot identity is shippable — no /etc/machine-id, AND systemd-firstboot masked
 #      (the two are only safe together); plus /etc/os-release carrying the per-build identity
-#      that non-qforge software reads, agreeing with /etc/qforge-release
+#      that non-retroforge software reads, agreeing with /etc/retroforge-release
 #   7. the RAUC update path is installable — rauc, the keyring, system.conf and this slot's
 #      own boot.img are all present, and the hook that consumes them is executable;
 #   8. the system UID/GID allocation matches the pin — the ids baked into this tree's passwd and
@@ -54,9 +54,9 @@ shopt -s nullglob
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE="${1:?usage: rootfs/guard-rootfs.sh <staged-root>}"
 LOCK="$ROOT/rootfs/manifest.lock"
-LIST="$STAGE/usr/lib/qforge/seal.list"
-TRIMLIST="$STAGE/usr/lib/qforge/trim.list"
-DB="$STAGE/usr/lib/qforge/pkgdb"
+LIST="$STAGE/usr/lib/retroforge/seal.list"
+TRIMLIST="$STAGE/usr/lib/retroforge/trim.list"
+DB="$STAGE/usr/lib/retroforge/pkgdb"
 SIZES="$ROOT/out/images/rootfs.sizes"
 
 [ -d "$STAGE" ] || { echo "no staged root: $STAGE" >&2; exit 2; }
@@ -104,7 +104,7 @@ for p in "${pkgs[@]}"; do
   done
   # The database is what makes the expansion possible; a stripped package missing from it means
   # the provenance copy is incomplete, and assertion 1 silently stops covering that package.
-  [ -n "$dbdir" ] || { bad "'$p' is on the removal list but has no entry under usr/lib/qforge/pkgdb"; continue; }
+  [ -n "$dbdir" ] || { bad "'$p' is on the removal list but has no entry under usr/lib/retroforge/pkgdb"; continue; }
 
   in_files=0
   while IFS= read -r rel; do
@@ -137,7 +137,7 @@ if [ "$paths_bad" = 0 ]; then echo "    ok  ${#paths[@]} declared paths gone"; f
 # 2. The named entry points, spelled out.
 #
 # Redundant with assertion 1 while the database is honest — and that is the point. Assertion 1
-# trusts usr/lib/qforge/pkgdb to say what a package owned; this list trusts nothing, so a
+# trusts usr/lib/retroforge/pkgdb to say what a package owned; this list trusts nothing, so a
 # truncated or wrong database cannot make the guard pass. These are also the names a person
 # reviewing this file wants to see stated: the shutdown stall (dirmngr) and the ability of a
 # running device to mutate its own read-only root (pacman).
@@ -289,7 +289,7 @@ fi
 # Asserts a PAIR, because either half alone is a defect:
 #
 #   - /etc/machine-id must be ABSENT. systemd's first-boot detection keys on it, so a populated one
-#     means preset-all never runs (the 60-qforge-*.preset files silently do nothing) and
+#     means preset-all never runs (the 60-retroforge-*.preset files silently do nothing) and
 #     gen-mac.sh's seed chain never falls through to the per-unit SoC serial, giving every unit
 #     flashed from the image the same Wi-Fi MAC. This was true of a shipped image and nothing
 #     caught it: the 4c bootstrap generates one (systemd's scriptlet, mode 0444), while two
@@ -326,27 +326,27 @@ if [ "$mid_ok" = 1 ] && [ "$fb_ok" = 1 ]; then
   echo "    ok  no /etc/machine-id, systemd-firstboot masked"
 fi
 
-# The image's identity to software that is NOT ours. /etc/qforge-release is what qforge reads;
+# The image's identity to software that is NOT ours. /etc/retroforge-release is what retroforge reads;
 # os-release is what everything else reads, and a UI's About screen renders OS Variant /
 # Version / Build straight out of it. Those fields shipped BLANK until 2026-08-09 — invisible in
 # the source (the committed rootfs/conf/os-release is static by design, and the values are appended by
 # the assembler), and invisible on device unless someone opens that screen. So assert the appended
-# half is there, and that it AGREES with qforge-release rather than being separately derived.
+# half is there, and that it AGREES with retroforge-release rather than being separately derived.
 osr="$STAGE/etc/os-release"
-rel="$STAGE/etc/qforge-release"
+rel="$STAGE/etc/retroforge-release"
 osr_ok=1
 for field in VARIANT VARIANT_ID VERSION VERSION_ID BUILD_ID; do
   grep -q "^$field=" "$osr" 2>/dev/null || { bad "/etc/os-release has no $field — os-release clients render that row blank"; osr_ok=0; }
 done
 if [ "$osr_ok" = 1 ]; then
   osr_ver="$(sed -n 's/^VERSION_ID=//p' "$osr" | tr -d '"')"
-  rel_ver="$(sed -n 's/^QFORGE_VERSION=//p' "$rel" 2>/dev/null)"
+  rel_ver="$(sed -n 's/^RETROFORGE_VERSION=//p' "$rel" 2>/dev/null)"
   osr_build="$(sed -n 's/^BUILD_ID=//p' "$osr" | tr -d '"')"
-  rel_build="$(sed -n 's/^QFORGE_BUILD=//p' "$rel" 2>/dev/null)"
+  rel_build="$(sed -n 's/^RETROFORGE_BUILD=//p' "$rel" 2>/dev/null)"
   if [ "$osr_ver" != "$rel_ver" ] || [ "$osr_build" != "$rel_build" ]; then
-    bad "os-release ($osr_ver/$osr_build) and qforge-release ($rel_ver/$rel_build) disagree — one identity, stamped once, is the whole rule"
+    bad "os-release ($osr_ver/$osr_build) and retroforge-release ($rel_ver/$rel_build) disagree — one identity, stamped once, is the whole rule"
   else
-    echo "    ok  os-release carries the per-build identity and agrees with qforge-release"
+    echo "    ok  os-release carries the per-build identity and agrees with retroforge-release"
   fi
 fi
 
@@ -356,7 +356,7 @@ fi
 # Every part of an A/B update is inert until something needs it, and each missing piece fails at a
 # different and unhelpful moment: no `rauc` binary is a missing command at install time; a missing
 # keyring means bundles verify against NOTHING while still reporting success; a missing stage-1/2
-# boot mirror under /usr/lib/qforge/boot means the post-install hook cannot refresh the ESP and
+# boot mirror under /usr/lib/retroforge/boot means the post-install hook cannot refresh the ESP and
 # the slot's efi partition, so the updated slot boots a boot chain that does not match it.
 #
 # lib-slotwrite.sh is on the list because the hook SOURCES it: since the primitives were factored out
@@ -372,15 +372,15 @@ echo "  7. RAUC update path"
 rauc_ok=1
 for f in usr/bin/rauc etc/rauc/keyring.pem etc/rauc/system.conf \
          usr/bin/steamos-bootconf \
-         usr/lib/systemd/system/qforge-boot-good.service \
-         usr/lib/systemd/system/qforge-boot-bad.service \
-         usr/lib/qforge/boot/steamcl.efi usr/lib/qforge/boot/steamcl-version \
-         usr/lib/qforge/boot/grubaa64.efi usr/lib/qforge/boot/grub-a.cfg \
-         usr/lib/qforge/boot/grub-b.cfg \
-         usr/lib/qforge/boot/fonts/dejavu-mono.pf2 \
-         boot/Image boot/initramfs-qforge.img \
+         usr/lib/systemd/system/retroforge-boot-good.service \
+         usr/lib/systemd/system/retroforge-boot-bad.service \
+         usr/lib/retroforge/boot/steamcl.efi usr/lib/retroforge/boot/steamcl-version \
+         usr/lib/retroforge/boot/grubaa64.efi usr/lib/retroforge/boot/grub-a.cfg \
+         usr/lib/retroforge/boot/grub-b.cfg \
+         usr/lib/retroforge/boot/fonts/dejavu-mono.pf2 \
+         boot/Image boot/initramfs-retroforge.img \
          usr/lib/rauc/post-install.sh \
-         usr/lib/qforge/install/lib-slotwrite.sh; do
+         usr/lib/retroforge/install/lib-slotwrite.sh; do
   if [ ! -s "$STAGE/$f" ]; then
     rauc_ok=0
     bad "/$f is missing or empty — the A/B update path is not installable"
@@ -408,10 +408,10 @@ fi
 # putting it there (boot/grub.sh emits it and asserts it is pristine). The 1024 is re-checked here
 # because it is the length nothing downstream complains about: grub_envblk_open only requires the
 # signature to FIT, so a short block reads back perfectly and is simply not the object a card carries.
-if [ ! -s "$STAGE/usr/lib/qforge/boot/grubenv" ]; then
-  bad "/usr/lib/qforge/boot/grubenv is missing — an internal install cannot seed the ESP's stage-2 env block, and the device has no grub-editenv to mint one"
-elif [ "$(wc -c <"$STAGE/usr/lib/qforge/boot/grubenv")" != 1024 ]; then
-  bad "/usr/lib/qforge/boot/grubenv is $(wc -c <"$STAGE/usr/lib/qforge/boot/grubenv") bytes, not 1024 — it would read back fine and still not match what a card carries"
+if [ ! -s "$STAGE/usr/lib/retroforge/boot/grubenv" ]; then
+  bad "/usr/lib/retroforge/boot/grubenv is missing — an internal install cannot seed the ESP's stage-2 env block, and the device has no grub-editenv to mint one"
+elif [ "$(wc -c <"$STAGE/usr/lib/retroforge/boot/grubenv")" != 1024 ]; then
+  bad "/usr/lib/retroforge/boot/grubenv is $(wc -c <"$STAGE/usr/lib/retroforge/boot/grubenv") bytes, not 1024 — it would read back fine and still not match what a card carries"
 else
   echo "    ok  installer artifacts: grubenv (1024 B, pristine)"
 fi
@@ -422,19 +422,19 @@ fi
 # no /etc. Listed, not just stat'd, because the two things that must NOT be in it are absences, and
 # an absence is what a `-s` check cannot see:
 #
-#   lib/qforge/slot     per-slot, written by seed_var after unpacking. Baked in, it would be a
+#   lib/retroforge/slot     per-slot, written by seed_var after unpacking. Baked in, it would be a
 #                         second answer to "which slot is this" — and that file exists precisely to
 #                         be the INDEPENDENT witness against the initramfs's own claim.
-#   lib/qforge/mac-wifi write-once and outranks the derivation, so a seeded copy would hand every
+#   lib/retroforge/mac-wifi write-once and outranks the derivation, so a seeded copy would hand every
 #                         installed device the same Wi-Fi MAC. Two on one network is the symptom.
-seed="$STAGE/usr/lib/qforge/var-seed.tar.zst"
+seed="$STAGE/usr/lib/retroforge/var-seed.tar.zst"
 if [ ! -s "$seed" ]; then
-  bad "/usr/lib/qforge/var-seed.tar.zst is missing — an internal install has no /var to seed a fresh slot with, and there is no running system to copy one from"
+  bad "/usr/lib/retroforge/var-seed.tar.zst is missing — an internal install has no /var to seed a fresh slot with, and there is no running system to copy one from"
 elif ! seed_list=$(tar -tf "$seed" 2>/dev/null); then
-  bad "/usr/lib/qforge/var-seed.tar.zst is not readable as a tar archive — is zstd in the build container?"
+  bad "/usr/lib/retroforge/var-seed.tar.zst is not readable as a tar archive — is zstd in the build container?"
 else
   seed_bad=0
-  for f in ./lib/qforge/slot ./lib/qforge/mac-wifi; do
+  for f in ./lib/retroforge/slot ./lib/retroforge/mac-wifi; do
     if printf '%s\n' "$seed_list" | grep -qx -- "$f"; then
       seed_bad=1
       bad "var-seed.tar.zst carries $f — it is per-device/per-slot state and must be written after unpacking, not baked in"
@@ -458,23 +458,23 @@ fi
 # tree refactor is a failure this project has already paid for once, and here it would strand an
 # install between "GPT written" and "nothing written to it".
 for f in genpart.sh partition-table.txt lib-gpt.sh; do
-  shipped="$STAGE/usr/lib/qforge/install/$f"
+  shipped="$STAGE/usr/lib/retroforge/install/$f"
   if [ ! -s "$shipped" ]; then
-    bad "/usr/lib/qforge/install/$f is missing — the installer cannot lay out a GPT"
+    bad "/usr/lib/retroforge/install/$f is missing — the installer cannot lay out a GPT"
   elif ! cmp -s "$shipped" "$ROOT/image/$f"; then
-    bad "/usr/lib/qforge/install/$f differs from image/$f — an install would partition a disk to a different layout than the card this release was tested on"
+    bad "/usr/lib/retroforge/install/$f differs from image/$f — an install would partition a disk to a different layout than the card this release was tested on"
   else
     echo "    ok  installer artifacts: $f byte-identical to image/$f"
   fi
 done
-if [ -e "$STAGE/usr/lib/qforge/install/genpart.sh" ] && [ ! -x "$STAGE/usr/lib/qforge/install/genpart.sh" ]; then
-  bad "/usr/lib/qforge/install/genpart.sh is not executable — the installer would write a GPT for a disk it then cannot populate"
+if [ -e "$STAGE/usr/lib/retroforge/install/genpart.sh" ] && [ ! -x "$STAGE/usr/lib/retroforge/install/genpart.sh" ]; then
+  bad "/usr/lib/retroforge/install/genpart.sh is not executable — the installer would write a GPT for a disk it then cannot populate"
 fi
 # The primitives the hook and the installer share. Asserted here as well as on the RAUC list above,
 # because the two readers fail differently: without it an OTA dies on post-install.sh's first line,
 # while an install has no way to write parts.env and leaves stage 2 guessing the SD card's 1..8.
-[ -s "$STAGE/usr/lib/qforge/install/lib-slotwrite.sh" ] \
-  || bad "/usr/lib/qforge/install/lib-slotwrite.sh is missing — neither an update nor an install can write a slot"
+[ -s "$STAGE/usr/lib/retroforge/install/lib-slotwrite.sh" ] \
+  || bad "/usr/lib/retroforge/install/lib-slotwrite.sh is missing — neither an update nor an install can write a slot"
 
 # --- the two halves of adaptive streaming, both of which fail SILENTLY --------------------------
 # Adaptive updates (ota/rauc/manifest.raucm.in) cut a release-to-release OTA from 3.90G to ~125M
@@ -511,9 +511,9 @@ fi
 # at the LAST step of an install, and the card is left with a new root, refreshed stage 2 and a
 # bootconf that never re-armed it: the worst shape available. Both files live in this tree, which
 # is precisely why a rename in one is easy to miss in the other.
-if [ "$rauc_ok" = 1 ] && [ -s "$STAGE/usr/bin/qforge-bootctl" ]; then
+if [ "$rauc_ok" = 1 ] && [ -s "$STAGE/usr/bin/retroforge-bootctl" ]; then
   known="dump-config selected-image this-image list-images set-mode config create"
-  for f in "$STAGE/usr/lib/rauc/post-install.sh" "$STAGE/usr/bin/qforge-bootctl"; do
+  for f in "$STAGE/usr/lib/rauc/post-install.sh" "$STAGE/usr/bin/retroforge-bootctl"; do
     [ -s "$f" ] || continue
     # Comment lines are stripped first: this file's prose names bootconf commands too. The
     # extraction catches both `bc <cmd>` and `bc --image <img> <cmd>` call shapes.
@@ -534,10 +534,10 @@ fi
 
 # --- the OTA client -----------------------------------------------------------------------------
 #
-# The shell drives updates through /usr/bin/qforge-update. It has to survive the copy into $STAGE
+# The shell drives updates through /usr/bin/retroforge-update. It has to survive the copy into $STAGE
 # present AND executable: each failure is silent on a device with no serial console — the symptom
 # is the update button doing nothing at all.
-f="$STAGE/usr/bin/qforge-update"
+f="$STAGE/usr/bin/retroforge-update"
 if [ ! -s "$f" ]; then
   bad "${f#"$STAGE"} is missing — the shell's update button has nothing to call"
 elif [ ! -x "$f" ]; then
@@ -562,7 +562,7 @@ if [ "$rauc_ok" = 1 ] && [ -s "$STAGE/etc/rauc/system.conf" ]; then
   fi
 fi
 if [ "$rauc_ok" = 1 ]; then
-  echo "    ok  rauc + keyring + system.conf + /usr/lib/qforge/boot stage-1/2 mirror + /boot kernel + executable hook"
+  echo "    ok  rauc + keyring + system.conf + /usr/lib/retroforge/boot stage-1/2 mirror + /boot kernel + executable hook"
   echo "    ok  a codeSigning-EKU bundle verifies through the shipped system.conf; an unrelated CA does not"
 fi
 
@@ -571,7 +571,7 @@ fi
 #
 # FOUR consumers resolve a partition by name after switch_root -- /esp and /home in /etc/fstab,
 # grow-home's repart target, and rauc's slot devices -- and all four now go through
-# /dev/qforge/<GPT name>, which exists only for partitions on the disk we booted from. The rule
+# /dev/retroforge/<GPT name>, which exists only for partitions on the disk we booted from. The rule
 # and its match program are what create those links; without either, the links are simply absent and
 # NOTHING SAYS SO AT RUNTIME. What the device does instead is boot with no /home and no /esp, fail
 # to confirm the trial, and roll back to the other slot -- survivable by design, and a full release
@@ -589,33 +589,33 @@ fi
 # ------------------------------------------------------------------------------------------
 echo "  7b. boot-disk-scoped partition links"
 bootdisk_ok=1
-BD_RULE="$STAGE/usr/lib/udev/rules.d/69-qforge-bootdisk.rules"
-BD_PROG="$STAGE/usr/lib/qforge/on-boot-disk"
+BD_RULE="$STAGE/usr/lib/udev/rules.d/69-retroforge-bootdisk.rules"
+BD_PROG="$STAGE/usr/lib/retroforge/on-boot-disk"
 
 if [ ! -s "$BD_RULE" ]; then
   bootdisk_ok=0
-  bad "/usr/lib/udev/rules.d/69-qforge-bootdisk.rules is missing — /dev/qforge/* would never be created, so /esp, /home and the rauc slots all resolve to nothing"
+  bad "/usr/lib/udev/rules.d/69-retroforge-bootdisk.rules is missing — /dev/retroforge/* would never be created, so /esp, /home and the rauc slots all resolve to nothing"
 fi
 if [ ! -s "$BD_PROG" ]; then
   bootdisk_ok=0
-  bad "/usr/lib/qforge/on-boot-disk is missing — the rule's PROGRAM cannot match, so no link is created"
+  bad "/usr/lib/retroforge/on-boot-disk is missing — the rule's PROGRAM cannot match, so no link is created"
 elif [ ! -x "$BD_PROG" ]; then
   bootdisk_ok=0
-  bad "/usr/lib/qforge/on-boot-disk is not executable — udev cannot run it, the rule never matches, and no link is created"
+  bad "/usr/lib/retroforge/on-boot-disk is not executable — udev cannot run it, the rule never matches, and no link is created"
 fi
 # The rule has to name the program at the path the program actually occupies. They are two files in
-# two different trees (udev/rules.d and qforge/), so a move renames one and not the other.
-if [ -s "$BD_RULE" ] && ! grep -q '/usr/lib/qforge/on-boot-disk' "$BD_RULE"; then
+# two different trees (udev/rules.d and retroforge/), so a move renames one and not the other.
+if [ -s "$BD_RULE" ] && ! grep -q '/usr/lib/retroforge/on-boot-disk' "$BD_RULE"; then
   bootdisk_ok=0
-  bad "69-qforge-bootdisk.rules does not name /usr/lib/qforge/on-boot-disk — its PROGRAM points somewhere else"
+  bad "69-retroforge-bootdisk.rules does not name /usr/lib/retroforge/on-boot-disk — its PROGRAM points somewhere else"
 fi
-for row in QFORGE-ESP:/esp qforge-home:/home; do
-  if ! grep -q "^/dev/qforge/${row%%:*}[[:space:]]" "$STAGE/etc/fstab" 2>/dev/null; then
+for row in RETROFORGE-ESP:/esp retroforge-home:/home; do
+  if ! grep -q "^/dev/retroforge/${row%%:*}[[:space:]]" "$STAGE/etc/fstab" 2>/dev/null; then
     bootdisk_ok=0
-    bad "/etc/fstab does not mount ${row##*:} from /dev/qforge/${row%%:*} — that mount follows whichever disk udev enumerated first"
+    bad "/etc/fstab does not mount ${row##*:} from /dev/retroforge/${row%%:*} — that mount follows whichever disk udev enumerated first"
   fi
 done
-if grep -qE '^(PARTLABEL|LABEL)=(QFORGE-ESP|qforge-home)[[:space:]]' "$STAGE/etc/fstab" 2>/dev/null; then
+if grep -qE '^(PARTLABEL|LABEL)=(RETROFORGE-ESP|retroforge-home)[[:space:]]' "$STAGE/etc/fstab" 2>/dev/null; then
   bootdisk_ok=0
   bad "/etc/fstab still carries a bare PARTLABEL=/LABEL= row for the ESP or home — the scoped link and the label row would race for the same mountpoint"
 fi
@@ -624,13 +624,13 @@ if [ -s "$STAGE/etc/rauc/system.conf" ] && grep -q '^device=/dev/disk/by-partlab
   bad "etc/rauc/system.conf still names its slots by-partlabel — an OTA can write the other disk's slot"
 fi
 if [ "$bootdisk_ok" = 1 ]; then
-  echo "    ok  69-qforge-bootdisk.rules + executable on-boot-disk; fstab and rauc slots both name /dev/qforge/"
+  echo "    ok  69-retroforge-bootdisk.rules + executable on-boot-disk; fstab and rauc slots both name /dev/retroforge/"
 fi
 
 # ------------------------------------------------------------------------------------------
 # 7c. The power-key path has the CLI it executes.
 #
-# qforge-powerbuttond (key -> suspend / power off) and qforge-suspend (arming the wake) both run
+# retroforge-powerbuttond (key -> suspend / power off) and retroforge-suspend (arming the wake) both run
 # `libinput debug-events`. Neither can fail loudly without it: the forwarder crash-loops under
 # Restart= and the key simply does nothing, and the suspend engine resumes at once rather than
 # sleep with no way to wake. The CLI is a package boundary that has already moved under us once —
@@ -640,7 +640,7 @@ fi
 echo "  7c. power-key path"
 pk_ok=1
 for f in usr/bin/libinput usr/lib/libinput/libinput-debug-events \
-         usr/bin/qforge-powerbuttond usr/bin/qforge-suspend; do
+         usr/bin/retroforge-powerbuttond usr/bin/retroforge-suspend; do
   if [ ! -x "$STAGE/$f" ]; then
     pk_ok=0
     bad "/$f is missing or not executable — the power key cannot suspend or wake the device"
@@ -651,7 +651,7 @@ done
 # ------------------------------------------------------------------------------------------
 # 8. The system UID/GID allocation matches the pin.
 #
-# /usr/lib/sysusers.d/01-qforge-enforce-ids.conf declares an id for every name in the range
+# /usr/lib/sysusers.d/01-retroforge-enforce-ids.conf declares an id for every name in the range
 # systemd-sysusers would otherwise allocate. Whether it WORKED is not visible in the declaration:
 # it only takes effect if it reached the target root before the transaction whose hook allocates,
 # and it wins only because `01-` sorts first. Both are properties of rootfs/customize-base.sh, one
@@ -667,14 +667,14 @@ done
 # tree, and the pin is only load-bearing if it is IN it. An absent pin is a failure, not a skip.
 # ------------------------------------------------------------------------------------------
 echo "  8. system UID/GID allocation"
-IDPIN="$STAGE/usr/lib/sysusers.d/01-qforge-enforce-ids.conf"
+IDPIN="$STAGE/usr/lib/sysusers.d/01-retroforge-enforce-ids.conf"
 PASSWD="$STAGE/etc/passwd"
 GROUP="$STAGE/etc/group"
 
 ids_ok=1
 if [ ! -s "$IDPIN" ]; then
   ids_ok=0
-  bad "/usr/lib/sysusers.d/01-qforge-enforce-ids.conf is missing — nothing pins the system id range, so every id in it is a function of the package set"
+  bad "/usr/lib/sysusers.d/01-retroforge-enforce-ids.conf is missing — nothing pins the system id range, so every id in it is a function of the package set"
 elif [ ! -s "$PASSWD" ] || [ ! -s "$GROUP" ]; then
   ids_ok=0
   bad "/etc/passwd or /etc/group is missing or empty — the tree has no id allocation to check"
@@ -738,7 +738,7 @@ fi
 # ------------------------------------------------------------------------------------------
 # 9. No Steam, x86-emulation or Android payload came back.
 #
-# qforge ships none of them: no Steam client or its contracts, no FEX/Proton x86 stack, no Android
+# retroforge ships none of them: no Steam client or its contracts, no FEX/Proton x86 stack, no Android
 # container, no Decky. Each used to arrive through a path that is easy to re-open by accident — a
 # prebuilt pin, an overlay file, an assembler stage — and none of them would fail a build on its
 # own; the image would simply grow gigabytes and carry dead services. Named paths rather than a
@@ -746,11 +746,11 @@ fi
 # ------------------------------------------------------------------------------------------
 echo "  9. no Steam / x86 / Android payload"
 REMOVED=(
-  usr/bin/qforge-steam usr/bin/qforge-steamos-manager usr/bin/steamos-polkit-helpers
-  usr/bin/steamos-update usr/bin/steamos-select-branch usr/bin/qforge-select-branch
+  usr/bin/retroforge-steam usr/bin/retroforge-steamos-manager usr/bin/steamos-polkit-helpers
+  usr/bin/steamos-update usr/bin/steamos-select-branch usr/bin/retroforge-select-branch
   usr/share/decky-loader usr/share/decky-plugins usr/lib/systemd/system/plugin_loader.service
   usr/bin/FEXInterpreter usr/share/fex-emu usr/share/guestos usr/share/steam/compatibilitytools.d
-  usr/bin/podman usr/bin/qforge-android usr/share/qforge-android
+  usr/bin/podman usr/bin/retroforge-android usr/share/retroforge-android
 )
 removed_bad=0
 for n in "${REMOVED[@]}"; do
@@ -763,7 +763,7 @@ done
 #
 # OpenGamepadUI arrives as an overlay package (packages/opengamepadui: upstream's aarch64 release
 # with a patched, rebuilt pck); a packaging mistake builds fine while the shell lands somewhere
-# QFORGE_SESSION_CMD cannot find it — a black panel at first boot. Its self-updater is trimmed
+# RETROFORGE_SESSION_CMD cannot find it — a black panel at first boot. Its self-updater is trimmed
 # (rootfs/conf/trim.list): on a RAUC root the slot carries the shell version.
 # ------------------------------------------------------------------------------------------
 echo "  9b. the shell"
@@ -991,7 +991,7 @@ fi
 # never be what fails a release build. (It is also what runs when someone points this script at a
 # tree by hand outside the container, where out/ is root-owned.)
 if ! { install -d -m0755 "$(dirname "$SIZES")" \
-       && { echo "# qforge staged-root sizes in KiB — written by rootfs/guard-rootfs.sh, read as the next build's baseline."
+       && { echo "# retroforge staged-root sizes in KiB — written by rootfs/guard-rootfs.sh, read as the next build's baseline."
             printf '%s\n' "$new"; } >"$SIZES"; } 2>/dev/null; then
   echo "    (could not record sizes to ${SIZES#"$ROOT"/} — next build reports no delta)" >&2
 fi

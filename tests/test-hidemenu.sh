@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Offline check for the LD_PRELOAD shim apps/qforge-hidemenu (melonDS's second-window menu bar).
+# Offline check for the LD_PRELOAD shim apps/retroforge-hidemenu (melonDS's second-window menu bar).
 #
 #   tests/test-hidemenu.sh
 #
@@ -16,12 +16,12 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SHIM="$ROOT/apps/qforge-hidemenu/build/libqforge-hidemenu.host.so"
+SHIM="$ROOT/apps/retroforge-hidemenu/build/libretroforge-hidemenu.host.so"
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "  ok   $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "  FAIL $1"; }
 
-make -s -C "$ROOT/apps/qforge-hidemenu" host >/dev/null || { echo "test-hidemenu.sh: shim does not build"; exit 1; }
+make -s -C "$ROOT/apps/retroforge-hidemenu" host >/dev/null || { echo "test-hidemenu.sh: shim does not build"; exit 1; }
 
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 

@@ -1,4 +1,4 @@
-From: qforge
+From: retroforge
 Subject: [PATCH] rendervulkan: mappable images on a GPU without cached+coherent memory
 
 A mappable image (screenshots, captures) asks findMemoryType() for a
@@ -21,7 +21,7 @@ HOST_VISIBLE | HOST_COHERENT, which the spec guarantees; the CPU-side
 reads of a screenshot are merely slower. And if no type fits at all, fail
 BInit with an error instead of passing -1 to the driver.
 
-(qforge: HW, MANGMI Air X, 2026-10-10. Two cores: coredumpctl 12346 and
+(retroforge: HW, MANGMI Air X, 2026-10-10. Two cores: coredumpctl 12346 and
 16505, symbolised against the unstripped build.)
 ---
 diff -ruN a/src/rendervulkan.cpp b/src/rendervulkan.cpp

@@ -1,4 +1,4 @@
-# qforge OTA release signing certificate profile — the ONE definition of it.
+# retroforge OTA release signing certificate profile — the ONE definition of it.
 #
 # Read by BOTH ota/gen-signing-ca.sh (which mints the real cert with it) and
 # ota/rauc/verify-signing.sh (which mints a throwaway cert with it and proves the shipped

@@ -1,4 +1,4 @@
-From: qforge
+From: retroforge
 Subject: [PATCH] secondary output: direct scanout rotated on the plane
 
 0042 never asked the secondary plane to rotate, so a rotated second
@@ -22,7 +22,7 @@ melonDS's own buffers (top 1920x1080, bottom 1240x1080 rotated on the
 plane), no composite on either; no DPU or rotator messages in dmesg over
 a 90 s watch, play clean.
 
-(qforge: dual-screen boards, 2026-10-12.)
+(retroforge: dual-screen boards, 2026-10-12.)
 ---
 diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
 index a94948a..4ab8282 100644

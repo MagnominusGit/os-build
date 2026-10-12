@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# qforge internal install — the CONSENT SCREEN, terminal rendering. Phase 4c/§4d of
+# retroforge internal install — the CONSENT SCREEN, terminal rendering. Phase 4c/§4d of
 # .claude/plans/internal-install.plan.md.
 #
 #   confirm-tty --facts <file> --sequence <NESW>
 #
-# Renders the screen qforge-install derived, reads the sequence back, prints what was entered on
+# Renders the screen retroforge-install derived, reads the sequence back, prints what was entered on
 # stdout and exits 0. A non-zero exit means the user aborted. That contract is the whole interface:
 # the spine owns the policy (what is randomised, how many attempts, what counts as consent) and this
 # owns the words and the input device. §5's gamepad screen is a second implementation of the same
@@ -56,21 +56,21 @@ DISK="$(fact DISK)"
 
 # Both screens are written out in full, separately, and they share no text. §4d requires that the
 # two consent paths cannot produce each other's rendering: an Android disk must produce the userdata
-# text and a QForge disk the /home choice, with no way for a variable to swap them. A single
+# text and a RetroForge disk the /home choice, with no way for a variable to swap them. A single
 # template with conditionals inside it is precisely the shape that lets that happen.
 case "$SCREEN" in
   android-wipe)
     # TWO OPTIONAL BLOCKS, both of them consequences of the same case: `fresh` on a disk that
-    # ALREADY carries qforge. That is a supported mode -- carve.sh calls it "I want a different
+    # ALREADY carries retroforge. That is a supported mode -- carve.sh calls it "I want a different
     # split" -- and until 2026-08-21 this screen did not know it existed. It told the operator on
-    # the Pocket ACE that QForge would get "0 GiB", and it reassured them their game library was
+    # the Pocket ACE that RetroForge would get "0 GiB", and it reassured them their game library was
     # safe while the carve was about to delete the /home holding it. Both are fixed here.
-    qforge_space="QForge will use the remaining $(fact QFORGE_GIB) GiB."
-    [ "$(fact QFORGE_GIB)" = unknown ] \
-      && qforge_space="QForge will use the rest of the disk."
+    retroforge_space="RetroForge will use the remaining $(fact RETROFORGE_GIB) GiB."
+    [ "$(fact RETROFORGE_GIB)" = unknown ] \
+      && retroforge_space="RetroForge will use the rest of the disk."
 
     # The SD-card reassurance is TRUE ONLY WHEN THE GAMES ARE ON THE SD CARD. Once there is a
-    # qforge /home on this disk, that is where they are, and "your game library is safe" becomes
+    # retroforge /home on this disk, that is where they are, and "your game library is safe" becomes
     # the most misleading sentence on the screen -- it reassures about the exact thing being erased.
     library_line="     Your SD card is never written to. Nothing on it is read, moved or
      erased -- your game library is safe."
@@ -84,9 +84,9 @@ case "$SCREEN" in
         *)          home_size="It is using ${home_gib} GiB today." ;;
       esac
       replaces_block="
-   THIS ALSO DELETES THE QFORGE INSTALL ALREADY ON THIS DISK.
+   THIS ALSO DELETES THE RETROFORGE INSTALL ALREADY ON THIS DISK.
 
-     QForge is already installed here. A fresh install replaces all of it,
+     RetroForge is already installed here. A fresh install replaces all of it,
      and that includes /home -- where your installed games, saves and settings
      live. ${home_size} It is NOT recoverable.
 
@@ -96,7 +96,7 @@ case "$SCREEN" in
     cat <<EOF
 
   ================================================================
-   INSTALL QFORGE ON THIS DEVICE'S INTERNAL STORAGE
+   INSTALL RETROFORGE ON THIS DEVICE'S INTERNAL STORAGE
   ================================================================
 
    Target disk: $DISK  ($(fact WWID))
@@ -108,7 +108,7 @@ case "$SCREEN" in
      or by us. There is no backup and no way to put it back.
 
      Android's data partition is $(fact UD_GIB_NOW) GiB today. It will be
-     recreated at $(fact UD_GIB_AFTER) GiB, and ${qforge_space}
+     recreated at $(fact UD_GIB_AFTER) GiB, and ${retroforge_space}
 $replaces_block
    WHAT SURVIVES:
 
@@ -119,7 +119,7 @@ $library_line
 
    AFTERWARDS:
 
-     The device will boot QForge from internal storage by default.
+     The device will boot RetroForge from internal storage by default.
      Hold Volume Up at startup to reach the bootloader menu and choose
      Android, or boot this installer again, at any time.
 
@@ -134,13 +134,13 @@ EOF
     cat <<EOF
 
   ================================================================
-   REPAIR THE QFORGE INSTALL ON THIS DEVICE
+   REPAIR THE RETROFORGE INSTALL ON THIS DEVICE
   ================================================================
 
    Target disk: $DISK  ($(fact WWID))
 
-   This rewrites QForge's system partitions. Android's data is NOT
-   touched on this path -- it was already resized when QForge was first
+   This rewrites RetroForge's system partitions. Android's data is NOT
+   touched on this path -- it was already resized when RetroForge was first
    installed, and nothing here changes it.
 
 EOF

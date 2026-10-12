@@ -1,0 +1,821 @@
+#!/usr/bin/env python3
+# retroforge-launch — start a ROM in its system's emulator, from an OpenGamepadUI library card.
+#
+#   retroforge-launch [--cpus big|all] <system> <rom>
+#   retroforge-launch [--cpus big|all] --gui <emulator>
+#
+# --gui starts the emulator's own UI with no ROM: Settings > Emulators > Open, for the settings OGUI
+# does not expose. It runs exactly like a ROM (prepare, seed, own session, exit handling below),
+# with the definition's gui_args in place of args.
+#
+# Emulators are not in the image: the RetroForge OGUI plugin downloads each one (retroforge-emu) into
+# /home/player/emulators/<emulator>/ and points `current` at the version to run. This is what every
+# ROM card runs. /etc/retroforge/launch.conf maps a system to its emulator (last `<system>=<emulator>`
+# line wins); /usr/share/retroforge/emulators/<emulator>/emulator.json says how to run it -- DATA ONLY:
+#
+#   {"format": "appimage" | "appimage-sharun" | "scripts",   how the download is packaged (FORMATS
+#                                                  below)
+#    "root": "roms/ports/PortMaster",              scripts only: the folder under $HOME retroforge-emu
+#                                                  unpacked the download into
+#    "binary": "usr/bin/x",                        the program inside it (relative, no '..')
+#    "args": ["-batch", "--", "{rom}"],            a game's command line; "{rom}" exactly once,
+#                                                  "{system}" (the card's system) anywhere in an arg
+#    "gui_args": ["-bigpicture"],                  --gui's command line (no "{rom}")
+#    "system_args": {"md": ["--system", "Mega Drive"]},  put before args when the card's system has
+#                                                  an entry (one emulator, several systems it must
+#                                                  be told about); "{system}" allowed
+#    "env": {"NAME": "value"},                     added to the emulator's environment
+#    "core_dumps": false,                          no core file when it crashes (default true; below)
+#    "seed": [{"file": "x.ini", "to": ".config/x/x.ini"}],   first-run settings (below)
+#    "sync": [{"file": "x.txt", "to": "roms/x/x.txt"}],      RetroForge's own files, kept current (below)
+#    "install": [{"from": "bios/x/fw.bin",          a one-time step with the emulator's own binary
+#                 "unless": ".config/x/fw/ok",       (below); paths under $HOME
+#                 "args": ["--installfw", "{file}"]}],
+#    "notes": ["..."]}                             why, for people; ignored here
+#
+# Anything else in it, or a format this script does not know, is refused (exit 2): a definition that
+# needs code is a new FORMAT here, never shell in the definition (plan Phase 4b, launcher redesign).
+#
+# CPU pinning (--cpus big): the emulator is started on the device's fast cores, so its threads stay
+# off the little cluster and do not migrate across clusters; background work (audio, input, Wi-Fi)
+# keeps the little cores. "Fast" is every ONLINE CPU whose cpu_capacity is above the smallest online
+# one — never a CPU number (Qualcomm numbers slowest-first, other SoCs do not), and never only the top
+# tier (one prime core is no home for a multi-threaded emulator). PowerStation's core-count slider is
+# the POWER control and offlines the fast cores first, so with none of them online, or on a
+# homogeneous SoC, nothing is pinned. sched_ext schedulers (scx_lavd) honour the affinity mask (HW
+# 2026-10-03). It is the PLAYER's choice, never the image's: a default per emulator (Settings >
+# Emulators -> ~/.config/retroforge/emulators/<emulator>.conf, CPUS=big|all, also used by --gui) and an
+# override per game (the plugin puts --cpus big|all on that game's command line). Nothing ships
+# pinned: with neither, all cores.
+#
+# First-run settings (seed) live in the image next to emulator.json and are copied into $HOME before
+# the emulator's first start — never over an existing file, so whatever the player changes in the
+# emulator is kept. One set per emulator serves every device: InputPlumber presents each handheld's
+# joypad as the same virtual pad.
+#
+# Kept current (sync): files that are RetroForge's, not the player's, placed into the download's world --
+# PortMaster's mod_RetroForge.txt and libgl_RetroForge.txt, which every port sources from PortMaster's
+# folder. Copied from the image at every launch when missing or different (an image update must
+# reach an existing install, which a seed never would), atomically. A failed copy is a warning: the
+# emulator still starts.
+#
+# One-time installs (install): a file the PLAYER provides that the emulator must import before any
+# game runs (RPCS3's PS3 firmware). When `unless` is missing under $HOME, the emulator's binary is run
+# with `args` ("{file}" = $HOME/<from>) from the mounted download, before the game, and waited for;
+# `unless` must exist afterwards. A ROM launch whose `from` file is missing does not start the
+# emulator (it would wait on its own error dialog): it ends with exit 3 and `missing-file <emulator>
+# <from>` in the status file, so the plugin can tell the player where to put it. --gui still opens
+# without it.
+#
+# The scripts format (PortMaster) is a folder retroforge-emu unpacked under $HOME, never mounted: --gui
+# runs <root>/<binary> in place, and a game card's ROM is ITSELF a script -- a port's own launch
+# script, which PortMaster installed beside its folder -- run with bash (args, "{rom}" = the
+# script), never with exec: its mode is whatever the port's zip carried. Not installed (exit 3,
+# `not-installed`) when <root>/<binary> is not executable, for a game too: every port script sources
+# PortMaster's control files. When the run ends, every runtime a port left mounted is released: the
+# mounts RetroForge's port `mount` stand-in (/usr/lib/retroforge/portmaster/bin/mount) records in
+# $RETROFORGE_PM_MOUNTS (default $XDG_RUNTIME_DIR/retroforge-portmaster-mounts), whose squashfuse daemons
+# outlive the port's session when OGUI's Exit skips the port's own umount.
+#
+# Every AppImage format mounts the AppImage and runs its real binary; every rule below was found on
+# hardware (DuckStation, MANGMI Pocket Max, 2026-10-03) and each one cost a crash:
+#
+#   - Never exec the AppImage or its AppRun. The runtime starts AppRun, a symlink to the binary; Qt
+#     takes applicationDirPath from that path, misses usr/bin/qt.conf, finds no platform plugin and
+#     aborts. Desktops hide this with a system Qt; RetroForge has none.
+#   - OGUI stops a game with Reaper.reap(): every PID in the tree, leaves inward, gets
+#     `kill -TERM -- -PID` and then `kill -TERM PID`, each a separate command. The emulator runs in
+#     its own session, so it leads its own process group: its two signals arrive back to back and
+#     coalesce into one, as when OGUI launches it directly. Inside our group it got a second, later
+#     SIGTERM through `-<our pid>`, which DuckStation takes as "Ctrl+C again: force quit" and
+#     abort()s — a core dump and a 14 s exit.
+#   - We never forward a signal to the emulator, for the same reason: it already has OGUI's. We
+#     only survive ours (TERM, INT, HUP) and wait for it. The one exception is opt-in per
+#     definition: "exit_resend": N sends ONE more SIGTERM when the emulator is still running N s
+#     after a stop signal reached us, and SIGKILL to the emulator alone N s after that. It is for
+#     an emulator that SIGTERM does not end: OGUI's second Exit would SIGKILL the whole tree, us
+#     included, leaving a dead mount. (melonDS and Azahar used it first; their real cause was SDL
+#     catching SIGTERM, fixed with SDL_NO_SIGNAL_HANDLERS in their definitions.) Killing only the emulator, we still release the mount.
+#   - The mount runtime is in the tree too. It starts with SIGTERM ignored, or OGUI's Exit pulls the
+#     files out from under an emulator that is still shutting down. After the emulator exits it is
+#     released with SIGHUP (the runtime holds the mount busy until it exits) and fusermount3 -u.
+#   - Exit pressed twice is SIGKILL for everything, which leaves a dead mount: sweep ours first.
+#
+# core_dumps false: the emulator starts with RLIMIT_CORE 0, so systemd-coredump logs a crash in the
+# journal but stores no core. For an emulator known to crash on a normal exit (Snes9x 1.63 did, until
+# the sigdefer shim moved its exit out of its SIGTERM handler): ~14 MB per Exit otherwise.
+#
+# Exit status: the emulator's (128 + N when signal N ended it), or 2 for a bad invocation or
+# definition, 3 when the emulator is not installed or does not start (its AppImage does not mount),
+# or a one-time install cannot run or fails. OGUI runs games through its reaper and never sees this
+# status, so an exit 3 is also written to $RETROFORGE_LAUNCH_STATUS (`not-installed <emulator>`,
+# `mount-failed <emulator>`, `missing-file <emulator> <path under $HOME>` or `install-failed
+# <emulator>`), cleared at every start: the RetroForge plugin's EXIT hook reads it and tells the player
+# what to do.
+
+import json
+import secrets
+import os
+import re
+import resource
+import select
+import shutil
+import signal
+import subprocess
+import sys
+import time
+
+ENV = os.environ
+LAUNCH_CONF = ENV.get("RETROFORGE_LAUNCH_CONF", "/etc/retroforge/launch.conf")
+EMU_DATA_DIR = ENV.get("RETROFORGE_EMU_DATA_DIR", "/usr/share/retroforge/emulators")
+EMU_DIR = ENV.get("RETROFORGE_EMU_DIR", "/home/player/emulators")
+MOUNTS = ENV.get("RETROFORGE_MOUNTS", "/proc/mounts")
+CPU_ROOT = ENV.get("RETROFORGE_CPU_ROOT", "/sys/devices/system/cpu")
+HOME = ENV.get("HOME", "/home/player")
+PLAYER_CONF_DIR = ENV.get("RETROFORGE_PLAYER_CONF_DIR",
+                          os.path.join(ENV.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"),
+                                       "retroforge", "emulators"))
+STATUS = ENV.get("RETROFORGE_LAUNCH_STATUS",
+                 os.path.join(ENV.get("XDG_RUNTIME_DIR") or "/tmp", "retroforge-launch.status"))
+TMP_LINK_DIR = ENV.get("RETROFORGE_TMP_LINK_DIR", "/tmp")
+DEVICE_ENV = ENV.get("RETROFORGE_DEVICE_ENV", "/usr/lib/retroforge/device-env")
+PM_MOUNTS = ENV.get("RETROFORGE_PM_MOUNTS",
+                    os.path.join(ENV.get("XDG_RUNTIME_DIR") or "/tmp", "retroforge-portmaster-mounts"))
+SYSTEM_VULKAN_ICD = "/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json"
+UNMOUNT_TRIES = 50   # x 0.1 s for the runtime to let go of the mount after SIGHUP
+MOUNT_TIMEOUT = 30   # s for the AppImage runtime to print its mount point
+INSTALL_SETTLE = 1.0  # s to wait after an install step for OGUI's Exit to reach us too (below)
+
+USAGE = "usage: retroforge-launch [--cpus big|all] <system> <rom> | [--cpus big|all] --gui <emulator>"
+SYSTEM_ID = re.compile(r"[a-z0-9_]+")
+EMU_ID = re.compile(r"[a-z0-9_-]+")
+DEFINITION_KEYS = {"format", "root", "binary", "args", "gui_args", "system_args", "env", "seed",
+                   "sync", "install", "core_dumps", "exit_resend", "notes"}
+EXIT_RESEND_MAX = 30  # s: an exit_resend longer than this is a typo, not a plan
+SCRIPT_SHELL = "/bin/bash"  # what a scripts-format game card's script runs with
+ROM = "{rom}"
+FILE = "{file}"
+SYSTEM = "{system}"
+
+
+class Exit(Exception):
+    """Stop with this status and message (stderr)."""
+
+    def __init__(self, code, msg):
+        super().__init__(msg)
+        self.code = code
+
+
+def log(msg):
+    print(f"retroforge-launch: {msg}", file=sys.stderr, flush=True)
+
+
+# ---------------------------------------------------------------------------------- invocation --
+
+def parse_args(argv):
+    """-> (cpus or None, system or None, rom or None, emulator or None)."""
+    cpus = None
+    if argv and argv[0] == "--cpus":
+        if len(argv) < 2:
+            raise Exit(2, USAGE)
+        cpus, argv = argv[1], argv[2:]
+        if cpus not in ("big", "all"):
+            raise Exit(2, f"--cpus must be 'big' or 'all', not '{cpus}'")
+    if len(argv) != 2:
+        raise Exit(2, USAGE)
+    if argv[0] == "--gui":
+        if not EMU_ID.fullmatch(argv[1]):
+            raise Exit(2, f"bad emulator name '{argv[1]}'")
+        return cpus, None, None, argv[1]
+    system, rom = argv
+    if not SYSTEM_ID.fullmatch(system):
+        raise Exit(2, f"bad system name '{system}'")
+    if not (os.path.isfile(rom) or os.path.isdir(rom)):  # a folder: a PS3 disc dump
+        raise Exit(2, f"no such ROM: {rom}")
+    return cpus, system, rom, None
+
+
+def emulator_for(system):
+    """The last `<system>=<emulator>` line of launch.conf."""
+    found = None
+    try:
+        with open(LAUNCH_CONF, errors="replace") as f:
+            for line in f:
+                m = re.fullmatch(rf"{system}=([a-z0-9_-]*)\s*", line.rstrip("\n"))
+                if m:
+                    found = m.group(1)
+    except OSError:
+        pass
+    if not found:
+        raise Exit(2, f"no emulator for system '{system}' in {LAUNCH_CONF}")
+    return found
+
+
+# ---------------------------------------------------------------------------------- definition --
+
+def clean_str(value):
+    """A string a command line or environment can carry (no NUL, encodable)."""
+    if not isinstance(value, str) or "\0" in value:
+        return False
+    try:
+        value.encode()
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def safe_relative(path):
+    """A file path under some root: relative, normalised (no '..', '.', '//' or trailing '/')."""
+    return (clean_str(path) and path not in ("", ".") and not path.startswith("/")
+            and os.path.normpath(path) == path and ".." not in path.split("/"))
+
+
+def str_list(value):
+    return isinstance(value, list) and all(clean_str(v) for v in value)
+
+
+def load_definition(emulator):
+    path = os.path.join(EMU_DATA_DIR, emulator, "emulator.json")
+    try:
+        with open(path) as f:
+            d = json.load(f)
+    except FileNotFoundError:
+        raise Exit(2, f"missing {path}") from None
+    except (OSError, ValueError) as err:
+        raise Exit(2, f"{path} is not readable JSON: {err}") from None
+
+    def bad(why):
+        return Exit(2, f"{path}: {why}")
+
+    if not isinstance(d, dict):
+        raise bad("not a JSON object")
+    unknown = set(d) - DEFINITION_KEYS
+    if unknown:
+        raise bad(f"unknown keys {sorted(unknown)} (a definition is data; new behaviour is a format)")
+    if not isinstance(d.get("format"), str) or d["format"] not in FORMATS:
+        raise bad(f"format {d.get('format')!r} is not one of {sorted(FORMATS)}")
+    if (d["format"] == "scripts") != ("root" in d) or ("root" in d and not safe_relative(d["root"])):
+        raise bad("root (a relative folder under $HOME, without '..') is required for the scripts "
+                  "format and only for it")
+    if not safe_relative(d.get("binary")):
+        raise bad("binary must be a relative path inside the download, without '..'")
+    args = d.get("args")
+    if not str_list(args) or args.count(ROM) != 1:
+        raise bad(f'args must be a list of strings holding "{ROM}" exactly once')
+    gui_args = d.get("gui_args", [])
+    if not str_list(gui_args) or ROM in gui_args or any(SYSTEM in a for a in gui_args):
+        raise bad(f'gui_args must be a list of strings without "{ROM}" or "{SYSTEM}" (no game, no system)')
+    system_args = d.get("system_args", {})
+    if not (isinstance(system_args, dict)
+            and all(isinstance(k, str) and SYSTEM_ID.fullmatch(k) and str_list(v) and ROM not in v
+                    for k, v in system_args.items())):
+        raise bad(f'system_args must map system names to lists of strings without "{ROM}"')
+    env = d.get("env", {})
+    if not (isinstance(env, dict)
+            and all(isinstance(k, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k)
+                    and clean_str(v) for k, v in env.items())):
+        raise bad("env must map variable names to strings")
+    seed, sync = d.get("seed", []), d.get("sync", [])
+    for key, entries in (("seed", seed), ("sync", sync)):
+        # A seed may name another file for dual-screen boards (device-env declares a second panel).
+        allowed = ({"file", "to"}, {"file", "to", "dual_screen_file"}) if key == "seed" else ({"file", "to"},)
+        if not (isinstance(entries, list)
+                and all(isinstance(s, dict) and set(s) in allowed
+                        and safe_relative(s["file"]) and safe_relative(s["to"])
+                        and safe_relative(s.get("dual_screen_file", "x")) for s in entries)):
+            raise bad(f'{key} entries must be {{"file": <in the image>, "to": <path under $HOME>}}'
+                      + (', optionally "dual_screen_file": <in the image>' if key == "seed" else "")
+                      + ", all relative without '..'")
+    install = d.get("install", [])
+    if not (isinstance(install, list)
+            and all(isinstance(i, dict) and set(i) == {"from", "unless", "args"}
+                    and safe_relative(i["from"]) and safe_relative(i["unless"])
+                    and not re.search(r"\s", i["from"] + i["unless"])
+                    and str_list(i["args"]) and i["args"].count(FILE) == 1 and ROM not in i["args"]
+                    and not any(SYSTEM in a for a in i["args"])
+                    for i in install)):
+        # No whitespace: `from` goes into the space-separated status line the plugin splits.
+        raise bad('install entries must be {"from": <path under $HOME>, "unless": <path under $HOME>, '
+                  f'"args": [... "{FILE}" once, no "{ROM}" or "{SYSTEM}" ...]}}, paths relative, '
+                  "without '..' or whitespace")
+    core_dumps = d.get("core_dumps", True)
+    if not isinstance(core_dumps, bool):
+        raise bad("core_dumps must be true or false")
+    exit_resend = d.get("exit_resend")
+    if exit_resend is not None and not (isinstance(exit_resend, (int, float)) and not isinstance(exit_resend, bool)
+                                        and 0 < exit_resend <= EXIT_RESEND_MAX):
+        raise bad(f"exit_resend must be a number of seconds, more than 0 and at most {EXIT_RESEND_MAX}")
+    return {"format": d["format"], "root": d.get("root"), "binary": d["binary"], "args": args, "gui_args": gui_args,
+            "system_args": system_args, "env": env, "seed": seed, "sync": sync, "install": install, "core_dumps": core_dumps,
+            "exit_resend": exit_resend}
+
+
+def dual_screen():
+    """Whether the board has a second panel: device-env's RETROFORGE_SECONDARY_CONNECTOR is set."""
+    try:
+        out = subprocess.run([DEVICE_ENV], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    m = re.search(r"^RETROFORGE_SECONDARY_CONNECTOR=(.*)$", out, re.M)
+    return bool(m and m.group(1).strip("'\""))
+
+
+def seed_first_run(emulator, seed):
+    # Ask device-env only when a seed has a dual-screen variant.
+    dual = any("dual_screen_file" in s for s in seed) and dual_screen()
+    for s in seed:
+        dst = os.path.join(HOME, s["to"])
+        if os.path.lexists(dst):
+            continue
+        src = os.path.join(EMU_DATA_DIR, emulator, s["dual_screen_file"] if dual and "dual_screen_file" in s else s["file"])
+        if not os.path.isfile(src):
+            raise Exit(2, f"{emulator}'s emulator.json seeds {src}, which the image does not have")
+        try:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copyfile(src, dst)
+        except OSError as err:
+            raise Exit(2, f"could not seed {dst}: {err}") from None
+        log(f"first run of {emulator}: seeded {dst}{' (dual-screen board)' if dual and 'dual_screen_file' in s else ''}")
+
+
+def sync_files(emulator, sync):
+    """RetroForge's own files (sync above): the image's copy, whenever the one under $HOME differs."""
+    for s in sync:
+        src = os.path.join(EMU_DATA_DIR, emulator, s["file"])
+        dst = os.path.join(HOME, s["to"])
+        tmp = f"{dst}.retroforge-{secrets.token_hex(4)}"
+        try:
+            with open(src, "rb") as f:
+                want = f.read()
+            try:
+                with open(dst, "rb") as f:
+                    if f.read() == want:
+                        continue
+            except OSError:
+                pass
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            with open(tmp, "wb") as f:
+                f.write(want)
+            os.replace(tmp, dst)
+            log(f"{emulator}: updated {dst}")
+        except OSError as err:
+            log(f"warning: {emulator}: could not place {dst}: {err}")
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+
+# -------------------------------------------------------------------------------------- CPUs --
+
+def player_cpus(emulator):
+    """The player's default for this emulator: Settings > Emulators writes CPUS=big|all. Read,
+    never sourced: it is the player's file, and only that one key means anything in it."""
+    path = os.path.join(PLAYER_CONF_DIR, f"{emulator}.conf")
+    value = ""
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                if line.startswith("CPUS="):
+                    value = line[len("CPUS="):].rstrip("\n")
+    except OSError:
+        return "all"
+    if value in ("big", "all"):
+        return value
+    if value:
+        log(f"{path}: ignoring CPUS={value} (want big or all)")
+    return "all"
+
+
+def read_text(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def fast_cpus():
+    """Online CPUs above the smallest online capacity, as a taskset list; "" when there are none."""
+    online = read_text(os.path.join(CPU_ROOT, "online"))
+    if not online:
+        return ""
+    cpus = []
+    for part in online.split(","):
+        lo, _, hi = part.partition("-")
+        if lo.isdigit() and (hi == "" or hi.isdigit()):
+            cpus.extend(range(int(lo), int(hi or lo) + 1))
+    caps = {}
+    for c in cpus:
+        cap = read_text(os.path.join(CPU_ROOT, f"cpu{c}", "cpu_capacity"))
+        if cap and cap.isdigit():
+            caps[c] = int(cap)
+    if not caps:
+        return ""
+    low = min(caps.values())
+    return ",".join(str(c) for c in sorted(caps) if caps[c] > low)
+
+
+# ----------------------------------------------------------------------------------- formats --
+
+def fusermount(*args):
+    """fusermount3 <args>: True when it succeeded. A missing or failing helper never stops us."""
+    try:
+        return subprocess.run(["fusermount3", *args], stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, check=False).returncode == 0
+    except OSError as err:
+        log(f"fusermount3 {' '.join(args)}: {err}")
+        return False
+
+
+def read_line(fd, timeout):
+    """The first line written to fd within timeout s ("" on timeout or EOF). Raw reads: a
+    buffered readline() would block past the deadline on a partial line."""
+    deadline, data = time.monotonic() + timeout, b""
+    while b"\n" not in data:
+        left = deadline - time.monotonic()
+        if left <= 0 or not select.select([fd], [], [], left)[0]:
+            return ""
+        chunk = os.read(fd, 4096)
+        if not chunk:
+            break
+        data += chunk
+    return data.split(b"\n", 1)[0].decode(errors="replace").strip()
+
+
+def mount_table():
+    try:
+        with open(MOUNTS) as f:
+            return [line.split() for line in f]
+    except OSError:
+        return []
+
+
+class AppImage:
+    """An AppImage, mounted for the run (`<image> --appimage-mount`), its binary run from the mount."""
+
+    def __init__(self, emulator, image):
+        self.emulator, self.image = emulator, image
+        self.runtime = None
+        self.mnt = None
+
+    def sweep_stale(self):
+        # A mount of OUR AppImage: the classic runtime names its FUSE filesystem after the file
+        # `current` points at (type fuse.<file>); pkgforge-dev's runtime serves it with a separate
+        # dwarfs process (type fuse.dwarfs, source = the AppImage's path), which outlives a killed
+        # launcher and runtime and keeps the mount (HW 2026-10-05).
+        real = os.path.realpath(self.image)
+        fstype = "fuse." + os.path.basename(real)
+        for fields in mount_table():
+            if len(fields) > 2 and (fields[2] == fstype or fields[0] == real):
+                log(f"releasing stale mount {fields[1]}")
+                fusermount("-uz", fields[1])
+
+    def prepare(self):
+        """Mount; -> the root the definition's binary is relative to. Exit(3) when it fails."""
+        self.sweep_stale()
+        # The runtime must start with SIGTERM ignored (it keeps that disposition across exec);
+        # the launcher's own no-op handler goes back right after, so it never dies of one either.
+        handler = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        try:
+            self.runtime = subprocess.Popen([self.image, "--appimage-mount"],
+                                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE)
+        except OSError as err:
+            raise Exit(3, f"{self.image} did not mount: {err}") from None
+        finally:
+            signal.signal(signal.SIGTERM, handler)
+        deadline = time.monotonic() + MOUNT_TIMEOUT
+        line = read_line(self.runtime.stdout.fileno(), MOUNT_TIMEOUT)
+        if not line:
+            raise Exit(3, f"{self.image} did not mount")
+        self.mnt = line
+        # RPCS3's runtime (DwarFS) prints the mount point before its filesystem is up: wait for the
+        # mount itself, not just the line (it failed 9 ms in otherwise, HW 2026-10-07 Pocket FIT).
+        while not (self.mounted() and os.path.isdir(line)):
+            if time.monotonic() > deadline or self.runtime.poll() is not None:
+                raise Exit(3, f"{self.image} did not mount at {line}")
+            time.sleep(0.05)
+        return self.mnt
+
+    def env(self):
+        return {}
+
+    def mounted(self):
+        return any(len(fields) > 1 and fields[1] == self.mnt for fields in mount_table())
+
+    def release(self):
+        """Undo prepare(), however far it got. Never raises: the emulator's status must survive."""
+        if not self.runtime:
+            return
+        if self.mnt is None:  # the mount never came up
+            self.runtime.kill()
+            return
+        try:
+            self.runtime.send_signal(signal.SIGHUP)
+        except ProcessLookupError:
+            pass
+        for _ in range(UNMOUNT_TRIES):
+            if not self.mounted() or fusermount("-u", self.mnt):
+                break
+            time.sleep(0.1)
+        if self.mounted():
+            log(f"{self.mnt} still busy; the next launch sweeps it")
+
+
+class SharunAppImage(AppImage):
+    """pkgforge-dev's "anylinux" AppImages (Dolphin, mGBA, Azahar, ...; PPSSPP's official one is
+    built with the same tooling): a sharun bundle with its own loader, libraries and Mesa. Two
+    things its AppRun would do, which we never run (one of its hooks is a self-updater that would
+    replace the pinned AppImage):
+
+    - Paths the program hardcodes (Dolphin's data dir, holding Sys: fonts, per-game settings) are
+      rewritten to random /tmp/<name> paths that bin/01-path-mapping-hardcoded.hook links to the
+      mounted bin, lib or share. We make the same links, reading the hook as data: only
+      `_tmp_<dir>=<letters>` lines. Without them Dolphin 2609 ran with no Sys folder ("Trying to
+      access Windows-1252 fonts", HW 2026-10-05).
+    - Vulkan: sharun points the loader at the bundled drivers unless SHARUN_ALLOW_SYS_VKICD=1. Every
+      emulator runs on the image's Turnip (Dolphin 2609 bundles an older Mesa).
+
+    The self-updater hook never runs here (only AppRun sources hooks, and it also needs $APPIMAGE,
+    which only the runtime sets for AppRun); DISABLE_AUTO_UPDATES=1, the hook's own off switch,
+    keeps it off should a later build run its hooks some other way: RetroForge pins every version.
+    """
+
+    # The hook's name depends on the build tooling's age: PPSSPP's own anylinux build ships it as a
+    # .src.hook (sourced by AppRun), pkgforge-dev's repackagings as a plain .hook. Same content.
+    HOOKS = ("bin/01-path-mapping-hardcoded.hook", "bin/01-path-mapping-hardcoded.src.hook")
+    HOOK_LINE = re.compile(r'_tmp_(bin|lib|share)="?([A-Za-z0-9]+)"?')
+
+    def __init__(self, emulator, image):
+        super().__init__(emulator, image)
+        self.links = []
+
+    def prepare(self):
+        root = super().prepare()
+        self.link_hardcoded_paths(root)
+        return root
+
+    def link_hardcoded_paths(self, root):
+        lines = []
+        for hook in self.HOOKS:
+            try:
+                with open(os.path.join(root, hook), errors="replace") as f:
+                    lines = f.read().splitlines()
+                break
+            except OSError:
+                continue
+        for line in lines:
+            m = self.HOOK_LINE.fullmatch(line)
+            if m:
+                self.link(os.path.join(TMP_LINK_DIR, m.group(2)), os.path.join(root, m.group(1)))
+
+    def link(self, link, target):
+        # /tmp is shared: only ever replace an entry of our own, and only a symlink.
+        try:
+            st = os.lstat(link)
+        except FileNotFoundError:
+            st = None
+        except OSError as err:
+            log(f"cannot check {link}: {err}")
+            return
+        if st is not None and (not os.path.islink(link) or st.st_uid != os.getuid()):
+            log(f"{link} exists and is not a link of ours: {self.emulator} runs without "
+                f"{os.path.basename(target)} files from its download")
+            return
+        tmp = f"{link}.retroforge-{secrets.token_hex(8)}"
+        try:
+            os.symlink(target, tmp)
+            os.replace(tmp, link)
+            self.links.append((link, target))
+        except OSError as err:
+            log(f"could not link {link} to {target}: {err}")
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+
+    def release(self):
+        for link, target in self.links:  # ours, if no later launch took it over
+            try:
+                if os.readlink(link) == target:
+                    os.unlink(link)
+            except OSError:
+                pass
+        super().release()
+
+    def env(self):
+        return {"SHARUN_ALLOW_SYS_VKICD": "1", "VK_DRIVER_FILES": SYSTEM_VULKAN_ICD,
+                "DISABLE_AUTO_UPDATES": "1"}
+
+
+class Scripts:
+    """A folder of scripts retroforge-emu unpacked under $HOME (PortMaster): nothing to mount; a game is
+    a script of its own (see the scripts format above)."""
+
+    runs_rom = True
+
+    def __init__(self, emulator, root):
+        self.emulator, self.root = emulator, root
+
+    def prepare(self):
+        return self.root
+
+    def env(self):
+        return {}
+
+    def release(self):
+        """Release every runtime mount the port `mount` stand-in recorded (see above). Never raises."""
+        try:
+            with open(PM_MOUNTS) as f:
+                entries = [line.rstrip("\n").split("\t", 1)[0] for line in f if line.strip()]
+        except OSError:
+            return
+        live = {fields[1].replace("\\040", " ") for fields in mount_table() if len(fields) > 1}
+        for dst in dict.fromkeys(entries):
+            if dst in live:
+                log(f"releasing {dst}, left mounted by the port")
+                try:
+                    subprocess.run(["fusermount", "-u", "-z", dst], stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL, check=False)
+                except OSError as err:
+                    log(f"fusermount -u {dst}: {err}")
+        try:
+            open(PM_MOUNTS, "w").close()
+        except OSError:
+            pass
+
+
+AppImage.runs_rom = False
+FORMATS = {"appimage": AppImage, "appimage-sharun": SharunAppImage, "scripts": Scripts}
+
+
+# ---------------------------------------------------------------------------------------- run --
+
+def fail(reason, emulator, msg, detail=None):
+    """An exit-3 failure the plugin reports to the player."""
+    try:
+        with open(STATUS, "w") as f:
+            f.write(f"{reason} {emulator}{' ' + detail if detail else ''}\n")
+    except OSError:
+        pass
+    raise Exit(3, msg)
+
+
+def missing_installs(emulator, install, is_game):
+    """The install steps still to run; a game launch whose provided file is absent fails here."""
+    todo = []
+    for step in install:
+        if os.path.exists(os.path.join(HOME, step["unless"])):
+            continue
+        if not os.path.isfile(os.path.join(HOME, step["from"])):
+            if is_game:
+                fail("missing-file", emulator, f"{emulator} needs ~/{step['from']} (not found)",
+                     step["from"])
+            log(f"{emulator}: ~/{step['from']} not found, skipping its install")
+            continue
+        todo.append(step)
+    return todo
+
+
+def run_installs(emulator, binary, env, todo, interrupted):
+    for step in todo:
+        src = os.path.join(HOME, step["from"])
+        args = [src if a == FILE else a for a in step["args"]]
+        log(f"{emulator}: installing ~/{step['from']}: {binary} {' '.join(args)}")
+        try:
+            # No core file: a one-time helper run, and RPCS3's installer aborts in a destructor
+            # after a successful install; dumping its address space held the launch ~1 min
+            # (HW 2026-10-07, Pocket FIT).
+            rc = subprocess.run([binary] + args, env=env, start_new_session=True,
+                                preexec_fn=no_core_dumps).returncode
+        except (OSError, ValueError) as err:
+            fail("install-failed", emulator, f"could not run {binary}: {err}")
+        # OGUI's Exit reached the install (and us): the player left. Never start the game after
+        # that, and leave no status: there is nothing to tell them. reap() signals leaves first, so
+        # an install that ends on SIGTERM returns BEFORE our own signal arrives: give it a moment
+        # (once per emulator, ever). How the installer itself ended says nothing about that: it
+        # may crash on its way out after a good install, so only our own signals mean "Exit".
+        deadline = time.monotonic() + INSTALL_SETTLE
+        while not interrupted and time.monotonic() < deadline:
+            time.sleep(0.05)
+        if interrupted:
+            raise Exit(128 + interrupted[0],
+                       f"{emulator}: install of ~/{step['from']} interrupted; not starting the game")
+        if not os.path.exists(os.path.join(HOME, step["unless"])):
+            fail("install-failed", emulator,
+                 f"installing ~/{step['from']} failed (exit {rc}, no ~/{step['unless']})")
+        if rc != 0:
+            log(f"{emulator}: the install of ~/{step['from']} ended with {rc}, but "
+                f"~/{step['unless']} is there: installed")
+
+
+def no_core_dumps():
+    """In the emulator's child, before exec: no core file (core_dumps false)."""
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+
+def pinning(emulator, cpus):
+    """`taskset -c <fast cpus>` when this run goes on the fast cores, else []."""
+    if (cpus or player_cpus(emulator)) != "big":
+        return []
+    fast = fast_cpus()
+    if not fast:
+        log("no fast core online (core-count limit, or one core type): not pinning")
+        return []
+    log(f"pinning {emulator} to fast cores {fast}")
+    return ["taskset", "-c", fast]
+
+
+def run(argv):
+    cpus, system, rom, emulator = parse_args(argv)
+    if emulator is None:
+        emulator = emulator_for(system)
+    definition = load_definition(emulator)
+    # One emulator can serve several systems (mGBA: gb, gbc, gba) with per-system folders.
+    args = ([rom if a == ROM else a.replace(SYSTEM, system)
+             for a in definition["system_args"].get(system, []) + definition["args"]]
+            if rom is not None else definition["gui_args"])
+
+    if definition["root"] is not None:  # the scripts format: the unpacked folder itself
+        image = os.path.join(HOME, definition["root"])
+        installed = os.path.join(image, definition["binary"])
+    else:
+        image = installed = os.path.join(EMU_DIR, emulator, "current")
+    if not os.access(installed, os.X_OK):
+        fail("not-installed", emulator, f"{emulator} is not installed ({installed} missing or not executable)")
+    seed_first_run(emulator, definition["seed"])
+    sync_files(emulator, definition["sync"])
+    todo = missing_installs(emulator, definition["install"], rom is not None)
+    pin = pinning(emulator, cpus)
+
+    # From here on, survive our own signals (OGUI's Exit reaches us too) and wait: never forward
+    # them. Caught signals go back to default in the emulator at exec.
+    interrupted = []  # signals seen: only the one-time install step acts on them
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, lambda signum, _: interrupted.append(signum))
+    package = FORMATS[definition["format"]](emulator, image)
+    try:
+        try:
+            root = package.prepare()
+        except Exit as err:
+            fail("mount-failed", emulator, str(err))
+        binary = os.path.join(root, definition["binary"])
+        env = {**ENV, **package.env(), **definition["env"]}
+        run_installs(emulator, binary, env, todo, interrupted)
+        program = SCRIPT_SHELL if package.runs_rom and rom is not None else binary
+        log(f"{system or 'gui'} -> {emulator}: {program} {' '.join(args)}")
+        try:
+            # Its own session; taskset execs, so the emulator keeps this PID and leads it.
+            emu = subprocess.Popen(pin + [program] + args, env=env, start_new_session=True,
+                                   preexec_fn=None if definition["core_dumps"] else no_core_dumps)
+        except (OSError, ValueError) as err:
+            fail("mount-failed", emulator, f"could not start {binary}: {err}")
+        rc = wait_emulator(emu, definition["exit_resend"], interrupted)
+        return 128 - rc if rc < 0 else rc
+    finally:
+        package.release()
+
+
+def wait_emulator(emu, resend_after, interrupted):
+    """The emulator's exit status. With exit_resend: once a stop signal reached us (OGUI's Exit
+    signals the whole tree) and the emulator still runs resend_after seconds later, it gets ONE
+    more SIGTERM, and SIGKILL resend_after seconds after that; we stay to release the mount."""
+    if not resend_after:
+        return emu.wait()
+    seen, since, escalation = len(interrupted), None, [(signal.SIGTERM, "one more SIGTERM"),
+                                                       (signal.SIGKILL, "SIGKILL")]
+    while True:
+        try:
+            return emu.wait(timeout=0.1)
+        except subprocess.TimeoutExpired:
+            pass
+        if since is None:
+            if len(interrupted) > seen:
+                since = time.monotonic()
+        elif escalation and time.monotonic() - since >= resend_after:
+            sig, what = escalation.pop(0)
+            log(f"the emulator still runs {resend_after} s after the stop: {what} (exit_resend)")
+            try:
+                emu.send_signal(sig)
+            except ProcessLookupError:
+                pass
+            since = time.monotonic()
+
+
+def main():
+    try:
+        os.unlink(STATUS)
+    except OSError:
+        pass
+    try:
+        return run(sys.argv[1:])
+    except Exit as err:
+        log(str(err))
+        return err.code
+    except Exception as err:  # a bug here must still end with a message, not a silent hang
+        log(f"internal error: {type(err).__name__}: {err}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

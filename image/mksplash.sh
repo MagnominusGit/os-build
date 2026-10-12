@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# qforge splash asset builder -> work/splash/logo.nds1
+# retroforge splash asset builder -> work/splash/logo.nds1
 #
 # Rasterises image/splash/logo.svg and flattens it to the raw NDS1 container that
-# qforge-splash loads (apps/qforge-splash). Two steps, both host-native and both at BUILD
+# retroforge-splash loads (apps/retroforge-splash). Two steps, both host-native and both at BUILD
 # time, on purpose:
 #
 #   logo.svg --rsvg-convert--> logo.png --image/png2nds1.py--> logo.nds1
@@ -25,7 +25,7 @@
 #   rootfs/assemble-rootfs.sh -> the copy in the sealed root (the session and shutdown drawers)
 #
 # Run inside the build image (needs rsvg-convert + python3):
-#   docker run --rm -v "$PWD":/src -w /src qforge-build image/mksplash.sh
+#   docker run --rm -v "$PWD":/src -w /src retroforge-build image/mksplash.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -37,8 +37,8 @@ NDS="$OUTDIR/logo.nds1"
 # Square render box, sized so the drawer NEVER scales up: upscaling a raster logo softens it and
 # the star's thin points show it first.
 #
-# qforge-splash draws the logo at LOGO_NUM/LOGO_DEN of the canvas's SHORT edge (auto_logo_px()
-# in apps/qforge-splash/src/qforge-splash.c), so the largest size it can ever ask for is that
+# retroforge-splash draws the logo at LOGO_NUM/LOGO_DEN of the canvas's SHORT edge (auto_logo_px()
+# in apps/retroforge-splash/src/retroforge-splash.c), so the largest size it can ever ask for is that
 # fraction of the largest short edge in the device registry. Rendering the full short edge, as an
 # earlier iteration did, produced an 8 MB asset to draw a 480px logo.
 #
@@ -51,11 +51,11 @@ LOGO_DEN=1080
 HEADROOM_PCT=20    # covers a --logo-height override and a slightly larger future panel
 RENDER_PX=768
 
-DEVDIR="$ROOT/rootfs/overlay/usr/lib/qforge/devices"
+DEVDIR="$ROOT/rootfs/overlay/usr/lib/retroforge/devices"
 if [ -d "$DEVDIR" ]; then
   # The registry is the source of truth for how large this has to be. Reading it here means
   # adding a wider panel fails the BUILD rather than shipping a blurry logo nobody notices.
-  widest=$(grep -h '^[[:space:]]*QFORGE_PANEL_NATIVE_WIDTH=' "$DEVDIR"/*.conf 2>/dev/null \
+  widest=$(grep -h '^[[:space:]]*RETROFORGE_PANEL_NATIVE_WIDTH=' "$DEVDIR"/*.conf 2>/dev/null \
            | sed 's/.*=//; s/[^0-9]//g' | sort -n | tail -1)
   if [ -n "$widest" ]; then
     need=$(( widest * LOGO_NUM / LOGO_DEN ))
@@ -72,9 +72,9 @@ fi
 
 [ -f "$SVG" ] || { echo "no splash source: ${SVG#"$ROOT"/}" >&2; exit 1; }
 command -v rsvg-convert >/dev/null 2>&1 \
-  || { echo "rsvg-convert not found (run inside qforge-build)" >&2; exit 1; }
+  || { echo "rsvg-convert not found (run inside retroforge-build)" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 \
-  || { echo "python3 not found (run inside qforge-build)" >&2; exit 1; }
+  || { echo "python3 not found (run inside retroforge-build)" >&2; exit 1; }
 
 mkdir -p "$OUTDIR"
 
@@ -88,4 +88,4 @@ rsvg-convert --background-color=none \
 python3 "$ROOT/image/png2nds1.py" "$PNG" "$NDS"
 [ -s "$NDS" ] || { echo "png2nds1 produced an empty asset" >&2; exit 1; }
 
-echo "[qforge] splash: ${SVG#"$ROOT"/} -> ${NDS#"$ROOT"/} (${RENDER_PX}px, $(du -h "$NDS" | cut -f1))"
+echo "[retroforge] splash: ${SVG#"$ROOT"/} -> ${NDS#"$ROOT"/} (${RENDER_PX}px, $(du -h "$NDS" | cut -f1))"

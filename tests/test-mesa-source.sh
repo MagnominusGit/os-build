@@ -68,7 +68,7 @@ echo
 echo "the mirror hash stays out of the lock"
 
 # 8. mirror.pin must be its OWN file. packages/inputhash.sh hashes source.pin (comments included)
-#    into manifest.lock's qforge rows, so a mirror hash living there would force a full
+#    into manifest.lock's retroforge rows, so a mirror hash living there would force a full
 #    `make relock` -- a re-resolve of every package -- for a value that cannot change the build.
 grep -q '^sha512:' "$MIRROR_PIN" \
     && ok "the mirror hash lives in mirror.pin" \

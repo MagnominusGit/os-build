@@ -42,7 +42,7 @@ index 8672ae7..e237630 100644
  			g_ColorMgmt.pending.outputVirtualWhite.y = santitize_float( bit_cast<float>( user_vec[1] ) );
 +
 +#if defined(__aarch64__)
-+			// qforge: the arm64 Steam client hits the same Xlib format=32 LP64 packing fault
++			// retroforge: the arm64 Steam client hits the same Xlib format=32 LP64 packing fault
 +			// documented at length on GAMESCOPE_COLOR_NIGHT_MODE above. The client hands
 +			// XChangeProperty a float[2] {x, y} -- 8 bytes -- and Xlib reads two 8-byte longs
 +			// off it, transmitting the low half of each:

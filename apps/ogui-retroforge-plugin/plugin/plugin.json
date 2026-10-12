@@ -1,0 +1,13 @@
+{
+  "plugin.id": "retroforge",
+  "plugin.name": "RetroForge",
+  "plugin.version": "0.1.43",
+  "plugin.min-api-version": "2.0.0",
+  "plugin.link": "https://github.com/loki666/retroforge",
+  "plugin.source": "https://github.com/loki666/retroforge/tree/main/apps/ogui-retroforge-plugin",
+  "plugin.description": "ROM library and emulator manager for RetroForge",
+  "author": "RetroForge",
+  "entrypoint": "plugin.gd",
+  "store.tags": ["library"],
+  "store.images": []
+}

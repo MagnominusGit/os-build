@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Offline test for the remote-access path: /usr/bin/qforge-pairingd and its unit.
+# Offline test for the remote-access path: /usr/bin/retroforge-pairingd and its unit.
 #
 #   tests/test-pairingd.sh
 #
@@ -17,8 +17,8 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DAEMON="$ROOT/rootfs/overlay/usr/bin/qforge-pairingd"
-UNIT="$ROOT/rootfs/overlay/usr/lib/systemd/system/qforge-pairingd.service"
+DAEMON="$ROOT/rootfs/overlay/usr/bin/retroforge-pairingd"
+UNIT="$ROOT/rootfs/overlay/usr/lib/systemd/system/retroforge-pairingd.service"
 
 PASS=0; FAIL=0; SKIP=0; CASE=""
 ok()   { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
@@ -245,8 +245,8 @@ if grep -q '^WantedBy=multi-user.target' "$UNIT"; then
 else
   bad "unit has no WantedBy=multi-user.target: pairing would not start at boot"
 fi
-if grep -qx 'enable qforge-pairingd.service' "$ROOT/rootfs/overlay/usr/lib/systemd/system-preset/60-qforge-pairingd.preset" 2>/dev/null \
-   && [ -L "$ROOT/rootfs/overlay/etc/systemd/system/multi-user.target.wants/qforge-pairingd.service" ]; then
+if grep -qx 'enable retroforge-pairingd.service' "$ROOT/rootfs/overlay/usr/lib/systemd/system-preset/60-retroforge-pairingd.preset" 2>/dev/null \
+   && [ -L "$ROOT/rootfs/overlay/etc/systemd/system/multi-user.target.wants/retroforge-pairingd.service" ]; then
   ok "preset + wants symlink both enable pairingd"
 else
   bad "pairingd is missing its preset or its multi-user.target.wants symlink"
@@ -286,7 +286,7 @@ else
   want="/org/freedesktop/resolve1/dnssd/$escaped"
   # Read the path back OUT of the unit and compare exactly, rather than grepping for the expected
   # one: a substring match passes when the id is a PREFIX of what the unit unregisters (shortening
-  # 'qforge-pairing' to 'qforge-pair' still "matched"), which is precisely the drift this
+  # 'retroforge-pairing' to 'retroforge-pair' still "matched"), which is precisely the drift this
   # guards and the loosest possible spelling of it.
   have="$(sed -n 's|^ExecStopPost=.*UnregisterService o \([^ ]*\).*|\1|p' "$UNIT")"
   if [ "$have" = "$want" ]; then
@@ -360,7 +360,7 @@ fi
 
 # The service file publishing was moved off. Left in the overlay it is dead weight that reads as
 # live configuration, and it is the thing an ExecStartPre would be re-pointed at.
-if [ -e "$ROOT/rootfs/overlay/usr/share/qforge/pairing.avahi-service" ]; then
+if [ -e "$ROOT/rootfs/overlay/usr/share/retroforge/pairing.avahi-service" ]; then
   bad "pairing.avahi-service is still in the overlay — publishing moved to the resolve1 bus, nothing reads that file"
 else
   ok "the avahi service file is gone from the overlay"

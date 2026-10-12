@@ -1,22 +1,22 @@
 # Installing to internal storage
 
-QForge normally runs from the SD card you flashed it to. The **installer medium** puts it on the
+RetroForge normally runs from the SD card you flashed it to. The **installer medium** puts it on the
 device's own internal storage instead, alongside Android — so the device boots with no card in it,
 and the slot is free.
 
 > **Using that free slot as a ROM library is not wired up yet.** A hot-inserted card is mounted
-> through udisks by the storage scripts under `/usr/lib/qforge/storage/`, but no shell uses it as a
+> through udisks by the storage scripts under `/usr/lib/retroforge/storage/`, but no shell uses it as a
 > library yet; that arrives with the shell.
 
-> **There is no QForge update server yet, so a medium built today cannot complete an install.** The
-> installer downloads the OS from the same host `qforge-update` uses, and that default is the
-> placeholder `https://updates.qforge.invalid` — written into `installer/netcfg`,
-> `installer/release-info` and `qforge-update`, which `tests/test-ui.sh` asserts agree. A placeholder
+> **There is no RetroForge update server yet, so a medium built today cannot complete an install.** The
+> installer downloads the OS from the same host `retroforge-update` uses, and that default is the
+> placeholder `https://updates.retroforge.invalid` — written into `installer/netcfg`,
+> `installer/release-info` and `retroforge-update`, which `tests/test-ui.sh` asserts agree. A placeholder
 > never resolves, so the **Network** screen stops at "could not be resolved (DNS)". Setting up a
 > server is described in [ota.md](ota.md); once one exists, those three literals name it.
 
 It is a separate image from the card: a self-contained recovery tool that boots on the handheld,
-draws its own screens on the panel, and is driven with the gamepad. It downloads the current QForge
+draws its own screens on the panel, and is driven with the gamepad. It downloads the current RetroForge
 release while you watch — the OS is the only thing it needs from the network — and gives the new
 `/home` an empty `player` home, laid out by the same `image/lib-homestage.sh` a card uses.
 
@@ -38,7 +38,7 @@ chooser, so the device keeps both systems.
 
 **Android's user data is destroyed.** Apps, saves, photos — everything in its `userdata` partition.
 There is no way around it: `userdata` cannot be shrunk in place, so the installer deletes it,
-recreates it at the size you choose, and appends QForge's eight partitions into the space that
+recreates it at the size you choose, and appends RetroForge's eight partitions into the space that
 frees. You choose how much Android keeps, on screen, before anything is written.
 
 **Nothing outside that span is touched.** The safety property is geometric, not a list of names:
@@ -48,7 +48,7 @@ outside it and are safe by construction, on any layout — including boards nobo
 
 **Your SD card is never written to.** Removable media is refused as a target outright.
 
-**On a device that already runs QForge**, the installer replaces it completely, **including
+**On a device that already runs RetroForge**, the installer replaces it completely, **including
 `/home`** — your games, saves and settings. A repair that keeps `/home` is not offered yet; the
 pre-flight screen says so in as many words rather than implying otherwise.
 
@@ -68,7 +68,7 @@ than to a card, so the card only has to be big enough to hold it.
 
 ### 2. Put your Wi-Fi on it — this is the mechanism, not a fallback
 
-**The installer downloads QForge over the network and cannot ask you for a password.** These
+**The installer downloads RetroForge over the network and cannot ask you for a password.** These
 devices have no keyboard and no guaranteed touchscreen, so the credentials come from a file you
 write on another computer, before you boot.
 
@@ -76,8 +76,8 @@ Plug the card into a PC or Mac. Its first partition mounts as **NDINSTALLER** �
 deliberately *not* an EFI System Partition, because Windows and macOS hide those. Inside it:
 
 ```
-qforge/wifi.conf.example     <- copy this
-qforge/wifi.conf             <- to this, and edit it
+retroforge/wifi.conf.example     <- copy this
+retroforge/wifi.conf             <- to this, and edit it
 ```
 
 ```ini
@@ -99,7 +99,7 @@ Put the card in and select **Linux** in the bootloader menu. Linux mode tries **
 falls back to the card, and the test is on what is actually there — so on a device that has only
 ever run Android there is nothing internal to find and it boots the card unaided.
 
-**On a device that already has QForge (or another Linux) on its internal storage, the card is not
+**On a device that already has RetroForge (or another Linux) on its internal storage, the card is not
 picked up: internal wins.** Use the bootloader's **force external** option. That is the recovery
 procedure for an internal install, and it is the only way back to the installer once one exists.
 
@@ -121,7 +121,7 @@ simply run it again; after it, internal wins and you need force external.
    the clock to be set from the network — move on with no press. A wired adapter plugged in at any
    point is noticed the same way.
 3. **Pre-flight** — the target disk, its model and size, what Android keeps (**left/right to
-   change**), what QForge gets, **every partition that will be destroyed, by index and name**, and
+   change**), what RetroForge gets, **every partition that will be destroyed, by index and name**, and
    what will be downloaded (the release version, its size, and the host it comes from). Every figure
    here is measured by the same programs that will act on it, never derived a second time.
 4. **Consent** — a random four-button sequence, drawn as positions on a diamond and echoed back.
@@ -145,7 +145,7 @@ The installer picks its own target and will not be argued with. What it says, an
 | `removable media is never an install target` | That is the card you booted from. |
 | `partition N (ROCKNIX) is a bootable ESP that is not ours` | Another distribution is installed on that disk. Remove it first — the installer will not take a disk it does not understand. |
 | `no partition named 'userdata' -- this board is not supported yet` | Nothing on the disk is safe to shrink. |
-| `userdata and the free space after it total N GiB` | Not enough room for both Android and QForge. |
+| `userdata and the free space after it total N GiB` | Not enough room for both Android and RetroForge. |
 | `sgdisk reports GPT problems` / `the GPT is damaged or absent` | The partition table is not readable. A damaged table is refused rather than repaired: "damaged" and "a layout we do not understand" cannot be told apart from here. |
 | *(no target at all, on a device booted from internal storage)* | The disk the running system is on is never a candidate. Boot from the card. |
 
@@ -155,7 +155,7 @@ A refusal always names the disk and the reason. There is no override flag, delib
 
 ## When it fails
 
-**Power-cycle the device, pull the card, and read `qforge-install.log`** in the root of the
+**Power-cycle the device, pull the card, and read `retroforge-install.log`** in the root of the
 NDINSTALLER partition on any computer.
 
 The log is written when the installer's unit *stops*, so a running installer has not produced one
@@ -166,7 +166,7 @@ the kernel ring, and the install record.
 If the installer itself could not start, the panel drops to a console showing the tail of that same
 log and naming where the full copy is.
 
-To boot the medium without its GUI — a shell on tty1 instead — add `qforge.install.debug` to the
+To boot the medium without its GUI — a shell on tty1 instead — add `retroforge.install.debug` to the
 kernel command line from the boot menu.
 
 **A failure after consent leaves a device that is not bootable into either OS.** The installer says
@@ -214,9 +214,9 @@ it. It checks the partition table, the boot partition, that the boot config addr
 PARTUUID, the root, the build identity, and whether the medium can actually install: every file the
 install path resolves at runtime, and the session unit being enabled while the `OnFailure=` console
 unit is not. It also refuses a release medium pinned to a channel other than `stable`
-(`QFORGE_OTA_CHANNEL` at `mkroot.sh` time writes that pin into the medium's `/etc/qforge/ota.conf`).
+(`RETROFORGE_OTA_CHANNEL` at `mkroot.sh` time writes that pin into the medium's `/etc/retroforge/ota.conf`).
 
-**A dev medium fails verification** unless you pass `QFORGE_INSTALLER_ALLOW_DEV=1`, because it
+**A dev medium fails verification** unless you pass `RETROFORGE_INSTALLER_ALLOW_DEV=1`, because it
 bakes an `authorized_keys` and a Wi-Fi PSK and must never be the one that gets published. Build one
 with `source dev.env` — it is what makes live diagnosis over SSH possible on a hardware trip.
 
@@ -233,7 +233,7 @@ installer/hw-install.sh       root@<device>   # stages, pre-flights, and PRINTS 
 
 ## What it deliberately does not do
 
-- **No repair that keeps `/home`.** A disk that already carries QForge gets a full replacement. The
+- **No repair that keeps `/home`.** A disk that already carries RetroForge gets a full replacement. The
   screen says so; the size control is what would distinguish the two, and asking for a different
   split *is* a fresh install by definition.
 - **No backups.** A plain-text record of the pre-state is written to the medium when it is writable,

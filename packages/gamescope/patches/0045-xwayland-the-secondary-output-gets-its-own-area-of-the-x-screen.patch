@@ -1,4 +1,4 @@
-From: qforge
+From: retroforge
 Subject: [PATCH] xwayland: the secondary output gets its own area of the X screen
 
 Windows on the secondary output (0041) stayed at 0,0 of their X screen,
@@ -20,7 +20,7 @@ root_width/height in steamcompmgr keep meaning the main output's area,
 which every fullscreen and placement rule sizes windows to, and focus
 windows are composited regardless of their X origin.
 
-(qforge: dual-screen boards, 2026-10-12.)
+(retroforge: dual-screen boards, 2026-10-12.)
 ---
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
 index af0f7e7..e8565de 100644

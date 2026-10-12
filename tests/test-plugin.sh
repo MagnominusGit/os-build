@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Offline test for the QForge OpenGamepadUI plugin's packaging (plan Phase 4).
+# Offline test for the RetroForge OpenGamepadUI plugin's packaging (plan Phase 4).
 #
 #   tests/test-plugin.sh
 #
@@ -15,8 +15,8 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SRC="$ROOT/apps/ogui-qforge-plugin/plugin"
-BUILD="$ROOT/apps/ogui-qforge-plugin/build.sh"
+SRC="$ROOT/apps/ogui-retroforge-plugin/plugin"
+BUILD="$ROOT/apps/ogui-retroforge-plugin/build.sh"
 OGUI_API="2.0.0"   # PluginLoader.PLUGIN_API_VERSION in the pinned OGUI (packages/opengamepadui)
 
 PASS=0; FAIL=0; CASE=""
@@ -36,7 +36,7 @@ python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$SRC/plugin.json" 2>
 for field in plugin.id plugin.name plugin.version plugin.min-api-version entrypoint; do
   [ -n "$(meta "$field")" ] && ok "has $field (PluginLoader requires it)" || bad "lacks $field: OGUI skips the plugin"
 done
-[ "$(meta plugin.id)" = qforge ] && ok "id is qforge (the zip must be qforge.zip)" || bad "id is '$(meta plugin.id)'"
+[ "$(meta plugin.id)" = retroforge ] && ok "id is retroforge (the zip must be retroforge.zip)" || bad "id is '$(meta plugin.id)'"
 [[ $(meta plugin.version) =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] && ok "version is semver (upgrades compare it)" || bad "version '$(meta plugin.version)' is not x.y.z"
 # SemanticVersion.is_feature_compatible: same major, and min-api minor/patch not above OGUI's.
 api="$(meta plugin.min-api-version)"
@@ -60,25 +60,25 @@ grep -q '^extends Plugin$' "$SRC/$(meta entrypoint)" && ok "the entrypoint exten
 
 # =================================================================================================
 CASE="zip"
-"$BUILD" "$T" >/dev/null && [ -f "$T/qforge.zip" ] && ok "build.sh writes qforge.zip" || bad "build.sh failed"
-sum1="$(sha256sum "$T/qforge.zip" | cut -d' ' -f1)"
-mapfile -t files < <(python3 -c 'import sys,zipfile; print("\n".join(zipfile.ZipFile(sys.argv[1]).namelist()))' "$T/qforge.zip")
-want=(); for f in "$SRC"/*; do want+=("plugins/qforge/$(basename "$f")"); done
+"$BUILD" "$T" >/dev/null && [ -f "$T/retroforge.zip" ] && ok "build.sh writes retroforge.zip" || bad "build.sh failed"
+sum1="$(sha256sum "$T/retroforge.zip" | cut -d' ' -f1)"
+mapfile -t files < <(python3 -c 'import sys,zipfile; print("\n".join(zipfile.ZipFile(sys.argv[1]).namelist()))' "$T/retroforge.zip")
+want=(); for f in "$SRC"/*; do want+=("plugins/retroforge/$(basename "$f")"); done
 [ "$(printf '%s\n' "${files[@]}" | sort)" = "$(printf '%s\n' "${want[@]}" | sort)" ] \
-  && ok "holds exactly plugin/* under plugins/qforge/ (where PluginLoader looks)" \
+  && ok "holds exactly plugin/* under plugins/retroforge/ (where PluginLoader looks)" \
   || bad "zip contents: ${files[*]}"
 "$BUILD" "$T" >/dev/null
-[ "$(sha256sum "$T/qforge.zip" | cut -d' ' -f1)" = "$sum1" ] \
+[ "$(sha256sum "$T/retroforge.zip" | cut -d' ' -f1)" = "$sum1" ] \
   && ok "rebuilding gives the same bytes (store sha256 stays valid)" || bad "the zip changes between builds"
 
 # =================================================================================================
 # OGUI keys its library by item name across every provider: two ROMs with the same name became one
 # card and the second ROM was lost; a rescan never dropped a deleted ROM. rom_names.gd has no OGUI
-# types, so a stock Godot runs it (QFORGE_GODOT=<godot 4 binary>, or godot on PATH; skipped without).
+# types, so a stock Godot runs it (RETROFORGE_GODOT=<godot 4 binary>, or godot on PATH; skipped without).
 CASE="rom helpers"
-GODOT="${QFORGE_GODOT:-$(command -v godot || true)}"
+GODOT="${RETROFORGE_GODOT:-$(command -v godot || true)}"
 if [ -z "$GODOT" ]; then
-  printf '  skip %s -- no Godot (set QFORGE_GODOT to a Godot 4 binary)\n' "$CASE"
+  printf '  skip %s -- no Godot (set RETROFORGE_GODOT to a Godot 4 binary)\n' "$CASE"
 else
   cat >"$T/names_test.gd" <<GD
 extends SceneTree
@@ -129,11 +129,11 @@ func _init() -> void:
 		RomNames.stale({"A": "/r/A.chd", "B": "/r/B.chd"}, {"A": "/r/A.chd"}), PackedStringArray(["B"]))
 	check("a name now meaning another file is dropped (re-added with the new ROM)",
 		RomNames.stale({"A": "/r/A.cue"}, {"A": "/r/A.chd"}), PackedStringArray(["A"]))
-	# Run on fast cores: per game "" (emulator default) / "big" / "all" -> qforge-launch --cpus.
+	# Run on fast cores: per game "" (emulator default) / "big" / "all" -> retroforge-launch --cpus.
 	var rom := "/home/player/roms/psx/Crash Team Racing (USA).chd"
 	check("launch args: the emulator default adds no --cpus",
 		LaunchArgs.for_rom("psx", rom, ""), PackedStringArray(["psx", rom]))
-	check("launch args: On puts --cpus big first (qforge-launch reads it there)",
+	check("launch args: On puts --cpus big first (retroforge-launch reads it there)",
 		LaunchArgs.for_rom("psx", rom, "big"), PackedStringArray(["--cpus", "big", "psx", rom]))
 	check("launch args: Off is --cpus all (beats an emulator default of On)",
 		LaunchArgs.for_rom("psx", rom, "all"), PackedStringArray(["--cpus", "all", "psx", rom]))
@@ -142,18 +142,18 @@ func _init() -> void:
 	check("options are saved per system + file, not per card name",
 		LaunchArgs.rom_id("psx", rom), "psx/Crash Team Racing (USA).chd")
 	var launch_conf := "# system=emulator\npsx=duckstation\nps2=armsx2\npsx=other  \npsxx=nope\n"
-	check("launch.conf: last system=emulator line wins, like qforge-launch",
+	check("launch.conf: last system=emulator line wins, like retroforge-launch",
 		LaunchArgs.emulator_for("psx", launch_conf), "other")
 	check("launch.conf: an unmapped system has no emulator",
 		LaunchArgs.emulator_for("gc", launch_conf), "")
-	check("player conf: CPUS read like qforge-launch (last line)",
+	check("player conf: CPUS read like retroforge-launch (last line)",
 		LaunchArgs.conf_cpus("CPUS=all\n# x\nCPUS=big\n"), "big")
 	check("player conf: an unknown CPUS value reads as unset",
 		LaunchArgs.conf_cpus("CPUS=fast\n"), "")
 	check("player conf: CPUS rewritten once, other lines kept",
 		LaunchArgs.conf_with_cpus("# mine\nCPUS=all\nFOO=1\nCPUS=all\n", "big"), "# mine\nFOO=1\nCPUS=big\n")
-	check("player conf: written under XDG_CONFIG_HOME, where qforge-launch looks",
-		LaunchArgs.player_conf_path("duckstation"), OS.get_environment("XDG_CONFIG_HOME") + "/qforge/emulators/duckstation.conf")
+	check("player conf: written under XDG_CONFIG_HOME, where retroforge-launch looks",
+		LaunchArgs.player_conf_path("duckstation"), OS.get_environment("XDG_CONFIG_HOME") + "/retroforge/emulators/duckstation.conf")
 	check("emulator default: off before anything is saved", LaunchArgs.emulator_fast_cores("duckstation"), false)
 	check("emulator default: saving On succeeds", LaunchArgs.set_emulator_fast_cores("duckstation", true), true)
 	check("emulator default: reads back On", LaunchArgs.emulator_fast_cores("duckstation"), true)
@@ -204,13 +204,13 @@ func test_credits() -> void:
 		"By A. Dev · x.org · Licence CC BY-NC-ND 4.0")
 	check("credits: no author still shows the homepage",
 		Credits.credit_text({"homepage": "https://x.org/", "licence": lic}), "x.org · Licence CC BY-NC-ND 4.0")
-	check("credits: JSON nulls (qforge-emu list of an old catalog) are skipped",
+	check("credits: JSON nulls (retroforge-emu list of an old catalog) are skipped",
 		Credits.credit_text({"author": null, "homepage": null, "licence": null}), "")
 	check("version: a pkgforge tag shows its version only",
 		Credits.version_text("2609@2026-10-01_1790876487"), "2609")
 	check("version: other tags are shown as they are",
 		Credits.version_text("v0.1-11894"), "v0.1-11894")
-	check("version: a nightly build (qforge-emu's nightly-<id>) says Nightly",
+	check("version: a nightly build (retroforge-emu's nightly-<id>) says Nightly",
 		[Credits.version_text("nightly-cc6fea125"), Credits.version_text("nightly")], ["Nightly cc6fea125", "Nightly"])
 
 func write(path: String, text: String) -> void:

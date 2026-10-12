@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge read-only root assembler — stage `first-boot-storage`.
+# retroforge read-only root assembler — stage `first-boot-storage`.
 #
 # SOURCED by rootfs/assemble-rootfs.sh, never executed. Split out of it for issue #43; the code
 # and its rationale are unchanged (tests/test-mkroot.sh reads the `# STAGE <name>` banners out of
@@ -12,9 +12,9 @@
 # where a verbatim move stops being verbatim, so it is deliberately not done.
 
 # STAGE first-boot-storage — the player user's growable home. We dd a fixed image to a card, so we grow on first boot instead. Three pieces:
-#  - /etc/fstab mounts the dedicated home partition (/dev/qforge/qforge-home, ext4) at /home.
+#  - /etc/fstab mounts the dedicated home partition (/dev/retroforge/retroforge-home, ext4) at /home.
 #    nofail so a card without that partition (the old 2-partition test image) still boots.
-#  - qforge-grow-home: a oneshot that extends the home partition (systemd-repart) + its ext4
+#  - retroforge-grow-home: a oneshot that extends the home partition (systemd-repart) + its ext4
 #    (resize2fs from e2fsprogs, in the base) to fill the device on first boot, before /home mounts.
 #  - the player user (uid 1000) is baked into the base /etc (customize-base.sh); /home/player is
 #    laid down at image-build time (image/lib-homestage.sh). ROMs, saves and states live on /home.
@@ -23,29 +23,29 @@
 echo "  injecting first-boot storage: /home mount + grow (player user baked in base)"
 mkdir -p "$stage/etc"
 #
-# BOTH ROWS NAME /dev/qforge/<GPT name>, NOT PARTLABEL=/LABEL=. Every qforge medium carries the
+# BOTH ROWS NAME /dev/retroforge/<GPT name>, NOT PARTLABEL=/LABEL=. Every retroforge medium carries the
 # same eight GPT names, so with a card inserted in a device installed to internal storage a label
 # names whichever disk udev enumerated first — and udev publishes ONE symlink per duplicate name, so
-# the loser gets none at all. /dev/qforge/* is the same set of links scoped to the disk we booted
-# from (usr/lib/udev/rules.d/69-qforge-bootdisk.rules + usr/lib/qforge/on-boot-disk), which is
+# the loser gets none at all. /dev/retroforge/* is the same set of links scoped to the disk we booted
+# from (usr/lib/udev/rules.d/69-retroforge-bootdisk.rules + usr/lib/retroforge/on-boot-disk), which is
 # the only disk either of these mounts can correctly mean. It matters most for the ESP: stage 2
 # INCREMENTS boot-attempts on the booted disk's ESP, and mark-good clears it through this mount — on
 # the wrong ESP the counter climbs every boot until steamcl's failsafe fires, and the other
 # install's A.conf is stamped over. Both confs are named A.conf, so nothing downstream can notice.
-if ! grep -q '/dev/qforge/QFORGE-ESP' "$stage/etc/fstab" 2>/dev/null; then
+if ! grep -q '/dev/retroforge/RETROFORGE-ESP' "$stage/etc/fstab" 2>/dev/null; then
   printf '%s\n' \
-    '# qforge shared ESP — SteamOS/conf + steamcl (stage 1). Mounted here at /esp; GPT bit 63' \
+    '# retroforge shared ESP — SteamOS/conf + steamcl (stage 1). Mounted here at /esp; GPT bit 63' \
     '# keeps gpt-auto away so the initramfs can mount the slot efi partition at /efi instead.' \
-    '/dev/qforge/QFORGE-ESP  /esp  vfat  defaults,nofail,noatime  0 2' \
+    '/dev/retroforge/RETROFORGE-ESP  /esp  vfat  defaults,nofail,noatime  0 2' \
     >>"$stage/etc/fstab"
 fi
-if ! grep -q '/dev/qforge/qforge-home' "$stage/etc/fstab" 2>/dev/null; then
+if ! grep -q '/dev/retroforge/retroforge-home' "$stage/etc/fstab" 2>/dev/null; then
   printf '%s\n' \
-    '# qforge shared data partition — the player home, ROMs and saves live here.' \
-    '# qforge-grow-home.service grows BOTH the partition (systemd-repart) and the ext4 (resize2fs)' \
+    '# retroforge shared data partition — the player home, ROMs and saves live here.' \
+    '# retroforge-grow-home.service grows BOTH the partition (systemd-repart) and the ext4 (resize2fs)' \
     '# before this mounts. x-systemd.growfs stays only as a belt-and-suspenders fallback (a no-op' \
     '# once grow-home has already sized the fs to the partition).' \
-    '/dev/qforge/qforge-home  /home  ext4  defaults,nofail,x-systemd.growfs  0 2' \
+    '/dev/retroforge/retroforge-home  /home  ext4  defaults,nofail,x-systemd.growfs  0 2' \
     >>"$stage/etc/fstab"
 fi
 
@@ -62,33 +62,33 @@ fi
 # The ext4 grow used to ride SOLELY on x-systemd.growfs (mount-time). That RACED home.mount: on HW
 # the mount+growfs ran before repart's enlargement was visible, so the fs was sized to the flashed
 # ~1G while the partition became 8.7G — /home then filled instantly and the session died with
-# ENOSPC. Fix: qforge-grow-home now runs a wrapper that does repart THEN
+# ENOSPC. Fix: retroforge-grow-home now runs a wrapper that does repart THEN
 # resize2fs, ordered Before=home.mount so the fs grow is a race-free OFFLINE resize (partition
 # already enlarged, /home not yet mounted). Idempotent — resize2fs is a no-op once the fs fills the
 # partition, so it is safe to run every boot; x-systemd.growfs remains only as a fallback.
 install -d -m0755 "$stage/usr/lib/repart.d"
-cat >"$stage/usr/lib/repart.d/50-qforge-home.conf" <<'REPART'
+cat >"$stage/usr/lib/repart.d/50-retroforge-home.conf" <<'REPART'
 [Partition]
 # Match the existing /home partition (Linux /home GUID) and grow it to claim free space at the end
 # of the disk. No SizeMinBytes/SizeMaxBytes -> repart expands it to take everything available.
 Type=home
 REPART
 
-install -d -m0755 "$stage/usr/lib/qforge"
-cat >"$stage/usr/lib/qforge/grow-home.sh" <<'GROW'
+install -d -m0755 "$stage/usr/lib/retroforge"
+cat >"$stage/usr/lib/retroforge/grow-home.sh" <<'GROW'
 #!/bin/sh
-# qforge first-boot grow: enlarge the /home partition to fill the device, THEN grow its ext4.
-# Runs from qforge-grow-home.service, ordered Before=home.mount, so the fs grow is a race-free
+# retroforge first-boot grow: enlarge the /home partition to fill the device, THEN grow its ext4.
+# Runs from retroforge-grow-home.service, ordered Before=home.mount, so the fs grow is a race-free
 # offline resize2fs (partition already enlarged, /home not yet mounted) rather than the mount-time
 # x-systemd.growfs that lost a race to home.mount and left the ext4 at the flashed ~1G. Idempotent.
 set -eu
 
-# /dev/qforge/, NOT /dev/disk/by-label/: this script resolves the partition and then hands its
-# PARENT DISK to systemd-repart, which writes the GPT. With two qforge media attached, by-label
+# /dev/retroforge/, NOT /dev/disk/by-label/: this script resolves the partition and then hands its
+# PARENT DISK to systemd-repart, which writes the GPT. With two retroforge media attached, by-label
 # names an arbitrary one, so the by-label version of this line could grow the internal install's
 # home partition — and rewrite the internal disk's GPT — while booted off a card. The scoped link
-# only ever names a partition on the disk we booted from (69-qforge-bootdisk.rules).
-HOME_DEV=/dev/qforge/qforge-home
+# only ever names a partition on the disk we booted from (69-retroforge-bootdisk.rules).
+HOME_DEV=/dev/retroforge/retroforge-home
 
 # Wait for udev to publish the home partition's symlink. Even ordered After systemd-udev-trigger,
 # the probe that creates the symlink is async, so settle the queue and then poll briefly. A card
@@ -101,7 +101,7 @@ while [ ! -b "$HOME_DEV" ] && [ "$i" -lt 50 ]; do
   i=$((i + 1))
 done
 if [ ! -b "$HOME_DEV" ]; then
-  echo "[qforge-grow-home] no ${HOME_DEV} after settle — nothing to grow (x-systemd.growfs covers any fs)"
+  echo "[retroforge-grow-home] no ${HOME_DEV} after settle — nothing to grow (x-systemd.growfs covers any fs)"
   exit 0
 fi
 HOME_PART=$(readlink -f "$HOME_DEV")
@@ -115,9 +115,9 @@ HOME_PART=$(readlink -f "$HOME_DEV")
 DISK=$(lsblk -no pkname "$HOME_PART" 2>/dev/null | head -n1)
 if [ -n "${DISK:-}" ] && [ -b "/dev/${DISK}" ]; then
   systemd-repart --dry-run=no "/dev/${DISK}" \
-    || echo "[qforge-grow-home] systemd-repart on /dev/${DISK} failed (non-fatal; resize2fs still runs)" >&2
+    || echo "[retroforge-grow-home] systemd-repart on /dev/${DISK} failed (non-fatal; resize2fs still runs)" >&2
 else
-  echo "[qforge-grow-home] could not resolve parent disk of ${HOME_PART} — skipping partition grow" >&2
+  echo "[retroforge-grow-home] could not resolve parent disk of ${HOME_PART} — skipping partition grow" >&2
 fi
 
 # Let udev settle so the enlarged partition's size is current before resize2fs.
@@ -125,14 +125,14 @@ udevadm settle 2>/dev/null || true
 
 # 2. Grow the ext4 to fill the (now enlarged) partition. No-op once it already fills it; non-fatal so
 #    a not-cleanly-unmounted fs can't block boot (x-systemd.growfs is the fallback).
-resize2fs "$HOME_PART" || echo "[qforge-grow-home] resize2fs skipped/failed (non-fatal)" >&2
+resize2fs "$HOME_PART" || echo "[retroforge-grow-home] resize2fs skipped/failed (non-fatal)" >&2
 GROW
-chmod 0755 "$stage/usr/lib/qforge/grow-home.sh"
+chmod 0755 "$stage/usr/lib/retroforge/grow-home.sh"
 
 install -d -m0755 "$stage/usr/lib/systemd/system"
-cat >"$stage/usr/lib/systemd/system/qforge-grow-home.service" <<'UNIT'
+cat >"$stage/usr/lib/systemd/system/retroforge-grow-home.service" <<'UNIT'
 [Unit]
-Description=qforge first-boot grow of /home to fill the storage device (systemd-repart + resize2fs)
+Description=retroforge first-boot grow of /home to fill the storage device (systemd-repart + resize2fs)
 Documentation=man:systemd-repart(8)
 DefaultDependencies=no
 ConditionDirectoryNotEmpty=/usr/lib/repart.d
@@ -148,7 +148,7 @@ Conflicts=shutdown.target
 Type=oneshot
 RemainAfterExit=yes
 # Wrapper: systemd-repart (grow partition) THEN resize2fs (grow ext4). 76/77 tolerance is inside it.
-ExecStart=/usr/lib/qforge/grow-home.sh
+ExecStart=/usr/lib/retroforge/grow-home.sh
 
 [Install]
 WantedBy=sysinit.target
@@ -157,16 +157,16 @@ UNIT
 # Enable on release: higher-priority preset (60 < 99 stock "disable *") + a build-time symlink
 # fallback. The unit runs early (Before=local-fs-pre.target), pulled in via sysinit.target.
 install -d -m0755 "$stage/usr/lib/systemd/system-preset"
-echo "enable qforge-grow-home.service" \
-  >"$stage/usr/lib/systemd/system-preset/60-qforge-storage.preset"
+echo "enable retroforge-grow-home.service" \
+  >"$stage/usr/lib/systemd/system-preset/60-retroforge-storage.preset"
 install -d -m0755 "$stage/etc/systemd/system/sysinit.target.wants"
-ln -sf /usr/lib/systemd/system/qforge-grow-home.service \
-       "$stage/etc/systemd/system/sysinit.target.wants/qforge-grow-home.service"
+ln -sf /usr/lib/systemd/system/retroforge-grow-home.service \
+       "$stage/etc/systemd/system/sysinit.target.wants/retroforge-grow-home.service"
 
 # Mask the stock systemd-repart.service. It's static but WantedBy=sysinit.target, so it also auto-runs
 # in real-root boot and FAILS the same way our old unit did: with no device argument it can't resolve
 # the btrfs /dev/root backing disk ("Cannot determine correct backing block device"), throwing a red
-# "Failed to start Repartition Root Disk" every boot. qforge-grow-home replaces it (explicit disk +
+# "Failed to start Repartition Root Disk" every boot. retroforge-grow-home replaces it (explicit disk +
 # resize2fs), so silence the duplicate. It STAYS masked now that the initramfs exists: the stock unit
 # is initrd-only, and our initramfs is a plain shell script with no systemd in it to run the unit.
 ln -sf /dev/null "$stage/etc/systemd/system/systemd-repart.service"

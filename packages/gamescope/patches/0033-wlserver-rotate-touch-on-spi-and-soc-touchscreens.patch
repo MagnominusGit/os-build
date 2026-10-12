@@ -1,4 +1,4 @@
-From: qforge
+From: retroforge
 Subject: [PATCH] wlserver: rotate touch on SPI and other SoC touchscreens
 
 gamescope applies the panel orientation to touch input only when the
@@ -13,7 +13,7 @@ Treat SPI as internal, and fall back to the internal connector for a
 touchscreen with no USB ancestor at all -- on a handheld that is the
 built-in panel, whichever bus the board wired it to.
 
-(qforge: HW, MANGMI Air X, 2026-10-10.)
+(retroforge: HW, MANGMI Air X, 2026-10-10.)
 ---
 --- a/src/wlserver.cpp
 +++ b/src/wlserver.cpp

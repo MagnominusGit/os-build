@@ -1,4 +1,4 @@
-# qforge steamos-efi source pin — Phase 5
+# retroforge steamos-efi source pin — Phase 5
 # Nova-Deck/steamos-efi fork of evlaV/steamos-efi, master (aarch64 patched + CI).
 # The TARBALL + its sha256 is the canonical pin.
 version:    1.1.0

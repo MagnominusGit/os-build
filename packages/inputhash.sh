@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge overlay input hash — the one definition of "which sources is this package built from".
+# retroforge overlay input hash — the one definition of "which sources is this package built from".
 #
 #   packages/inputhash.sh <package-dir>     # e.g. packages/mesa
 #
@@ -11,13 +11,13 @@
 # SIX CALLERS, ONE FORMULA, and they have to agree or the build breaks in confusing ways:
 #
 #   packages/build-overlay.sh   incremental-rebuild cache key (work/repo/<arch>/.stamps/<n>.hash)
-#   rootfs/genmanifest.sh       writes it into rootfs/manifest.lock as the `qforge` rows' pin
+#   rootfs/genmanifest.sh       writes it into rootfs/manifest.lock as the `retroforge` rows' pin
 #   rootfs/fetchlock.sh         re-derives it and refuses the install when the lock disagrees
 #   packages/verify-lock-rows.sh  the same comparison as fetchlock but from COMMITTED FILES ONLY,
 #                               so it runs in a second before any build rather than after one
 #   packages/build-overlay.sh   the per-package rebuild stamp, work/repo/<arch>/.stamps/<name>.hash
 #
-# WHY THIS IS THE `qforge` ROWS' PIN AND NOT THE BUILT ARTIFACT'S SHA256. Our overlay builds
+# WHY THIS IS THE `retroforge` ROWS' PIN AND NOT THE BUILT ARTIFACT'S SHA256. Our overlay builds
 # are not bit-reproducible: rebuilding from identical inputs moves every artifact's sha256, so an
 # artifact hash in the lock only ever verified on the machine that last ran `make relock` — it
 # said "you rebuilt", never "the inputs changed", and it made a clean CI runner fail every run.

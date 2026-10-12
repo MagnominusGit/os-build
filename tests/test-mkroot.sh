@@ -186,16 +186,16 @@ done
 # re-declaring them here is the point: a second copy would drift in the same commit that broke the
 # first, and agree with it.
 CASE="the two dev credentials fail the same way"
-# THEY DID NOT UNTIL 2026-08-25. QFORGE_WIFI=1 with no creds died; QFORGE_DEV=1 with no
-# QFORGE_SSH_PUBKEY printed a warning that the build then buried under twenty emulated minutes of
+# THEY DID NOT UNTIL 2026-08-25. RETROFORGE_WIFI=1 with no creds died; RETROFORGE_DEV=1 with no
+# RETROFORGE_SSH_PUBKEY printed a warning that the build then buried under twenty emulated minutes of
 # pacstrap. sshd on this medium is KEY-ONLY, so that second one produces a "dev" medium that admits
 # nobody -- a release medium that took the dev path -- and you find out over SSH, on a hardware trip,
 # at the moment the panel has gone black and the shell was the whole reason for building it.
-grep -q 'die "QFORGE_DEV=1 requires QFORGE_SSH_PUBKEY' "$MKROOT" \
+grep -q 'die "RETROFORGE_DEV=1 requires RETROFORGE_SSH_PUBKEY' "$MKROOT" \
   && ok "a dev build with no pubkey is fatal, like a dev build with no Wi-Fi creds" \
-  || bad "a missing QFORGE_SSH_PUBKEY is still only a warning — the medium admits nobody"
-grep -q 'QFORGE_DEV_NO_SSH' "$MKROOT" \
-  && ok "and there is a way to ask for that on purpose (QFORGE_DEV_NO_SSH=1)" \
+  || bad "a missing RETROFORGE_SSH_PUBKEY is still only a warning — the medium admits nobody"
+grep -q 'RETROFORGE_DEV_NO_SSH' "$MKROOT" \
+  && ok "and there is a way to ask for that on purpose (RETROFORGE_DEV_NO_SSH=1)" \
   || bad "no opt-out: a Wi-Fi-only dev medium is a real thing to want and cannot be built"
 # Both refusals name the variable AND what to do, since dev.env is where both actually live.
 grep -q 'Source dev.env' "$MKROOT" \
@@ -224,7 +224,7 @@ grep -q 'run: make kernel' "$MKROOT" \
 grep -qE '^installer-root:.*\$\(KERNEL\)' "$ROOT/Makefile" \
   && ok "make builds the kernel before the installer root, since mkroot ships its modules" \
   || bad "installer-root does not depend on \$(KERNEL) — a cold \`make installer\` dies in mkroot"
-# And the lock check ahead of the kernel: mkroot.sh's resolve rejects a qforge package built from
+# And the lock check ahead of the kernel: mkroot.sh's resolve rejects a retroforge package built from
 # sources installer/manifest.lock does not describe, but it does that from inside the bootstrap,
 # i.e. after $(KERNEL). installer/v0.0.8 spent 56 minutes building 7.2.5 to reach that verdict.
 grep -qE '^installer-root: verify-lock .*\$\(KERNEL\)' "$ROOT/Makefile" \
@@ -241,7 +241,7 @@ for f in "${FLAT[@]}"; do
 done
 # The four §5 model/view files and the spine specifically: they find each other by
 # dirname(__file__) and $SELFDIR, so all of them or none of them.
-for f in ui uipad.py uiflow.py uiview.py qforge-install confirm-ui installer-session save-log.sh; do
+for f in ui uipad.py uiflow.py uiview.py retroforge-install confirm-ui installer-session save-log.sh; do
   printf '%s\n' "${FLAT[@]}" | grep -qx "$f" && ok "$f travels with the image" \
     || bad "$f is NOT placed — it is resolved by dirname/SELFDIR and there is no fallback"
 done
@@ -305,20 +305,20 @@ printf '%s\n' "$shipped_names" | grep -qx lib-gpt.sh \
 
 # ---------------------------------------------------------------------------------------------
 CASE="units"
-[ -f "$UNITS/qforge-installer.service" ] && ok "the session unit exists" \
-  || bad "no qforge-installer.service"
-[ -f "$UNITS/qforge-installer-console.service" ] && ok "the fallback console unit exists" \
-  || bad "no qforge-installer-console.service"
+[ -f "$UNITS/retroforge-installer.service" ] && ok "the session unit exists" \
+  || bad "no retroforge-installer.service"
+[ -f "$UNITS/retroforge-installer-console.service" ] && ok "the fallback console unit exists" \
+  || bad "no retroforge-installer-console.service"
 # The console unit is started by OnFailure=. Enabling it would run the fallback on every boot —
 # including the ones that worked — and the log tail on the panel would read as a failure.
-grep -q 'multi-user.target.wants/qforge-installer.service' "$MKROOT" \
+grep -q 'multi-user.target.wants/retroforge-installer.service' "$MKROOT" \
   && ok "mkroot.sh enables the session unit" || bad "mkroot.sh does not enable the session unit"
-grep -q 'multi-user.target.wants/qforge-installer-console.service' "$MKROOT" \
+grep -q 'multi-user.target.wants/retroforge-installer-console.service' "$MKROOT" \
   && bad "mkroot.sh ENABLES the fallback console — it is an OnFailure= target, not a boot unit" \
   || ok "the fallback console is not enabled (OnFailure= starts it)"
 
 CASE="the consent gate's fixed path"
-# $CONFIRM defaults to /usr/lib/qforge/install/confirm and the symlink decides which renderer
+# $CONFIRM defaults to /usr/lib/retroforge/install/confirm and the symlink decides which renderer
 # answers. On this image the UI already owns the panel and the pad, so a second SDL client would
 # contend with it for gamescope focus — and that failure mode is a consent screen that never
 # appears, which points nowhere near its cause.
@@ -327,12 +327,12 @@ grep -qE 'ln -sf +confirm-ui .*/install/confirm$' "$MKROOT" \
   || bad "the confirm symlink does not point at confirm-ui"
 
 CASE="identity"
-grep -q '^ID=qforge-installer$' "$OSREL" && ok "ID=qforge-installer" \
-  || bad "installer/os-release does not set ID=qforge-installer"
+grep -q '^ID=retroforge-installer$' "$OSREL" && ok "ID=retroforge-installer" \
+  || bad "installer/os-release does not set ID=retroforge-installer"
 # It must not answer the same ID as an install. The spine's own rules key off "is this disk ours",
-# and a medium claiming to be qforge is a device claiming to be the thing it is about to install.
-grep -q '^ID=qforge$' "$OSREL" \
-  && bad "installer/os-release claims ID=qforge — that is the SHIPPED image's identity" \
+# and a medium claiming to be retroforge is a device claiming to be the thing it is about to install.
+grep -q '^ID=retroforge$' "$OSREL" \
+  && bad "installer/os-release claims ID=retroforge — that is the SHIPPED image's identity" \
   || ok "it does not claim the shipped image's identity"
 
 # ---------------------------------------------------------------------------------------------
@@ -515,15 +515,15 @@ declare -A STAGE_EXPECTED=(
   [release-marker]="the marker that identifies the slot's provenance"
   [os-release-fields]="the same identity in the fields other software reads"
   [overlay-payload]="the RELEASE overlay (session, HW support, input, audio)"
-  [rauc-boot-mirror]="RAUC keyring + /usr/lib/qforge/boot + the installer's GPT"
+  [rauc-boot-mirror]="RAUC keyring + /usr/lib/retroforge/boot + the installer's GPT"
   [first-boot-storage]="the player user's growable home"
   [offload-mounts]="the writable paths a read-only root needs"
   [dev-wifi-ssh]="DEV-ONLY Wi-Fi credentials + root authorized_keys"
   [dev-ota-channel]="DEV-ONLY OTA channel pin"
   [boot-splash]="the splash drawer + its asset, in the sealed root"
-  [ogui-plugin]="the QForge OGUI plugin zip, copied to the player's home by the session (not on the installer medium: it runs no OGUI)"
+  [ogui-plugin]="the RetroForge OGUI plugin zip, copied to the player's home by the session (not on the installer medium: it runs no OGUI)"
   [sigdefer-shim]="the LD_PRELOAD shim Snes9x's definition names (not on the installer medium: it runs no emulator)"
-  [gptk-interpose]="the LD_PRELOAD library PortMaster's gptokeyb2 gets from mod_QForge.txt (not on the installer medium: it runs no port)"
+  [gptk-interpose]="the LD_PRELOAD library PortMaster's gptokeyb2 gets from mod_RetroForge.txt (not on the installer medium: it runs no port)"
   [hidemenu-shim]="the LD_PRELOAD shim melonDS's definition names (not on the installer medium: it runs no emulator)"
   [debug-capture]="DEBUG-ONLY journald log capture"
   [seal]="strip the package manager from the RELEASE root"
@@ -571,7 +571,7 @@ CASE="remote access is TEST-ONLY"
 grep -q 'authorized_keys' "$MKROOT" && ok "a dev build can bake an authorized_keys" \
   || bad "no dev credential path at all — an early failure would be undiagnosable"
 grep -q 'if \[ -f /prebuilt/authorized_keys \]' "$MKROOT" \
-  && ok "sshd is enabled ONLY when that key was staged (i.e. QFORGE_DEV=1)" \
+  && ok "sshd is enabled ONLY when that key was staged (i.e. RETROFORGE_DEV=1)" \
   || bad "sshd enablement is not gated on the dev credential"
 # The host key must not be in /etc: that is squashfs here, so openssh's own sshdgenkeys would fail
 # every boot and sshd, which only Wants= it, would start with no key and refuse every connection.
@@ -581,9 +581,9 @@ grep -q 'HostKey /run/ssh/ssh_host_ed25519_key' "$MKROOT" \
 # The generator is a COMMITTED unit, so tests/test-units.sh lints it with systemd-analyze — a unit
 # printf-ed from inside mkroot.sh's container half would be linted by nothing, and systemd IGNORES
 # a misspelled directive silently ([[systemd-execonfailure-is-not-a-directive]]).
-HOSTKEY_UNIT="$UNITS/qforge-installer-hostkey.service"
+HOSTKEY_UNIT="$UNITS/retroforge-installer-hostkey.service"
 [ -f "$HOSTKEY_UNIT" ] && ok "the key generator is a committed unit file, so it gets linted" \
-  || bad "no installer/units/qforge-installer-hostkey.service — a generated unit is an unlinted one"
+  || bad "no installer/units/retroforge-installer-hostkey.service — a generated unit is an unlinted one"
 grep -q 'ConditionPathExists=!/run/ssh/ssh_host_ed25519_key' "$HOSTKEY_UNIT" 2>/dev/null \
   && ok "regeneration is conditional (ssh-keygen prompts rather than overwriting)" \
   || bad "an sshd restart within a boot would wedge on the key generator"
@@ -606,7 +606,7 @@ CASE="the TEST-ONLY Wi-Fi profile"
 # It is what makes the sshd above worth having: joining otherwise happens through the UI's network
 # screen, so on the one failure this medium exists to diagnose — a dead GUI — there is no way to
 # drive the join, and therefore no network and no shell.
-grep -q 'QFORGE_WIFI_SSID' "$MKROOT" && ok "a dev build can bake a Wi-Fi profile" \
+grep -q 'RETROFORGE_WIFI_SSID' "$MKROOT" && ok "a dev build can bake a Wi-Fi profile" \
   || bad "no Wi-Fi injection — a dead GUI means no network and no way in"
 # /etc is the WRONG place here and it fails silently: keyfile `path=` is redirected to /run so nmcli
 # can write on a read-only root, and `path=` is the one directory NM both reads and writes.
@@ -621,13 +621,13 @@ grep -qE 'install -m0600 /prebuilt/wifi.nmconnection' "$MKROOT" \
 grep -q 'STAGE/wifi.nmconnection' "$MKROOT" \
   && ok "the PSK crosses as a file, not interpolated into the container script" \
   || bad "the PSK is interpolated somewhere — a quote in a passphrase would break the build"
-# The reuse marker is INSTALLED INTO THE IMAGE as /usr/lib/qforge/pkgs, so a plaintext credential
+# The reuse marker is INSTALLED INTO THE IMAGE as /usr/lib/retroforge/pkgs, so a plaintext credential
 # in the cache key would ship on the medium.
 grep -qE '^wifi:\$\(printf .* \| sha256sum' "$MKROOT" \
   && ok "credentials are hashed into the reuse key, never written to it" \
   || bad "the reuse key may carry a plaintext PSK, and that marker ships inside the image"
-grep -q 'QFORGE_WIFI=1 requires' "$MKROOT" \
-  && ok "QFORGE_WIFI=1 without creds is a hard error, not a quiet skip" \
+grep -q 'RETROFORGE_WIFI=1 requires' "$MKROOT" \
+  && ok "RETROFORGE_WIFI=1 without creds is a hard error, not a quiet skip" \
   || bad "an explicit Wi-Fi request can be silently ignored"
 
 CASE="a read-only /etc, and its three writers"

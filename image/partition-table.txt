@@ -1,4 +1,4 @@
-# qforge A/B image partition table.
+# retroforge A/B image partition table.
 #
 # SteamOS-style atomic-update layout (cf. the steamos-teardown reference):
 # a shared ESP, A/B boot partitions, A/B read-only Btrfs roots, A/B /var, and a shared
@@ -16,7 +16,7 @@
 #   p8 home  — the player user's home. Two build-time choices, neither a layout divergence:
 #              it is created with an empty player home (image/lib-homestage.sh), and a factory
 #              reset is a reflash of the card, and an internal UFS install is recovered by booting
-#              a separate SD-card image. And home must stay LAST on disk: qforge-grow-home
+#              a separate SD-card image. And home must stay LAST on disk: retroforge-grow-home
 #              expands it to fill the card on first boot, so nothing may follow it.
 #
 # efi-a/efi-b are typed 0700 (Microsoft basic data), NOT ef00 — exactly as SteamOS types
@@ -113,11 +113,11 @@
 # tests/test-partition-table.sh asserts all of this against the table alone, at both sector sizes.
 #
 # name      size  typecode  fs        label            attrs
-esp         256M  ef00      vfat      QFORGE-ESP     63
-efi-a       128M  0700      vfat      qforge-efi-A   -
-efi-b       128M  0700      vfat      qforge-efi-B   -
-rootfs-a    2G    8300      btrfs     qforge-root-A  -
-rootfs-b    2G    8300      btrfs     qforge-root-B  -
-var-a       256M  8300      ext4      qforge-var-A   -
-var-b       256M  8300      ext4      qforge-var-B   -
-home        rest  8302      ext4      qforge-home    63
+esp         256M  ef00      vfat      RETROFORGE-ESP     63
+efi-a       128M  0700      vfat      retroforge-efi-A   -
+efi-b       128M  0700      vfat      retroforge-efi-B   -
+rootfs-a    2G    8300      btrfs     retroforge-root-A  -
+rootfs-b    2G    8300      btrfs     retroforge-root-B  -
+var-a       256M  8300      ext4      retroforge-var-A   -
+var-b       256M  8300      ext4      retroforge-var-B   -
+home        rest  8302      ext4      retroforge-home    63

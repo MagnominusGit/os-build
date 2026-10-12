@@ -13,8 +13,8 @@
 # SO THE CASE THAT EARNS THIS FILE is "publishing an installer leaves cards/ alone". Everything else
 # here is scaffolding around it.
 #
-# HOW IT WORKS: the real, shipped script runs — not a copy. Its seams are the QFORGE_*/R2_*
-# variables it already documents, plus QFORGE_RCLONE, which ota/lib-rclone.sh honours precisely
+# HOW IT WORKS: the real, shipped script runs — not a copy. Its seams are the RETROFORGE_*/R2_*
+# variables it already documents, plus RETROFORGE_RCLONE, which ota/lib-rclone.sh honours precisely
 # so this can exist: rclone_bin returns an ABSOLUTE path under work/tools/, so a stub cannot be
 # shadowed onto PATH, and pre-creating that path would overwrite a real operator's binary.
 #
@@ -86,39 +86,39 @@ run() {  # [env assignments...] <version> [image]
   while [ $# -gt 0 ] && [[ $1 == *=* ]]; do envs+=("$1"); shift; done
   : >"$W/rclone.log"; : >"$W/curl.log"
   OUT="$(env PATH="$W/bin:$PATH" \
-      QFORGE_RCLONE="$W/bin/rclone" \
+      RETROFORGE_RCLONE="$W/bin/rclone" \
       RCLONELOG="$W/rclone.log" CURLLOG="$W/curl.log" BUCKETDIR="$W/bucket" \
       R2_ACCOUNT_ID=acct R2_ACCESS_KEY_ID=key R2_SECRET_ACCESS_KEY=secret \
-      R2_BUCKET=qforge R2_PUBLIC_BASE="https://pub.example/qforge" \
+      R2_BUCKET=retroforge R2_PUBLIC_BASE="https://pub.example/retroforge" \
       "${envs[@]}" bash "$PUBLISH" "$1" "${2:-$IMG}" "$W/meta" 2>"$W/err")"
   RC=$?
   ERR="$(cat "$W/err")"
 }
 
-reset_bucket() { rm -rf "$W/bucket"; mkdir -p "$W/bucket/qforge"; }
-seed_prefix() { mkdir -p "$W/bucket/qforge/$1"; printf 'x\n' >"$W/bucket/qforge/$1/old.img.gz"; }
+reset_bucket() { rm -rf "$W/bucket"; mkdir -p "$W/bucket/retroforge"; }
+seed_prefix() { mkdir -p "$W/bucket/retroforge/$1"; printf 'x\n' >"$W/bucket/retroforge/$1/old.img.gz"; }
 
 # =================================================================================================
 CASE="the default prefix is cards/, unchanged"
 reset_bucket
 run 1.0.0
 [ "$RC" = 0 ] && ok "exit 0" || bad "exit $RC: $ERR"
-[ -f "$W/bucket/qforge/cards/1.0.0/sdcard.img.gz" ] \
+[ -f "$W/bucket/retroforge/cards/1.0.0/sdcard.img.gz" ] \
   && ok "the card lands in cards/<version>/" \
   || bad "nothing at cards/1.0.0/: $(find "$W/bucket" -type f | head -3)"
-[ -f "$W/bucket/qforge/cards/1.0.0/sha256sums.txt" ] \
+[ -f "$W/bucket/retroforge/cards/1.0.0/sha256sums.txt" ] \
   && ok "with the checksums beside it" || bad "the metadata did not land"
-printf '%s' "$OUT$ERR" | grep -q 'pub.example/qforge/cards/1.0.0/sdcard.img.gz' \
+printf '%s' "$OUT$ERR" | grep -q 'pub.example/retroforge/cards/1.0.0/sdcard.img.gz' \
   && ok "and the URL it hands back is the one it uploaded to" \
   || bad "the published URL is wrong: $ERR"
 
-CASE="QFORGE_R2_KIND puts a medium somewhere else"
+CASE="RETROFORGE_R2_KIND puts a medium somewhere else"
 reset_bucket
-run QFORGE_R2_KIND=installer 2.0.0
-[ -f "$W/bucket/qforge/installer/2.0.0/sdcard.img.gz" ] \
+run RETROFORGE_R2_KIND=installer 2.0.0
+[ -f "$W/bucket/retroforge/installer/2.0.0/sdcard.img.gz" ] \
   && ok "it lands in installer/<version>/" \
   || bad "nothing at installer/2.0.0/"
-[ -d "$W/bucket/qforge/cards" ] \
+[ -d "$W/bucket/retroforge/cards" ] \
   && bad "it created a cards/ prefix as well" \
   || ok "and nothing was written under cards/"
 
@@ -131,14 +131,14 @@ reset_bucket
 seed_prefix cards/0.9.0
 seed_prefix cards/0.9.1
 seed_prefix installer/1.0.0
-run QFORGE_R2_KIND=installer QFORGE_CARD_KEEP=1 2.0.0
-[ -d "$W/bucket/qforge/cards/0.9.0" ] && [ -d "$W/bucket/qforge/cards/0.9.1" ] \
+run RETROFORGE_R2_KIND=installer RETROFORGE_CARD_KEEP=1 2.0.0
+[ -d "$W/bucket/retroforge/cards/0.9.0" ] && [ -d "$W/bucket/retroforge/cards/0.9.1" ] \
   && ok "publishing an installer left BOTH cards alone" \
-  || bad "the installer publish pruned cards/: $(ls "$W/bucket/qforge/cards" 2>&1)"
-[ ! -d "$W/bucket/qforge/installer/1.0.0" ] \
+  || bad "the installer publish pruned cards/: $(ls "$W/bucket/retroforge/cards" 2>&1)"
+[ ! -d "$W/bucket/retroforge/installer/1.0.0" ] \
   && ok "and pruned the older installer, as KEEP=1 asks" \
   || bad "the older installer survived a KEEP=1 prune"
-[ -d "$W/bucket/qforge/installer/2.0.0" ] \
+[ -d "$W/bucket/retroforge/installer/2.0.0" ] \
   && ok "never the one just published" \
   || bad "it deleted the version it had just uploaded"
 grep -q 'purge .*cards' "$W/rclone.log" \
@@ -149,25 +149,25 @@ CASE="the card path prunes cards/ and nothing else"
 reset_bucket
 seed_prefix cards/0.9.0
 seed_prefix installer/1.0.0
-run QFORGE_CARD_KEEP=1 1.0.0
-[ ! -d "$W/bucket/qforge/cards/0.9.0" ] \
+run RETROFORGE_CARD_KEEP=1 1.0.0
+[ ! -d "$W/bucket/retroforge/cards/0.9.0" ] \
   && ok "the older card is pruned" || bad "KEEP=1 kept two cards"
-[ -d "$W/bucket/qforge/installer/1.0.0" ] \
+[ -d "$W/bucket/retroforge/installer/1.0.0" ] \
   && ok "and the installer prefix is untouched" \
   || bad "a card publish deleted a published installer medium"
 
 CASE="KEEP=0 prunes nothing at all"
 reset_bucket
 seed_prefix cards/0.9.0
-run QFORGE_CARD_KEEP=0 1.0.0
-[ -d "$W/bucket/qforge/cards/0.9.0" ] \
+run RETROFORGE_CARD_KEEP=0 1.0.0
+[ -d "$W/bucket/retroforge/cards/0.9.0" ] \
   && ok "an explicit 0 keeps the back catalogue" || bad "KEEP=0 still pruned"
 
 # =================================================================================================
 CASE="a prefix that could escape is refused before anything moves"
 reset_bucket
 for k in "../evil" "cards/nested" "Cards" "up/../down"; do
-  run QFORGE_R2_KIND="$k" 1.0.0
+  run RETROFORGE_R2_KIND="$k" 1.0.0
   if [ "$RC" != 0 ] && [ ! -s "$W/rclone.log" ]; then
     ok "'$k' is refused, and nothing was uploaded"
   else
@@ -175,13 +175,13 @@ for k in "../evil" "cards/nested" "Cards" "up/../down"; do
   fi
 done
 # AN EMPTY ONE IS THE DEFAULT, NOT A REFUSAL, and that is the `:-` semantics every knob in this
-# repo uses. It matters in CI: a `QFORGE_R2_KIND: ${{ vars.X }}` that evaluates empty should
+# repo uses. It matters in CI: a `RETROFORGE_R2_KIND: ${{ vars.X }}` that evaluates empty should
 # publish a card rather than fail the release.
 reset_bucket
-run QFORGE_R2_KIND= 1.0.0
-[ "$RC" = 0 ] && [ -f "$W/bucket/qforge/cards/1.0.0/sdcard.img.gz" ] \
+run RETROFORGE_R2_KIND= 1.0.0
+[ "$RC" = 0 ] && [ -f "$W/bucket/retroforge/cards/1.0.0/sdcard.img.gz" ] \
   && ok "an empty prefix falls back to cards/, like every other :- knob here" \
-  || bad "an empty QFORGE_R2_KIND did not default (rc=$RC)"
+  || bad "an empty RETROFORGE_R2_KIND did not default (rc=$RC)"
 
 # The version is a path segment too, and it was already guarded — assert it stayed guarded.
 run "1.0.0/../.."

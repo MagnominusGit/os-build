@@ -1,6 +1,6 @@
 Subject: [PATCH] ASoC: qcom: sm8250: shut down MI2S AFE port clocks
 
-qforge: ROCKNIX SM6115 patch carried verbatim; it applies with fuzz 0 on top of 0870/0871 (sm8250.c) resp. 0895 (q6afe.c), checked 2026-10-09.
+retroforge: ROCKNIX SM6115 patch carried verbatim; it applies with fuzz 0 on top of 0870/0871 (sm8250.c) resp. 0895 (q6afe.c), checked 2026-10-09.
 
 Adapted from upstream patch 5/6 of "ASoC: qcom: fixes and improvements"
 by Val Packett <val@packett.cool>:

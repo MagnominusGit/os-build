@@ -33,7 +33,7 @@
 #
 # WHY THE BUMP GUIDANCE IS NOT IN source.pin OR THE PKGBUILD, where a reader would look first:
 # packages/inputhash.sh hashes both of those files -- comments included -- into manifest.lock's
-# `qforge` rows, so a pointer comment in either one would force a `make relock` (a full
+# `retroforge` rows, so a pointer comment in either one would force a `make relock` (a full
 # re-resolve of every package) for a value that cannot change what is built. The bump path
 # announces itself instead: after a version bump the stale mirror hash 404s and the error below
 # says exactly what to refresh.

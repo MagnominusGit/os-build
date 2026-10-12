@@ -1,4 +1,4 @@
-# qforge overlay package pipeline — prove the from-source packages still compile.
+# retroforge overlay package pipeline — prove the from-source packages still compile.
 #
 # WHAT THIS IS FOR. `make overlay` rebuilds ~8 holo packages from source with our patches. A change
 # to a source.pin, a patch, or a PKGBUILD can break one of those builds, and without this the first
@@ -21,7 +21,7 @@
 #
 # That is still a large slice of every release build job, rebuilding identical sources almost every
 # time. The cache needs no registry, no secret, no pin and no bot: the stamps decide what is fresh,
-# exactly as they do locally, and rootfs/fetchlock.sh still checks every `qforge` lock row against
+# exactly as they do locally, and rootfs/fetchlock.sh still checks every `retroforge` lock row against
 # the sources in the commit.
 #
 # WHY NATIVE ARM. The dev box compiles these under qemu; these runners are real aarch64, so

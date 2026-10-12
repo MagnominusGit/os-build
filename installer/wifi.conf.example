@@ -1,11 +1,11 @@
-# QForge installer -- Wi-Fi settings.
+# RetroForge installer -- Wi-Fi settings.
 #
 # HOW TO USE THIS FILE
 #   1. Copy it, in this same folder, to a file named exactly:   wifi.conf
 #   2. Open the copy and put your network name and password below.
 #   3. Eject the card, put it back in the device, and switch it on.
 #
-# The installer downloads QForge over the network, so it needs a network to join. If you
+# The installer downloads RetroForge over the network, so it needs a network to join. If you
 # would rather not use Wi-Fi at all, plug a USB-C Ethernet adapter into the device instead --
 # that needs no file and no editing.
 #

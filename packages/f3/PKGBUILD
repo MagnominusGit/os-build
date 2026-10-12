@@ -1,6 +1,6 @@
 # f3 — "Fight Flash Fraud". We build and ship exactly ONE of its five binaries.
 #
-# WHY IT IS HERE: usr/lib/qforge/storage/format-device.sh runs f3probe before it formats a card,
+# WHY IT IS HERE: usr/lib/retroforge/storage/format-device.sh runs f3probe before it formats a card,
 # when the client asks for it. Settings > Storage's format dialog has a "Run validation tests"
 # checkbox that is ticked BY DEFAULT for SD media, and the client has a whole Testing stage in its
 # format-progress enum for exactly this. Without f3probe that checkbox was a no-op: a counterfeit

@@ -41,24 +41,24 @@ done
 
 # lib-gpt.sh (name -> index, past any entry the GPT no longer uses) and lib-slotwrite.sh
 # (index -> /dev/disk/by-partuuid/...). Resolved by search exactly as carve.sh resolves them.
-LIBGPT="${QFORGE_LIB_GPT:-}"
+LIBGPT="${RETROFORGE_LIB_GPT:-}"
 if [ -z "$LIBGPT" ]; then
-  for c in "$SELFDIR/lib-gpt.sh" /usr/lib/qforge/install/lib-gpt.sh "$SELFDIR/../image/lib-gpt.sh"; do
+  for c in "$SELFDIR/lib-gpt.sh" /usr/lib/retroforge/install/lib-gpt.sh "$SELFDIR/../image/lib-gpt.sh"; do
     [ -r "$c" ] && { LIBGPT="$c"; break; }
   done
 fi
-SLOTWRITE="${QFORGE_SLOTWRITE:-}"
+SLOTWRITE="${RETROFORGE_SLOTWRITE:-}"
 if [ -z "$SLOTWRITE" ]; then
-  for c in "$SELFDIR/lib-slotwrite.sh" /usr/lib/qforge/install/lib-slotwrite.sh \
-           "$SELFDIR/../rootfs/overlay/usr/lib/qforge/install/lib-slotwrite.sh"; do
+  for c in "$SELFDIR/lib-slotwrite.sh" /usr/lib/retroforge/install/lib-slotwrite.sh \
+           "$SELFDIR/../rootfs/overlay/usr/lib/retroforge/install/lib-slotwrite.sh"; do
     [ -r "$c" ] && { SLOTWRITE="$c"; break; }
   done
 fi
-[ -n "$LIBGPT" ]    && [ -r "$LIBGPT" ]    || die "cannot find lib-gpt.sh (set QFORGE_LIB_GPT)"
-[ -n "$SLOTWRITE" ] && [ -r "$SLOTWRITE" ] || die "cannot find lib-slotwrite.sh (set QFORGE_SLOTWRITE)"
+[ -n "$LIBGPT" ]    && [ -r "$LIBGPT" ]    || die "cannot find lib-gpt.sh (set RETROFORGE_LIB_GPT)"
+[ -n "$SLOTWRITE" ] && [ -r "$SLOTWRITE" ] || die "cannot find lib-slotwrite.sh (set RETROFORGE_SLOTWRITE)"
 # shellcheck source=../image/lib-gpt.sh
 . "$LIBGPT"
-# shellcheck source=../rootfs/overlay/usr/lib/qforge/install/lib-slotwrite.sh
+# shellcheck source=../rootfs/overlay/usr/lib/retroforge/install/lib-slotwrite.sh
 . "$SLOTWRITE"
 
 T="$(mktemp -d)"
@@ -72,8 +72,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-OUR_NAMES=(QFORGE-ESP qforge-efi-A qforge-efi-B qforge-root-A qforge-root-B \
-           qforge-var-A qforge-var-B qforge-home)
+OUR_NAMES=(RETROFORGE-ESP retroforge-efi-A retroforge-efi-B retroforge-root-A retroforge-root-B \
+           retroforge-var-A retroforge-var-B retroforge-home)
 
 # --- which disk ---------------------------------------------------------------------------------
 # By GPT name, not by asking which disk we booted from: the point of this script is to check an
@@ -82,16 +82,16 @@ DISK="${1:-}"
 if [ -z "$DISK" ]; then
   for d in /dev/sd? /dev/nvme?n? /dev/mmcblk?; do
     [ -b "$d" ] || continue
-    if gpt_rows "$d" 2>/dev/null | awk '{print $5}' | grep -qx qforge-root-A; then
-      [ -z "$DISK" ] || die "more than one disk carries a qforge install ($DISK and $d) -- name one"
+    if gpt_rows "$d" 2>/dev/null | awk '{print $5}' | grep -qx retroforge-root-A; then
+      [ -z "$DISK" ] || die "more than one disk carries a retroforge install ($DISK and $d) -- name one"
       DISK="$d"
     fi
   done
 fi
-[ -n "$DISK" ] || die "no disk carries a qforge install (looked for qforge-root-A)"
+[ -n "$DISK" ] || die "no disk carries a retroforge install (looked for retroforge-root-A)"
 [ -b "$DISK" ] || die "$DISK is not a block device"
 
-echo "[qforge] verifying the install on $DISK"
+echo "[retroforge] verifying the install on $DISK"
 
 # --- 1. the eight are there, and addressable by PARTUUID -----------------------------------------
 # The index is discovered by NAME and never by arithmetic: on an internal install the eight are
@@ -136,41 +136,41 @@ expect_fs() {  # <gpt-name> <expected type>
   local got; got="$(fstype "${DEV[$1]}")"
   [ "$got" = "$2" ] && ok "$1 is $2" || bad "$1 is '${got:-none}', expected $2"
 }
-expect_fs QFORGE-ESP   vfat
-expect_fs qforge-efi-A vfat
-expect_fs qforge-efi-B vfat
-expect_fs qforge-root-A btrfs
-expect_fs qforge-var-A  ext4
-expect_fs qforge-home   ext4
+expect_fs RETROFORGE-ESP   vfat
+expect_fs retroforge-efi-A vfat
+expect_fs retroforge-efi-B vfat
+expect_fs retroforge-root-A btrfs
+expect_fs retroforge-var-A  ext4
+expect_fs retroforge-home   ext4
 
 # SLOT B IS EMPTY ON A FRESH INSTALL, and that is a claim worth asserting rather than a gap in the
 # list. The spine formats four filesystems, not six: the RAUC handler owns var-A, and root-B/var-B
 # are left untouched so the disk matches the release card's shape. A populated B here means either
-# an update has already been applied (fine -- set QFORGE_SLOT_B=1) or the installer wrote a slot
+# an update has already been applied (fine -- set RETROFORGE_SLOT_B=1) or the installer wrote a slot
 # it had no business writing.
-if [ "${QFORGE_SLOT_B:-0}" = 1 ]; then
-  expect_fs qforge-root-B btrfs
-  expect_fs qforge-var-B  ext4
+if [ "${RETROFORGE_SLOT_B:-0}" = 1 ]; then
+  expect_fs retroforge-root-B btrfs
+  expect_fs retroforge-var-B  ext4
   # Content-identical roots that SHARE an fsid make mounting B hand you A, and every slot test
   # after that is meaningless. Same check, same reason, as image/verify-card.sh.
-  a="$(fsuuid "${DEV[qforge-root-A]}")"; b="$(fsuuid "${DEV[qforge-root-B]}")"
+  a="$(fsuuid "${DEV[retroforge-root-A]}")"; b="$(fsuuid "${DEV[retroforge-root-B]}")"
   { [ -n "$a" ] && [ "$a" != "$b" ]; } \
     && ok "root-A / root-B fsids differ (${a:0:8} vs ${b:0:8})" \
     || bad "root-A and root-B share an fsid -- a slot switch cannot be trusted"
-  a="$(fsuuid "${DEV[qforge-var-A]}")"; b="$(fsuuid "${DEV[qforge-var-B]}")"
+  a="$(fsuuid "${DEV[retroforge-var-A]}")"; b="$(fsuuid "${DEV[retroforge-var-B]}")"
   { [ -n "$a" ] && [ "$a" != "$b" ]; } \
     && ok "var-A / var-B UUIDs differ" || bad "var-A and var-B share a UUID"
 else
-  for n in qforge-root-B qforge-var-B; do
+  for n in retroforge-root-B retroforge-var-B; do
     got="$(fstype "${DEV[$n]}")"
     [ -z "$got" ] && ok "$n is unformatted (empty slot B, as a fresh install leaves it)" \
-                  || bad "$n carries a $got filesystem on a fresh install -- set QFORGE_SLOT_B=1 if an update has landed"
+                  || bad "$n carries a $got filesystem on a fresh install -- set RETROFORGE_SLOT_B=1 if an update has landed"
   done
 fi
 
-[ "$(fslabel "${DEV[qforge-root-A]}")" = qforge-root-A ] \
-  && ok "root-A btrfs label = qforge-root-A" \
-  || bad "root-A btrfs label is '$(fslabel "${DEV[qforge-root-A]}")'"
+[ "$(fslabel "${DEV[retroforge-root-A]}")" = retroforge-root-A ] \
+  && ok "root-A btrfs label = retroforge-root-A" \
+  || bad "root-A btrfs label is '$(fslabel "${DEV[retroforge-root-A]}")'"
 
 # --- 3. the slot witness -------------------------------------------------------------------------
 echo "  2. slot witness"
@@ -183,9 +183,9 @@ echo "  2. slot witness"
 # it is a witness for diagnosis, and the two verifiers are its only readers -- so it costs nothing
 # today. It is still two artifacts answering the same question differently, which is the thing
 # these parallel check lists exist to surface. Asserted here as the installer actually writes it.
-if use_fs "${DEV[qforge-var-A]}" "$T/var"; then
-  got="$(tr -d '[:space:]' <"$USE_PATH/lib/qforge/slot" 2>/dev/null)"
-  [ "$got" = A ] && ok "var-A /var/lib/qforge/slot = A" \
+if use_fs "${DEV[retroforge-var-A]}" "$T/var"; then
+  got="$(tr -d '[:space:]' <"$USE_PATH/lib/retroforge/slot" 2>/dev/null)"
+  [ "$got" = A ] && ok "var-A /var/lib/retroforge/slot = A" \
                  || bad "var-A slot witness: expected 'A', got '${got:-<missing>}'"
   release_fs
 else
@@ -196,7 +196,7 @@ fi
 # ABL boots /EFI/BOOT/bootaa64.efi from here. The boot confs and the shared grubenv live here too,
 # because they are per-DISK rather than per-slot.
 echo "  3. ESP (stage 1)"
-if use_fs "${DEV[QFORGE-ESP]}" "$T/esp"; then
+if use_fs "${DEV[RETROFORGE-ESP]}" "$T/esp"; then
   esp="$USE_PATH"
   for f in /EFI/BOOT/bootaa64.efi /EFI/BOOT/steamcl-version /EFI/BOOT/fonts/default.pf2 \
            /EFI/steamos/grubenv /SteamOS/conf/A.conf; do
@@ -210,7 +210,7 @@ if use_fs "${DEV[QFORGE-ESP]}" "$T/esp"; then
 
   # B.conf is what makes steamcl offer B as a boot candidate. On a fresh install slot B holds
   # nothing, so a B.conf here points the bootloader at an empty partition.
-  if [ "${QFORGE_SLOT_B:-0}" = 1 ]; then
+  if [ "${RETROFORGE_SLOT_B:-0}" = 1 ]; then
     [ -s "$esp/SteamOS/conf/B.conf" ] && ok "B.conf present (slot B is populated)" \
                                         || bad "B.conf missing though slot B is populated"
   else
@@ -235,7 +235,7 @@ if use_fs "${DEV[QFORGE-ESP]}" "$T/esp"; then
     [ "$v" = 0 ] && ok "A.conf $k = 0" || bad "A.conf $k = '${v:-<none>}', expected 0"
   done
 
-  for junk in /KERNEL /QFORGE; do
+  for junk in /KERNEL /RETROFORGE; do
     [ -e "$esp$junk" ] && bad "$junk present on a Phase 5 ESP" || ok "no $junk"
   done
   release_fs
@@ -251,7 +251,7 @@ fi
 # thing telling stage 2 where anything is. A map that disagrees with the disk it sits on is a boot
 # failure with no diagnostic, on a device with no serial console.
 echo "  4. efi-A (stage 2)"
-if use_fs "${DEV[qforge-efi-A]}" "$T/efi"; then
+if use_fs "${DEV[retroforge-efi-A]}" "$T/efi"; then
   efi="$USE_PATH"
   for f in /EFI/steamos/grubaa64.efi /EFI/steamos/grub.cfg \
            /EFI/steamos/fonts/dejavu-mono.pf2 /EFI/steamos/parts.env; do
@@ -259,10 +259,10 @@ if use_fs "${DEV[qforge-efi-A]}" "$T/efi"; then
   done
   grep -aq "GRUB Environment Block" "$efi/EFI/steamos/parts.env" \
     && ok "parts.env is a valid GRUB env block" || bad "parts.env has no GRUB magic header"
-  for kv in "nd_esp=${IDX[QFORGE-ESP]}"     "nd_efi_a=${IDX[qforge-efi-A]}" \
-            "nd_efi_b=${IDX[qforge-efi-B]}" "nd_root_a=${IDX[qforge-root-A]}" \
-            "nd_root_b=${IDX[qforge-root-B]}" "nd_var_a=${IDX[qforge-var-A]}" \
-            "nd_var_b=${IDX[qforge-var-B]}"   "nd_home=${IDX[qforge-home]}"; do
+  for kv in "nd_esp=${IDX[RETROFORGE-ESP]}"     "nd_efi_a=${IDX[retroforge-efi-A]}" \
+            "nd_efi_b=${IDX[retroforge-efi-B]}" "nd_root_a=${IDX[retroforge-root-A]}" \
+            "nd_root_b=${IDX[retroforge-root-B]}" "nd_var_a=${IDX[retroforge-var-A]}" \
+            "nd_var_b=${IDX[retroforge-var-B]}"   "nd_home=${IDX[retroforge-home]}"; do
     grep -aqx -- "$kv" "$efi/EFI/steamos/parts.env" \
       && ok "parts.env $kv" \
       || bad "parts.env does not carry $kv -- the map disagrees with the GPT it sits on"
@@ -286,9 +286,9 @@ if [ -z "$ud_idx" ]; then
   bad "userdata is gone from the table -- Android has no data partition"
 else
   ud_type="$(sgdisk -i "$ud_idx" "$DISK" 2>/dev/null | sed -n 's/^Partition GUID code: \([0-9A-Fa-f-]*\).*/\1/p')"
-  [ "${ud_type^^}" = "$QFORGE_ANDROID_USERDATA_GUID" ] \
+  [ "${ud_type^^}" = "$RETROFORGE_ANDROID_USERDATA_GUID" ] \
     && ok "userdata (p$ud_idx) still carries the Android vendor type" \
-    || bad "userdata (p$ud_idx) is typed $ud_type, not $QFORGE_ANDROID_USERDATA_GUID -- Android may not recognise it"
+    || bad "userdata (p$ud_idx) is typed $ud_type, not $RETROFORGE_ANDROID_USERDATA_GUID -- Android may not recognise it"
 fi
 
 # A GPT entry the table no longer uses is what made this disk uninstallable before #56, and the
@@ -301,8 +301,8 @@ fi
 
 echo
 if [ "$FAIL" = 0 ]; then
-  echo "[qforge] install OK on $DISK"
+  echo "[retroforge] install OK on $DISK"
 else
-  echo "[qforge] install NOT verified on $DISK -- see the !! lines above" >&2
+  echo "[retroforge] install NOT verified on $DISK -- see the !! lines above" >&2
 fi
 exit "$FAIL"

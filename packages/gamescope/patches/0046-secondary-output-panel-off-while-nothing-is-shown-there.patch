@@ -1,4 +1,4 @@
-From: qforge
+From: retroforge
 Subject: [PATCH] secondary output: the panel is off while nothing is shown there
 
 The secondary panel stayed lit (black) whenever no window was routed to
@@ -13,7 +13,7 @@ present races it. The debug pattern keeps the panel on, and a VT switch
 redoes the off commit. ConVar secondary_output_off_when_unused (default
 on) keeps the panel on instead.
 
-(qforge: dual-screen boards, 2026-10-12.)
+(retroforge: dual-screen boards, 2026-10-12.)
 ---
 diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
 index 4ab8282..e87c080 100644

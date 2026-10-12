@@ -1,4 +1,4 @@
-# gamescope — built FROM SOURCE via a qforge-owned PKGBUILD (packages/gamescope/PKGBUILD),
+# gamescope — built FROM SOURCE via a retroforge-owned PKGBUILD (packages/gamescope/PKGBUILD),
 # NOT fetched from the holo monorepo. build-overlay.sh sees `pkgbuild_local` below and uses that
 # checked-in recipe instead of curl'ing one; makepkg still clones the upstream git source (the
 # gamescope tag + its submodules) named in it.
@@ -23,7 +23,7 @@
 # are not in any gamescope release. 0026-0030 are pre-rotation for a panel the plane cannot rotate
 # (SM6115): layers are turned by a VK_QCOM_rotated_copy blit and scanned out unrotated instead of
 # compositing every frame; 0030 is ours and keeps the DPU colour management of 0014/0018 on a
-# blitted frame. etc/qforge/session.conf passes --composite-blit (and, on SM6115,
+# blitted frame. etc/retroforge/session.conf passes --composite-blit (and, on SM6115,
 # --force-composition-rotation); the flags exist only in this patched gamescope.
 #
 # 0014 IS COUPLED TO THE KERNEL and the two must move together. It drives the DPU's CRTC CTM so a

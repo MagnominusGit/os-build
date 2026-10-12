@@ -1,0 +1,34 @@
+[Unit]
+Description=retroforge splash (powering off)
+Documentation=file:///usr/lib/retroforge/retroforge-splash
+
+# After=display-manager.service reads backwards here, and that is deliberate. During SHUTDOWN
+# systemd reverses ordering for units it is stopping, so for a unit being STARTED as part of the
+# poweroff transaction this means "start once the display manager has been STOPPED". That is
+# exactly what we need: gamescope holds DRM master for the whole session, and this drawer cannot
+# take it until gamescope is gone. Starting any earlier just fails SET_MASTER.
+DefaultDependencies=no
+After=display-manager.service
+Before=systemd-poweroff.service systemd-halt.service
+
+ConditionPathExists=/usr/lib/retroforge/retroforge-splash
+ConditionPathExists=/usr/share/retroforge/splash/logo.nds1
+ConditionKernelCommandLine=!retroforge.splash=0
+
+[Service]
+Type=simple
+# Overwrite whatever the boot left in the status file; the panel would otherwise come back
+# saying "Starting RetroForge" on the way down.
+ExecStartPre=-/usr/lib/retroforge/splash-progress Shutting down
+# No --takeover: nothing succeeds us here. Without one the drawer never enters the yield path,
+# so it restores the console and exits cleanly when systemd stops it.
+ExecStart=/usr/lib/retroforge/retroforge-splash \
+    --image /usr/share/retroforge/splash/logo.nds1 \
+    --font /usr/share/retroforge/splash/font.ttf \
+    --status /run/retroforge/splash/status
+TimeoutStopSec=5
+# A splash must never be the reason a device will not power off.
+Restart=no
+
+[Install]
+WantedBy=poweroff.target halt.target

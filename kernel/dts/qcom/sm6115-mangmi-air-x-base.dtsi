@@ -41,7 +41,7 @@
 	/*
 	 * The fan's supply switch hangs on TLMM GPIO 92, which has no PWM function of its own
 	 * (no gcc_gp/pdm mux on that pin), so ROCKNIX ran it as a two-state gpio-fan: off or full.
-	 * QForge pulses it with the kernel's hrtimer GPIO PWM and drives it as a normal pwm-fan (hwmon
+	 * RetroForge pulses it with the kernel's hrtimer GPIO PWM and drives it as a normal pwm-fan (hwmon
 	 * pwm1 0-255). The fan has no speed input: pulsing its supply is the only lever. Listening tests
 	 * on the Air Y (2026-10-11, Quick bar > Fan test): 5-10 Hz is stop-and-go and usable only from
 	 * ~50%; 15 Hz was the best, smooth at 40% duty (period 66.67 ms below). The trade-off: the
@@ -57,7 +57,7 @@
 	fan: pwm-fan {
 		compatible = "pwm-fan";
 		pwms = <&fan_pwm 0 66666667 0>;	/* 15 Hz */
-		/* not in any cooling map: qforge-powerd owns the fan (see the thermal note below) */
+		/* not in any cooling map: retroforge-powerd owns the fan (see the thermal note below) */
 		cooling-levels = <0 102 153 204 255>;
 		#cooling-cells = <2>;
 	};
@@ -1706,13 +1706,13 @@
 };
 
 /*
- * Thermal: the kernel throttles, qforge-powerd runs the fan.
+ * Thermal: the kernel throttles, retroforge-powerd runs the fan.
  *
  * ROCKNIX bound only the fan to these zones -- the CPU zones' passive trips (alert0/alert1,
  * 90/95 C) named the fan and nothing else, so the cpufreq cooling devices existed but were bound
  * to no zone and a hot CPU was never throttled (an all-core load sat at 93-95 C on the Air Y,
  * 2026-10-11). Its 70 C "active" fan trips and the battery zone's bang-bang fan also fought
- * qforge-powerd over pwm1 once the fan became a real PWM fan (duty jumping 204/122/158/255 within
+ * retroforge-powerd over pwm1 once the fan became a real PWM fan (duty jumping 204/122/158/255 within
  * seconds). Now the passive trips throttle the cluster they measure (cpu0123: the A53s, cpu0's
  * policy; cpu45/cpu67: the A73s, cpu4's policy) and the GPU, and the fan belongs to powerd alone
  * (its curve, its fail-safe 50% on exit; pwm-fan runs the fan at full speed from probe until
@@ -1805,7 +1805,7 @@
 			thermal-sensors = <&fuel_gauge>;
 			linux,governor = "bang_bang";
 
-			/* reporting only: the fan is qforge-powerd's (see the thermal note above) */
+			/* reporting only: the fan is retroforge-powerd's (see the thermal note above) */
 			trips {
 				battery_hot: battery-hot {
 					temperature = <60000>;

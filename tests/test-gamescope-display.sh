@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Offline test for gs_resolve_display() in /usr/lib/qforge/gamescope-display.sh.
+# Offline test for gs_resolve_display() in /usr/lib/retroforge/gamescope-display.sh.
 #
 #   tests/test-gamescope-display.sh
 #
-# WHY THIS FILE EXISTS. qforge-suspend and qforge-rest run as ROOT and find the live
+# WHY THIS FILE EXISTS. retroforge-suspend and retroforge-rest run as ROOT and find the live
 # gamescope control socket through this resolver. It used to search only $XDG_RUNTIME_DIR, defaulted
 # to /run/user/0 from when the session ran as root. The session runs as `player` (uid 1000) now, so its
 # socket is /run/user/1000/gamescope-0, every strategy missed, and every suspend fell back to
@@ -15,9 +15,9 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-LIB="$ROOT/rootfs/overlay/usr/lib/qforge/gamescope-display.sh"
-SUSPEND="$ROOT/rootfs/overlay/usr/bin/qforge-suspend"
-REST="$ROOT/rootfs/overlay/usr/bin/qforge-rest"
+LIB="$ROOT/rootfs/overlay/usr/lib/retroforge/gamescope-display.sh"
+SUSPEND="$ROOT/rootfs/overlay/usr/bin/retroforge-suspend"
+REST="$ROOT/rootfs/overlay/usr/bin/retroforge-rest"
 [ -f "$LIB" ] || { echo "no resolver: $LIB" >&2; exit 1; }
 
 PASS=0; FAIL=0; CASE=""

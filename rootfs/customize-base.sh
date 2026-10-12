@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge root bootstrap — lay the RELEASE root down from packages, into an empty tree.
+# retroforge root bootstrap — lay the RELEASE root down from packages, into an empty tree.
 #
 # PHASE 4c. This script used to `docker export` a vendor-built base image and pacman-install
 # on top of it. It now bootstraps: `pacman -r work/base` against an EMPTY directory, so every
@@ -40,7 +40,7 @@
 # This installs PACKAGES only — it writes NO network/SSH config and enables NO services.
 # First-boot networking is the shell's responsibility on release. All Wi-Fi/SSH
 # scaffolding (.link/.network, regdom, wpa creds, sshd + host keys, enable-symlinks) is a
-# DEV-ONLY injection done later by assemble-rootfs.sh under QFORGE_DEV=1 (see it).
+# DEV-ONLY injection done later by assemble-rootfs.sh under RETROFORGE_DEV=1 (see it).
 #
 # This EXECUTES arm64 userspace (pacman, its install scriptlets, locale-gen, useradd), so it
 # needs qemu binfmt — registered on demand via tonistiigi/binfmt. Network required.
@@ -53,7 +53,7 @@
 # exactly the package files rootfs/manifest.lock declares, sha256-verified on the host, and the
 # container installs that explicit list with `pacman -U`. No repo database is synced, so no
 # dependency resolution happens implicitly at build time.
-#   QFORGE_RESOLVE=1  re-resolve from PKGS with `pacman -Sy` (the pre-lock behaviour). This is
+#   RETROFORGE_RESOLVE=1  re-resolve from PKGS with `pacman -Sy` (the pre-lock behaviour). This is
 #                       how the lock is REGENERATED, so it must exist: `make relock` runs this
 #                       mode and then rootfs/genmanifest.sh over the result. Never ships.
 # The two modes produce different trees by design (that is the point of relocking), so the mode
@@ -72,9 +72,9 @@ OSRELEASE="$ROOT/rootfs/conf/os-release"
 # run must agree with it), but it has to be in the target root BEFORE the transaction whose
 # sysusers hook allocates the ids — so this script reads it from there and stages it in early.
 # There is exactly one copy; assemble-rootfs.sh later re-lays the identical file with the overlay.
-IDPIN="$ROOT/rootfs/overlay/usr/lib/sysusers.d/01-qforge-enforce-ids.conf"
+IDPIN="$ROOT/rootfs/overlay/usr/lib/sysusers.d/01-retroforge-enforce-ids.conf"
 DEST="$ROOT/work/base"
-RESOLVE="${QFORGE_RESOLVE:-}"
+RESOLVE="${RETROFORGE_RESOLVE:-}"
 
 # The root's foundation. `base` is the metapackage the vendor's own image is built from, so
 # declaring it reproduces the shipped set exactly (measured: `pacman -r <empty> -Sy base PKGS`
@@ -89,36 +89,36 @@ BOOTSTRAP_PKGS=(base)
 #   gamescope + seatd   the session compositor and its seat manager.
 #   xorg-xwayland       gamescope's nested X server; the shell and most emulators are X11 clients.
 #   bluez/bluez-utils   Bluetooth stack (controllers, audio); the WCN7850 BT firmware ships from
-#                       assemble-rootfs.sh, bluetoothd is enabled by 60-qforge-bluetooth.preset.
+#                       assemble-rootfs.sh, bluetoothd is enabled by 60-retroforge-bluetooth.preset.
 #   networkmanager      Wi-Fi manager. Ships no auto-enable preset; the network preset below enables it.
 #   pipewire stack + alsa-ucm-conf   audio. alsa-ucm-conf supplies the codec/lib snippets the device
 #                       UCM2 profiles under rootfs/overlay Include. pipewire-jack is not needed.
 #   rtkit               REQUIRED for PipeWire realtime priority: module-rt only uses the RTKit path
 #                       (an RLIMIT_RTPRIO grant was tried on HW and does not work). D-Bus activated.
-#   libinput-tools      the `libinput` CLI that qforge-powerbuttond and qforge-suspend read the
+#   libinput-tools      the `libinput` CLI that retroforge-powerbuttond and retroforge-suspend read the
 #                       power key through. Our GUI-less build (packages/libinput/), from the overlay.
 #   e2fsprogs           /home is an ext4 partition grown to fill the card on first boot (resize2fs).
 #   noto-fonts(+emoji)  the base only carries Latin adwaita-fonts; non-Latin UI text is tofu
 #                       without these. noto-fonts-cjk is deliberately NOT here: 299 MiB, a fifth
 #                       of the root, so CJK text renders as tofu (2026-10-03 disk-space trim).
-# No display manager. qforge-session.service (rootfs/overlay) logs player in through PAM itself,
+# No display manager. retroforge-session.service (rootfs/overlay) logs player in through PAM itself,
 # which gives the ACTIVE seat0 logind session stock polkit (allow_active) authorizes Wi-Fi +
 # timezone against. SDDM did the same job and dragged in qt6-declarative (122 MiB) for a greeter
 # that was never shown. No ffmpeg either (190 MiB with its codec libs, nothing in PKGS needs it):
 # an emulator that wants it pulls it in as its own dependency.
 #   mangohud            the performance overlay gamescope spawns with --mangoapp. Overlay build with
 #                       the Qualcomm/Adreno GPU + battery patches (packages/mangohud).
-#   python + python-gobject  the interpreter and D-Bus bindings behind qforge-powerd and the other
+#   python + python-gobject  the interpreter and D-Bus bindings behind retroforge-powerd and the other
 #                       shipped python tools; a missing one fails at the shebang or the import.
-#   scx-scheds          sched_ext schedulers (scx_lavd). Installed but OFF by default: qforge-powerd
+#   scx-scheds          sched_ext schedulers (scx_lavd). Installed but OFF by default: retroforge-powerd
 #                       selects one only when the user picks it. Needs CONFIG_SCHED_CLASS_EXT. Overlay.
 #   rauc                A/B update client. Built at 1.15.x in the overlay (packages/rauc): the
 #                       snapshot's 1.14 cannot install a dm-verity bundle on a kernel >= 6.19.
-#                       Reads /etc/rauc/system.conf, which points bootloader=custom at qforge-bootctl.
+#                       Reads /etc/rauc/system.conf, which points bootloader=custom at retroforge-bootctl.
 #   btrfs-progs         `btrfstune -U` in the post-install hook, so the two slots never share an fsid.
 #   rsync               the post-install hook copies the running /var into the new slot's /var.
 #   earlyoom            userspace OOM killer, acting before allocation fails (policy in
-#                       earlyoom.service.d/qforge.conf, enabled by 60-qforge-earlyoom.preset).
+#                       earlyoom.service.d/retroforge.conf, enabled by 60-retroforge-earlyoom.preset).
 #   zram-generator      the image's only swap device; needs CONFIG_ZRAM (kernel/kernel.config).
 #   udisks2             removable-media service behind the storage automount and format paths.
 #   f3                  f3probe, the counterfeit-card check before formatting an SD card. Overlay.
@@ -142,14 +142,14 @@ BOOTSTRAP_PKGS=(base)
 #                       AppImages run as shipped: the type-2 runtime mounts its squashfs through it
 #                       and, without it, aborts ("Cannot mount AppImage, please check your FUSE
 #                       setup", HW 2026-10-03, DuckStation). Emulators are not in the image; the
-#                       QForge OGUI plugin downloads them into /home (plan Phase 3/4).
+#                       RetroForge OGUI plugin downloads them into /home (plan Phase 3/4).
 #   ksmbd-tools         userspace for ksmbd, the in-kernel SMB3 server (CONFIG_SMB_SERVER=m) behind the
 #                       player's network shares (/etc/ksmbd/ksmbd.conf: roms, bios, saves, states;
 #                       guest read-write, on by default). Overlay (packages/ksmbd-tools): not in the
 #                       holo snapshot. Chosen over Samba, ~110 MiB+ with its dependencies.
-#   avahi               mDNS: announces qforge.local and the SMB shares (/etc/avahi/services/
+#   avahi               mDNS: announces retroforge.local and the SMB shares (/etc/avahi/services/
 #                       smb.service). Already pulled in as a dependency; listed because the image
-#                       now ENABLES avahi-daemon (60-qforge-shares.preset), which must not depend on
+#                       now ENABLES avahi-daemon (60-retroforge-shares.preset), which must not depend on
 #                       some other package keeping it around.
 #   PortMaster's needs (Settings > Emulators downloads it into ~/roms/ports/PortMaster; plan Phase
 #   4b). Its GUI is python + pysdl2 on the system SDL2 libraries:
@@ -169,7 +169,7 @@ BOOTSTRAP_PKGS=(base)
 #                       every LÖVE port run on it. Measured 2026-10-11 on the ACE: +5.0 MiB.
 PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-tools mesa gamescope seatd mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit e2fsprogs xorg-xwayland noto-fonts noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl opengamepadui powerstation which fuse3 ksmbd-tools avahi sdl2_ttf sdl2_image sdl2_mixer squashfuse mesa-utils unzip openal libtheora rmtfs)
 
-# Dev-only packages — installed ONLY under QFORGE_DEV=1, NEVER in a release base.
+# Dev-only packages — installed ONLY under RETROFORGE_DEV=1, NEVER in a release base.
 # On-device bring-up tools: evtest reads raw /dev/input events; usbutils provides lsusb.
 # xorg-xprop + xorg-xwininfo: read the ACTUAL attributes of a window inside gamescope's nested
 # Xwayland. Added 2026-08-06 because the Steam bootstrap update dialog is created and shown
@@ -242,7 +242,7 @@ done
 # package, a new prebuilt's declared deps, or the test-only packages toggling in/out. Probing
 # for one sentinel file per package doesn't scale (and silently misses any package without a
 # sentinel), so instead record the whole sorted install set in ONE marker file
-# (/usr/lib/qforge/pkgs) and compare it. prebuilt.manifest stays a SEPARATE marker because
+# (/usr/lib/retroforge/pkgs) and compare it. prebuilt.manifest stays a SEPARATE marker because
 # the container also reads it verbatim as the tar-extraction list, so it must hold only
 # prebuilt rows.
 #
@@ -255,7 +255,7 @@ INSTALL_PKGS=("${BOOTSTRAP_PKGS[@]}" "${PKGS[@]}" "${PREBUILT_DEPS[@]}")
 # of the container script). It is deliberately NOT in the lock: the lock describes the RELEASE
 # image, which is the tree the step-4 seal guard runs against. Keeping test rows out of it also
 # means `make relock` must run release — genmanifest.sh refuses a dev base for that reason.
-if [ "${QFORGE_DEV:-}" = "1" ]; then
+if [ "${RETROFORGE_DEV:-}" = "1" ]; then
   INSTALL_PKGS+=("${DEV_PKGS[@]}")
 fi
 # Canonical (sorted, de-duped) install set — the reuse-cache key recorded in the base below.
@@ -268,7 +268,7 @@ EXPECTED_PKGS="$(printf '%s\n' "${INSTALL_PKGS[@]}" | sort -u)"
 # Arch-scoped (aarch64), shared across SoCs — overlay packages are plain aarch64 binaries every
 # device reuses, so they are NOT under work/base/. See packages/build-overlay.sh.
 OVERLAY_REPO="$ROOT/work/repo/aarch64"
-OVERLAY_DB="$OVERLAY_REPO/qforge.db.tar.zst"
+OVERLAY_DB="$OVERLAY_REPO/retroforge.db.tar.zst"
 if [ -f "$OVERLAY_DB" ]; then
   EXPECTED_PKGS="$EXPECTED_PKGS
 overlay:$(sha256sum "$OVERLAY_DB" | cut -d' ' -f1)"
@@ -303,12 +303,12 @@ if [ -n "$RESOLVE" ]; then
   EXPECTED_PKGS="$EXPECTED_PKGS
 mode:resolve"
 else
-  [ -f "$LOCKFILE" ] || { echo "no manifest: $LOCKFILE (QFORGE_RESOLVE=1 to re-resolve)" >&2; exit 1; }
+  [ -f "$LOCKFILE" ] || { echo "no manifest: $LOCKFILE (RETROFORGE_RESOLVE=1 to re-resolve)" >&2; exit 1; }
   EXPECTED_PKGS="$EXPECTED_PKGS
 mode:locked
 lock:$(sha256sum "$LOCKFILE" | cut -d' ' -f1)"
 fi
-if [ "${QFORGE_DEV:-}" = "1" ]; then
+if [ "${RETROFORGE_DEV:-}" = "1" ]; then
   EXPECTED_PKGS="$EXPECTED_PKGS
 dev:1"
 fi
@@ -335,9 +335,9 @@ ctr_require "the root bootstrap"
 # missed. The pkgs marker is written last in-container, so its presence also proves the
 # bootstrap completed (no need for per-package existence sentinels).
 if [ -z "${FORCE:-}" ] \
-   && [ "$(cat "$DEST/usr/lib/qforge/pkgs" 2>/dev/null)" = "$EXPECTED_PKGS" ] \
-   && [ "$(cat "$DEST/usr/lib/qforge/prebuilt.manifest" 2>/dev/null)" = "$EXPECTED_MANIFEST" ]; then
-  echo "[qforge] bootstrapped root present: ${DEST#"$ROOT"/} (FORCE=1 to rebuild)" >&2
+   && [ "$(cat "$DEST/usr/lib/retroforge/pkgs" 2>/dev/null)" = "$EXPECTED_PKGS" ] \
+   && [ "$(cat "$DEST/usr/lib/retroforge/prebuilt.manifest" 2>/dev/null)" = "$EXPECTED_MANIFEST" ]; then
+  echo "[retroforge] bootstrapped root present: ${DEST#"$ROOT"/} (FORCE=1 to rebuild)" >&2
   echo "$DEST"; exit 0
 fi
 
@@ -388,10 +388,10 @@ for pin in "${PREBUILT_PINS[@]}"; do
   # Reuse a cached blob only if its sha already matches the pin (guards against a partial download
   # or a bumped url reusing the old file); otherwise (re)fetch and verify.
   if [ -f "$staged" ] && echo "$sha  $staged" | sha256sum -c --status -; then
-    echo "[qforge] prebuilt $name $ver ($kind): cached ($url)" >&2
+    echo "[retroforge] prebuilt $name $ver ($kind): cached ($url)" >&2
     continue
   fi
-  echo "[qforge] fetching prebuilt $name $ver ($kind): $url" >&2
+  echo "[retroforge] fetching prebuilt $name $ver ($kind): $url" >&2
   curl -fsSL "$url" -o "$staged.part"
   echo "$sha  $staged.part" | sha256sum -c - \
     || { echo "$name sha256 mismatch — refusing" >&2; rm -f "$staged.part"; exit 1; }
@@ -408,13 +408,13 @@ printf '%s\n' "$EXPECTED_PKGS" >"$PREBUILT_DIR/pkgs"
 if [ -z "$RESOLVE" ]; then
   "$ROOT/rootfs/fetchlock.sh" "$PREBUILT_DIR/install.list"
 else
-  echo "[qforge] QFORGE_RESOLVE=1 — re-resolving from PKGS, this tree is for relock only" >&2
+  echo "[retroforge] RETROFORGE_RESOLVE=1 — re-resolving from PKGS, this tree is for relock only" >&2
 fi
 
 # Dev-only tooling crosses as a file for the same reason the mirrorlist does: it keeps the
 # container script free of another layer of nested quoting. Absent file => release build.
 rm -f "$PREBUILT_DIR/dev.pkgs"
-if [ "${QFORGE_DEV:-}" = "1" ]; then
+if [ "${RETROFORGE_DEV:-}" = "1" ]; then
   printf '%s\n' "${DEV_PKGS[@]}" >"$PREBUILT_DIR/dev.pkgs"
 fi
 
@@ -441,14 +441,14 @@ fi
 # host-owned (created above, and by the Makefile at parse time); only work/base is root-owned,
 # which is already how the tree is treated everywhere else (`make clean-base` removes it from
 # inside a container for exactly this reason).
-echo "[qforge] clearing the target root -> ${DEST#"$ROOT"/}" >&2
+echo "[retroforge] clearing the target root -> ${DEST#"$ROOT"/}" >&2
 mkdir -p "$ROOT/work"
 ctr run --rm -v "$ROOT/work":/wb "$REF" sh -c 'rm -rf /wb/base && mkdir -m0755 /wb/base'
 
 if [ -n "$RESOLVE" ]; then
-  echo "[qforge] resolving the root under arm64: ${INSTALL_PKGS[*]}" >&2
+  echo "[retroforge] resolving the root under arm64: ${INSTALL_PKGS[*]}" >&2
 else
-  echo "[qforge] laying down $(wc -l <"$PREBUILT_DIR/install.list") locked packages under arm64" >&2
+  echo "[retroforge] laying down $(wc -l <"$PREBUILT_DIR/install.list") locked packages under arm64" >&2
 fi
 ctr run --rm --platform linux/arm64 -v "$PREBUILT_DIR":/prebuilt:ro \
   -v "$PACMAN_CACHE":/var/cache/pacman/pkg \
@@ -492,7 +492,7 @@ ctr run --rm --platform linux/arm64 -v "$PREBUILT_DIR":/prebuilt:ro \
   # that moment, and the first definition of a name wins. Placed after the install it would be
   # inert — the ids would already have been allocated by counting down from 999. No package owns
   # this path, so it cannot collide with the transaction. See the file for what drift it prevents.
-  install -Dm0644 /prebuilt/sysusers-ids.conf /target/usr/lib/sysusers.d/01-qforge-enforce-ids.conf
+  install -Dm0644 /prebuilt/sysusers-ids.conf /target/usr/lib/sysusers.d/01-retroforge-enforce-ids.conf
 
   # Lay the root down. LOCKED when the host staged an install list, else RESOLVE.
   if [ -s /prebuilt/install.list ]; then
@@ -547,7 +547,7 @@ ctr run --rm --platform linux/arm64 -v "$PREBUILT_DIR":/prebuilt:ro \
   # lines down; the two have to agree or everything silently falls back to C.
   printf "LANG=en_US.UTF-8\n" >/target/etc/locale.conf
   # The vendor left a 0-byte /etc/hostname, so the device fell back to a compiled-in default.
-  printf "qforge\n" >/target/etc/hostname
+  printf "retroforge\n" >/target/etc/hostname
 
   # Compile the en_US.UTF-8 locale. glibc ships /etc/locale.gen with every entry COMMENTED and
   # nothing runs locale-gen at install time, so /usr/lib/locale would hold only C.utf8 and
@@ -609,12 +609,12 @@ ctr run --rm --platform linux/arm64 -v "$PREBUILT_DIR":/prebuilt:ro \
           ;;
       esac
     done < /prebuilt/prebuilt.manifest
-    install -Dm0644 /prebuilt/prebuilt.manifest /target/usr/lib/qforge/prebuilt.manifest
+    install -Dm0644 /prebuilt/prebuilt.manifest /target/usr/lib/retroforge/prebuilt.manifest
   fi
   # Release base ships the runtime PACKAGES only — no network/SSH config or service
   # enablement. First-boot networking is the shell job; all Wi-Fi/SSH
   # scaffolding (.link/.network, regdom, wpa creds, sshd + host keys, enable-symlinks) is
-  # injected dev-only by rootfs/assemble-rootfs.sh under QFORGE_DEV=1.
+  # injected dev-only by rootfs/assemble-rootfs.sh under RETROFORGE_DEV=1.
 
   # Headless-boot fix (GENERAL, not network/test): no package owns /etc/machine-id, so the root
   # ships without one (ConditionFirstBoot=yes) — as it did before 4c, where the vendor image had
@@ -651,7 +651,7 @@ ctr run --rm --platform linux/arm64 -v "$PREBUILT_DIR":/prebuilt:ro \
   # too, at higher priority than /usr/lib). Keep comments apostrophe-free — a bare single-quote
   # closes the -c string and leaks the rest to the host shell (permission-denied on /etc + /usr).
   mkdir -p /target/etc/systemd/system-preset
-  echo "enable NetworkManager.service" >/target/etc/systemd/system-preset/60-qforge-network.preset
+  echo "enable NetworkManager.service" >/target/etc/systemd/system-preset/60-retroforge-network.preset
   mkdir -p /target/etc/systemd/system/multi-user.target.wants
   ln -sf /usr/lib/systemd/system/NetworkManager.service \
          /target/etc/systemd/system/multi-user.target.wants/NetworkManager.service
@@ -691,7 +691,7 @@ ctr run --rm --platform linux/arm64 -v "$PREBUILT_DIR":/prebuilt:ro \
   # systemd-tmpfiles returns non-zero if ANY line failed. Report the code rather than swallow it,
   # so a run that starts failing wholesale is visible in the build log.
   if ! systemd-tmpfiles --root=/target --create; then
-    echo "[qforge] systemd-tmpfiles --root exited $? (partial offline application; see above)" >&2
+    echo "[retroforge] systemd-tmpfiles --root exited $? (partial offline application; see above)" >&2
   fi
 
   # Journal message catalog, offline for the same reason as tmpfiles above. pacman`s hook runs
@@ -704,14 +704,14 @@ ctr run --rm --platform linux/arm64 -v "$PREBUILT_DIR":/prebuilt:ro \
   # message explanations. On a device with no serial console, where the only debugging path is
   # reading an offloaded journal off the card, that is the wrong thing to be missing.
   if ! journalctl --root=/target --update-catalog; then
-    echo "[qforge] journalctl --root --update-catalog exited $? (no message catalog)" >&2
+    echo "[retroforge] journalctl --root --update-catalog exited $? (no message catalog)" >&2
   fi
 
   # Record the install-set marker LAST, so its presence proves the whole bootstrap ran. The host
   # reuse-check keys off it: a run that died anywhere above leaves no marker, so the next build
   # re-bootstraps instead of shipping a half-populated root. (It used to be written before this
   # block, which made "the marker exists" a weaker claim than the comment said it was.)
-  install -Dm0644 /prebuilt/pkgs /target/usr/lib/qforge/pkgs
+  install -Dm0644 /prebuilt/pkgs /target/usr/lib/retroforge/pkgs
 
   # NB: no `pacman -Scc` here — /var/cache/pacman/pkg is a persistent host bind-mount (the retry
   # cache) and lives outside the target root, so cleaning it would only throw the cache away
@@ -729,5 +729,5 @@ ctr run --rm --platform linux/arm64 -v "$PREBUILT_DIR":/prebuilt:ro \
 
 # du -sh on a root-owned tree warns on 0700 dirs (/root, NM system-connections, gnupg keys) when
 # run as the host user; the size is just for the log line, so drop those stderr warnings.
-echo "[qforge] bootstrapped root ready ($(du -sh "$DEST" 2>/dev/null | cut -f1) at ${DEST#"$ROOT"/})" >&2
+echo "[retroforge] bootstrapped root ready ($(du -sh "$DEST" 2>/dev/null | cut -f1) at ${DEST#"$ROOT"/})" >&2
 echo "$DEST"

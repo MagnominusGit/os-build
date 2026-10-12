@@ -1,4 +1,4 @@
-# qforge /etc/os-release (Phase 4c).
+# retroforge /etc/os-release (Phase 4c).
 #
 # Installed as /etc/os-release by rootfs/customize-base.sh. Overriding in /etc is what
 # os-release(5) defines /etc for; /usr/lib/os-release stays as the `filesystem` package
@@ -13,7 +13,7 @@
 #
 # NO PER-BUILD FIELDS *HERE*. This file is static so that rebuilding does not churn the tree.
 # The per-build identity — variant, version, git and build timestamp — is written by
-# rootfs/assemble-rootfs.sh to /etc/qforge-release, which is where qforge's own tooling
+# rootfs/assemble-rootfs.sh to /etc/retroforge-release, which is where retroforge's own tooling
 # looks. That same script then APPENDS the os-release spellings of those values
 # (VARIANT/VARIANT_ID/VERSION/VERSION_ID/BUILD_ID) to the installed copy of this file, because
 # software that is not ours reads them from here: SteamUI's Settings -> System renders OS
@@ -25,8 +25,8 @@
 
 # NAME/PRETTY_NAME carry the BRAND spelling; ID is the machine identifier and os-release(5)
 # requires it lowercase, so the two differ on purpose and neither is a typo for the other.
-NAME="QForge"
-PRETTY_NAME="QForge"
-ID=qforge
+NAME="RetroForge"
+PRETTY_NAME="RetroForge"
+ID=retroforge
 ID_LIKE=arch
 ANSI_COLOR="1;35"

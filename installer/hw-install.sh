@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Phase 4 hardware STAGER for installer/qforge-install — the destructive peer of
+# Phase 4 hardware STAGER for installer/retroforge-install — the destructive peer of
 # installer/hw-select-target.sh. Plan verification step 3.
 #
 #   installer/hw-install.sh [options] root@<device>
@@ -19,7 +19,7 @@
 #      which owns the pins and the DT_NEEDED closures. recon() catches all four at second zero, so
 #      the failure is cheap, but it is still four round trips to find out by hand.
 #   2. TWO FIXED PATHS POINT INTO A READ-ONLY ROOTFS — the consent renderer and the RAUC
-#      post-install handler both default under /usr/lib/qforge/install/, and both are
+#      post-install handler both default under /usr/lib/retroforge/install/, and both are
 #      installer-only, so neither is there on a dev card. The generated `run-install` wrapper
 #      redirects them, and that wrapper is the only reason the printed command fits on a line.
 #   3. THE WORKING TREE MUST WIN OVER THE CARD'S BAKED COPIES. genpart.sh, partition-table.txt and
@@ -43,7 +43,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib-hwstage.sh
 . "$ROOT/installer/lib-hwstage.sh"
 
-STAGE=/run/qforge/install-stage       # tmpfs; rebuilt by every run of this script
+STAGE=/run/retroforge/install-stage       # tmpfs; rebuilt by every run of this script
 
 BUNDLE=""; PORT=8088; SERVE=1; PREFLIGHT=1; HTTP_HOST=""
 usage() {
@@ -110,7 +110,7 @@ log "bundle: ${BUNDLE#"$ROOT"/} ($(du -h "$BUNDLE" | cut -f1))"
 # Measured 2026-08-21 against the ACE: serving with `http2 on;` (h2c, verified working from the
 # host with `curl --http2-prior-knowledge`) does NOT silence it -- rauc does not attempt
 # prior-knowledge h2 over cleartext, so h2 arrives via TLS ALPN or not at all. The production OTA
-# vhost has both (ota/nginx-qforge-ota.conf), and giving this lab server TLS would mean a cert
+# vhost has both (ota/nginx-retroforge-ota.conf), and giving this lab server TLS would mean a cert
 # the device trusts, for a stream that only has to finish once. So the gate runs on HTTP/1 and is
 # slower than the release path will be. That is a property of the harness, not a defect.
 #
@@ -122,7 +122,7 @@ log "bundle: ${BUNDLE#"$ROOT"/} ($(du -h "$BUNDLE" | cut -f1))"
 #
 # CONSEQUENCE: THIS SERVES FILES, NOT AN OTA CHANNEL, and that is correct for what it is for -- the
 # installer fetches ONE bundle by direct URL and verifies it against the device's keyring. But
-# `qforge-update` wants `<url>/<channel>/latest.json` and resolves `bundle` relative to it, which
+# `retroforge-update` wants `<url>/<channel>/latest.json` and resolves `bundle` relative to it, which
 # is a DIRECTORY shape this server cannot answer: every path under /stable/ is a 404.
 #
 # So the OTA leg of the hardware gate needs its own server, e.g.
@@ -131,19 +131,19 @@ log "bundle: ${BUNDLE#"$ROOT"/} ($(du -h "$BUNDLE" | cut -f1))"
 # with out/images/stable/{latest.json, <symlink to the bundle>}. Do not "fix" this one to mount the
 # directory -- the two reasons above still hold.
 #
-# WHEN IT LOOKS LIKE THE SERVER IS BROKEN, IT USUALLY IS NOT. `qforge-update` exits instantly and
+# WHEN IT LOOKS LIKE THE SERVER IS BROKEN, IT USUALLY IS NOT. `retroforge-update` exits instantly and
 # silently in two very different situations: a 404 on latest.json, and a deliberate deferral
-# (it defers on purpose, so first-boot setup never starts a 4 GB download). `qforge-update status` separates
+# (it defers on purpose, so first-boot setup never starts a 4 GB download). `retroforge-update status` separates
 # them in one command -- it prints the resolved server URL, `logged in:`, and `available:`. Reach
 # for it before touching the server. Cost 20 minutes and a wrong hypothesis on 2026-08-22.
-CONTAINER=qforge-hw-http
+CONTAINER=retroforge-hw-http
 BUNDLE_NAME="$(basename "$BUNDLE")"
 
 DOCKER_CMD=(ctr run -d --rm --name "$CONTAINER" -p "$PORT:80"
             -v "$BUNDLE:/usr/share/nginx/html/$BUNDLE_NAME:ro" docker.io/library/nginx:alpine)
 if [ "$SERVE" = 1 ]; then
   ctr rm -f "$CONTAINER" >/dev/null 2>&1 || true
-  "${DOCKER_CMD[@]}" >/dev/null || die "cannot start nginx (is $QFORGE_CONTAINER up?)"
+  "${DOCKER_CMD[@]}" >/dev/null || die "cannot start nginx (is $RETROFORGE_CONTAINER up?)"
   log "serving $BUNDLE_NAME on :$PORT as container $CONTAINER"
 fi
 
@@ -160,7 +160,7 @@ BUNDLE_URL="http://$HTTP_HOST:$PORT/$BUNDLE_NAME"
 # 4. onto the device
 # =================================================================================================
 # ONE FLAT DIRECTORY, because that is what every component's own resolver looks at first
-# ($SELFDIR, then /usr/lib/qforge/install/, then a repo-relative path). Flat therefore means the
+# ($SELFDIR, then /usr/lib/retroforge/install/, then a repo-relative path). Flat therefore means the
 # working tree wins over the card's baked copies without a single environment variable -- and it
 # means a component that silently fell back to the card's copy would be a resolver bug rather than
 # something this script has to police.
@@ -168,7 +168,7 @@ ssh "${SSHOPTS[@]}" "$HOST" "rm -rf $STAGE && mkdir -p $STAGE/bin $STAGE/lib" \
   || die "cannot prepare $STAGE on the device"
 
 scp "${SSHOPTS[@]}" -q \
-  "$ROOT/installer/qforge-install" \
+  "$ROOT/installer/retroforge-install" \
   "$ROOT/installer/select-target.sh" \
   "$ROOT/installer/carve.sh" \
   "$ROOT/installer/rauc-session.sh" \
@@ -177,12 +177,12 @@ scp "${SSHOPTS[@]}" -q \
   "$ROOT/image/genpart.sh" \
   "$ROOT/image/partition-table.txt" \
   "$ROOT/image/lib-homestage.sh" \
-  "$ROOT/rootfs/overlay/usr/lib/qforge/install/lib-slotwrite.sh" \
+  "$ROOT/rootfs/overlay/usr/lib/retroforge/install/lib-slotwrite.sh" \
   "$HOST:$STAGE/" || die "cannot stage the scripts"
 
 scp "${SSHOPTS[@]}" -q "$HWSTAGE_CACHE/bin/"* "$HOST:$STAGE/bin/" || die "cannot stage the binaries"
 scp "${SSHOPTS[@]}" -q "$HWSTAGE_CACHE/lib/"* "$HOST:$STAGE/lib/" || die "cannot stage the libraries"
-ssh "${SSHOPTS[@]}" "$HOST" "chmod +x $STAGE/bin/* $STAGE/qforge-install $STAGE/select-target.sh \
+ssh "${SSHOPTS[@]}" "$HOST" "chmod +x $STAGE/bin/* $STAGE/retroforge-install $STAGE/select-target.sh \
   $STAGE/carve.sh $STAGE/rauc-session.sh $STAGE/post-install-fresh.sh $STAGE/confirm-tty \
   $STAGE/genpart.sh" || die "cannot make the staged components executable"
 log "staged $STAGE"
@@ -193,21 +193,21 @@ log "staged $STAGE"
 # the dev card's rootfs is read-only and is not the installer image.
 #
 # IT SETS PATHS AND NOTHING ELSE. There is no value it could carry that means "consent given" --
-# QFORGE_CONFIRM names WHO renders the screen, which §4d explicitly provides for, and the
+# RETROFORGE_CONFIRM names WHO renders the screen, which §4d explicitly provides for, and the
 # renderer it names still has to display a sequence and read it back. If a variable ever appears
 # here that shortcuts the gate, that is the bug, not a convenience.
 # shellcheck disable=SC2087  # client-side expansion is the point: every value below is local
 ssh "${SSHOPTS[@]}" "$HOST" "cat >$STAGE/run-install && chmod +x $STAGE/run-install" <<EOF
 #!/usr/bin/env bash
 # GENERATED by installer/hw-install.sh -- /run is tmpfs, so this is gone at the next reboot and the
-# stager must be re-run. Arguments are passed through to qforge-install; --bundle is already set
+# stager must be re-run. Arguments are passed through to retroforge-install; --bundle is already set
 # and can be overridden by passing it again.
 set -euo pipefail
 export PATH=$STAGE/bin:\$PATH
 export LD_LIBRARY_PATH=$STAGE/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}
-export QFORGE_CONFIRM=$STAGE/confirm-tty
+export RETROFORGE_CONFIRM=$STAGE/confirm-tty
 export POST_INSTALL=$STAGE/post-install-fresh.sh
-exec $STAGE/qforge-install --bundle '$BUNDLE_URL' "\$@"
+exec $STAGE/retroforge-install --bundle '$BUNDLE_URL' "\$@"
 EOF
 log "wrapper: $STAGE/run-install"
 
@@ -282,7 +282,7 @@ if [ "$SERVE" = 1 ]; then
   cat <<EOF
 
 The bundle is served by container $CONTAINER; stop it with
-  $QFORGE_CONTAINER rm -f $CONTAINER
+  $RETROFORGE_CONTAINER rm -f $CONTAINER
 EOF
 else
   cat <<EOF

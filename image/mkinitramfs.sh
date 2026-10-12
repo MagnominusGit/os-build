@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge initramfs builder -> out/initramfs.cpio.gz (installed as /boot/initramfs-qforge.img
+# retroforge initramfs builder -> out/initramfs.cpio.gz (installed as /boot/initramfs-retroforge.img
 # by rootfs/assemble-rootfs.sh; the slot's stage-2 grub.cfg boots it via `initrd`).
 #
 # Stages a handful of aarch64 binaries out of the base rootfs, resolves their shared
@@ -19,7 +19,7 @@
 #   BASE_ROOTFS=<dir> image/mkinitramfs.sh
 #
 # Run inside the build image (needs readelf + cpio + gzip):
-#   docker run --rm -v "$PWD":/src -w /src qforge-build image/mkinitramfs.sh work/base
+#   docker run --rm -v "$PWD":/src -w /src retroforge-build image/mkinitramfs.sh work/base
 set -euo pipefail
 
 BASE="${1:-${BASE_ROOTFS:-}}"
@@ -29,7 +29,7 @@ INIT="$ROOT/image/initramfs/init"
 IMG="$OUT/initramfs.cpio.gz"
 
 # /bin/sh is bash (the base has no busybox); the rest is util-linux + coreutils. findfs
-# resolves root=/qforge.var=/steamos.efi=PARTUUID= specs without udev; mkdir creates the
+# resolves root=/retroforge.var=/steamos.efi=PARTUUID= specs without udev; mkdir creates the
 # overlay upper/work and the /efi mountpoint on first boot; sleep paces the device-probe poll.
 #
 # NO umount: the init mounts only INSIDE the btrfs root ($SYSROOT/efi, $SYSROOT/var), so every
@@ -40,12 +40,12 @@ IMG="$OUT/initramfs.cpio.gz"
 BINS=(bash mount switch_root findfs mkdir sleep)
 
 # The boot splash. Three files, staged whole rather than resolved through copy_deps() below,
-# because the drawer is STATIC on purpose (apps/qforge-splash/src/qforge-splash.c explains
+# because the drawer is STATIC on purpose (apps/retroforge-splash/src/retroforge-splash.c explains
 # why at length: the cross toolchain's glibc is newer than the image's, and the process has to
 # outlive switch_root, which frees every .so out from under it). If it ever grows a DT_NEEDED,
 # the assertion after staging catches it — that would mean the static link silently stopped
 # working, which is exactly the failure that shows up as a black panel and nothing else.
-SPLASH_BIN="$ROOT/apps/qforge-splash/build/qforge-splash"
+SPLASH_BIN="$ROOT/apps/retroforge-splash/build/retroforge-splash"
 SPLASH_ASSET="$ROOT/work/splash/logo.nds1"
 # The status line is what makes the splash worth having; without a font it degrades to a bare
 # logo, which is the old plymouth behaviour and not what we are shipping.
@@ -55,7 +55,7 @@ SPLASH_FONT="$BASE/usr/share/fonts/noto/NotoSansMono-Medium.ttf"
 [ -d "$BASE" ] || { echo "no base rootfs dir: $BASE" >&2; exit 2; }
 [ -f "$INIT" ] || { echo "no init script: $INIT" >&2; exit 1; }
 for t in readelf cpio gzip; do
-  command -v "$t" >/dev/null 2>&1 || { echo "$t not found (run inside qforge-build)" >&2; exit 1; }
+  command -v "$t" >/dev/null 2>&1 || { echo "$t not found (run inside retroforge-build)" >&2; exit 1; }
 done
 
 stage="$(mktemp -d)"
@@ -65,7 +65,7 @@ chmod 0755 "$stage"   # mktemp -d is 0700; that mode would become the initramfs 
 # Pre-create every directory init needs, so it never has to mkdir before /dev exists.
 # /bin, /sbin and /lib are symlinks into /usr, matching the base's merged-usr layout — the
 # binaries' hardcoded PT_INTERP (/lib/ld-linux-aarch64.so.1) resolves through /lib.
-# /sysroot is where the slot's root (and, inside it, /var + /efi) is mounted; /run/qforge is
+# /sysroot is where the slot's root (and, inside it, /var + /efi) is mounted; /run/retroforge is
 # NOT pre-created here -- /run is over-mounted with a fresh tmpfs, so a directory staged in the
 # cpio would be invisible; the init mkdirs it at runtime.
 mkdir -p "$stage"/{usr/bin,usr/lib,proc,sys,dev,run,sysroot}
@@ -123,10 +123,10 @@ if readelf -d "$SPLASH_BIN" 2>/dev/null | grep -q '(NEEDED)'; then
   readelf -d "$SPLASH_BIN" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/  needs \1/p' >&2
   exit 1
 fi
-mkdir -p "$stage/usr/lib/qforge" "$stage/usr/share/qforge/splash"
-install -m0755 "$SPLASH_BIN"   "$stage/usr/lib/qforge/qforge-splash"
-install -m0644 "$SPLASH_ASSET" "$stage/usr/share/qforge/splash/logo.nds1"
-install -m0644 "$SPLASH_FONT"  "$stage/usr/share/qforge/splash/font.ttf"
+mkdir -p "$stage/usr/lib/retroforge" "$stage/usr/share/retroforge/splash"
+install -m0755 "$SPLASH_BIN"   "$stage/usr/lib/retroforge/retroforge-splash"
+install -m0644 "$SPLASH_ASSET" "$stage/usr/share/retroforge/splash/logo.nds1"
+install -m0644 "$SPLASH_FONT"  "$stage/usr/share/retroforge/splash/font.ttf"
 
 # newc cpio, gzip (CONFIG_RD_GZIP=y). Ownership comes from the build user — root in the
 # build container, which is what the kernel should unpack as. Refuse to build a cpio whose
@@ -137,4 +137,4 @@ mkdir -p "$OUT"
 ( cd "$stage" && find . -print0 | sort -z | cpio --null -o -H newc --quiet ) \
   | gzip -9 >"$IMG"
 
-echo "[qforge] initramfs: ${#BINS[@]} binaries, ${#copied[@]} libraries, splash (static) -> ${IMG#"$ROOT"/} ($(du -h "$IMG" | cut -f1))"
+echo "[retroforge] initramfs: ${#BINS[@]} binaries, ${#copied[@]} libraries, splash (static) -> ${IMG#"$ROOT"/} ($(du -h "$IMG" | cut -f1))"

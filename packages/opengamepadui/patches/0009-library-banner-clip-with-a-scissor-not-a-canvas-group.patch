@@ -1,4 +1,4 @@
-From: qforge
+From: retroforge
 Subject: [PATCH] perf(LibraryBanner): clip the collage with a scissor, not a canvas group
 
 The home banner's collage of twelve tilted library tiles sits in a
@@ -18,7 +18,7 @@ continuously), Godot's own viewport GPU timer: 19.6 -> 13.9 ms per
 frame. The card and icon clip masks are real shape masks (rounded
 corners, icon shapes) and are left alone.
 
-(qforge: ours, for upstream.)
+(retroforge: ours, for upstream.)
 ---
 --- a/core/ui/components/library_banner.tscn
 +++ b/core/ui/components/library_banner.tscn

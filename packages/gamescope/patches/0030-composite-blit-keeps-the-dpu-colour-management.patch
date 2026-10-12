@@ -1,4 +1,4 @@
-From: qforge
+From: retroforge
 Subject: [PATCH] composite-blit: keep the DPU's colour management
 
 0027's transfer blit copies layer 0 to the output raw, "like direct

@@ -1,4 +1,4 @@
-# qforge GRUB source pin — Phase 5
+# retroforge GRUB source pin — Phase 5
 # GNU GRUB 2.14, the upstream RELEASE tarball. The TARBALL + its sha256 is the canonical pin.
 version:    2.14
 url:        https://ftp.gnu.org/gnu/grub/grub-2.14.tar.xz
@@ -14,7 +14,7 @@ git_tag:    grub-2.14
 #
 # Our delta lives in boot/patches/grub/ and is applied lexically, exactly like kernel/patches/:
 #   0001  grub-core/video/fb/*, include/grub/  framebuffer rotation (`set rotation=90|180|270`)
-#   0002  grub-core/commands/efi/qforge.c    the boot-attempts counter module
+#   0002  grub-core/commands/efi/retroforge.c    the boot-attempts counter module
 #   0003  grub-core/Makefile.core.def          GRUB's module manifest -- the stanza that builds it
 #
 # 0001 is a three-commit series by kbader94 <kyle.bader94@gmail.com> (2024-06-17), carried
@@ -30,7 +30,7 @@ git_tag:    grub-2.14
 # 191 hunks of grub-core/Makefile.in, because Ubuntu's automake is not the one that cut the
 # tarball. That churn is not a reviewable patch.
 #
-# NOT patched, deliberately: the -fshort-wchar that the qforge module needs (it copies L"..."
+# NOT patched, deliberately: the -fshort-wchar that the retroforge module needs (it copies L"..."
 # literals into grub_efi_char16_t buffers, so wchar_t has to be 2 bytes -- without it the firmware
 # is handed a UTF-32 path and finds nothing). SteamOS patches configure.ac + conf/Makefile.common
 # for the same reason on x86; we pass it as a configure argument instead

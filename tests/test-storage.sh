@@ -19,7 +19,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PKGSRC="$ROOT/rootfs/customize-base.sh"
 LOCK="$ROOT/rootfs/manifest.lock"
-RULES="$ROOT/rootfs/overlay/usr/share/polkit-1/rules.d/50-qforge-storage.rules"
+RULES="$ROOT/rootfs/overlay/usr/share/polkit-1/rules.d/50-retroforge-storage.rules"
 
 PASS=0; FAIL=0; CASE=""
 ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
@@ -57,7 +57,7 @@ CASE="storage-polkit-rule"
 # The gate, not just the grants. Without the active+wheel test the rule would authorize any subject
 # that can reach the bus, including a non-session one.
 grep -q 'subject.active' "$RULES" && grep -q 'isInGroup("wheel")' "$RULES" \
-  && ok "gated on an active session in wheel, like 50-qforge-timezone.rules" \
+  && ok "gated on an active session in wheel, like 50-retroforge-timezone.rules" \
   || bad "the rule does not gate on subject.active + wheel"
 
 # THE QUOTED STRINGS WITH THE COMMENTS STRIPPED, never a grep over the whole file. This rule
@@ -107,15 +107,15 @@ grep -q '^});' "$RULES" \
 
 # =================================================================================================
 CASE="the-scripts-ship-and-parse"
-LIB="$ROOT/rootfs/overlay/usr/lib/qforge/storage/lib-storage.sh"
-FMT="$ROOT/rootfs/overlay/usr/lib/qforge/storage/format-device.sh"
-AUTO="$ROOT/rootfs/overlay/usr/lib/qforge/storage/automount.sh"
-EVT="$ROOT/rootfs/overlay/usr/lib/qforge/storage/block-event.sh"
-POLICY="$ROOT/rootfs/overlay/usr/share/polkit-1/actions/org.qforge.policykit.storage.policy"
-UDEV="$ROOT/rootfs/overlay/usr/lib/udev/rules.d/99-qforge-automount.rules"
-UNIT="$ROOT/rootfs/overlay/usr/lib/systemd/system/qforge-automount@.service"
-H_SD="$ROOT/rootfs/overlay/usr/bin/qforge-format-sdcard"
-H_DEV="$ROOT/rootfs/overlay/usr/bin/qforge-format-device"
+LIB="$ROOT/rootfs/overlay/usr/lib/retroforge/storage/lib-storage.sh"
+FMT="$ROOT/rootfs/overlay/usr/lib/retroforge/storage/format-device.sh"
+AUTO="$ROOT/rootfs/overlay/usr/lib/retroforge/storage/automount.sh"
+EVT="$ROOT/rootfs/overlay/usr/lib/retroforge/storage/block-event.sh"
+POLICY="$ROOT/rootfs/overlay/usr/share/polkit-1/actions/org.retroforge.policykit.storage.policy"
+UDEV="$ROOT/rootfs/overlay/usr/lib/udev/rules.d/99-retroforge-automount.rules"
+UNIT="$ROOT/rootfs/overlay/usr/lib/systemd/system/retroforge-automount@.service"
+H_SD="$ROOT/rootfs/overlay/usr/bin/retroforge-format-sdcard"
+H_DEV="$ROOT/rootfs/overlay/usr/bin/retroforge-format-device"
 
 # EVERY HELPER THE SHELL CAN RUN LEAVES A LINE. pkexec records what it EXECUTED, so a call it
 # declines leaves nothing. "The client never called us" and "the client called us and it went nowhere" then look
@@ -151,7 +151,7 @@ target="$(sed -n 's/.*pkexec \([^ ]*format-device\.sh\).*/\1/p' "$H_SD" | head -
 [ -n "$annot" ] && [ "$annot" = "$target" ] \
   && ok "the action annotates exactly what the helper execs ($annot)" \
   || bad "annotation '$annot' != helper target '$target' — pkexec would fall back to auth_admin"
-[ "$annot" = "/usr/lib/qforge/storage/format-device.sh" ] \
+[ "$annot" = "/usr/lib/retroforge/storage/format-device.sh" ] \
   && ok "and that is the shipped path" \
   || bad "the annotated path is not where the script ships"
 grep -q "<allow_active>yes</allow_active>" "$POLICY" \
@@ -177,8 +177,8 @@ done
 
 # =================================================================================================
 CASE="unknown-boot-disk-refuses"
-# THE FAIL-CLOSED DIRECTION, and the one that is easy to get backwards. usr/lib/qforge/on-boot-disk
-# fails OPEN when /run/qforge/boot is missing, because a single-disk device must still mount its
+# THE FAIL-CLOSED DIRECTION, and the one that is easy to get backwards. usr/lib/retroforge/on-boot-disk
+# fails OPEN when /run/retroforge/boot is missing, because a single-disk device must still mount its
 # own /home. Here the same absence has to mean "assume it IS the system disk", or a degraded
 # initramfs turns into an erased card. Run against a sandbox where the file cannot exist.
 W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
@@ -189,7 +189,7 @@ W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
 # internally-installed device: `automount.sh: skipping /dev/mmcblk0p1: this system runs from it`.
 # The stub for storage_disk_of stands in for block devices this host does not have.
 printf 'slot=A\nsource=grub\nroot=/dev/mmcblk9p4\nvar=/dev/mmcblk9p6\n' >"$W/boot"
-out="$(QFORGE_BOOTINFO="$W/boot" bash -c '
+out="$(RETROFORGE_BOOTINFO="$W/boot" bash -c '
   . '"$LIB"'
   storage_disk_of() { printf "%s\n" "${1##*/}" | sed "s/p[0-9]*$//"; }
   storage_boot_disk' 2>/dev/null | tail -1)"
@@ -199,15 +199,15 @@ out="$(QFORGE_BOOTINFO="$W/boot" bash -c '
 
 # The seam name must be the one on-boot-disk already uses, or the two files disagree about where
 # the boot disk is written down.
-grep -q 'QFORGE_BOOTINFO' "$LIB" && grep -q 'QFORGE_BOOTINFO' "$ROOT/rootfs/overlay/usr/lib/qforge/on-boot-disk" \
-  && ok "both readers use the QFORGE_BOOTINFO seam" \
+grep -q 'RETROFORGE_BOOTINFO' "$LIB" && grep -q 'RETROFORGE_BOOTINFO' "$ROOT/rootfs/overlay/usr/lib/retroforge/on-boot-disk" \
+  && ok "both readers use the RETROFORGE_BOOTINFO seam" \
   || bad "the seam name does not match on-boot-disk's"
 
 # Fail-closed, but only when NOTHING resolves: no handoff AND a mount table that answers nothing.
 # findmnt is stubbed to silence rather than removed from PATH — bash substitutes a default PATH when
 # the environment has none, so `env -i` does NOT stop it running, and a first attempt at this case
 # passed against the HOST's real mounts while asserting nothing.
-out="$(QFORGE_BOOTINFO=/nonexistent bash -c '
+out="$(RETROFORGE_BOOTINFO=/nonexistent bash -c '
   . '"$LIB"'
   findmnt() { :; }
   storage_is_system_disk mmcblk9 && echo REFUSED || echo ALLOWED' 2>/dev/null | tail -1)"
@@ -217,7 +217,7 @@ out="$(QFORGE_BOOTINFO=/nonexistent bash -c '
 
 # And the case the first version got wrong: no handoff, but a mount table that plainly says the
 # system runs from another disk. That card is eligible.
-out="$(QFORGE_BOOTINFO=/nonexistent bash -c '
+out="$(RETROFORGE_BOOTINFO=/nonexistent bash -c '
   . '"$LIB"'
   findmnt() { case "$*" in *--target\ /) echo /dev/sda15 ;; *) echo /dev/sda19 ;; esac; }
   storage_disk_of() { printf "%s\n" "${1##*/}" | sed -e "s/p[0-9]*$//" -e "s/[0-9]*$//"; }
@@ -233,7 +233,7 @@ CASE="mounted-detection-actually-works"
 # the early-exiting grep SIGPIPEs the loop and pipefail reports failure, so "something is mounted"
 # came back as "nothing is mounted" — the one answer that matters. It wiped a card on 2026-09-02.
 mounted_says() { # <stub findmnt output> -> MOUNTED|CLEAR
-  QFORGE_BOOTINFO=/nonexistent bash -c '
+  RETROFORGE_BOOTINFO=/nonexistent bash -c '
     set -euo pipefail
     . '"$LIB"'
     findmnt() { printf "%s\n" "'"$1"'"; }
@@ -310,7 +310,7 @@ grep -q 'ACTION!="add|remove"' "$UDEV" \
 grep -q 'ACTION!="add|change|remove"' "$UDEV" \
   && bad "change is matched again — this is the regression that broke Unmount" \
   || ok "and change specifically is not matched"
-code "$FMT" | grep -q '/usr/lib/qforge/storage/automount.sh add' \
+code "$FMT" | grep -q '/usr/lib/retroforge/storage/automount.sh add' \
   && ok "the formatter mounts the card itself, which is what matching change used to buy" \
   || bad "nothing mounts a freshly formatted card — the case that put change in the rule is back"
 # FATAL, not best-effort, and upstream's own helper is the authority: `exit 5` on a failed
@@ -325,10 +325,10 @@ grep -q 'KERNEL!="mmcblk\*p\*"' "$UDEV" \
 grep -qE 'KERNEL=="?sd\*|sd\[a-z\]' "$UDEV" \
   && bad "the rule matches sd* — that is the internal UFS on this hardware, not removable media" \
   || ok "does not match sd* (the vendor's internal storage)"
-grep -q 'qforge-automount@%k.service' "$UDEV" \
+grep -q 'retroforge-automount@%k.service' "$UDEV" \
   && ok "hands the work to the templated unit" \
-  || bad "the rule does not start qforge-automount@%k.service"
-grep -q 'ExecStart=/usr/lib/qforge/storage/block-event.sh add %i' "$UNIT" \
+  || bad "the rule does not start retroforge-automount@%k.service"
+grep -q 'ExecStart=/usr/lib/retroforge/storage/block-event.sh add %i' "$UNIT" \
   && ok "the unit runs the shipped automount path" \
   || bad "the unit's ExecStart does not match the shipped script"
 
@@ -409,7 +409,7 @@ u_ln=$(grep -nE '^[^#]*umount "\$mnt"' "$FMT" | head -1 | cut -d: -f1)
 # The first version of this case reported HELD/FREE from both the outer and inner shell, so "the
 # parent could not take the lock" and "the child took it as well" were the same string — it failed
 # against a lock that works. Each side now names itself, and both are asserted.
-sed "s,/run/qforge,$W/run/qforge,g" "$LIB" > "$W/lib.sh"
+sed "s,/run/retroforge,$W/run/retroforge,g" "$LIB" > "$W/lib.sh"
 lock_out="$(bash -c '. '"$W/lib.sh"'
     if storage_lock testpart; then
         echo PARENT_ACQUIRED
@@ -422,7 +422,7 @@ case "$lock_out" in
   *PARENT_ACQUIRED*CHILD_ACQUIRED*) bad "storage_lock does not exclude — it reads as protection while providing none" ;;
   *) bad "storage_lock could not be taken at all in the sandbox ($lock_out) — the case proves nothing" ;;
 esac
-seam="$(bash -c 'QFORGE_STORAGE_LOCK_HELD=testpart; . '"$W/lib.sh"'; storage_lock testpart && echo PASS || echo BLOCKED' 2>/dev/null | tail -1)"
+seam="$(bash -c 'RETROFORGE_STORAGE_LOCK_HELD=testpart; . '"$W/lib.sh"'; storage_lock testpart && echo PASS || echo BLOCKED' 2>/dev/null | tail -1)"
 [ "$seam" = PASS ] \
   && ok "and the parent-holds-it seam lets the formatter's own child through" \
   || bad "the seam does not work — the formatter's post-format mount would be refused"
@@ -476,8 +476,8 @@ CASE="the-formatter-speaks-the-clients-argument-vocabulary"
 # BEHAVIOURAL, against a copy whose absolute source line points at the repo, because the exit code
 # is the whole assertion: 22 is "I do not understand you", and anything else means we parsed it.
 FCOPY="$W/format-device.sh"
-sed "s,^\. /usr/lib/qforge/storage/lib-storage.sh,. $LIB," "$FMT" > "$FCOPY"; chmod +x "$FCOPY"
-arg_exit() { QFORGE_BOOTINFO=/nonexistent "$FCOPY" "$@" >/dev/null 2>&1; echo $?; }
+sed "s,^\. /usr/lib/retroforge/storage/lib-storage.sh,. $LIB," "$FMT" > "$FCOPY"; chmod +x "$FCOPY"
+arg_exit() { RETROFORGE_BOOTINFO=/nonexistent "$FCOPY" "$@" >/dev/null 2>&1; echo $?; }
 
 # /dev/null is a CHARACTER device, so a root run stops at the block-device check and a non-root run
 # stops at the root check. Neither writes anything, and neither is 22.
@@ -495,7 +495,7 @@ done
 
 # THE OPTION SET IS UPSTREAM'S, WITH NOTHING ADDED. A helper whose CLI matches the one it was ported
 # from can be diffed against it in one glance; every option we bolt on is one the comparison no
-# longer makes. --auto lived here and moved to qforge-format-sdcard, where our divergence belongs.
+# longer makes. --auto lived here and moved to retroforge-format-sdcard, where our divergence belongs.
 opts="$(sed -n 's/^ *\(--[a-z|-]*\)).*/\1/p' "$FMT" | tr '|' '\n' | grep -c .)"
 for o in --version --force --skip-validation --full --quick --owner --device --label; do
   sed -n 's/^ *\(--[a-z|-]*\)).*/\1/p' "$FMT" | tr '|' '\n' | grep -qx -- "$o" \
@@ -513,7 +513,7 @@ CASE="which-card-is-resolved-in-our-wrapper"
 # no-argument entry point has to resolve which card it means — and that divergence lives in our
 # wrapper rather than as an extra option on the ported helper.
 code "$H_SD" | grep -q 'storage_target_sd' \
-  && ok "qforge-format-sdcard resolves the card itself" \
+  && ok "retroforge-format-sdcard resolves the card itself" \
   || bad "nothing resolves which card the no-device entry point means"
 code "$H_SD" | grep -q 'format-device.sh --device' \
   && ok "and hands the helper an explicit --device" \

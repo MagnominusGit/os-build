@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge internal install — §4b's NETWORK DIAGNOSIS. Phase 4b/5 of
+# retroforge internal install — §4b's NETWORK DIAGNOSIS. Phase 4b/5 of
 # .claude/plans/internal-install.plan.md.
 #
 #   netcfg diagnose      read-only: which of §4b's states is this machine in?
@@ -11,7 +11,7 @@
 #
 # WHY EACH STATE IS SEPARATE, and why "network failed" is not acceptable. This is a network-only
 # installer with NO on-device credential entry (§4b, 2026-08-05): no keyboard is guaranteed, no
-# touchscreen is guaranteed, so the SSID and PSK arrive as `qforge/wifi.conf` on the installer's
+# touchscreen is guaranteed, so the SSID and PSK arrive as `retroforge/wifi.conf` on the installer's
 # own ESP, written from the user's PC before booting. A wrong file therefore costs a power-off,
 # pulling the card, editing it on another computer and rebooting. Every one of the states below has
 # a DIFFERENT fix, and a user who is told only "network failed" has to guess which -- at that
@@ -26,32 +26,32 @@ log() { printf '[%s] %s\n' "$PROG" "$*" >&2; }
 
 # Test seams, in the spirit of the rest of installer/: tests/test-netcfg.sh executes THIS file with
 # every tool stubbed and every path redirected. What runs under test is the artifact that ships.
-WIFI_CONF=${QFORGE_WIFI_CONF:-/esp/qforge/wifi.conf}
+WIFI_CONF=${RETROFORGE_WIFI_CONF:-/esp/retroforge/wifi.conf}
 
-# THE OTA URL IS RESOLVED THE WAY qforge-update RESOLVES IT: the environment, then OTA_URL in
-# /etc/qforge/ota.conf, then the same built-in default. Reachability of THAT host is what
+# THE OTA URL IS RESOLVED THE WAY retroforge-update RESOLVES IT: the environment, then OTA_URL in
+# /etc/retroforge/ota.conf, then the same built-in default. Reachability of THAT host is what
 # `no-host` means, so a URL of our own invention here would report a healthy network as broken --
 # which is exactly the misdiagnosis this file exists to prevent. It was, briefly: this default read
-# `ota.qforge.org`, a host that does not exist.
+# `ota.retroforge.org`, a host that does not exist.
 #
-# The literal is written twice, here and in rootfs/overlay/usr/bin/qforge-update, because one is
+# The literal is written twice, here and in rootfs/overlay/usr/bin/retroforge-update, because one is
 # shell and the other Python. tests/test-ui.sh asserts the two agree; that assertion is the only
 # thing that keeps them the same URL.
-OTA_CONFIG=${QFORGE_OTA_CONFIG:-/etc/qforge/ota.conf}
-OTA_DEFAULT_URL=https://updates.qforge.invalid
-if [ -z "${QFORGE_OTA_URL:-}" ] && [ -r "$OTA_CONFIG" ]; then
-  QFORGE_OTA_URL=$(sed -n 's/^[[:space:]]*OTA_URL=//p' "$OTA_CONFIG" | tail -1 | tr -d '"'"'"' \r')
+OTA_CONFIG=${RETROFORGE_OTA_CONFIG:-/etc/retroforge/ota.conf}
+OTA_DEFAULT_URL=https://updates.retroforge.invalid
+if [ -z "${RETROFORGE_OTA_URL:-}" ] && [ -r "$OTA_CONFIG" ]; then
+  RETROFORGE_OTA_URL=$(sed -n 's/^[[:space:]]*OTA_URL=//p' "$OTA_CONFIG" | tail -1 | tr -d '"'"'"' \r')
 fi
-OTA_URL=${QFORGE_OTA_URL:-$OTA_DEFAULT_URL}
+OTA_URL=${RETROFORGE_OTA_URL:-$OTA_DEFAULT_URL}
 NMCLI=${NMCLI:-nmcli}
 CURL=${CURL:-curl}
 IP=${IP:-ip}
-CONNECT_TIMEOUT=${QFORGE_NET_TIMEOUT:-20}
+CONNECT_TIMEOUT=${RETROFORGE_NET_TIMEOUT:-20}
 # How long nmcli may take to associate AND get a lease. Left to nmcli's own default it gave up
 # before slow access points finished (HW 2026-08-25). Association is fast; DHCP is what drags, and
 # a join that times out costs the operator a full retry, so err long -- the UI animates throughout
 # and the child is polled, so waiting is not a frozen screen.
-JOIN_TIMEOUT=${QFORGE_NET_JOIN_TIMEOUT:-90}
+JOIN_TIMEOUT=${RETROFORGE_NET_JOIN_TIMEOUT:-90}
 # HOW MANY ACTIVATIONS ONE JOIN IS WORTH. HW 2026-08-25, from the first ESP log this medium ever
 # delivered: the first attempt reached `no-lease` 10.2s into a 90s budget, the self re-check 5s later
 # still found no address, and a SECOND activation was online in 3.9s. So the lease does not arrive
@@ -61,7 +61,7 @@ JOIN_TIMEOUT=${QFORGE_NET_JOIN_TIMEOUT:-90}
 #
 # 2, not more: a second attempt costs the operator ~10s of animation, and past that a failure is a
 # real one that a screen should name rather than a loop should hide.
-JOIN_ATTEMPTS=${QFORGE_NET_JOIN_ATTEMPTS:-2}
+JOIN_ATTEMPTS=${RETROFORGE_NET_JOIN_ATTEMPTS:-2}
 
 emit() { printf '%s=%s\n' "$1" "$2"; }
 
@@ -182,8 +182,8 @@ parse_conf() {
     # Trim surrounding quotes the way a user who copied dev.env would have written them.
     val=${val#[\"\']}; val=${val%[\"\']}
     case "$(printf '%s' "$key" | tr -d '[:space:]')" in
-      SSID|QFORGE_WIFI_SSID) SSID=$val ;;
-      PSK|PASSWORD|QFORGE_WIFI_PSK) PSK=$val ;;
+      SSID|RETROFORGE_WIFI_SSID) SSID=$val ;;
+      PSK|PASSWORD|RETROFORGE_WIFI_PSK) PSK=$val ;;
       *) BAD_LINE=$n; return 1 ;;
     esac
   done <"$WIFI_CONF"

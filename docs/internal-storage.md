@@ -10,10 +10,10 @@ Re-run and commit alongside any new board: `installer/disk-rules.conf` is author
 | Captured | 2026-08-05T21:32:14Z |
 | Board | `AYANEO Pocket S2` |
 | Kernel | `7.1.6` |
-| QFORGE_VARIANT | `unified` |
-| QFORGE_MODE | `dev` |
-| QFORGE_VERSION | `dev` |
-| QFORGE_BUILD | `20260805T212114Z` |
+| RETROFORGE_VARIANT | `unified` |
+| RETROFORGE_MODE | `dev` |
+| RETROFORGE_VERSION | `dev` |
+| RETROFORGE_BUILD | `20260805T212114Z` |
 | Running root | `/dev/mmcblk0p4` |
 | **Boot medium — never an install target** | **`mmcblk0`** |
 
@@ -576,10 +576,10 @@ Re-run and commit alongside any new board: `installer/disk-rules.conf` is author
 | Captured | 2026-08-05T21:38:38Z |
 | Board | `AYANEO Pocket ACE` |
 | Kernel | `7.1.6` |
-| QFORGE_VARIANT | `unified` |
-| QFORGE_MODE | `dev` |
-| QFORGE_VERSION | `dev` |
-| QFORGE_BUILD | `20260805T212114Z` |
+| RETROFORGE_VARIANT | `unified` |
+| RETROFORGE_MODE | `dev` |
+| RETROFORGE_VERSION | `dev` |
+| RETROFORGE_BUILD | `20260805T212114Z` |
 | Running root | `/dev/mmcblk0p4` |
 | **Boot medium — never an install target** | **`mmcblk0`** |
 
@@ -1094,10 +1094,10 @@ Re-run and commit alongside any new board: `installer/disk-rules.conf` is author
 | Captured | 2026-08-05T21:42:33Z |
 | Board | `AYN Odin 2` |
 | Kernel | `7.1.6` |
-| QFORGE_VARIANT | `unified` |
-| QFORGE_MODE | `dev` |
-| QFORGE_VERSION | `dev` |
-| QFORGE_BUILD | `20260805T212114Z` |
+| RETROFORGE_VARIANT | `unified` |
+| RETROFORGE_MODE | `dev` |
+| RETROFORGE_VERSION | `dev` |
+| RETROFORGE_BUILD | `20260805T212114Z` |
 | Running root | `/dev/mmcblk0p4` |
 | **Boot medium — never an install target** | **`mmcblk0`** |
 
@@ -1708,10 +1708,10 @@ Re-run and commit alongside any new board: `installer/disk-rules.conf` is author
 | Captured | 2026-08-05T21:48:18Z |
 | Board | `KONKR Pocket FIT` |
 | Kernel | `7.1.6` |
-| QFORGE_VARIANT | `unified` |
-| QFORGE_MODE | `dev` |
-| QFORGE_VERSION | `dev` |
-| QFORGE_BUILD | `20260805T212114Z` |
+| RETROFORGE_VARIANT | `unified` |
+| RETROFORGE_MODE | `dev` |
+| RETROFORGE_VERSION | `dev` |
+| RETROFORGE_BUILD | `20260805T212114Z` |
 | Running root | `/dev/mmcblk0p4` |
 | **Boot medium — never an install target** | **`mmcblk0`** |
 
@@ -2279,10 +2279,10 @@ Re-run and commit alongside any new board: `installer/disk-rules.conf` is author
 | Captured | 2026-08-21T09:44:16Z |
 | Board | `MANGMI Pocket Max` |
 | Kernel | `7.2.0` |
-| QFORGE_VARIANT | `unified` |
-| QFORGE_MODE | `dev` |
-| QFORGE_VERSION | `dev` |
-| QFORGE_BUILD | `20260821T073416Z` |
+| RETROFORGE_VARIANT | `unified` |
+| RETROFORGE_MODE | `dev` |
+| RETROFORGE_VERSION | `dev` |
+| RETROFORGE_BUILD | `20260821T073416Z` |
 | Running root | `/dev/mmcblk0p4` |
 | **Boot medium — never an install target** | **`mmcblk0`** |
 
@@ -2824,15 +2824,15 @@ Re-run and commit alongside any new board: `installer/disk-rules.conf` is author
 | Captured | 2026-08-22T09:06:34Z |
 | Board | `AYANEO Pocket ACE` |
 | Kernel | `7.2.0` |
-| QFORGE_VARIANT | `unified` |
-| QFORGE_MODE | `dev` |
-| QFORGE_VERSION | `dev` |
-| QFORGE_BUILD | `20260821T073416Z` |
+| RETROFORGE_VARIANT | `unified` |
+| RETROFORGE_MODE | `dev` |
+| RETROFORGE_VERSION | `dev` |
+| RETROFORGE_BUILD | `20260821T073416Z` |
 | Running root | `/dev/mmcblk0p4` |
 | **Boot medium — never an install target** | **`mmcblk0`** |
 
 This board is the SAME AYANEO Pocket ACE as the section above, captured after uninstalling
-QForge from ROCKNIX LinuxLoader's menu. It is a separate board here because the
+RetroForge from ROCKNIX LinuxLoader's menu. It is a separate board here because the
 fixture builder keys on this heading, and because what it captures is a STATE, not a device: eight
 GPT entries whose type GUID, unique GUID and name were zeroed while their LBAs were kept, with
 `userdata` regrown across them. Only `/dev/sda` is reproduced -- the other LUNs are untouched by an

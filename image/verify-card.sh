@@ -10,7 +10,7 @@
 # GRUB (stage 2, on the slot's efi-a/b partition) → kernel. So beyond the filesystem identities
 # this asserts the two boot homes: the ESP carries steamcl + the boot confs + the grubenv, and
 # each efi partition carries its stage-2 GRUB + identity partsets keyed to the disk's partuuids.
-# There is deliberately no /KERNEL and no /QFORGE/ to check anymore.
+# There is deliberately no /KERNEL and no /RETROFORGE/ to check anymore.
 #
 # It matters most for one thing that is invisible until hardware contradicts you: the two roots
 # are content-identical by design, so if they also share a btrfs fsid then mounting slot B can
@@ -20,7 +20,7 @@
 # read the ESP/efi partitions with mtools. No loop mounts, no root.
 #
 # Run inside the build image (needs sgdisk, blkid, debugfs, mtools, cpio):
-#   docker run --rm -v "$PWD":/src -w /src qforge-build image/verify-card.sh
+#   docker run --rm -v "$PWD":/src -w /src retroforge-build image/verify-card.sh
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,7 +30,7 @@ INITRAMFS="$ROOT/out/initramfs.cpio.gz"
 
 [ -f "$IMG" ] || { echo "no card image: $IMG (run make sdcard)" >&2; exit 1; }
 for t in sgdisk blkid debugfs mdir mtype mlabel cpio; do
-  command -v "$t" >/dev/null 2>&1 || { echo "$t not found — run inside qforge-build" >&2; exit 1; }
+  command -v "$t" >/dev/null 2>&1 || { echo "$t not found — run inside retroforge-build" >&2; exit 1; }
 done
 
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
@@ -53,7 +53,7 @@ ESP_UUID=$(part_uuid "$P_ESP")
 EFIA_UUID=$(part_uuid "$P_EFIA")
 EFIB_UUID=$(part_uuid "$P_EFIB")
 
-echo "[qforge] verifying ${IMG#"$ROOT"/}"
+echo "[retroforge] verifying ${IMG#"$ROOT"/}"
 
 # ----------------------------------------------------------------------------------------------
 # 1. Filesystem identity. Two btrfs filesystems on one disk sharing an fsid AND devid=1 are the
@@ -71,7 +71,7 @@ for p in "$P_ROOTA" "$P_ROOTB" "$P_VARA" "$P_VARB"; do
 done
 
 if [ -z "${U[$P_ROOTB]:-}" ]; then
-  ok "slot B is empty (release card, or QFORGE_SLOT_B=0) — skipping the A/B identity checks"
+  ok "slot B is empty (release card, or RETROFORGE_SLOT_B=0) — skipping the A/B identity checks"
   SLOT_B=0
 else
   SLOT_B=1
@@ -88,8 +88,8 @@ fi
 # Per-slot filesystem LABELS. Not how stage 2 normally finds the root -- it goes by partition
 # index -- but they are its documented fallback, they are what `blkid` on a mounted card reports,
 # and they are the thing a RAUC raw write silently gets wrong (the bundle image is slot A's, so an
-# install leaves the target labelled qforge-root-A until the post-install hook re-labels it).
-for pair in "$P_ROOTA:qforge-root-A" "$P_ROOTB:qforge-root-B"; do
+# install leaves the target labelled retroforge-root-A until the post-install hook re-labels it).
+for pair in "$P_ROOTA:retroforge-root-A" "$P_ROOTB:retroforge-root-B"; do
   pn=${pair%%:*}; want=${pair#*:}
   [ "$SLOT_B" = 0 ] && [ "$pn" = "$P_ROOTB" ] && continue
   got=$(blkid -p -o value -s LABEL "$T/p$pn.sb" 2>/dev/null)
@@ -97,7 +97,7 @@ for pair in "$P_ROOTA:qforge-root-A" "$P_ROOTB:qforge-root-B"; do
 done
 
 # ----------------------------------------------------------------------------------------------
-# 2. The independent slot witness. /var/lib/qforge/slot records which var actually mounted;
+# 2. The independent slot witness. /var/lib/retroforge/slot records which var actually mounted;
 # it is written per-slot at image build and re-written by post-install.sh. It is the only
 # cross-check that does not share a failure mode with the selection code.
 # ----------------------------------------------------------------------------------------------
@@ -106,8 +106,8 @@ check_slot() {  # <partnum> <expected letter>
   local s got
   s=$(start "$1")
   dd if="$IMG" of="$T/var$1.img" bs=512 skip="$s" count=524288 status=none
-  got=$(debugfs -R "cat /lib/qforge/slot" "$T/var$1.img" 2>/dev/null | tr -d '\n\r')
-  [ "$got" = "$2" ] && ok "p$1 /var/lib/qforge/slot = $2" \
+  got=$(debugfs -R "cat /lib/retroforge/slot" "$T/var$1.img" 2>/dev/null | tr -d '\n\r')
+  [ "$got" = "$2" ] && ok "p$1 /var/lib/retroforge/slot = $2" \
                     || bad "p$1 slot witness: expected '$2', got '$got'"
 }
 check_slot "$P_VARA" A
@@ -127,7 +127,7 @@ need_file() {  # <msdos path> <what>
 # asserting: when it did matter, it drifted from what grub.cfg searched for and nothing failed.
 # mlabel, not blkid: a FAT32 volume label lives in a root-directory entry out in the data area,
 # so probing a short dd of the superblock reports nothing at all.
-# mlabel prints " Volume label is QFORGE   " -- leading space, and the label space-padded to the
+# mlabel prints " Volume label is RETROFORGE   " -- leading space, and the label space-padded to the
 # full 11 bytes FAT stores. Both have to be stripped or this compares against padding.
 esp_fslabel=$(mlabel -i "$IMG@@$espoff" -s :: 2>/dev/null \
   | sed -n 's/^[[:space:]]*Volume label is //p' | sed 's/[[:space:]]*$//')
@@ -156,11 +156,11 @@ fi
 mtype -i "$IMG@@$espoff" ::/EFI/BOOT/steamcl-restricted >"$T/f" 2>/dev/null \
   && { [ -s "$T/f" ] && bad "steamcl-restricted should be empty" || ok "steamcl-restricted present and empty"; } \
   || bad "/EFI/BOOT/steamcl-restricted missing"
-# A stale /KERNEL or /QFORGE would mean this card was laid by the pre-Phase-5 assembler; catch it here so it cannot be flashed by habit.
+# A stale /KERNEL or /RETROFORGE would mean this card was laid by the pre-Phase-5 assembler; catch it here so it cannot be flashed by habit.
 mdir -i "$IMG@@$espoff" ::/KERNEL >/dev/null 2>&1 && bad "/KERNEL present on a Phase 5 card" \
                                                    || ok "no /KERNEL"
-mdir -i "$IMG@@$espoff" ::/QFORGE >/dev/null 2>&1 && bad "/QFORGE present on a Phase 5 card" \
-                                                      || ok "no /QFORGE"
+mdir -i "$IMG@@$espoff" ::/RETROFORGE >/dev/null 2>&1 && bad "/RETROFORGE present on a Phase 5 card" \
+                                                      || ok "no /RETROFORGE"
 # confs: A is seeded with the newest boot-requested-at so the first boot picks A; B is 0. Both
 # must be the bootconf key: value format (any non-empty value line parses; these are the seeds).
 mtype -i "$IMG@@$espoff" ::/SteamOS/conf/A.conf >"$T/conf_a" 2>/dev/null || true

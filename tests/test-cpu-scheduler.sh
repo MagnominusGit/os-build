@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Offline check for powerd's CPU-scheduler decision logic (rootfs/overlay/usr/bin/qforge-powerd).
+# Offline check for powerd's CPU-scheduler decision logic (rootfs/overlay/usr/bin/retroforge-powerd).
 #
 #   tests/test-cpu-scheduler.sh
 #
@@ -27,13 +27,13 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-POWERD="$ROOT/rootfs/overlay/usr/bin/qforge-powerd"
+POWERD="$ROOT/rootfs/overlay/usr/bin/retroforge-powerd"
 
-[[ -f $POWERD ]] || { echo "qforge-powerd missing: $POWERD" >&2; exit 1; }
+[[ -f $POWERD ]] || { echo "retroforge-powerd missing: $POWERD" >&2; exit 1; }
 
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 
-# Loading qforge-powerd as a module writes a __pycache__ into rootfs/overlay/usr/bin, which the
+# Loading retroforge-powerd as a module writes a __pycache__ into rootfs/overlay/usr/bin, which the
 # assembler copies into the rootfs verbatim. Keep the bytecode in the sandbox.
 export PYTHONPYCACHEPREFIX="$TMP/pycache"
 
@@ -63,7 +63,7 @@ class FakeProc:
 # __init__ globs sysfs and writes pwm1, so build the object without it. What stays real is
 # exactly what this suite is about: reconcile_scheduler_live and apply_scheduler's guard.
 def fresh(unit_active=False, cpu_scheduler="none", scheduler_live="none"):
-    obj = pd.QforgePower.__new__(pd.QforgePower)
+    obj = pd.RetroForgePower.__new__(pd.RetroForgePower)
     obj.cpu_scheduler = cpu_scheduler
     obj.scheduler_live = scheduler_live
     obj.connection = None
@@ -134,14 +134,14 @@ check("re-choosing the same scheduler is a no-op", o.calls, ["start"])
 
 # ----------------------------------------------------------------------------------- report ---
 # ---------------------------------------------------------- board allow-list (device-env) ---
-# The Air X profile narrows the choice to the stock scheduler (QFORGE_CPU_SCHEDULERS=none): scx_lavd
+# The Air X profile narrows the choice to the stock scheduler (RETROFORGE_CPU_SCHEDULERS=none): scx_lavd
 # measured harmful there. The list comes from device-env; lavd must then be neither offered nor
 # settable, and a persisted lavd must not be restored.
 import pathlib, tempfile
 tmpd = pathlib.Path(tempfile.mkdtemp())
 fake_env = tmpd / "device-env"
 def board(value):
-    fake_env.write_text("#!/bin/sh\necho QFORGE_DEVICE_ID=x\necho QFORGE_CPU_SCHEDULERS=%s\n" % value)
+    fake_env.write_text("#!/bin/sh\necho RETROFORGE_DEVICE_ID=x\necho RETROFORGE_CPU_SCHEDULERS=%s\n" % value)
     fake_env.chmod(0o755)
     pd.DEVICE_ENV = fake_env
     return pd.board_cpu_schedulers()
@@ -151,10 +151,10 @@ check("board list: unreadable device-env means every scheduler",
       (setattr(pd, "DEVICE_ENV", tmpd / "missing") or pd.board_cpu_schedulers()), None)
 real_sysfs, real_bin = pd.SCX_SYSFS, pd.SCX_BINARY
 pd.SCX_SYSFS, pd.SCX_BINARY = tmpd, fake_env      # both exist: sched_ext "available"
-narrow = pd.QforgePower.__new__(pd.QforgePower)
+narrow = pd.RetroForgePower.__new__(pd.RetroForgePower)
 narrow.board_schedulers = {"none"}
 check("a board allowing only none offers only none", narrow.available_cpu_schedulers(), ["none"])
-wide = pd.QforgePower.__new__(pd.QforgePower)
+wide = pd.RetroForgePower.__new__(pd.RetroForgePower)
 wide.board_schedulers = None
 check("a board with no list offers both", wide.available_cpu_schedulers(), ["none", "lavd"])
 narrow.cpu_scheduler, narrow.scheduler_live = "none", "none"
@@ -173,7 +173,7 @@ pd.SCX_SYSFS, pd.SCX_BINARY = real_sysfs, real_bin
 # writes sched_energy_aware=0 after every governor change unless [cpu] energy_aware=on.
 eas = tmpd / "sched_energy_aware"
 pd.EAS_SYSCTL = eas
-gov = pd.QforgePower.__new__(pd.QforgePower)
+gov = pd.RetroForgePower.__new__(pd.RetroForgePower)
 gov.cpu_policies, gov.cpu_governor = [], "schedutil"
 eas.write_text("1\n"); gov.cpu_energy_aware = False; gov.apply_cpu_governor()
 check("EAS is switched off after a governor change by default", eas.read_text().strip(), "0")

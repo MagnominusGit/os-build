@@ -9,7 +9,7 @@ page allocation/pinning.
 Signed-off-by: Rob Clark <robin.clark@oss.qualcomm.com>
 ---
 v2: Initialize THP earlier
-qforge: hunk 1 context refreshed for 7.2.8, which fixes the MODULE_PARM_DESC
+retroforge: hunk 1 context refreshed for 7.2.8, which fixes the MODULE_PARM_DESC
 name above it (separate_gpu_drm -> separate_gpu_kms). Regenerated, no code change.
  drivers/gpu/drm/msm/msm_drv.c | 24 ++++++++++++++++++++++++
  1 file changed, 24 insertions(+)

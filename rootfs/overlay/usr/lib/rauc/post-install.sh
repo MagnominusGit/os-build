@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge RAUC post-install handler — Phase 5 (SteamDeck-style boot; docs/archive/phase5.md).
+# retroforge RAUC post-install handler — Phase 5 (SteamDeck-style boot; docs/archive/phase5.md).
 #
 # Runs after RAUC has written and unmounted the target slot. A freshly written slot is NOT usable
 # until this has run: the bytes are an exact copy of the running slot, so it shares an fsid, it has
@@ -41,7 +41,7 @@ PROG=${0##*/}
 log()  { printf '[%s] %s\n' "$PROG" "$1"; }
 die()  { printf '[%s] ERROR: %s\n' "$PROG" "$1" >&2; exit 1; }
 
-# Test seams, documented exactly as qforge-bootctl documents its own. The offline suite
+# Test seams, documented exactly as retroforge-bootctl documents its own. The offline suite
 # (tests/test-post-install.sh) executes THIS file -- not a copy -- so what it asserts is the
 # artifact that ships; overriding them points it at a sandbox ESP/efi/var and fake slot devices.
 # Nothing here is otherwise conditional on being under test, and the defaults are what every real
@@ -50,15 +50,15 @@ die()  { printf '[%s] ERROR: %s\n' "$PROG" "$1" >&2; exit 1; }
 # lives behind DEVDIR, so treat both as the pair they are.
 ESP=${ESP:-/esp}              # the shared ESP (SteamOS/conf + steamcl); mounted by fstab
 EFI=${EFI:-/efi}              # the RUNNING slot's efi partition (SteamOS/partsets); initramfs mount
-MNT=${MNT:-/run/qforge/rauc-target}
-EFIMNT=${EFIMNT:-/run/qforge/rauc-efi}
+MNT=${MNT:-/run/retroforge/rauc-target}
+EFIMNT=${EFIMNT:-/run/retroforge/rauc-efi}
 VAR=${VAR:-/var}
-# /dev/qforge/, NOT /dev/disk/by-partlabel/: the same GPT names exist on every qforge medium, so
+# /dev/retroforge/, NOT /dev/disk/by-partlabel/: the same GPT names exist on every retroforge medium, so
 # by-partlabel would let this hook reformat the /var and rewrite the efi partition of the OTHER disk
 # when two are attached. The links here are scoped to the disk we booted from
-# (/usr/lib/udev/rules.d/69-qforge-bootdisk.rules), which is the disk rauc just wrote a slot on --
+# (/usr/lib/udev/rules.d/69-retroforge-bootdisk.rules), which is the disk rauc just wrote a slot on --
 # etc/rauc/system.conf names its slot devices through the same links, so the two cannot disagree.
-DEVDIR=${DEVDIR:-/dev/qforge}
+DEVDIR=${DEVDIR:-/dev/retroforge}
 DEVTEST=${DEVTEST:--b}
 BC=${BC:-steamos-bootconf}
 BC_ARGS=(--conf-dir "$ESP/SteamOS/conf" --efi-dir "$EFI")
@@ -71,18 +71,18 @@ bc() { "$BC" "${BC_ARGS[@]}" "$@"; }
 SHA256=${SHA256:-sha256sum}
 
 # The shared half of this hook. Everything a RAUC bundle does not carry has to be written twice --
-# once here and once by the internal installer, onto a disk with no qforge on it -- and two copies
+# once here and once by the internal installer, onto a disk with no retroforge on it -- and two copies
 # of that logic drift in the direction "the installed system boots, the updated one does not", which
 # is discoverable only on hardware. So they live in one file and this sources it.
 #
 # Resolved RELATIVE TO THIS SCRIPT, with no seam, because rootfs/overlay/ mirrors the device layout
-# exactly: /usr/lib/rauc/../qforge/install/ and rootfs/overlay/usr/lib/rauc/../qforge/install/ are
+# exactly: /usr/lib/rauc/../retroforge/install/ and rootfs/overlay/usr/lib/rauc/../retroforge/install/ are
 # both right, so the offline suite exercises the shipped path rather than a test-only one. Sourced
 # AFTER the seams above so the library picks up an overridden $SHA256 rather than its own default.
 SELFDIR="$(cd "$(dirname "$0")" && pwd)"
-SLOTWRITE="$SELFDIR/../qforge/install/lib-slotwrite.sh"
+SLOTWRITE="$SELFDIR/../retroforge/install/lib-slotwrite.sh"
 [ -r "$SLOTWRITE" ] || die "cannot read $SLOTWRITE -- this root is missing the slot-write primitives"
-# shellcheck source=../qforge/install/lib-slotwrite.sh
+# shellcheck source=../retroforge/install/lib-slotwrite.sh
 . "$SLOTWRITE"
 
 # --- which slot did we just write? --------------------------------------------------------------
@@ -110,8 +110,8 @@ if [ -n "${RAUC_TARGET_SLOTS:-}" ]; then
 fi
 
 case "$target" in
-  A) dev_root=$DEVDIR/qforge-root-A; dev_var=$DEVDIR/qforge-var-A; dev_efi=$DEVDIR/qforge-efi-A ;;
-  B) dev_root=$DEVDIR/qforge-root-B; dev_var=$DEVDIR/qforge-var-B; dev_efi=$DEVDIR/qforge-efi-B ;;
+  A) dev_root=$DEVDIR/retroforge-root-A; dev_var=$DEVDIR/retroforge-var-A; dev_efi=$DEVDIR/retroforge-efi-A ;;
+  B) dev_root=$DEVDIR/retroforge-root-B; dev_var=$DEVDIR/retroforge-var-B; dev_efi=$DEVDIR/retroforge-efi-B ;;
 esac
 # shellcheck disable=SC2086  # DEVTEST is a predicate, not a path
 [ $DEVTEST "$dev_root" ] || die "no block device at $dev_root"
@@ -156,14 +156,14 @@ btrfstune -f -U "$(cat /proc/sys/kernel/random/uuid)" "$dev_root" >/dev/null \
   || die "btrfstune could not re-randomise the fsid of $dev_root"
 
 # The LABEL is the other identity the byte copy got wrong. rootfs/assemble-rootfs.sh bakes
-# qforge-root-A into the image, RAUC writes that image verbatim to whichever slot it targets,
-# and nothing else corrects it -- so without this, both partitions answer to qforge-root-A.
+# retroforge-root-A into the image, RAUC writes that image verbatim to whichever slot it targets,
+# and nothing else corrects it -- so without this, both partitions answer to retroforge-root-A.
 # Stage 2 normally addresses the root by partition index, so this is not what makes the slot boot;
 # it is what makes `blkid` honest and what keeps stage 2's documented fallback (search --label)
 # from resolving to the wrong slot. Cheap, and the window where it is wrong is this hook's own.
-btrfs filesystem label "$dev_root" "qforge-root-${target^^}" >/dev/null \
-  || die "cannot label $dev_root as qforge-root-${target^^}"
-log "fsid randomised, label set to qforge-root-${target^^}"
+btrfs filesystem label "$dev_root" "retroforge-root-${target^^}" >/dev/null \
+  || die "cannot label $dev_root as retroforge-root-${target^^}"
+log "fsid randomised, label set to retroforge-root-${target^^}"
 
 # --- 2. per-slot /var ---------------------------------------------------------------------------
 # Reformat, then copy the RUNNING /var over wholesale, then stamp the slot's own identity onto it.
@@ -186,7 +186,7 @@ mount "$dev_efi" "$EFIMNT" || die "cannot mount the target efi partition ($dev_e
 # the bundle carries only rootfs.img), so the only thing that ever writes them on an update is this
 # block. write_efi_partition carries the rest of the reasoning, including why it copies onto the
 # partition rather than wiping it -- parts.env lives there and an update cannot rebuild it.
-BOOTDIR="$MNT/usr/lib/qforge/boot"
+BOOTDIR="$MNT/usr/lib/retroforge/boot"
 write_efi_partition "$EFIMNT" "$target" "$BOOTDIR"
 log "stage-2 GRUB + grub.cfg + font installed on $dev_efi"
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Offline test for /usr/bin/qforge-update — the OTA client the shell drives.
+# Offline test for /usr/bin/retroforge-update — the OTA client the shell drives.
 #
 #   tests/test-update.sh
 #
-# WHY THIS FILE EXISTS. The caller (the QForge shell plugin) PARSES STDOUT, under a contract
+# WHY THIS FILE EXISTS. The caller (the RetroForge shell plugin) PARSES STDOUT, under a contract
 # inherited from the steamos-update interface. `check` printing the wrong thing is not
 # a cosmetic bug — anything on stdout that is not a version string becomes "an update is available,
 # called <that>", and a stray traceback would offer the fleet an update named `Traceback`. Every
@@ -15,10 +15,10 @@
 # ota/genbundle.sh and in Python here — and `identity-rules-agree` below is the only thing that
 # makes them stay the same rule. Phase 2 exists because those two strings had drifted apart.
 #
-# HOW IT WORKS: the real, shipped rootfs/overlay/usr/bin/qforge-update is executed — not a copy, not a
+# HOW IT WORKS: the real, shipped rootfs/overlay/usr/bin/retroforge-update is executed — not a copy, not a
 # sed-mangled variant. It exposes the environment seams documented in its own header
-# (QFORGE_RELEASE_FILE, QFORGE_OTA_CONFIG, QFORGE_OTA_USER_CONFIG, QFORGE_OTA_STAGE, QFORGE_SHELL_SETTINGS,
-# QFORGE_CURL, QFORGE_OTA_URL) and they exist for this file. curl is stubbed on disk so no test
+# (RETROFORGE_RELEASE_FILE, RETROFORGE_OTA_CONFIG, RETROFORGE_OTA_USER_CONFIG, RETROFORGE_OTA_STAGE, RETROFORGE_SHELL_SETTINGS,
+# RETROFORGE_CURL, RETROFORGE_OTA_URL) and they exist for this file. curl is stubbed on disk so no test
 # touches the network. Nothing here needs rauc, a bus, a server or a device.
 #
 # WHAT THIS CANNOT COVER: the install half. `apply`'s D-Bus conversation with rauc needs a bus, and
@@ -27,9 +27,9 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CLIENT="$ROOT/rootfs/overlay/usr/bin/qforge-update"
+CLIENT="$ROOT/rootfs/overlay/usr/bin/retroforge-update"
 GENBUNDLE="$ROOT/ota/genbundle.sh"
-[ -f "$CLIENT" ] || { echo "no qforge-update: $CLIENT" >&2; exit 1; }
+[ -f "$CLIENT" ] || { echo "no retroforge-update: $CLIENT" >&2; exit 1; }
 
 PASS=0; FAIL=0; CASE=""
 ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
@@ -38,7 +38,7 @@ bad() { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
 W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
 
-# Loading qforge-update as a module writes a __pycache__ into rootfs/overlay/usr/bin, which the
+# Loading retroforge-update as a module writes a __pycache__ into rootfs/overlay/usr/bin, which the
 # assembler copies into the rootfs verbatim. Keep the bytecode in the sandbox.
 export PYTHONPYCACHEPREFIX="$W/pycache"
 
@@ -79,11 +79,11 @@ printf '[general]\n\nfirst_boot=false\n\n[general.updates]\n\nauto_update=false\
 
 release_file() { # <version> [build] [mode] -> path
   local f="$W/release-$1"
-  { echo "QFORGE_VARIANT=unified"
-    echo "QFORGE_BUILD=${2:-20260101T000000Z}"
-    echo "QFORGE_VERSION=$1"
-    echo "QFORGE_GIT=abc1234"
-    echo "QFORGE_MODE=${3:-release}"
+  { echo "RETROFORGE_VARIANT=unified"
+    echo "RETROFORGE_BUILD=${2:-20260101T000000Z}"
+    echo "RETROFORGE_VERSION=$1"
+    echo "RETROFORGE_GIT=abc1234"
+    echo "RETROFORGE_MODE=${3:-release}"
   } >"$f"
   printf '%s' "$f"
 }
@@ -105,11 +105,11 @@ run() { # <arg...> -- with env assignments allowed before the first non-assignme
   : >"$W/requests.log"
   : >"$W/argv.log"
   OUT="$(env PATH="$W/bin:$PATH" WWW="$W/www" \
-      QFORGE_CURL="$W/bin/curl" \
-      QFORGE_OTA_URL="https://updates.example" \
-      QFORGE_OTA_CONFIG="$W/nonexistent.conf" \
-      QFORGE_OTA_STAGE="$W/stage" \
-      QFORGE_SHELL_SETTINGS="$W/settings.cfg" \
+      RETROFORGE_CURL="$W/bin/curl" \
+      RETROFORGE_OTA_URL="https://updates.example" \
+      RETROFORGE_OTA_CONFIG="$W/nonexistent.conf" \
+      RETROFORGE_OTA_STAGE="$W/stage" \
+      RETROFORGE_SHELL_SETTINGS="$W/settings.cfg" \
       "${envs[@]}" python3 "$CLIENT" "$@" 2>"$W/err")"
   RC=$?
   ERR="$(cat "$W/err")"
@@ -127,8 +127,8 @@ run --supports-duplicate-detection
 
 # =================================================================================================
 CASE="no-update"
-manifest stable '{"version":"1.0.0","bundle":"qforge-1.0.0.raucb","size":100}'
-run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=stable check
+manifest stable '{"version":"1.0.0","bundle":"retroforge-1.0.0.raucb","size":100}'
+run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" RETROFORGE_OTA_CHANNEL=stable check
 [ "$RC" = 7 ] && ok "exit 7 when the server offers what we run" \
               || bad "exit $RC, expected 7"
 # "Prints nothing" is a separate assertion from the exit code, and the more important one: the caller
@@ -138,8 +138,8 @@ run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=stable check
 
 # =================================================================================================
 CASE="update-available"
-manifest stable '{"version":"1.1.0","bundle":"qforge-1.1.0.raucb","size":100}'
-run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=stable check
+manifest stable '{"version":"1.1.0","bundle":"retroforge-1.1.0.raucb","size":100}'
+run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" RETROFORGE_OTA_CHANNEL=stable check
 [ "$RC" = 0 ] && ok "exit 0" || bad "exit $RC, expected 0"
 [ "$OUT" = "1.1.0" ] && ok "prints exactly the version" \
                      || bad "printed '$OUT', expected '1.1.0'"
@@ -152,7 +152,7 @@ CASE="duplicate-detection"
 # IT READS $OUT FROM THE CASE ABOVE, so it has to stay adjacent to it — inserting a case between
 # the two silently changes what "the same check twice" compares (caught doing exactly that).
 first="$OUT"
-run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=stable check
+run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" RETROFORGE_OTA_CHANNEL=stable check
 [ "$OUT" = "$first" ] && ok "two checks print the same identity ('$OUT')" \
                       || bad "identity changed between calls: '$first' then '$OUT'"
 
@@ -162,35 +162,35 @@ CASE="channel-precedence"
 # USER_CONFIG_FILE is the only one a user can write on a release device — no sudo on the image,
 # pairingd hands out a `player` login and never root's — so without it the channel is whatever the
 # image says, forever, and the shell (which carries no environment of ours) can never be aimed
-# anywhere else. With it, /etc still wins: the one image that ships /etc/qforge/ota.conf is a dev
+# anywhere else. With it, /etc still wins: the one image that ships /etc/retroforge/ota.conf is a dev
 # card, where the pin stops the card being offered a stable release that would downgrade it, and a
 # file in $HOME must not undo that quietly.
-manifest etcchan  '{"version":"2.0.0","bundle":"qforge-2.0.0.raucb","size":100}'
-manifest userchan '{"version":"3.0.0","bundle":"qforge-3.0.0.raucb","size":100}'
-manifest envchan  '{"version":"4.0.0","bundle":"qforge-4.0.0.raucb","size":100}'
+manifest etcchan  '{"version":"2.0.0","bundle":"retroforge-2.0.0.raucb","size":100}'
+manifest userchan '{"version":"3.0.0","bundle":"retroforge-3.0.0.raucb","size":100}'
+manifest envchan  '{"version":"4.0.0","bundle":"retroforge-4.0.0.raucb","size":100}'
 printf 'OTA_CHANNEL=etcchan\n'  >"$W/etc-ota.conf"
 printf 'OTA_CHANNEL=userchan\n' >"$W/user-ota.conf"
 
-run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" \
-    QFORGE_OTA_USER_CONFIG="$W/user-ota.conf" check
+run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" \
+    RETROFORGE_OTA_USER_CONFIG="$W/user-ota.conf" check
 [ "$OUT" = "3.0.0" ] && ok "a user file with no /etc file and no env steers the check" \
                      || bad "printed '$OUT', expected '3.0.0' — the user file was ignored"
 
-run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" \
-    QFORGE_OTA_CONFIG="$W/etc-ota.conf" QFORGE_OTA_USER_CONFIG="$W/user-ota.conf" check
+run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" \
+    RETROFORGE_OTA_CONFIG="$W/etc-ota.conf" RETROFORGE_OTA_USER_CONFIG="$W/user-ota.conf" check
 [ "$OUT" = "2.0.0" ] && ok "/etc outranks the user file (the dev pin cannot be undone from \$HOME)" \
                      || bad "printed '$OUT', expected '2.0.0' — the user file overrode the pin"
 
-run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=envchan \
-    QFORGE_OTA_CONFIG="$W/etc-ota.conf" QFORGE_OTA_USER_CONFIG="$W/user-ota.conf" check
+run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" RETROFORGE_OTA_CHANNEL=envchan \
+    RETROFORGE_OTA_CONFIG="$W/etc-ota.conf" RETROFORGE_OTA_USER_CONFIG="$W/user-ota.conf" check
 [ "$OUT" = "4.0.0" ] && ok "the environment still outranks both files" \
                      || bad "printed '$OUT', expected '4.0.0'"
 
 # `status` must name the source, not just the winner. Three of the four are invisible on a device
 # — an env var in someone else's environment, a file a release does not ship, a file in $HOME
 # nobody remembers writing — so "it is checking the wrong channel" is otherwise unanswerable.
-run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" \
-    QFORGE_OTA_USER_CONFIG="$W/user-ota.conf" status
+run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" \
+    RETROFORGE_OTA_USER_CONFIG="$W/user-ota.conf" status
 printf '%s\n' "$OUT" | grep -q "channel from $W/user-ota.conf" \
   && ok "status names the file the channel came from" \
   || bad "status does not say where the channel came from: $OUT"
@@ -199,8 +199,8 @@ printf '%s\n' "$OUT" | grep -q "channel from $W/user-ota.conf" \
 # gate either way, but where a device fetches from is an operator decision, and one writable file in
 # $HOME must not silently aim every future update somewhere else.
 printf 'OTA_CHANNEL=userchan\nOTA_URL=https://evil.example\n' >"$W/user-ota.conf"
-run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_URL= \
-    QFORGE_OTA_USER_CONFIG="$W/user-ota.conf" check
+run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" RETROFORGE_OTA_URL= \
+    RETROFORGE_OTA_USER_CONFIG="$W/user-ota.conf" check
 if grep -q 'evil\.example' "$W/argv.log"; then
   bad "the user file repointed the server: $(cat "$W/argv.log")"
 else
@@ -214,8 +214,8 @@ CASE="setup-not-done"
 # impression. OpenGamepadUI's first-boot flow is what writes `[general] first_boot=false`; until it
 # has, every check is a silent 7 and makes no request at all.
 gate_case() { # <label> <settings file>
-  run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=stable \
-      QFORGE_SHELL_SETTINGS="$2" check
+  run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" RETROFORGE_OTA_CHANNEL=stable \
+      RETROFORGE_SHELL_SETTINGS="$2" check
   [ "$RC" = 7 ] && [ -z "$OUT" ] && [ "$(requests)" = 0 ] \
     && ok "$1: exit 7, silent, no request" \
     || bad "$1: exit $RC out='$OUT' requests=$(requests), expected a silent 7 with no fetch"
@@ -228,12 +228,12 @@ gate_case "first_boot key missing (OGUI shows the OOBE)" "$W/fb-missing.cfg"
 printf '[general]\n\nlanguage="en"\n\n[general.updates]\n\nfirst_boot=false\n' >"$W/fb-other.cfg"
 gate_case "first_boot=false in another section" "$W/fb-other.cfg"
 # And the other direction: the default fixture (setup done) does reach the server.
-manifest stable '{"version":"1.1.0","bundle":"qforge-1.1.0.raucb","size":100}'
-run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=stable check
+manifest stable '{"version":"1.1.0","bundle":"retroforge-1.1.0.raucb","size":100}'
+run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" RETROFORGE_OTA_CHANNEL=stable check
 [ "$RC" = 0 ] && [ "$OUT" = "1.1.0" ] && ok "setup done: the check goes through" \
                                       || bad "setup done but exit $RC out='$OUT'"
-run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=stable \
-    QFORGE_SHELL_SETTINGS="$W/fb-true.cfg" status
+run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" RETROFORGE_OTA_CHANNEL=stable \
+    RETROFORGE_SHELL_SETTINGS="$W/fb-true.cfg" status
 printf '%s\n' "$OUT" | grep -q 'first boot not finished' \
   && ok "status says why updates are deferred" || bad "status hides the gate: $OUT"
 
@@ -241,7 +241,7 @@ printf '%s\n' "$OUT" | grep -q 'first boot not finished' \
 CASE="unreachable-server"
 # Fail CLOSED. A check that cannot reach the server must not answer "yes", and must not crash: an
 # unhandled traceback on stdout would be read as a version string.
-run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=missing check
+run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" RETROFORGE_OTA_CHANNEL=missing check
 [ "$RC" = 7 ] && ok "exit 7 when the manifest 404s" || bad "exit $RC, expected 7"
 [ -z "$OUT" ] && ok "stdout stays empty" || bad "printed '$OUT'"
 case "$ERR" in *Traceback*) bad "leaked a traceback" ;; *) ok "reported the reason on stderr" ;; esac
@@ -249,7 +249,7 @@ case "$ERR" in *Traceback*) bad "leaked a traceback" ;; *) ok "reported the reas
 # =================================================================================================
 CASE="malformed-manifest"
 manifest broken '{"version": "1.1.0", oops'
-run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=broken check
+run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" RETROFORGE_OTA_CHANNEL=broken check
 [ "$RC" = 7 ] && [ -z "$OUT" ] && ok "unparseable JSON -> silent 7" \
                               || bad "exit $RC out='$OUT'"
 
@@ -262,7 +262,7 @@ i=0
 for evil in '../../etc/passwd' 'http://elsewhere/x.raucb' '/etc/passwd' 'a/b.raucb' '.hidden'; do
   i=$((i+1))
   manifest "evil$i" "{\"version\":\"9.9.9\",\"bundle\":\"$evil\",\"size\":100}"
-  run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL="evil$i" check
+  run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" RETROFORGE_OTA_CHANNEL="evil$i" check
   [ "$RC" = 7 ] && [ -z "$OUT" ] && ok "rejected bundle=$evil" \
                                 || bad "ACCEPTED bundle=$evil (exit $RC, out='$OUT')"
 done
@@ -272,8 +272,8 @@ CASE="missing-size"
 # Nothing sizes a download any more (rauc streams), so this no longer guards an allocation -- it
 # guards the MANIFEST. A latest.json without a usable size is malformed, and a malformed manifest
 # must be refused rather than partially honoured.
-manifest nosize '{"version":"9.9.9","bundle":"qforge-9.9.9.raucb"}'
-run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=nosize check
+manifest nosize '{"version":"9.9.9","bundle":"retroforge-9.9.9.raucb"}'
+run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" RETROFORGE_OTA_CHANNEL=nosize check
 [ "$RC" = 7 ] && ok "manifest with no usable size -> 7" || bad "exit $RC, expected 7"
 
 # =================================================================================================
@@ -293,9 +293,9 @@ CASE="streams-rather-than-downloading"
 #
 # The stall guard has NO replacement, deliberately -- rauc's D-Bus API has no Cancel, so it could
 # not be reimplemented here. See the long comment above EXIT_OK in the client.
-bundle_file stream qforge-9.9.9.raucb 4096
-manifest stream '{"version":"9.9.9","bundle":"qforge-9.9.9.raucb","size":4096}'
-run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=stream
+bundle_file stream retroforge-9.9.9.raucb 4096
+manifest stream '{"version":"9.9.9","bundle":"retroforge-9.9.9.raucb","size":4096}'
+run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" RETROFORGE_OTA_CHANNEL=stream
 # Exactly one request, and it is the manifest. A second would mean something still fetches bundles.
 [ "$(requests)" = 1 ] && ok "fetched only the manifest, never the bundle" \
                       || bad "made $(requests) requests — something is still downloading the bundle"
@@ -321,8 +321,8 @@ seen = {}
 nvu.setup_done = lambda: True
 nvu.config = lambda: ("https://updates.example.test", "stable")
 nvu.manifest = lambda base, ch: {
-    "version": "9.9.9", "build": "20260101T000000Z", "git": "", "bundle": "qforge-9.9.9.raucb",
-    "size": 4096, "url": f"{base}/{ch}/qforge-9.9.9.raucb",
+    "version": "9.9.9", "build": "20260101T000000Z", "git": "", "bundle": "retroforge-9.9.9.raucb",
+    "size": 4096, "url": f"{base}/{ch}/retroforge-9.9.9.raucb",
 }
 def fake_install(source, on_percent):
     seen["source"] = source
@@ -333,9 +333,9 @@ fails = []
 if nvu.cmd_apply() != nvu.EXIT_OK:
     fails.append("apply did not succeed with a working install")
 src = seen.get("source")
-if src != "https://updates.example.test/stable/qforge-9.9.9.raucb":
+if src != "https://updates.example.test/stable/retroforge-9.9.9.raucb":
     fails.append(f"InstallBundle got {src!r}, not the manifest URL")
-if os.path.exists(os.path.join(nvu.STAGE_DIR, "qforge-9.9.9.raucb")):
+if os.path.exists(os.path.join(nvu.STAGE_DIR, "retroforge-9.9.9.raucb")):
     fails.append("apply created a bundle file in the staging directory")
 # To a FILE, not stdout: cmd_apply legitimately prints `100%` there and logs to stderr, and mixing
 # the verdict into the artefact under test is how a case ends up asserting its own noise.
@@ -343,7 +343,7 @@ with open(os.environ["VERDICT"], "w") as handle:
     handle.write("\n".join(fails))
 PY
 rm -f "$W/stage/staged.json"
-CLIENT="$CLIENT" QFORGE_OTA_STAGE="$W/stage" VERDICT="$W/stream.verdict" \
+CLIENT="$CLIENT" RETROFORGE_OTA_STAGE="$W/stage" VERDICT="$W/stream.verdict" \
   python3 "$W/stream_test.py" >/dev/null 2>&1
 out="$(cat "$W/stream.verdict" 2>/dev/null)"
 [ -z "$out" ] && ok "InstallBundle is handed the manifest's https URL, not a path" \
@@ -370,10 +370,10 @@ CASE="apply-refuses-a-reinstall"
 # Note that the request count cannot detect this: rauc streams the bundle, so a redundant install
 # makes exactly the same one curl request (the manifest) as a refused one. The exit code and stdout
 # are the discriminators, because they are also what the caller reads.
-bundle_file uptodate qforge-9.9.9.raucb 4096
-manifest uptodate '{"version":"9.9.9","bundle":"qforge-9.9.9.raucb","size":4096}'
+bundle_file uptodate retroforge-9.9.9.raucb 4096
+manifest uptodate '{"version":"9.9.9","bundle":"retroforge-9.9.9.raucb","size":4096}'
 rm -f "$W/stage/staged.json"
-run QFORGE_RELEASE_FILE="$(release_file 9.9.9)" QFORGE_OTA_CHANNEL=uptodate
+run RETROFORGE_RELEASE_FILE="$(release_file 9.9.9)" RETROFORGE_OTA_CHANNEL=uptodate
 # EXIT_OK, not 7: the state the caller asked for already holds, and 7 is how this client reports a
 # FAILED update. Before the guard this returned 7 — the install was attempted and died on the
 # absent bus — so the exit code alone separates the two behaviours.
@@ -403,8 +403,8 @@ nvu.device_identity = lambda: {
 }
 nvu.manifest = lambda base, ch: {
     "version": "9.9.9", "build": "20260202T000000Z", "git": "def5678",
-    "bundle": "qforge-9.9.9.raucb", "size": 4096,
-    "url": f"{base}/{ch}/qforge-9.9.9.raucb",
+    "bundle": "retroforge-9.9.9.raucb", "size": 4096,
+    "url": f"{base}/{ch}/retroforge-9.9.9.raucb",
 }
 # Nothing is staged: this is the state a device is in AFTER the reboot that completed the real
 # update, which is exactly when the spurious apply arrived.
@@ -421,7 +421,7 @@ if called:
 with open(os.environ["VERDICT"], "w") as handle:
     handle.write("\n".join(fails))
 PY
-CLIENT="$CLIENT" QFORGE_OTA_STAGE="$W/stage" VERDICT="$W/reinstall.verdict" \
+CLIENT="$CLIENT" RETROFORGE_OTA_STAGE="$W/stage" VERDICT="$W/reinstall.verdict" \
   python3 "$W/reinstall_test.py" >/dev/null 2>&1
 out="$(cat "$W/reinstall.verdict" 2>/dev/null)"
 [ -z "$out" ] && ok "InstallBundle is never reached when the device already runs that version" \
@@ -450,7 +450,7 @@ CASE="argv-fails-closed-on-a-word-and-open-on-a-flag"
 # would actually read, and neither needs a bus.
 for flag in --enable-duplicate-detection --a-flag-valve-has-not-shipped-yet; do
   rm -f "$W/stage/staged.json"
-  run QFORGE_RELEASE_FILE="$(release_file 9.9.9)" QFORGE_OTA_CHANNEL=uptodate "$flag"
+  run RETROFORGE_RELEASE_FILE="$(release_file 9.9.9)" RETROFORGE_OTA_CHANNEL=uptodate "$flag"
   [ "$RC" = 0 ] && [ "$OUT" = "100%" ] \
     && ok "'$flag' still reaches apply (forward-compatible)" \
     || bad "'$flag' did not reach apply: exit $RC, stdout '$OUT' — a new Valve flag would stop the fleet updating"
@@ -458,7 +458,7 @@ done
 
 for word in chekc refresh ""; do
   rm -f "$W/stage/staged.json"
-  run QFORGE_RELEASE_FILE="$(release_file 9.9.9)" QFORGE_OTA_CHANNEL=uptodate "$word"
+  run RETROFORGE_RELEASE_FILE="$(release_file 9.9.9)" RETROFORGE_OTA_CHANNEL=uptodate "$word"
   [ "$RC" = 7 ] && ok "'$word' is refused rather than treated as apply" \
                 || bad "'$word' exited $RC — an unknown word fell through to an install"
   # The assertion that outranks the exit code: this path is reachable from a caller that PARSES
@@ -482,9 +482,9 @@ rm -f "$W/stage/staged.json"
 CASE="apply-progress"
 # The progress bar reads stdout. Every line must be N%, forward-only. The install then fails here (no
 # bus), which is expected and must still leave stdout clean.
-bundle_file ok qforge-9.9.9.raucb 4096
-manifest ok '{"version":"9.9.9","bundle":"qforge-9.9.9.raucb","size":4096}'
-run QFORGE_RELEASE_FILE="$(release_file 1.0.0)" QFORGE_OTA_CHANNEL=ok
+bundle_file ok retroforge-9.9.9.raucb 4096
+manifest ok '{"version":"9.9.9","bundle":"retroforge-9.9.9.raucb","size":4096}'
+run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" RETROFORGE_OTA_CHANNEL=ok
 badline=""; last=-1; mono=1
 while read -r line; do
   [ -z "$line" ] && continue
@@ -531,7 +531,7 @@ for pair in "1.4.0|20260101T000000Z" "dev|20260102T030405Z" "|20260103T000000Z" 
   want="$(shell_identity "$v" "$b")"
   # The client's answer for the same release file, taken through `status` — the only subcommand
   # that prints the device's own identity without needing a server.
-  run QFORGE_RELEASE_FILE="$(release_file "$v" "$b")" QFORGE_OTA_CHANNEL=missing status
+  run RETROFORGE_RELEASE_FILE="$(release_file "$v" "$b")" RETROFORGE_OTA_CHANNEL=missing status
   got="$(printf '%s\n' "$OUT" | sed -n 's/^device: *\([^ ]*\).*/\1/p')"
   [ "$got" = "$want" ] && ok "identity('${v:-<empty>}','$b') = '$got' in both" \
                        || bad "DRIFT for version='${v:-<empty>}' build='$b': genbundle says '$want', client says '$got'"
@@ -589,7 +589,7 @@ if nvu.staged_identity(Installer("rootfs.1", "rootfs.0")) != "9.9.9":
 
 print("\n".join(fails))
 PY
-staged_out="$(CLIENT="$CLIENT" QFORGE_OTA_STAGE="$W/stage" python3 "$W/staged_test.py" 2>&1)"
+staged_out="$(CLIENT="$CLIENT" RETROFORGE_OTA_STAGE="$W/stage" python3 "$W/staged_test.py" 2>&1)"
 if [ -z "$staged_out" ]; then
   ok "the stamp is cleared by the reboot, and survives until it"
 else
@@ -598,28 +598,28 @@ fi
 
 # =================================================================================================
 CASE="channel-picker"
-# `channels` + `set-channel` replace the old Steam-shaped qforge-select-branch: the shell's picker
+# `channels` + `set-channel` replace the old Steam-shaped retroforge-select-branch: the shell's picker
 # reads the list, writes the choice, and the next `check` follows it. The choice lands in the USER
 # file only, and is refused when /etc or the environment outranks it (a dev card's pin).
 PICK="$W/pick/ota.conf"
-run QFORGE_OTA_USER_CONFIG="$PICK" channels
+run RETROFORGE_OTA_USER_CONFIG="$PICK" channels
 [ "$RC" = 0 ] && [ "$OUT" = "$(printf 'stable\nbeta')" ] \
   && ok "lists stable and beta" || bad "channels: exit $RC, '$OUT'"
-run QFORGE_OTA_USER_CONFIG="$PICK" set-channel beta
+run RETROFORGE_OTA_USER_CONFIG="$PICK" set-channel beta
 [ "$RC" = 0 ] && grep -qx 'OTA_CHANNEL=beta' "$PICK" \
   && ok "set-channel writes the user file" || bad "set-channel: exit $RC, file: $(cat "$PICK" 2>&1)"
-run QFORGE_OTA_USER_CONFIG="$PICK" channel
+run RETROFORGE_OTA_USER_CONFIG="$PICK" channel
 [ "$OUT" = "$(printf 'beta\t%s' "$PICK")" ] && ok "channel reports the new choice and its source" \
                                            || bad "channel printed '$OUT'"
 [ "$(requests)" = 0 ] && ok "picking a channel fetched nothing" || bad "set-channel made $(requests) request(s)"
-run QFORGE_OTA_USER_CONFIG="$PICK" set-channel '../evil'
+run RETROFORGE_OTA_USER_CONFIG="$PICK" set-channel '../evil'
 [ "$RC" = 1 ] && grep -qx 'OTA_CHANNEL=beta' "$PICK" \
   && ok "an invalid name is refused and the file is untouched" || bad "invalid name: exit $RC"
 printf 'OTA_CHANNEL=dev\n' >"$W/etc-dev.conf"
-run QFORGE_OTA_USER_CONFIG="$PICK" QFORGE_OTA_CONFIG="$W/etc-dev.conf" set-channel stable
+run RETROFORGE_OTA_USER_CONFIG="$PICK" RETROFORGE_OTA_CONFIG="$W/etc-dev.conf" set-channel stable
 [ "$RC" = 1 ] && grep -qx 'OTA_CHANNEL=beta' "$PICK" \
   && ok "a pinned channel refuses the write" || bad "pinned: exit $RC, file: $(cat "$PICK")"
-run QFORGE_OTA_USER_CONFIG="$PICK" QFORGE_OTA_CONFIG="$W/etc-dev.conf" channels
+run RETROFORGE_OTA_USER_CONFIG="$PICK" RETROFORGE_OTA_CONFIG="$W/etc-dev.conf" channels
 [ "$OUT" = "$(printf 'stable\nbeta\ndev\npinned\t%s' "$W/etc-dev.conf")" ] \
   && ok "channels lists the pinned off-picker channel and says it is pinned" \
   || bad "pinned channels printed '$OUT'"

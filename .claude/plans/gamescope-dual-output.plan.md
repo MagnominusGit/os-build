@@ -124,12 +124,12 @@ Line numbers below are in the patched 3.16.31 tree (`work/overlay-build/aarch64/
 
 ### 1. Device and session config
 
-- Cherry-pick 103c24c from the lease branch (device-env `QFORGE_SECONDARY_*`, Thor Lite values,
+- Cherry-pick 103c24c from the lease branch (device-env `RETROFORGE_SECONDARY_*`, Thor Lite values,
   `tests/test-device-env.sh`). Reword its message: no lease any more. Drop
-  `QFORGE_SECONDARY_PANEL_NATIVE_{WIDTH,HEIGHT}` if gamescope reads the mode off the connector
+  `RETROFORGE_SECONDARY_PANEL_NATIVE_{WIDTH,HEIGHT}` if gamescope reads the mode off the connector
   (it will), or keep them for the touch rotation check only.
 - Add Thor and Pocket DS rows (from spike 0.3).
-- `qforge-session` passes `--secondary-output` / `--secondary-touch-device` when the block is set;
+- `retroforge-session` passes `--secondary-output` / `--secondary-touch-device` when the block is set;
   `tests/test-session.sh` case "dual screen" (and "single panel passes neither").
 - Do not take 4998658 (second gamescope) or the lease series 0030-0037.
 
@@ -245,24 +245,24 @@ Line numbers below are in the patched 3.16.31 tree (`work/overlay-build/aarch64/
 
 ### 6. Emulator seeds for dual-screen boards (repo, not gamescope)
 
-- Per-device seed values (qforge.plan.md Phase 4b "Device-specific values only when needed"):
+- Per-device seed values (retroforge.plan.md Phase 4b "Device-specific values only when needed"):
   melonDS `Window1` enabled, top-only / bottom-only layouts (ROCKNIX values above); Azahar
   `layout_option=4`. Single-panel boards keep today's seeds.
 - Launcher: nothing new if the default title regex matches. Only if some emulator needs its own
-  rule: gamescope reads a root property `GAMESCOPE_SECONDARY_WINDOW_TITLE` that qforge-launch sets
+  rule: gamescope reads a root property `GAMESCOPE_SECONDARY_WINDOW_TITLE` that retroforge-launch sets
   from the emulator def and clears on exit.
 - melonDS and Azahar with two windows both need two SIGTERMs (spike 0.2). Find why in each
   SIGTERM path (each signal closing one window?) and fix it once in the launcher (forward a second
   TERM after a short grace while the emulator lives) rather than per emulator, or per emulator
-  with a small patch / LD_PRELOAD shim like `apps/qforge-sigdefer`.
+  with a small patch / LD_PRELOAD shim like `apps/retroforge-sigdefer`.
 - Check that every exit path releases the AppImage mount (spike 0.2 left both dwarfs mounts
-  behind); fix in qforge-launch's release step if the double Exit causes it.
+  behind); fix in retroforge-launch's release step if the double Exit causes it.
 - HW: one NDS and one 3DS game on Thor Lite, every exit path (OGUI Exit, emulator menu), state
   saves.
 - **Done 2026-10-12.** Seeds: emulator.json seed entries take an optional `dual_screen_file`, used
-  when device-env declares QFORGE_SECONDARY_CONNECTOR (melonDS: Window0 top only, Window1 enabled
+  when device-env declares RETROFORGE_SECONDARY_CONNECTOR (melonDS: Window0 top only, Window1 enabled
   bottom only; Azahar: layout_option=4). Exit: melonDS with two windows never exits on SIGTERM (its
-  handler calls qApp->quit() inside the signal; deferring it to the GLib loop with qforge-sigdefer
+  handler calls qApp->quit() inside the signal; deferring it to the GLib loop with retroforge-sigdefer
   did not help, the queued handler was never dispatched). New emulator.json `exit_resend: N`: one
   more SIGTERM N s after the stop, then SIGKILL to the emulator alone N s later; the launcher
   survives and releases the mount (OGUI's second Exit would SIGKILL the launcher too and leave a

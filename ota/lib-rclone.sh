@@ -1,4 +1,4 @@
-# qforge R2 plumbing — the pinned rclone and the credential environment, shared by
+# retroforge R2 plumbing — the pinned rclone and the credential environment, shared by
 # ota/publish-card.sh and ota/r2-preflight.sh.
 #
 # Sourced, never executed. Its own file because two readers need the identical fetch-and-verify and
@@ -19,8 +19,8 @@ rclone_bin() {
   # returns is absolute and lives under work/tools/, so a suite cannot stub it by shadowing PATH,
   # and pre-creating that path would overwrite the real binary an operator has already fetched.
   # tests/test-publish-card.sh sets this; nothing in CI or in a publish ever should.
-  if [ -n "${QFORGE_RCLONE:-}" ]; then
-    printf '%s\n' "$QFORGE_RCLONE"
+  if [ -n "${RETROFORGE_RCLONE:-}" ]; then
+    printf '%s\n' "$RETROFORGE_RCLONE"
     return 0
   fi
   [ -f "$RCLONE_PIN" ] || die "no rclone pin: $RCLONE_PIN"

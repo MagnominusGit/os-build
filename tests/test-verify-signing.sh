@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Offline test for ota/rauc/verify-signing.sh — the RAUC signing self-test.
 #
-#   docker run --rm -v "$PWD":/src -w /src qforge-build tests/test-verify-signing.sh
+#   docker run --rm -v "$PWD":/src -w /src retroforge-build tests/test-verify-signing.sh
 #   make test-signing
 #
 # WHY A TEST FOR A TEST. verify-signing.sh is a check, and the failure mode of a check is not
@@ -29,7 +29,7 @@ CONF="$ROOT/rootfs/overlay/etc/rauc/system.conf"
 EXT="$ROOT/ota/rauc/release.ext"
 CA="$ROOT/ota/gen-signing-ca.sh"
 [ -f "$VS" ] || { echo "no verify-signing.sh: $VS" >&2; exit 1; }
-command -v rauc >/dev/null 2>&1 || { echo "rauc not found — run inside qforge-build" >&2; exit 1; }
+command -v rauc >/dev/null 2>&1 || { echo "rauc not found — run inside retroforge-build" >&2; exit 1; }
 
 PASS=0; FAIL=0; CASE=""; SB=""; OUT=""; RC=0
 ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
@@ -46,7 +46,7 @@ done_() { rm -rf "$SB"; }
 PKI="${PKIDIR:-$ROOT/out/pki}"
 
 vs() {
-  OUT=$(RELEASE_EXT="${USE_EXT:-$EXT}" KEYRING="${USE_KEYRING:-$ROOT/ota/rauc/qforge-ca.pem}" \
+  OUT=$(RELEASE_EXT="${USE_EXT:-$EXT}" KEYRING="${USE_KEYRING:-$ROOT/ota/rauc/retroforge-ca.pem}" \
         PKIDIR="${USE_PKI:-$PKI}" bash "$VS" "$1" 2>&1)
   RC=$?
   USE_EXT=""; USE_KEYRING=""; USE_PKI=""
@@ -134,7 +134,7 @@ t "a-keyring-from-an-unrelated-ca-is-caught"
 # bundle we can ever sign, curable only by reflash. Both files are public, so this needs no secret
 # and runs on every CI push — which is the whole reason release.cert.pem is committed.
 openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 1 -keyout "$SB/other.key" \
-  -out "$SB/other-ca.pem" -subj "/O=qforge-selftest/CN=someone elses CA" \
+  -out "$SB/other-ca.pem" -subj "/O=retroforge-selftest/CN=someone elses CA" \
   -addext "basicConstraints=critical,CA:TRUE,pathlen:0" >/dev/null 2>&1
 USE_KEYRING="$SB/other-ca.pem"
 vs "$CONF"

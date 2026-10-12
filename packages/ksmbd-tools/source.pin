@@ -1,4 +1,4 @@
-# ksmbd-tools — built FROM SOURCE via a qforge-owned PKGBUILD (packages/ksmbd-tools/PKGBUILD).
+# ksmbd-tools — built FROM SOURCE via a retroforge-owned PKGBUILD (packages/ksmbd-tools/PKGBUILD).
 # The userspace half of ksmbd, the in-kernel SMB3 server (CONFIG_SMB_SERVER=m in kernel/kernel.config)
 # behind the player's network shares (roms, bios, saves, states). Not in the pinned holo aarch64
 # snapshot, so there is no repo row to resolve; same "local PKGBUILD" form as packages/brightnessctl.

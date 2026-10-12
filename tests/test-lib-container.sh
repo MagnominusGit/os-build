@@ -25,17 +25,17 @@ done
 
 # ctr with a given runtime and PATH; prints what the fake runtime received. PATH holds ONLY the
 # fakes (bash by absolute path), so a real docker on the host cannot decide the choice cases.
-call() {  # call <QFORGE_CONTAINER or ""> <path> <ctr args...>
+call() {  # call <RETROFORGE_CONTAINER or ""> <path> <ctr args...>
   local rt="$1" path="$2"; shift 2
-  env -i PATH="$path" QFORGE_CONTAINER="$rt" "$BASH" -c '[ -n "$QFORGE_CONTAINER" ] || unset QFORGE_CONTAINER; . "$1"; shift; ctr "$@"' _ "$LIB" "$@"
+  env -i PATH="$path" RETROFORGE_CONTAINER="$rt" "$BASH" -c '[ -n "$RETROFORGE_CONTAINER" ] || unset RETROFORGE_CONTAINER; . "$1"; shift; ctr "$@"' _ "$LIB" "$@"
 }
 
 CASE=podman
 out="$(call podman "$TMP/bin" run --rm -v /x:/src img true)"
 [ "$out" = "podman run --security-opt label=disable --rm -v /x:/src img true" ] \
   && ok "run disables SELinux labelling" || bad "run: $out"
-out="$(call podman "$TMP/bin" import --platform linux/arm64 - qforge/builder-import:x)"
-[ "$out" = "podman import --os linux --arch arm64 - qforge/builder-import:x" ] \
+out="$(call podman "$TMP/bin" import --platform linux/arm64 - retroforge/builder-import:x)"
+[ "$out" = "podman import --os linux --arch arm64 - retroforge/builder-import:x" ] \
   && ok "import --platform becomes --os/--arch" || bad "import: $out"
 out="$(call podman "$TMP/bin" image inspect ref)"
 [ "$out" = "podman image inspect ref" ] && ok "other subcommands pass through" || bad "pass-through: $out"

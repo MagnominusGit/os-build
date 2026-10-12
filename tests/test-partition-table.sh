@@ -21,7 +21,7 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TABLE="$ROOT/image/partition-table.txt"
-LIB="$ROOT/rootfs/overlay/usr/lib/qforge/install/lib-slotwrite.sh"
+LIB="$ROOT/rootfs/overlay/usr/lib/retroforge/install/lib-slotwrite.sh"
 
 PASS=0; FAIL=0; SKIP=0; CASE=""
 ok()   { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
@@ -32,13 +32,13 @@ for f in "$TABLE" "$LIB"; do
   [ -r "$f" ] || { echo "missing input: $f" >&2; exit 1; }
 done
 command -v mkfs.vfat >/dev/null 2>&1 || {
-  CASE="prerequisites"; skip "mkfs.vfat is not installed -- run this inside qforge-build"
+  CASE="prerequisites"; skip "mkfs.vfat is not installed -- run this inside retroforge-build"
   printf '\ntest-partition-table.sh: %d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "$SKIP"
   exit 0
 }
 
 die() { printf 'lib: %s\n' "$*" >&2; return 1; }
-# shellcheck source=../rootfs/overlay/usr/lib/qforge/install/lib-slotwrite.sh
+# shellcheck source=../rootfs/overlay/usr/lib/retroforge/install/lib-slotwrite.sh
 . "$LIB"
 
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT

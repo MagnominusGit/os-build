@@ -1,6 +1,6 @@
 # kernel/
 
-arm64 kernel build for qforge target SoCs.
+arm64 kernel build for retroforge target SoCs.
 
 The upstream base ships only `linux-firmware`, **not** a device kernel — so we build
 our own. Mainline/Linaro `sm8x50` base with vendor cherry-picks as needed.
@@ -16,7 +16,7 @@ that reason — nothing reads it.
 | Path | Purpose |
 |---|---|
 | `*.config` | Kconfig fragment(s), all merged onto an arm64 base defconfig (union across SoCs) |
-| `kernel.config` | The **additive** fragment: everything qforge turns on |
+| `kernel.config` | The **additive** fragment: everything retroforge turns on |
 | `trim-platforms.config` | The **subtractive** fragment: non-Qualcomm platform gates turned off |
 | `patches/` | Out-of-tree patches applied before build (lexical order) |
 | `dts/qcom/` | Device trees injected into the kernel source before build; boards are **discovered** from the top-level `.dts` files |

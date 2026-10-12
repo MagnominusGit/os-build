@@ -1,4 +1,4 @@
-# qforge trim removal list — the seal's size counterpart.
+# retroforge trim removal list — the seal's size counterpart.
 #
 # The explicit, reviewed declaration of what rootfs/trim-rootfs.sh deletes from the RELEASE root
 # after the seal. Editing this file changes what ships, so it is committed and reviewed like
@@ -30,7 +30,7 @@
 #
 # Both kinds reject an absolute path or one containing `..`, exactly as the sealer does.
 #
-# RELEASE ONLY, like the seal. A QFORGE_DEV tree keeps pacman, and deleting files out from
+# RELEASE ONLY, like the seal. A RETROFORGE_DEV tree keeps pacman, and deleting files out from
 # under a live package database would make on-device `pacman -Qkk` and every reinstall lie about
 # the tree. rootfs/assemble-rootfs.sh calls this only on the release path.
 #
@@ -51,7 +51,7 @@ path usr/lib/pkgconfig
 path usr/share/pkgconfig
 path usr/share/aclocal
 # GObject-introspection XML. The RUNTIME format is the .typelib under usr/lib/girepository-*,
-# which is what PyGObject loads for qforge-powerd; the .gir here
+# which is what PyGObject loads for retroforge-powerd; the .gir here
 # is its source, consumed by g-ir-compiler and by bindings generators at build time.
 path usr/share/gir-1.0
 # Static libraries — 100M, of which Qt6's libQt6QmlDom.a + libQt6QmlLS.a (QML tooling for an IDE)

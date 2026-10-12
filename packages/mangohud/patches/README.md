@@ -1,6 +1,6 @@
 # mangohud patches
 
-qforge patches applied on top of the local mangohud PKGBUILD source (MangoHud `0.8.4`, see
+retroforge patches applied on top of the local mangohud PKGBUILD source (MangoHud `0.8.4`, see
 [`../PKGBUILD`](../PKGBUILD)), in the order listed by `patches:` in
 [`../source.pin`](../source.pin). Each is applied with `patch -p1` from the MangoHud source root
 (the `MangoHud/` checkout inside makepkg's `$srcdir`) by
@@ -41,7 +41,7 @@ Stock MangoHud only knows how to read desktop GPUs (amdgpu/i915/nvidia) and gene
   `/proc/<pid>/fdinfo`; when the game holds a capability mangoapp lacks, the kernel denies it and
   the uncaught `ghc::filesystem` error aborted mangoapp every few seconds (blinking, frozen
   overlay; HW 2026-10-04). Caught now, as the `mangohud-next` code on upstream master already does,
-  so no upstream PR. Made on branch `qforge-0.8.4` in `_ref/MangoHud` (v0.8.4 + 0001-0006).
+  so no upstream PR. Made on branch `retroforge-0.8.4` in `_ref/MangoHud` (v0.8.4 + 0001-0006).
 
 **SM8650 tuning note:** we ship on SM8650 (Adreno 750), while `0006` was authored for SM8750 and
 `0002` was originally SM8550-only. We take all six anyway — SM8650 shares the Adreno kgsl/devfreq +
@@ -67,7 +67,7 @@ per-SoC GPU patches published upstream must NOT be taken as-is. Each of those ha
 | SM8550 | `gpuss_0_thermal`     | `gpuss-0-thermal` … `gpuss-7-thermal`            |
 | SM8650 | `gpuss0_thermal`      | `gpuss0-thermal` … `gpuss7-thermal`              |
 
-qforge builds one unified image, so pinning any single one of those breaks the other two SoCs
+retroforge builds one unified image, so pinning any single one of those breaks the other two SoCs
 outright (`gpuss_0_thermal` is not a substring of `gpu_top_thermal`, and vice versa). The other
 half of those patches — repointing `init_kgsl()` at `/sys/class/devfreq/3d00000.gpu` — is already
 covered by `0002`, which tries that path plus the kgsl and SM6115 ones and takes the first that

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# qforge OTA server bootstrap — Phase 3. RUNS ON THE INSTANCE, as root. Ship the whole ota/ tree
+# retroforge OTA server bootstrap — Phase 3. RUNS ON THE INSTANCE, as root. Ship the whole ota/ tree
 # and run it from there, in one command:
 #
-#   tar cz ota | ssh -i <key> ubuntu@updates.qforge.invalid \
+#   tar cz ota | ssh -i <key> ubuntu@updates.retroforge.invalid \
 #                    'sudo tar xz -C /tmp && sudo bash /tmp/ota/setup-server.sh'
 #
 # NOT `ssh 'sudo bash -s' < setup-server.sh`, even though that is the tidier-looking invocation: this
-# script has to install ota/nginx-qforge-ota.conf, and a lone stdin stream cannot carry it. The
+# script has to install ota/nginx-retroforge-ota.conf, and a lone stdin stream cannot carry it. The
 # alternative is embedding a copy of the vhost in a heredoc here, which makes two files that must be
 # edited together and will therefore eventually disagree — the exact drift the vhost's own header
 # refuses --nginx over. One source of truth: the conf next to this script.
@@ -35,17 +35,17 @@
 # and changes nothing while looking exactly like a fix in `iptables -S`.
 set -euo pipefail
 
-DOMAIN="${QFORGE_OTA_DOMAIN:-updates.qforge.invalid}"
-DOCROOT="${QFORGE_OTA_DOCROOT:-/srv/qforge-ota}"
+DOMAIN="${RETROFORGE_OTA_DOMAIN:-updates.retroforge.invalid}"
+DOCROOT="${RETROFORGE_OTA_DOCROOT:-/srv/retroforge-ota}"
 # Who owns the docroot, i.e. who publish-bundle.sh rsyncs in as. nginx reads it as www-data through
 # the o+rx below, so the owner never needs to be www-data and publishing never needs sudo.
 #
 # `otapub`, not `ubuntu`, and this script does not create it — ota/setup-ci-user.sh does, and dies
 # below if it has not run. The two are ordered that way because the CI account is the thing that
 # must NOT have sudo, and a server bootstrap that silently invents privileged-adjacent accounts is
-# how that property gets lost. Set QFORGE_OTA_OWNER=ubuntu to bring up a server without a CI
+# how that property gets lost. Set RETROFORGE_OTA_OWNER=ubuntu to bring up a server without a CI
 # principal at all; publishing then only works from the workstation.
-OWNER="${QFORGE_OTA_OWNER:-otapub}"
+OWNER="${RETROFORGE_OTA_OWNER:-otapub}"
 # Mode 2775, not 0755: setgid so files created by EITHER publishing principal (otapub from CI,
 # ubuntu by hand) land in a group the other can act on. Dropping this back to 0755 does not break
 # anything until the next by-hand rollback or the next new channel, which is the worst possible
@@ -54,10 +54,10 @@ DOCROOT_MODE=2775
 # Certbot's registration address. Not cosmetic: it is the only warning anybody gets if the renewal
 # timer breaks, and an expired cert takes every device's update check offline with no device-side
 # symptom beyond "unreachable".
-EMAIL="${QFORGE_OTA_EMAIL:-simons.philippe@gmail.com}"
+EMAIL="${RETROFORGE_OTA_EMAIL:-simons.philippe@gmail.com}"
 # THE CHANNELS A DEVICE CAN BE POINTED AT. There is no picker in Settings — that work was dropped
 # with PR #82 — so a device reaches a channel through OTA_CHANNEL: the environment, then
-# /etc/qforge/ota.conf (root, and only a dev card ships one), then ~/.config/qforge/ota.conf,
+# /etc/retroforge/ota.conf (root, and only a dev card ships one), then ~/.config/retroforge/ota.conf,
 # which is the only one a user on a release device can write. Keep this list and what
 # release-bundle.yml can publish in step; a channel a device can name and the server does not have
 # is a 404. This is not what MAKES a channel work (publish-bundle.sh runs `mkdir -p` on the
@@ -67,11 +67,11 @@ EMAIL="${QFORGE_OTA_EMAIL:-simons.philippe@gmail.com}"
 #
 # An empty channel directory is the correct resting state — see the note below the loop that creates
 # them: a device fetching a channel with no latest.json gets a 404, fails closed and exits 7.
-CHANNELS="${QFORGE_OTA_CHANNELS:-stable beta}"
+CHANNELS="${RETROFORGE_OTA_CHANNELS:-stable beta}"
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-VHOST_SRC="${QFORGE_OTA_VHOST:-$HERE/nginx-qforge-ota.conf}"
-SITE=/etc/nginx/sites-available/qforge-ota
+VHOST_SRC="${RETROFORGE_OTA_VHOST:-$HERE/nginx-retroforge-ota.conf}"
+SITE=/etc/nginx/sites-available/retroforge-ota
 LIVE="/etc/letsencrypt/live/$DOMAIN"
 
 say()  { printf '[ota-setup] %s\n' "$*"; }
@@ -153,7 +153,7 @@ fi
 id "$OWNER" >/dev/null 2>&1 || die "no such user '$OWNER' to own the docroot.
   If that is 'otapub', it is the CI publishing account and this script does not create it:
     bash $HERE/setup-ci-user.sh    # then re-run this one
-  To stand up a server with no CI principal, re-run with QFORGE_OTA_OWNER=ubuntu."
+  To stand up a server with no CI principal, re-run with RETROFORGE_OTA_OWNER=ubuntu."
 install -d -o "$OWNER" -g "$OWNER" -m "$DOCROOT_MODE" "$DOCROOT"
 install -d -o "$OWNER" -g "$OWNER" -m "$DOCROOT_MODE" "$DOCROOT/.well-known" "$DOCROOT/.well-known/acme-challenge"
 for ch in $CHANNELS; do
@@ -183,7 +183,7 @@ server {
     location / { return 404; }
 }
 EOF
-  ln -sfn "$SITE" /etc/nginx/sites-enabled/qforge-ota
+  ln -sfn "$SITE" /etc/nginx/sites-enabled/retroforge-ota
   rm -f /etc/nginx/sites-enabled/default
   nginx -t || die "the temporary vhost does not parse — this is a bug in $0"
   systemctl enable --now nginx >/dev/null 2>&1 || true
@@ -200,17 +200,17 @@ fi
 
 # --- 5. the real vhost ---------------------------------------------------------------------------
 # Copied from the repo file, never generated here. The domain and docroot are substituted so a
-# non-default QFORGE_OTA_DOMAIN yields a coherent vhost rather than one that silently still names
+# non-default RETROFORGE_OTA_DOMAIN yields a coherent vhost rather than one that silently still names
 # the committed default in half its directives.
 install -m 0644 "$VHOST_SRC" "$SITE"
-sed -i "s|updates\.qforge\.invalid|$DOMAIN|g; s|/srv/qforge-ota|$DOCROOT|g" "$SITE"
+sed -i "s|updates\.retroforge\.invalid|$DOMAIN|g; s|/srv/retroforge-ota|$DOCROOT|g" "$SITE"
 
-ln -sfn "$SITE" /etc/nginx/sites-enabled/qforge-ota
+ln -sfn "$SITE" /etc/nginx/sites-enabled/retroforge-ota
 rm -f /etc/nginx/sites-enabled/default
 nginx -t || die "the installed vhost does not parse; nothing was reloaded, the previous config is still serving"
 systemctl enable --now nginx >/dev/null 2>&1 || true
 systemctl reload nginx
-say "nginx reloaded with the qforge-ota vhost"
+say "nginx reloaded with the retroforge-ota vhost"
 
 # --- 6. renewal ----------------------------------------------------------------------------------
 #
@@ -231,7 +231,7 @@ HOOK=/etc/letsencrypt/renewal-hooks/deploy/10-reload-nginx.sh
 install -d -m 0755 /etc/letsencrypt/renewal-hooks/deploy
 cat >"$HOOK" <<'HOOK_EOF'
 #!/bin/sh
-# Installed by qforge's ota/setup-server.sh. certbot runs this after a successful renewal.
+# Installed by retroforge's ota/setup-server.sh. certbot runs this after a successful renewal.
 # nginx caches certificates in memory at startup; without this reload it would keep serving the
 # expiring one for another 30 days despite a renewal that reported success.
 set -e
@@ -262,17 +262,17 @@ fi
 # it is the only thing here that grows without bound. Found 2026-08-03 at 242M.
 #
 # Why it matters more here than the raw number suggests: the free space on this instance is the
-# retention budget for published bundles. QFORGE_OTA_KEEP=3 at ~4G each is ~12G, and
+# retention budget for published bundles. RETROFORGE_OTA_KEEP=3 at ~4G each is ~12G, and
 # publish-bundle.sh does a df check BEFORE it uploads and REFUSES if the room is not there. An
 # uncapped journal is therefore not just untidy; it is a slow leak pointed at the one resource a
 # publish needs, and it would surface as a refused release rather than as a disk-space alert.
 #
 # A drop-in rather than an edit to journald.conf, so a distribution upgrade cannot silently revert
 # it and so this script stays idempotent. 200M keeps weeks of history on a machine this quiet.
-JOURNALD_DROPIN=/etc/systemd/journald.conf.d/10-qforge-cap.conf
+JOURNALD_DROPIN=/etc/systemd/journald.conf.d/10-retroforge-cap.conf
 install -d -m 0755 /etc/systemd/journald.conf.d
 cat >"$JOURNALD_DROPIN" <<'JOURNALD_EOF'
-# Installed by qforge's ota/setup-server.sh. See the rationale there.
+# Installed by retroforge's ota/setup-server.sh. See the rationale there.
 [Journal]
 SystemMaxUse=200M
 JOURNALD_EOF

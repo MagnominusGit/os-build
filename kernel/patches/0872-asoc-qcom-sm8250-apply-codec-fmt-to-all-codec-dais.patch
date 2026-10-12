@@ -2,7 +2,7 @@ From: Val Packett <val@packett.cool>
 Date: Wed, 6 May 2026 17:33:07 -0300
 Subject: [PATCH] ASoC: qcom: sm8250: apply codec_fmt to all codec DAIs
 
-qforge: ROCKNIX SM6115 patch carried verbatim; it applies with fuzz 0 on top of 0870/0871 (sm8250.c) resp. 0895 (q6afe.c), checked 2026-10-09.
+retroforge: ROCKNIX SM6115 patch carried verbatim; it applies with fuzz 0 on top of 0870/0871 (sm8250.c) resp. 0895 (q6afe.c), checked 2026-10-09.
 
 With MI2S and TDM interfaces, multiple codecs typically share one bus.
 All codecs on the bus should receive the same format configuration, so

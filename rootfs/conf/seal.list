@@ -1,4 +1,4 @@
-# qforge seal removal list — Phase 4a step 3.
+# retroforge seal removal list — Phase 4a step 3.
 #
 # The explicit, reviewed declaration of what rootfs/seal-rootfs.sh deletes from the RELEASE
 # root after the last install. Editing this file changes what ships, so it is committed and
@@ -28,7 +28,7 @@
 # with pacman itself. The target is the package-manager RUNTIME and the daemons it drags in,
 # not every transitive dependency.
 #
-# Under QFORGE_DEV=1 nothing here is removed — on-device pacman is a genuine bring-up
+# Under RETROFORGE_DEV=1 nothing here is removed — on-device pacman is a genuine bring-up
 # affordance and the divergence is confined to tooling. The step-4 guard runs against the
 # RELEASE tree.
 
@@ -51,7 +51,7 @@ pkg  gnupg
 # can disable and which is what activates dirmngr@etc-pacman.d-gnupg in the first place.
 pkg  archlinux-keyring
 
-# The local database, minus the copy preserved as provenance under /usr/lib/qforge/pkgdb.
+# The local database, minus the copy preserved as provenance under /usr/lib/retroforge/pkgdb.
 path var/lib/pacman
 # pacman-key's generated keyring (1.4M of trustdb + private keys, owned by no package), plus
 # the base image's stray pacman.conf.debug. The whole directory goes: with pacman-mirrorlist

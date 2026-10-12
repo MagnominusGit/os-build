@@ -30,7 +30,7 @@ frame, so the non-blocking commit that pulled it in kept failing with
 Single-output use is unchanged: one CRTC only ever takes SSPPs it had or
 that were never used.
 
-(qforge: dual-screen boards, gamescope patches 0040-0043, 2026-10-12.)
+(retroforge: dual-screen boards, gamescope patches 0040-0043, 2026-10-12.)
 ---
 diff -ru a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h b/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h
 --- a/drivers/gpu/drm/msm/disp/dpu1/dpu_kms.h	2026-10-12 16:07:21.788428466 +0200

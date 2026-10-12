@@ -1,4 +1,4 @@
-From: qforge
+From: retroforge
 Subject: [PATCH] wlserver: route the secondary touchscreen to the secondary output
 
 Dual-screen boards have a digitizer on each panel. gamescope tied every
@@ -17,7 +17,7 @@ change keyboard focus, so the game on the main output keeps its input,
 and their ids are offset so the two digitizers never share one. Other
 touchscreens keep the existing path untouched.
 
-(qforge: dual-screen boards, step 5 of the dual-output plan, 2026-10-12.)
+(retroforge: dual-screen boards, step 5 of the dual-output plan, 2026-10-12.)
 ---
 diff --git a/src/main.cpp b/src/main.cpp
 index cc42704..38b17ca 100644

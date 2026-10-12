@@ -1,6 +1,6 @@
 Subject: [PATCH] Input: hynitron_cstxxx - add cst3530 (cst66xx family)
 
-qforge: merged with 0720 (AYN Odin2 Mini cst340), which had already added the vdd regulator and
+retroforge: merged with 0720 (AYN Odin2 Mini cst340), which had already added the vdd regulator and
 removed the bootloader handshake from hyn_probe(). ROCKNIX's resume-aware power-on, reset
 direction, devm vdd release and panel follower are kept; the bootloader_enter() call stays out
 for every chip, as 0720 wants (the cst3530 defines none anyway). Rest is ROCKNIX SM6115 0046.

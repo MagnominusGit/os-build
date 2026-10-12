@@ -1,7 +1,0 @@
-# qforge: the player's network shares, ON by default (decided 2026-10-03): ksmbd (the in-kernel SMB3
-# server, /etc/ksmbd/ksmbd.conf) and avahi-daemon, which announces them and the qforge.local name.
-# /etc/machine-id is empty on a fresh image so systemd runs preset-all on first boot, where the
-# stock 99-default.preset is "disable *"; this higher-priority preset (60 < 99) keeps them enabled.
-# Build-time multi-user.target.wants symlinks ship alongside as a fallback (cf. 60-qforge-powerd).
-enable ksmbd.service
-enable avahi-daemon.service

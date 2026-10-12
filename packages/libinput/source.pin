@@ -1,4 +1,4 @@
-# libinput-tools — built FROM SOURCE via a qforge-owned PKGBUILD (packages/libinput/PKGBUILD):
+# libinput-tools — built FROM SOURCE via a retroforge-owned PKGBUILD (packages/libinput/PKGBUILD):
 # the snapshot's own libinput 1.30.1 recipe, reduced to the CLI with no debug GUI. See the PKGBUILD
 # header for why (Arch's split libinput-tools drags gtk4 + gstreamer in for one GUI tool) and for
 # every deviation.

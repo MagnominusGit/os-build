@@ -10,7 +10,7 @@
 # running disk is never a candidate) have no coverage until this runs. That is what this is for,
 # and it is the only thing Phase 3 still owed after the suites went green.
 #
-# NOTHING HERE WRITES TO THE DEVICE outside /run/qforge/probe, which is tmpfs and gone at the
+# NOTHING HERE WRITES TO THE DEVICE outside /run/retroforge/probe, which is tmpfs and gone at the
 # next boot. select-target.sh is pure by construction; this wrapper adds no writes of its own,
 # which is why it is safe to run against any board at any time, including one carrying an install
 # somebody cares about.
@@ -43,9 +43,9 @@ mdir="$(hwstage_path mdir)"
 # --- stage 2: onto the device ----------------------------------------------------------------
 hwstage_ssh_opts
 
-ssh "${SSHOPTS[@]}" "$host" 'mkdir -p /run/qforge/probe'
-scp "${SSHOPTS[@]}" -q "$sgdisk" "$mdir" "$ROOT/installer/select-target.sh" "$host:/run/qforge/probe/"
-ssh "${SSHOPTS[@]}" "$host" 'chmod +x /run/qforge/probe/sgdisk /run/qforge/probe/mdir /run/qforge/probe/select-target.sh'
+ssh "${SSHOPTS[@]}" "$host" 'mkdir -p /run/retroforge/probe'
+scp "${SSHOPTS[@]}" -q "$sgdisk" "$mdir" "$ROOT/installer/select-target.sh" "$host:/run/retroforge/probe/"
+ssh "${SSHOPTS[@]}" "$host" 'chmod +x /run/retroforge/probe/sgdisk /run/retroforge/probe/mdir /run/retroforge/probe/select-target.sh'
 
 # --- stage 3: the run ------------------------------------------------------------------------
 # Markdown on stdout, per-board sections that concatenate, exactly like probe-internal.sh's
@@ -53,8 +53,8 @@ ssh "${SSHOPTS[@]}" "$host" 'chmod +x /run/qforge/probe/sgdisk /run/qforge/probe
 # single canonical table.
 ssh "${SSHOPTS[@]}" "$host" 'bash -s' <<'REMOTE'
 set -u
-export PATH=/run/qforge/probe:$PATH
-ST=/run/qforge/probe/select-target.sh
+export PATH=/run/retroforge/probe:$PATH
+ST=/run/retroforge/probe/select-target.sh
 
 model="$( { tr -d '\0' < /sys/firmware/devicetree/base/model; } 2>/dev/null )"
 echo "# select-target hardware run — ${model:-unknown board}"
@@ -68,8 +68,8 @@ echo "| Board | \`${model:-?}\` |"
 echo "| Kernel | \`$(uname -r)\` |"
 echo "| sgdisk | \`$(sgdisk --version 2>&1 | head -1)\` |"
 echo "| mdir | \`$(mdir --version 2>&1 | head -1)\` |"
-for k in QFORGE_VARIANT QFORGE_MODE QFORGE_VERSION QFORGE_BUILD QFORGE_GIT; do
-  v="$(sed -n "s/^$k=//p" /etc/qforge-release 2>/dev/null | head -1 | tr -d '"')"
+for k in RETROFORGE_VARIANT RETROFORGE_MODE RETROFORGE_VERSION RETROFORGE_BUILD RETROFORGE_GIT; do
+  v="$(sed -n "s/^$k=//p" /etc/retroforge-release 2>/dev/null | head -1 | tr -d '"')"
   [ -n "$v" ] && echo "| $k | \`$v\` |"
 done
 root_src="$(findmnt -no SOURCE / 2>/dev/null | sed 's/\[.*//')"
@@ -122,4 +122,4 @@ for n in $(lsblk -dno NAME | grep -Ev '^(loop|ram|zram|dm-)'); do
 done
 REMOTE
 
-echo "[qforge] staged files remain under /run/qforge/probe (tmpfs); they vanish at reboot" >&2
+echo "[retroforge] staged files remain under /run/retroforge/probe (tmpfs); they vanish at reboot" >&2

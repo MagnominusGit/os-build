@@ -45,7 +45,7 @@ diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
  	{
 -		g_nSteamCompMgrTargetFPS = get_prop( ctx, ctx->root, ctx->atoms.gamescopeFPSLimit, 0 );
 -		update_runtime_info();
-+		// qforge: route the legacy X-atom cap through the SAME override the
++		// retroforge: route the legacy X-atom cap through the SAME override the
 +		// gamescope_control Wayland protocol writes. Assigning
 +		// g_nSteamCompMgrTargetFPS directly does not survive: paint_all() calls
 +		// update_app_target_refresh_cycle() every frame, which resets the target

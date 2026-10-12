@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge internal-install target selection — Phase 3 of .claude/plans/internal-install.plan.md
+# retroforge internal-install target selection — Phase 3 of .claude/plans/internal-install.plan.md
 #
 #   installer/select-target.sh              # scan every internal disk, pick the one
 #   installer/select-target.sh /dev/sda     # examine exactly this disk
@@ -11,7 +11,7 @@
 # On success, prints key=value lines on stdout and exits 0:
 #
 #   TARGET=/dev/sda        the disk to install to
-#   MODE=fresh|reinstall   reinstall means the qforge eight are already there
+#   MODE=fresh|reinstall   reinstall means the retroforge eight are already there
 #   SECTOR=4096            logical sector size, because MiB->sectors depends on it
 #   UD_INDEX=11            the userdata partition number
 #   UD_START=..  UD_END=.. its extent, in sectors
@@ -29,12 +29,12 @@
 # agrees on the spelling, and a board that disagrees is refused rather than carved wrongly.
 set -euo pipefail
 
-# 32 GiB for qforge plus 1 GiB kept for Android. This is the POLICY minimum -- below 32 an install
+# 32 GiB for retroforge plus 1 GiB kept for Android. This is the POLICY minimum -- below 32 an install
 # is not worth having. It is not `genpart.sh --min` (15361 MiB), which is the MECHANICAL one, the
 # point below which the eight partitions do not physically fit. Both exist; do not conflate them.
-QFORGE_MIN_GIB="${QFORGE_MIN_GIB:-32}"
+RETROFORGE_MIN_GIB="${RETROFORGE_MIN_GIB:-32}"
 ANDROID_FLOOR_GIB="${ANDROID_FLOOR_GIB:-1}"
-UD_MIN_GIB=$(( QFORGE_MIN_GIB + ANDROID_FLOOR_GIB ))
+UD_MIN_GIB=$(( RETROFORGE_MIN_GIB + ANDROID_FLOOR_GIB ))
 
 ESP_TYPE_GUID="C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
 
@@ -62,18 +62,18 @@ command -v mdir  >/dev/null 2>&1 || die "mdir not found (mtools) -- rule 3b cann
 # that breaks are precisely the ones a user has already tried another distribution on.
 command -v sfdisk >/dev/null 2>&1 || die "sfdisk not found -- the table cannot be read without it"
 
-# lib-gpt.sh is SHIPPED (into /usr/lib/qforge/install/, beside genpart.sh) while this script is
+# lib-gpt.sh is SHIPPED (into /usr/lib/retroforge/install/, beside genpart.sh) while this script is
 # installer-only, so the two do not always sit together. Resolved by search, exactly as carve.sh
 # resolves genpart.sh and lib-slotwrite.sh.
-LIBGPT="${QFORGE_LIB_GPT:-}"
+LIBGPT="${RETROFORGE_LIB_GPT:-}"
 if [ -z "$LIBGPT" ]; then
   for c in "$(cd "$(dirname "$0")" && pwd)/lib-gpt.sh" \
-           /usr/lib/qforge/install/lib-gpt.sh \
+           /usr/lib/retroforge/install/lib-gpt.sh \
            "$(cd "$(dirname "$0")" && pwd)/../image/lib-gpt.sh"; do
     [ -r "$c" ] && { LIBGPT="$c"; break; }
   done
 fi
-[ -n "$LIBGPT" ] && [ -r "$LIBGPT" ] || die "cannot find lib-gpt.sh (set QFORGE_LIB_GPT)"
+[ -n "$LIBGPT" ] && [ -r "$LIBGPT" ] || die "cannot find lib-gpt.sh (set RETROFORGE_LIB_GPT)"
 # Sourced AFTER die() exists, so its refusals carry this script's prefix.
 # shellcheck source=../image/lib-gpt.sh
 . "$LIBGPT"
@@ -99,10 +99,10 @@ running_disk() {
   local src parent
   src="$(findmnt -no SOURCE / 2>/dev/null || true)"
   [ -n "$src" ] || return 1
-  # A loop/squashfs root has no PKNAME; fall back to whatever /run/qforge/boot recorded.
+  # A loop/squashfs root has no PKNAME; fall back to whatever /run/retroforge/boot recorded.
   parent="$(lsblk -no PKNAME "$src" 2>/dev/null | head -1 || true)"
-  if [ -z "$parent" ] && [ -r /run/qforge/boot ]; then
-    src="$(sed -n 's/.*root=\([^ ]*\).*/\1/p' /run/qforge/boot | head -1)"
+  if [ -z "$parent" ] && [ -r /run/retroforge/boot ]; then
+    src="$(sed -n 's/.*root=\([^ ]*\).*/\1/p' /run/retroforge/boot | head -1)"
     [ -n "$src" ] && parent="$(lsblk -no PKNAME "$(blkid -o device -t "$src" 2>/dev/null || echo "$src")" 2>/dev/null | head -1 || true)"
   fi
   [ -n "$parent" ] || return 1
@@ -140,13 +140,13 @@ examine() {
   local disk="$1" base ss rows ud_idx="" ud_start ud_end ud_type next_start ceil mode=fresh
   base="${disk#/dev/}"
 
-  # QFORGE_SELECT_FIXTURE lets the suite drive a GPT in an image file. It relaxes these three sysfs
+  # RETROFORGE_SELECT_FIXTURE lets the suite drive a GPT in an image file. It relaxes these three sysfs
   # checks, plus the running-disk resolution at the bottom of the file (the container's root is an
   # overlay with no block parent), and NOTHING else -- every rule that decides what gets carved still runs. The scan path
   # globs /dev/*, so this cannot widen a real selection; and since this script writes nothing, the
   # seam cannot turn into a write path. Without it the rules below are untestable off a device,
   # which is the trade genpart.sh's table seam already makes for the same reason.
-  if [ -f "$disk" ] && [ -n "${QFORGE_SELECT_FIXTURE:-}" ]; then
+  if [ -f "$disk" ] && [ -n "${RETROFORGE_SELECT_FIXTURE:-}" ]; then
     :
   else
     [ -b "$disk" ] || { say "  $disk: not a block device"; return 1; }
@@ -192,7 +192,7 @@ examine() {
 
   # Already ours? Settled BEFORE anything looks at sizes. On a reinstall the biggest partition is
   # our own /home, so any size test reached first carves the user's game library.
-  if printf '%s\n' "$rows" | awk '{print $5}' | grep -qx "qforge-root-A"; then
+  if printf '%s\n' "$rows" | awk '{print $5}' | grep -qx "retroforge-root-A"; then
     mode=reinstall
   fi
 
@@ -201,7 +201,7 @@ examine() {
   local idx start end code name
   while read -r idx start end code name; do
     [ "$code" = "EF00" ] || continue
-    [ "$name" = "QFORGE-ESP" ] && continue
+    [ "$name" = "RETROFORGE-ESP" ] && continue
     if esp_is_bootable "$disk" "$start" "$ss"; then
       say "  $disk: partition $idx ($name) is a bootable ESP that is not ours -- remove the other OS first"
       return 1
@@ -225,7 +225,7 @@ examine() {
   if [ -n "$next_start" ]; then ceil=$(( next_start - 1 )); else ceil="$(last_usable "$disk")"; fi
   [ -n "$ceil" ] || { say "  $disk: cannot determine the last usable sector"; return 1; }
 
-  # The size test is a FRESH-INSTALL question and only ever meant "is there room to make a QForge
+  # The size test is a FRESH-INSTALL question and only ever meant "is there room to make a RetroForge
   # install here". On a reinstall that has been answered -- and answered by a carve that was allowed
   # to leave userdata as small as ANDROID_FLOOR_GIB, so applying it here refuses to reinstall exactly
   # the devices whose owners gave Android the least. Rule 8's "skip 4-6 on a disk that is already
@@ -244,7 +244,7 @@ examine() {
   local span_gib=$(( (ceil - ud_start + 1) * ss / 1073741824 ))
   if [ "$mode" = fresh ]; then
     [ "$span_gib" -ge "$UD_MIN_GIB" ] \
-      || { say "  $disk: userdata and the free space after it total ${span_gib} GiB, and ${UD_MIN_GIB} is the minimum (${QFORGE_MIN_GIB} for QForge + ${ANDROID_FLOOR_GIB} kept for Android)"; return 1; }
+      || { say "  $disk: userdata and the free space after it total ${span_gib} GiB, and ${UD_MIN_GIB} is the minimum (${RETROFORGE_MIN_GIB} for RetroForge + ${ANDROID_FLOOR_GIB} kept for Android)"; return 1; }
   fi
 
   # The type GUID has to come back byte-identical on the recreated partition: stock userdata is a
@@ -265,10 +265,10 @@ examine() {
   # some other type is not ours to correct, and guessing would be the same class of mistake in the
   # other direction. (The install record's `sfdisk --dump` pre-state was the other candidate source
   # and cannot serve here -- in this scenario we were the ones uninstalled, so no record survives.)
-  if [ "${ud_type^^}" != "$QFORGE_ANDROID_USERDATA_GUID" ] && gpt_has_dead_entries "$disk"; then
+  if [ "${ud_type^^}" != "$RETROFORGE_ANDROID_USERDATA_GUID" ] && gpt_has_dead_entries "$disk"; then
     say "  $disk: userdata is typed $ud_type on a table that still carries zeroed GPT entries --"
-    say "  $disk: restoring the Android type $QFORGE_ANDROID_USERDATA_GUID (a foreign uninstaller left this disk behind)"
-    ud_type="$QFORGE_ANDROID_USERDATA_GUID"
+    say "  $disk: restoring the Android type $RETROFORGE_ANDROID_USERDATA_GUID (a foreign uninstaller left this disk behind)"
+    ud_type="$RETROFORGE_ANDROID_USERDATA_GUID"
   fi
 
   # CEIL was computed above, before the size test, because that test measures against it.
@@ -289,7 +289,7 @@ examine() {
 # still globs /dev/*, and this script writes nothing -- and the refusal itself is exercised with the
 # flag UNSET, which is the only way to test the path that matters.
 RUNNING=""
-if ! RUNNING="$(running_disk)" && [ -z "${QFORGE_SELECT_FIXTURE:-}" ]; then
+if ! RUNNING="$(running_disk)" && [ -z "${RETROFORGE_SELECT_FIXTURE:-}" ]; then
   die "cannot determine which disk this system is running from, so no disk can be ruled out.
   Every other rule here decides whether a disk is a SUITABLE target; this one is what keeps the
   installer off the medium it booted from, and without it a carve could take the recovery path with
@@ -307,14 +307,14 @@ fi
 # Scan. Exactly one disk must pass: zero says what was rejected and why, two or more refuses and
 # lists them rather than picking, because picking is the decision this script exists not to guess at.
 #
-# QFORGE_SELECT_DISKS stands in for the glob so the suite can drive this loop. Rule 9 is the only
+# RETROFORGE_SELECT_DISKS stands in for the glob so the suite can drive this loop. Rule 9 is the only
 # rule the explicit-target path cannot reach, and it is the one that decides WHICH disk every
 # geometric guarantee below is about -- untested, "never pick" is an intention rather than a
-# property. It is the same seam as QFORGE_SELECT_FIXTURE and no wider: examine() still refuses
+# property. It is the same seam as RETROFORGE_SELECT_FIXTURE and no wider: examine() still refuses
 # anything that is not a block device unless the fixture flag is ALSO set, so a list on its own
 # cannot introduce a candidate a bare scan would have skipped.
 found=0; result=""; names=""
-for d in ${QFORGE_SELECT_DISKS:-/dev/sd? /dev/nvme?n? /dev/mmcblk?}; do
+for d in ${RETROFORGE_SELECT_DISKS:-/dev/sd? /dev/nvme?n? /dev/mmcblk?}; do
   # -e, not -b: an unmatched glob leaves the pattern itself, and examine() is where "not a block
   # device" is decided -- with a message, which the scan owes the user when zero disks qualify.
   [ -e "$d" ] || continue

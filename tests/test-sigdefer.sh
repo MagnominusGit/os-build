@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Offline check for the LD_PRELOAD shim apps/qforge-sigdefer (Snes9x's Exit crash).
+# Offline check for the LD_PRELOAD shim apps/retroforge-sigdefer (Snes9x's Exit crash).
 #
 #   tests/test-sigdefer.sh
 #
@@ -16,7 +16,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SHIM="$ROOT/apps/qforge-sigdefer/build/libqforge-sigdefer.host.so"
+SHIM="$ROOT/apps/retroforge-sigdefer/build/libretroforge-sigdefer.host.so"
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS + 1)); echo "  ok   $1"; }
 bad() { FAIL=$((FAIL + 1)); echo "  FAIL $1"; }
@@ -25,7 +25,7 @@ if ! pkg-config --exists glib-2.0; then
   echo "test-sigdefer.sh: SKIP (no glib-2.0 development files)"
   exit 0
 fi
-make -s -C "$ROOT/apps/qforge-sigdefer" host >/dev/null || { echo "test-sigdefer.sh: shim does not build"; exit 1; }
+make -s -C "$ROOT/apps/retroforge-sigdefer" host >/dev/null || { echo "test-sigdefer.sh: shim does not build"; exit 1; }
 
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 

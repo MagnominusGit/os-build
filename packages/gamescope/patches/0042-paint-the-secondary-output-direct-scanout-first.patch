@@ -1,4 +1,4 @@
-From: qforge
+From: retroforge
 Subject: [PATCH] paint the secondary output, direct scanout first
 
 The secondary focus (patch 0041) is now painted on the secondary output
@@ -27,7 +27,7 @@ No colour management on that panel. The secondary paint never sets
 bPainted, so the main output's repaint state and pacing ignore it. The
 debug pattern takes the output back while it is on.
 
-(qforge: dual-screen boards, step 4 of the dual-output plan, 2026-10-12.)
+(retroforge: dual-screen boards, step 4 of the dual-output plan, 2026-10-12.)
 ---
 diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
 index 71f4bf2..a94948a 100644

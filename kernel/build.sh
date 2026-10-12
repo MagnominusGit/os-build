@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge unified kernel build. Requires an aarch64 build host (or CROSS_COMPILE) + toolchain.
+# retroforge unified kernel build. Requires an aarch64 build host (or CROSS_COMPILE) + toolchain.
 #
 # One Image serves EVERY supported SoC/board: a single arm64 kernel built with the union of all
 # config fragments, all out-of-tree patches, and all device trees. Every board DTB is staged
@@ -36,11 +36,11 @@ WORK="${WORK:-$ROOT/work/kernel}"
 TARBALL="$WORK/linux-${KVER}.tar.xz"
 
 if [ -n "$BASE_CONFIG" ]; then
-  echo "[qforge] base-config=$BASE_CONFIG (verbatim) kernel=$KVER"
+  echo "[retroforge] base-config=$BASE_CONFIG (verbatim) kernel=$KVER"
   [ -f "$BASE_CONFIG" ] || { echo "missing base config: $BASE_CONFIG" >&2; exit 1; }
 else
   [ "${#FRAGMENTS[@]}" -gt 0 ] || { echo "no config fragments in $KDIR_REPO/*.config" >&2; exit 1; }
-  echo "[qforge] fragments=${FRAGMENTS[*]#"$ROOT"/} kernel=$KVER"
+  echo "[retroforge] fragments=${FRAGMENTS[*]#"$ROOT"/} kernel=$KVER"
 fi
 
 # Fetch + verify the pinned tarball (idempotent), then extract a clean tree.
@@ -50,19 +50,19 @@ echo "${KSHA}  ${TARBALL}" | sha256sum -c - || { echo "sha256 mismatch — refus
 SRCDIR="$WORK/linux-${KVER}"
 rm -rf "$SRCDIR"
 tar -C "$WORK" -xf "$TARBALL"
-echo "[qforge] source ready at $SRCDIR"
+echo "[retroforge] source ready at $SRCDIR"
 
 # --- Apply out-of-tree patches in lexical order (rename files to reorder) ---
 # --fuzz=0 is load-bearing, not pedantry. A hunk that lands on approximate context has
 # drifted from what it was written against and can silently attach to the wrong place on a
 # later bump or reorder. Without it patch(1) defaults to fuzz 2 and that drift is invisible.
 for p in "$KDIR_REPO"/patches/*.patch; do
-  echo "[qforge] applying $(basename "$p")"
+  echo "[retroforge] applying $(basename "$p")"
   patch -p1 --fuzz=0 -d "$SRCDIR" --no-backup-if-mismatch <"$p" \
     || { echo "patch FAILED: $(basename "$p")" >&2; exit 1; }
 done
 
-# --- Inject qforge device trees + register every board dtb in the qcom Makefile ---
+# --- Inject retroforge device trees + register every board dtb in the qcom Makefile ---
 # Boards are DISCOVERED from the top-level .dts files (one per board); .dtsi are includes.
 QCOM_DTS="$SRCDIR/arch/arm64/boot/dts/qcom"
 cp "$KDIR_REPO"/dts/qcom/*.dtsi "$KDIR_REPO"/dts/qcom/*.dts "$QCOM_DTS"/
@@ -73,7 +73,7 @@ for b in "${BOARDS[@]}"; do
   grep -q "${b}\.dtb" "$QCOM_DTS/Makefile" \
     || echo "dtb-\$(CONFIG_ARCH_QCOM) += ${b}.dtb" >> "$QCOM_DTS/Makefile"
 done
-echo "[qforge] ${#BOARDS[@]} board(s): ${BOARDS[*]}"
+echo "[retroforge] ${#BOARDS[@]} board(s): ${BOARDS[*]}"
 
 # --- Stage built-in firmware (CONFIG_EXTRA_FIRMWARE) ---
 # Like ROCKNIX, bake firmware into the Image so the blobs are present before the SD-card
@@ -89,7 +89,7 @@ FWX="$ROOT/firmware/qcom-fw"
 XFW="$ROOT/firmware/extra-fw"
 EMBED_LIST="$KDIR_REPO/embed.list"
 [ -f "$EMBED_LIST" ] || { echo "missing embed list: $EMBED_LIST" >&2; exit 1; }
-echo "[qforge] staging built-in firmware (CONFIG_EXTRA_FIRMWARE) into firmware/"
+echo "[retroforge] staging built-in firmware (CONFIG_EXTRA_FIRMWARE) into firmware/"
 EMBED_REL=""   # accumulates the /lib/firmware-relative paths -> CONFIG_EXTRA_FIRMWARE list
 while read -r rel _rest; do
   case "$rel" in ''|'#'*) continue ;; esac
@@ -119,7 +119,7 @@ if [ -n "${CROSS_COMPILE:-}" ]; then
     echo "  install the aarch64 toolchain or set CROSS_COMPILE to its prefix" >&2
     exit 1
   }
-  echo "[qforge] cross-compiling with ${CROSS_COMPILE}gcc"
+  echo "[retroforge] cross-compiling with ${CROSS_COMPILE}gcc"
 fi
 CC=(${CROSS_COMPILE:+CROSS_COMPILE=$CROSS_COMPILE})
 
@@ -131,14 +131,14 @@ CC=(${CROSS_COMPILE:+CROSS_COMPILE=$CROSS_COMPILE})
 # a comment-only fragment edit, a patch, a dts or a build.sh change mostly hits.
 # The cache sits under work/ (bind-mounted, so it outlives the container), at the same /src path
 # every run — the kernel build passes absolute paths, so a moving tree would miss.
-# QFORGE_CCACHE=0 opts out (e.g. to time a cold build).
-if [ "${QFORGE_CCACHE:-1}" != 0 ] && command -v ccache >/dev/null 2>&1; then
+# RETROFORGE_CCACHE=0 opts out (e.g. to time a cold build).
+if [ "${RETROFORGE_CCACHE:-1}" != 0 ] && command -v ccache >/dev/null 2>&1; then
   export CCACHE_DIR="${CCACHE_DIR:-$ROOT/work/ccache/kernel}"
   export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-8G}"
   mkdir -p "$CCACHE_DIR"
   CC+=("CC=ccache ${CROSS_COMPILE:-}gcc" "HOSTCC=ccache gcc")
   ccache --zero-stats >/dev/null
-  echo "[qforge] ccache: ${CCACHE_DIR#"$ROOT"/} (max $CCACHE_MAXSIZE)"
+  echo "[retroforge] ccache: ${CCACHE_DIR#"$ROOT"/} (max $CCACHE_MAXSIZE)"
 fi
 ( cd "$SRCDIR"
   if [ -n "$BASE_CONFIG" ]; then
@@ -147,7 +147,7 @@ fi
     cp "$BASE_CONFIG" .config
     make ARCH=arm64 "${CC[@]}" olddefconfig
   else
-    # Merge defconfig with EVERY qforge fragment (union across SoCs).
+    # Merge defconfig with EVERY retroforge fragment (union across SoCs).
     scripts/kconfig/merge_config.sh -m arch/arm64/configs/defconfig "${FRAGMENTS[@]}"
     make ARCH=arm64 "${CC[@]}" olddefconfig
   fi
@@ -181,7 +181,7 @@ fi
   #       vfat makes every boot silently fall back to the cmdline root= instead.
   #   =y  zram + the zstd backend: the ONLY swap device on this image comes from zram-generator,
   #       and a kernel without it produces no zram0, no swap and no error — while
-  #       60-qforge-gaming.conf's vm.swappiness=180 quietly does nothing. The backend is checked
+  #       60-retroforge-gaming.conf's vm.swappiness=180 quietly does nothing. The backend is checked
   #       separately from ZRAM because losing just that one leaves zram working but rejecting the
   #       `compression-algorithm = zstd` the shipped generator config asks for.
   #
@@ -284,12 +284,12 @@ fi
            exit 1 ;;
       esac
     done
-    echo "[qforge] trim-platforms: $TRIM_CUT symbols confirmed disabled"
+    echo "[retroforge] trim-platforms: $TRIM_CUT symbols confirmed disabled"
     [ -z "$TRIM_DEAD" ] || {
-      echo "[qforge] trim-platforms: REDUNDANT, cuts nothing --$TRIM_DEAD"
-      echo "[qforge]   each is already unreachable via a gate this file cuts. Find the parent"
-      echo "[qforge]   with 'grep -A3 \"^config <SYM>\$\" arch/arm64/Kconfig.platforms' and drop"
-      echo "[qforge]   the line; see the fragment header's cascade rule."
+      echo "[retroforge] trim-platforms: REDUNDANT, cuts nothing --$TRIM_DEAD"
+      echo "[retroforge]   each is already unreachable via a gate this file cuts. Find the parent"
+      echo "[retroforge]   with 'grep -A3 \"^config <SYM>\$\" arch/arm64/Kconfig.platforms' and drop"
+      echo "[retroforge]   the line; see the fragment header's cascade rule."
     }
   fi
 
@@ -314,4 +314,4 @@ rm -rf "$MODROOT"
   make ARCH=arm64 "${CC[@]}" INSTALL_MOD_PATH="$MODROOT" INSTALL_MOD_STRIP=1 modules_install
 )
 find "$MODROOT/lib/modules" -maxdepth 2 -type l \( -name build -o -name source \) -delete
-echo "[qforge] staged Image + ${#BOARDS[@]} dtbs + modules in $OUT"
+echo "[retroforge] staged Image + ${#BOARDS[@]} dtbs + modules in $OUT"

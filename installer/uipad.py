@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# qforge internal install — the installer UI's INPUT VOCABULARY and its sources. Phase 5 of
+# retroforge internal install — the installer UI's INPUT VOCABULARY and its sources. Phase 5 of
 # .claude/plans/internal-install.plan.md.
 #
 # Everything in the installer that has an opinion about buttons is here, and it has exactly one:
@@ -69,7 +69,7 @@ def log(msg):
 # The keyboard half cannot be asked of SDL, so it is read from the kernel's device list — and the
 # question is not "is there a keyboard" but "is there something that can type the four letters the
 # consent screen asks for". That is the same question, asked in the form that can be answered.
-INPUT_DEVICES = os.environ.get("QFORGE_UI_INPUT_DEVICES", "/proc/bus/input/devices")
+INPUT_DEVICES = os.environ.get("RETROFORGE_UI_INPUT_DEVICES", "/proc/bus/input/devices")
 
 # KEY_S, KEY_W, KEY_N, KEY_E — the initials installer/confirm-tty takes and this UI accepts.
 TYPING_KEYS = (31, 17, 49, 18)
@@ -216,7 +216,7 @@ class ScriptedInput:
         # This source IS an input device -- it replays presses, which is what a keyboard does. It
         # defers to the device scan only when a test points it at a fixture explicitly, which is
         # how §4d's no-input case is driven with no SDL in the picture.
-        return typing_keyboard_present() if os.environ.get("QFORGE_UI_INPUT_DEVICES") else True
+        return typing_keyboard_present() if os.environ.get("RETROFORGE_UI_INPUT_DEVICES") else True
 
     def close(self):
         pass
@@ -296,7 +296,7 @@ class PadInput:
         Needed because InputPlumber's discovery is ASYNCHRONOUS: its target can appear after this
         UI has already enumerated, in which case a source was opened while it was the only pad
         there. Ordering the units cannot express that -- inputplumber.service is already
-        Before=qforge-installer.service, and it did not help.
+        Before=retroforge-installer.service, and it did not help.
 
         Only fires while a non-source pad is held, so a board where InputPlumber never comes up
         keeps whatever it has rather than being left with nothing.

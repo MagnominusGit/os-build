@@ -3,7 +3,7 @@
 # rootfs/customize-base.sh PKGS. Built from Valve's SteamOS scx tree, not an upstream release:
 # see the PKGBUILD header for why and how it is fetched and verified.
 #
-# To re-gate after any scx bump: `qforge-scheduler lavd` plus a real gameplay leg on a title
+# To re-gate after any scx bump: `retroforge-scheduler lavd` plus a real gameplay leg on a title
 # that runs BELOW the frame cap, then `journalctl -k -g sched_ext`. PASS is the absence of
 # `runnable_at=-`, `RCU CPU stall detected`, `runnable task stall` and `disabled (runtime error)`
 # (every disable should be a deliberate `unregistered from user space`). The `Writing directly to
@@ -30,11 +30,11 @@
 #
 # The default stays "none" as a deliberate policy choice, not because of the refuted report: lavd is
 # a non-default in-kernel scheduler swap, so it is opted into rather than imposed. A device opts in
-# with `qforge-scheduler lavd`, via the org.qforge.Power1.CpuScheduler property, or per-game and
-# globally from qforge-control. Note a device that booted while lavd WAS the default keeps it — an
+# with `retroforge-scheduler lavd`, via the org.retroforge.Power1.CpuScheduler property, or per-game and
+# globally from retroforge-control. Note a device that booted while lavd WAS the default keeps it — an
 # explicit saved choice outranks the default in both directions.
 #
-# scx.service itself is never `enable`d: qforge-powerd starts it when the selected scheduler
+# scx.service itself is never `enable`d: retroforge-powerd starts it when the selected scheduler
 # says to (DEFAULT_CPU_SCHEDULER is the fallback when nothing is saved) and stops it on "none".
 # Do not add a preset or a .wants symlink for it — powerd's persisted choice is the only thing
 # that decides whether it runs, and an enabled unit would start lavd regardless of that choice.
@@ -75,7 +75,7 @@
 #
 # See also the [[scx-sched-bringup]] memory note.
 #
-# scx-scheds — built FROM SOURCE via a qforge-owned PKGBUILD (packages/scx-scheds/PKGBUILD),
+# scx-scheds — built FROM SOURCE via a retroforge-owned PKGBUILD (packages/scx-scheds/PKGBUILD),
 # NOT Valve's own recipe: SteamOS's scx-scheds PKGBUILD (in the same holo-main source tarball)
 # clones gitlab.steamos.cloud over SSH, which an anonymous builder cannot do, and builds only
 # scx_lavd. This is the "local PKGBUILD" form, like packages/mesa and packages/gtk2; makepkg

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge R2 preflight — prove the card bucket works, in seconds, with a throwaway object.
+# retroforge R2 preflight — prove the card bucket works, in seconds, with a throwaway object.
 #
 #   ota/r2-preflight.sh
 #
@@ -31,7 +31,7 @@ RCLONE="$(rclone_bin)"
 pass "pinned rclone $(pin_field "$RCLONE_PIN" version) fetched and verified"
 
 key="_preflight/$(date -u +%Y%m%dT%H%M%SZ)-$$.txt"
-body="qforge r2 preflight $(date -u +%FT%TZ)"
+body="retroforge r2 preflight $(date -u +%FT%TZ)"
 tmp="$(mktemp)"; printf '%s\n' "$body" > "$tmp"
 trap 'rm -f "$tmp"; "$RCLONE" purge "r2:$R2_BUCKET/_preflight" >/dev/null 2>&1 || true' EXIT
 

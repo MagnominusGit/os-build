@@ -1,5 +1,5 @@
-# qforge rmtfs — the Qualcomm modem userspace the SM6115 (MANGMI Air X) needs for Wi-Fi, built
-# FROM SOURCE via a qforge-owned PKGBUILD. None of it is in the holo snapshot (only libqrtr-glib
+# retroforge rmtfs — the Qualcomm modem userspace the SM6115 (MANGMI Air X) needs for Wi-Fi, built
+# FROM SOURCE via a retroforge-owned PKGBUILD. None of it is in the holo snapshot (only libqrtr-glib
 # is, which is a different library), and Arch carries these only on the AUR.
 #
 # WHY ONE PACKAGE AND NOT FOUR. packages/build-overlay.sh builds every source.pin in one container
@@ -19,7 +19,7 @@
 # name service is in the kernel (QRTR), so qrtr-ns is not built; pd-mapper is in the kernel too
 # (QCOM_PD_MAPPER=y, kernel/kernel.config).
 #
-# rootfs/overlay/usr/lib/systemd/system/{rmtfs,tqftpserv}.service.d/10-qforge-sm6115.conf gates
+# rootfs/overlay/usr/lib/systemd/system/{rmtfs,tqftpserv}.service.d/10-retroforge-sm6115.conf gates
 # both units on the SM6115 devicetree compatible, so SM8250 boards (which also expose a
 # qcom_rmtfs_mem device) do not start a modem service they have no use for.
 #

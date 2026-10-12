@@ -1,4 +1,4 @@
-# mangohud — built FROM SOURCE via a qforge-owned PKGBUILD (packages/mangohud/PKGBUILD), NOT
+# mangohud — built FROM SOURCE via a retroforge-owned PKGBUILD (packages/mangohud/PKGBUILD), NOT
 # fetched from the holo monorepo: the curated holo aarch64 repos ship NO mangohud/mangoapp at all
 # (verified against the pinned base's synced core/extra dbs — gamescope/mesa/openal resolve, `mango*`
 # does not). So there is nothing to `pacman -S`; we build it ourselves from a checked-in recipe. See

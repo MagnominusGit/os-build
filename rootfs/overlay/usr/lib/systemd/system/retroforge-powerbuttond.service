@@ -1,0 +1,13 @@
+[Unit]
+Description=retroforge power-key dispatcher
+# Reads the power-key evdev (present from boot) and runs the configured short/long-press action
+# (/etc/retroforge/rest.conf): by default a logind Suspend(), intercepted into retroforge-suspend, and a
+# power-off. It does not require the session to be up.
+
+[Service]
+ExecStart=/usr/bin/retroforge-powerbuttond
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

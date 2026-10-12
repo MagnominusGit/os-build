@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Offline test for /usr/lib/qforge/install-ogui-plugin — how the session puts the image's QForge
+# Offline test for /usr/lib/retroforge/install-ogui-plugin — how the session puts the image's RetroForge
 # plugin into OpenGamepadUI's plugin folder.
 #
 #   tests/test-plugin-install.sh
@@ -9,15 +9,15 @@
 # there. The rules, each of which goes wrong silently:
 #   - install when missing, or when the installed copy is OLDER than the image's (an OS update
 #     brings a newer plugin);
-#   - never replace a copy that is the same or NEWER (a later version from the QForge plugin store
+#   - never replace a copy that is the same or NEWER (a later version from the RetroForge plugin store
 #     must survive the next boot -- and the next OS update that still ships the older one);
 #   - an unreadable installed zip counts as missing (it would never load);
-#   - the copy is atomic: OGUI must never find a half-written qforge.zip;
+#   - the copy is atomic: OGUI must never find a half-written retroforge.zip;
 #   - a broken image copy is an error, not an install.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TOOL="$ROOT/rootfs/overlay/usr/lib/qforge/install-ogui-plugin"
+TOOL="$ROOT/rootfs/overlay/usr/lib/retroforge/install-ogui-plugin"
 [ -f "$TOOL" ] || { echo "no install-ogui-plugin: $TOOL" >&2; exit 1; }
 
 PASS=0; FAIL=0; CASE=""
@@ -32,18 +32,18 @@ mkzip() {  # mkzip <path> <version>: a plugin zip as build.sh lays it out
 import json, sys, zipfile
 path, version = sys.argv[1:3]
 with zipfile.ZipFile(path, "w") as z:
-    z.writestr("plugins/qforge/plugin.json", json.dumps({"plugin.id": "qforge", "plugin.version": version}))
-    z.writestr("plugins/qforge/plugin.gd", "extends Plugin\n")
+    z.writestr("plugins/retroforge/plugin.json", json.dumps({"plugin.id": "retroforge", "plugin.version": version}))
+    z.writestr("plugins/retroforge/plugin.gd", "extends Plugin\n")
 PY
 }
-version_of() { python3 -c 'import json,sys,zipfile; print(json.loads(zipfile.ZipFile(sys.argv[1]).read("plugins/qforge/plugin.json"))["plugin.version"])' "$1" 2>/dev/null; }
+version_of() { python3 -c 'import json,sys,zipfile; print(json.loads(zipfile.ZipFile(sys.argv[1]).read("plugins/retroforge/plugin.json"))["plugin.version"])' "$1" 2>/dev/null; }
 
-SRC="$T/image/qforge.zip"
+SRC="$T/image/retroforge.zip"
 DST_DIR="$T/home/.local/share/opengamepadui/plugins"
-DST="$DST_DIR/qforge.zip"
+DST="$DST_DIR/retroforge.zip"
 mkdir -p "$T/image"
 run() {
-  OUT="$(QFORGE_PLUGIN_SRC="$SRC" QFORGE_PLUGIN_DIR="$DST_DIR" python3 "$TOOL" 2>"$T/err")"; RC=$?
+  OUT="$(RETROFORGE_PLUGIN_SRC="$SRC" RETROFORGE_PLUGIN_DIR="$DST_DIR" python3 "$TOOL" 2>"$T/err")"; RC=$?
   ERR="$(cat "$T/err")"
 }
 
@@ -53,7 +53,7 @@ mkzip "$SRC" 0.2.0
 run
 [ "$RC" = 0 ] && [ "$(version_of "$DST")" = 0.2.0 ] && ok "installs the image's copy when none is there (exit 0)" || bad "rc=$RC installed=$(version_of "$DST") err=$ERR"
 cmp -s "$SRC" "$DST" && ok "the installed zip is byte-identical to the image's" || bad "the copy differs"
-[ "$(ls -A "$DST_DIR")" = qforge.zip ] && ok "no temporary file left beside it" || bad "left: $(ls -A "$DST_DIR")"
+[ "$(ls -A "$DST_DIR")" = retroforge.zip ] && ok "no temporary file left beside it" || bad "left: $(ls -A "$DST_DIR")"
 [ "$(stat -c %a "$DST")" = 644 ] && ok "mode 644" || bad "mode $(stat -c %a "$DST")"
 
 CASE="same version"

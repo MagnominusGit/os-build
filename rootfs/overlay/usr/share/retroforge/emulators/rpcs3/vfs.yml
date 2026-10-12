@@ -1,0 +1,9 @@
+# RetroForge first-run virtual file system for RPCS3 (~/.config/rpcs3/vfs.yml), merged over its defaults.
+# - /dev_hdd0/: the PS3's internal drive, where game saves live (home/00000001/savedata/), in
+#   ~/saves/ps3/dev_hdd0 so they are on the network share. It also holds installed updates, DLC,
+#   licences and trophies, which belong with the saves.
+# - /games/: the folder RPCS3's game list and Big Picture Mode scan: the RetroForge ROM folder.
+# Save states cannot be moved (~/.config/rpcs3/savestates, hard-coded); the installed firmware stays
+# in ~/.config/rpcs3/dev_flash.
+/dev_hdd0/: /home/player/saves/ps3/dev_hdd0/
+/games/: /home/player/roms/ps3/

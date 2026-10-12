@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Convert an RGBA PNG into the NDS1 raw container that qforge-splash loads.
+"""Convert an RGBA PNG into the NDS1 raw container that retroforge-splash loads.
 
     NDS1 | u32 width LE | u32 height LE | width*height*4 bytes BGRA
 
 The splash binary is statically linked with no libraries at all (see the header of
-apps/qforge-splash/src/qforge-splash.c), so it has no PNG decoder and no zlib. Flattening the
+apps/retroforge-splash/src/retroforge-splash.c), so it has no PNG decoder and no zlib. Flattening the
 logo to raw pixels here — on the x86_64 build host, at build time — is what keeps it that way.
 The cost is a few hundred KB in the initramfs, which is the right trade against a dynamic
 dependency that fails to load on the device without saying so.

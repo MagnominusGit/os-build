@@ -1,4 +1,4 @@
-# The hardware map: `/run/qforge/hw`
+# The hardware map: `/run/retroforge/hw`
 
 Every board names its battery, charger, backlight, thermal zones, fan and LEDs differently, because
 the kernel names them after the devicetree. The MANGMI Air X keeps its battery at
@@ -7,7 +7,7 @@ and knows only `charge_full_design`; its CPU temperature is spread over per-core
 zones; its stick rings are eighteen `rgb:l1..l9` / `rgb:r1..r9` multicolour LEDs. Anything that
 wants to show or drive that hardware would otherwise carry a list of per-board sysfs names.
 
-`/usr/lib/qforge/hw-map` resolves all of it, once per boot (and again when such a device appears
+`/usr/lib/retroforge/hw-map` resolves all of it, once per boot (and again when such a device appears
 late), into one tree of links into sysfs:
 
 | path | points at | read |
@@ -22,17 +22,17 @@ late), into one tree of links into sysfs:
 | `cpu` | `/sys/devices/system/cpu` | `cpufreq/policy*/scaling_cur_freq`, ... |
 | `soc` | `/sys/devices/soc0` (Qualcomm socinfo) | `machine` (`SM8550`), `family`, `soc_id`, `revision`, `serial_number` |
 | `leds/<group>/01..` | `/sys/class/leds/<led>` | `brightness`, `max_brightness`, `multi_intensity` |
-| `hw.env` | a sourceable `KEY=value` summary of what was resolved | `QFORGE_HW_*`, `QFORGE_DEVICE_*` |
+| `hw.env` | a sourceable `KEY=value` summary of what was resolved | `RETROFORGE_HW_*`, `RETROFORGE_DEVICE_*` |
 
 A consumer tests for a link and reads through it; a missing link means the board has no such thing.
 The links point into sysfs, so values are live and nothing copies them.
 
 ## Per-board input
 
-The board profile (`/usr/lib/qforge/devices/<id>.conf`, through `device-env`) may pin any node with
-`QFORGE_HW_BATTERY`, `QFORGE_HW_CHARGER`, `QFORGE_HW_BACKLIGHT`, `QFORGE_HW_THERMAL_{CPU,GPU,BATTERY,SKIN}`
-(thermal zone *type* names), `QFORGE_HW_FAN` (hwmon name), `QFORGE_HW_GPU_DEVFREQ` and
-`QFORGE_HW_LED_GROUPS` (`"group=glob[,glob] ..."` over `/sys/class/leds`). Everything left empty is
+The board profile (`/usr/lib/retroforge/devices/<id>.conf`, through `device-env`) may pin any node with
+`RETROFORGE_HW_BATTERY`, `RETROFORGE_HW_CHARGER`, `RETROFORGE_HW_BACKLIGHT`, `RETROFORGE_HW_THERMAL_{CPU,GPU,BATTERY,SKIN}`
+(thermal zone *type* names), `RETROFORGE_HW_FAN` (hwmon name), `RETROFORGE_HW_GPU_DEVFREQ` and
+`RETROFORGE_HW_LED_GROUPS` (`"group=glob[,glob] ..."` over `/sys/class/leds`). Everything left empty is
 detected: the first battery that reports a `capacity`, the first non-battery supply with `online`
 (preferring one that also reports a `status`, i.e. the charger IC over a bare Type-C source), the
 first backlight, zone types matching `^(cpu|soc)`, `^gpu`, `^batt`, `skin|xo-therm|quiet|case`, the
@@ -40,15 +40,15 @@ first hwmon with `fan1_input` or `pwm1`, the `*gpu*` devfreq, and `power=power-l
 exists. `defaults.conf` documents the fields.
 
 Every known board pins every node it has; detection is what an unknown board gets. A pinned name
-the running board does not have is logged (`qforge hw-map: QFORGE_HW_X=... is not on this board --
+the running board does not have is logged (`retroforge hw-map: RETROFORGE_HW_X=... is not on this board --
 detecting instead`) and detected, so a stale pin costs a journal line rather than the link. An LED
 group that matches nothing is left out and logged the same way.
 
 ## The boards
 
-Read off QForge's own DTS (`kernel/dts/qcom/`) and the drivers' naming rules, and cross-checked
+Read off RetroForge's own DTS (`kernel/dts/qcom/`) and the drivers' naming rules, and cross-checked
 with what ROCKNIX `next` reads on the same boards (`packages/hardware/quirks/`). **Only the MANGMI
-Air X and Air Y have been seen running QForge** (detection resolved the same nodes there). Every
+Air X and Air Y have been seen running RetroForge** (detection resolved the same nodes there). Every
 other board's pins are checked against its compiled devicetree (below), and on a device the
 journal line above is how a wrong name will show.
 
@@ -61,8 +61,8 @@ journal line above is how a wrong name will show.
 
 - **Battery, charger.** SM8550/SM8650 report through pmic_glink's battmgr; its USB supply has
   `online` but no `status`. (ROCKNIX's scripts read `power_supply/battery` there only because a
-  ROCKNIX kernel patch renames the battmgr battery; QForge does not carry it.) SM8250 uses
-  QForge's pm8150b fuel gauge (`battery`) and smb5 charger, which names itself `<pmic>-charger`
+  ROCKNIX kernel patch renames the battmgr battery; RetroForge does not carry it.) SM8250 uses
+  RetroForge's pm8150b fuel gauge (`battery`) and smb5 charger, which names itself `<pmic>-charger`
   at probe — not the `pmi8998_charger` in its template descriptor. SM6115 (the Air X and Air Y)
   has a cw221x gauge, `battery`, beside the bq256xx charger's companion `bq256xx-battery`, which
   reports no capacity; the gauge also registers the only battery thermistor zone in the fleet.
@@ -118,33 +118,33 @@ Known gaps, from the source:
 - **Odin 2:** both SN3112 PWM chips under the stick lights are `status = "disabled"` in the DTS,
   so its two ring groups resolve empty (and are logged) until they are enabled.
 - **AYANEO DMG, EVO, S2 (and the KONKR, which ROCKNIX treats as an S2):** the stick RGB rings
-  belong to the serial MCU; QForge's `ayaneo-serial-mcu` driver exposes no LED device for them.
-- **AYANEO Pocket DS:** the bottom screen's SY7758 node has no `enable-gpios`, which QForge's
+  belong to the serial MCU; RetroForge's `ayaneo-serial-mcu` driver exposes no LED device for them.
+- **AYANEO Pocket DS:** the bottom screen's SY7758 node has no `enable-gpios`, which RetroForge's
   SY7758 driver requires, so `sy7758-backlight` should fail to probe there; the bottom panel then
   never attaches to dsi1, which may hold up the whole display. Unconfirmed on a device.
 
 ## Consumers
 
-- The OpenGamepadUI plugin's **Quick bar > Hardware** card (`apps/ogui-qforge-plugin/plugin/hardware_card.gd`
+- The OpenGamepadUI plugin's **Quick bar > Hardware** card (`apps/ogui-retroforge-plugin/plugin/hardware_card.gd`
   over `hardware_info.gd`) shows battery, charger, temperatures, fan, clocks, backlight and LED
   groups from this tree, hiding whatever the board lacks. No board-specific code.
-- **qforge-powerd** drives the `fan` link's hwmon (a two-speed gpio-fan is switched on/off at
+- **retroforge-powerd** drives the `fan` link's hwmon (a two-speed gpio-fan is switched on/off at
   the curve's first step) and every LED in `leds/<group>/` (colour on multicolor LEDs; a
   `red:`/`green:`/`blue:` channel LED at its component of the colour; brightness on all; off for
   suspend). It falls back to scanning sysfs only when the map is absent or names
-  no LEDs. Its D-Bus interface (`org.qforge.Power1`) is how a UI changes them: `FanCurve`,
+  no LEDs. Its D-Bus interface (`org.retroforge.Power1`) is how a UI changes them: `FanCurve`,
   `LedCount`, `LedEnabled`, `LedColor` (R, G, B), `LedBrightness` (0-255), kept in
-  `/etc/qforge/power.conf.d/50-{fan-curves,leds}.conf`. `qforge-powerd.service` starts after
-  `qforge-hw.service`.
+  `/etc/retroforge/power.conf.d/50-{fan-curves,leds}.conf`. `retroforge-powerd.service` starts after
+  `retroforge-hw.service`.
 - The plugin's Hardware card also carries the LED controls (Lights, Brightness, colour), through
   powerd's D-Bus interface only (`power_client.gd`), hidden when `LedCount` is 0.
-- Scripts: `. /run/qforge/hw/hw.env` or read through the links. `soc/serial_number` is the
+- Scripts: `. /run/retroforge/hw/hw.env` or read through the links. `soc/serial_number` is the
   per-unit serial ROCKNIX reads on these SoCs.
 
 ## Layering
 
 Board differences live in data: the profile names nodes, hw-map resolves them, the daemons
-(PowerStation, InputPlumber, UPower, and qforge-powerd for fan and LEDs) drive them, and the UI
+(PowerStation, InputPlumber, UPower, and retroforge-powerd for fan and LEDs) drive them, and the UI
 talks to the daemons over D-Bus. A new board is a profile (and DTS), not code.
 
 ## Checking the pins without a board
@@ -162,7 +162,7 @@ the kernel does, and checks every pin against it:
   Mini's fixed names (an SY7758 without `enable-gpios` does not probe), and `<dsi device>.<reg>`
   for a panel that dims over DCS. The checker's `PANELS` table says which panels do, and the test
   holds it against each panel driver in `kernel/patches`. It also checks that the pinned backlight
-  dims the profile's `QFORGE_PRIMARY_CONNECTOR`, using msm's connector order: DSI hosts in address
+  dims the profile's `RETROFORGE_PRIMARY_CONNECTOR`, using msm's connector order: DSI hosts in address
   order, a bridge (the Odin 2's lt8912b) taking its own connector type, and a bonded pair counting
   once.
 - **Supplies, fan, GPU:** the supplies the enabled drivers register, `pwmfan`/`gpio_fan`, and the
@@ -173,7 +173,7 @@ board gets.
 
 ```sh
 make kernel && make check-hw-paths          # the DTBs the build staged in out/dtbs
-make check-hw-paths LINUX_SRC=~/linux       # or compile kernel/dts/qcom here, with QForge's DT patches
+make check-hw-paths LINUX_SRC=~/linux       # or compile kernel/dts/qcom here, with RetroForge's DT patches
 ```
 
 Known gaps live in `tools/check-hw-paths.xfail` (the Odin 2's stick lights, whose SN3112 chips the
@@ -186,10 +186,10 @@ left one, which zone runs hottest, or whether a GPIO really is an enable.
 
 ## Tests
 
-`tests/test-hw-map.sh` drives the real script against a fabricated sysfs (`QFORGE_HW_SYS`,
-`QFORGE_HW_RUN`, `QFORGE_HW_DEVICE_ENV`), including stale pins, single-colour LED globs and the
+`tests/test-hw-map.sh` drives the real script against a fabricated sysfs (`RETROFORGE_HW_SYS`,
+`RETROFORGE_HW_RUN`, `RETROFORGE_HW_DEVICE_ENV`), including stale pins, single-colour LED globs and the
 `soc` link, and checks every board profile: each pins battery, charger, backlight, CPU/GPU zones,
 fan and devfreq; zone types keep their `-thermal` suffix and fit the kernel's 19 characters; LED
 groups parse; and the pins survive `device-env`'s quoting. `tests/test-hw-dtb.sh` covers the checker's
 naming rules on fabricated devicetrees (with `dtc`) and its `PANELS` table against the panel
-drivers, and runs the whole fleet when `out/dtbs` or `QFORGE_LINUX_SRC` is there.
+drivers, and runs the whole fleet when `out/dtbs` or `RETROFORGE_LINUX_SRC` is there.

@@ -1,4 +1,4 @@
-# qforge master build orchestrator.
+# retroforge master build orchestrator.
 #
 # Drives the whole Phase-1 pipeline — toolchain image, kernel, firmware, base
 # rootfs, read-only root, boot artifact, SD card / RAUC bundle — as one incremental
@@ -15,7 +15,7 @@
 #     argument: the kernel is built with the union of all config fragments, patches and
 #     device trees (kernel/), and the boot artifact bundles every board DTB (the ABL DTB
 #     picker selects at boot).
-#   * Container stages run in the qforge-build image with the repo bind-mounted at
+#   * Container stages run in the retroforge-build image with the repo bind-mounted at
 #     /src; host stages either need the network or drive docker themselves (base
 #     customization registers qemu binfmt, so it cannot run nested in the container).
 #   * Stamp files live under the already-gitignored out/ work/ firmware/ trees.
@@ -23,31 +23,31 @@
 # Memory: builds cross-compile INSIDE docker, never on the host. Don't reorder the
 # kernel patches. work/base is root-owned (clean-base uses docker to remove it).
 
-BUILD_IMG ?= qforge-build
+BUILD_IMG ?= retroforge-build
 # The RAUC signing self-test's image: build/Dockerfile's first stage, holding rauc + openssl +
 # mksquashfs and nothing else. Separate because that suite runs on every push and pull request and
 # has no use for the cross-toolchain the full image spends its build time on. Same Dockerfile, so
 # the two cannot disagree about the rauc pin — see the header there.
-SIGN_IMG  ?= qforge-sign
+SIGN_IMG  ?= retroforge-sign
 
 # Optional knobs forwarded to the underlying scripts:
 #   BASE_CONFIG  repo-relative path to a full verbatim kernel .config (e.g. a ROCKNIX
 #                config) — skips the defconfig+fragment merge in kernel/build.sh.
-#   QFORGE_VERSION  the release this build calls itself, stamped into /etc/qforge-release AND
+#   RETROFORGE_VERSION  the release this build calls itself, stamped into /etc/retroforge-release AND
 #                carried by the RAUC bundle manifest. Empty (a local build) renders as `dev`, and
 #                the bundle then identifies itself by its build timestamp instead. CI sets it from
 #                the release tag. There is no separate bundle-version knob; see below.
 #   ESP          mounted EFI System Partition, for `make deploy`.
-#   QFORGE_DEV=1  build a dev image. `set -a; . ./dev.env; set +a` sets this and the rest;
+#   RETROFORGE_DEV=1  build a dev image. `set -a; . ./dev.env; set +a` sets this and the rest;
 #                dev.env is TRACKED and secret-free, and sources dev.env.local (gitignored) for
-#                Wi-Fi creds. A RELEASE image (no QFORGE_DEV) builds locally too — it just
+#                Wi-Fi creds. A RELEASE image (no RETROFORGE_DEV) builds locally too — it just
 #                cannot be published, since the R2 and signing credentials only exist in CI.
-#   QFORGE_WIFI_SSID/PSK  OPTIONAL dev-only Wi-Fi profile, injected from the environment so it
+#   RETROFORGE_WIFI_SSID/PSK  OPTIONAL dev-only Wi-Fi profile, injected from the environment so it
 #                never touches the repo. Absent => a card with NO network and no SSH, i.e. the
 #                shipping first-boot condition (the only honest way to test OOBE locally).
-#   QFORGE_WIFI  intent knob for the above: 1 = require creds (fail loudly rather than hand you
+#   RETROFORGE_WIFI  intent knob for the above: 1 = require creds (fail loudly rather than hand you
 #                an unreachable card), 0 = no profile even when creds are set. See dev.env.
-#   QFORGE_SSH_PUBKEY  root's authorized_keys on a dev card. dev.env generates a throwaway key
+#   RETROFORGE_SSH_PUBKEY  root's authorized_keys on a dev card. dev.env generates a throwaway key
 #                under work/dev-ssh/ rather than using your personal one.
 BASE_CONFIG ?=
 
@@ -84,9 +84,9 @@ $(shell mkdir -p work)
 # rootless podman). Exported so the host scripts (build/lib-container.sh) make the same choice.
 # Under podman every run disables SELinux labelling: on an enforcing host a container cannot read
 # an unlabelled bind mount, and relabelling (:z) would rewrite the labels of the checkout.
-QFORGE_CONTAINER ?= $(if $(shell command -v docker 2>/dev/null),docker,podman)
-export QFORGE_CONTAINER
-CTR_RUN  := $(QFORGE_CONTAINER) run$(if $(filter podman,$(QFORGE_CONTAINER)), --security-opt label=disable)
+RETROFORGE_CONTAINER ?= $(if $(shell command -v docker 2>/dev/null),docker,podman)
+export RETROFORGE_CONTAINER
+CTR_RUN  := $(RETROFORGE_CONTAINER) run$(if $(filter podman,$(RETROFORGE_CONTAINER)), --security-opt label=disable)
 BUSYBOX  := docker.io/library/busybox
 # Container: repo bind-mounted at /src. INBUILD is the plain run; DOCKER lets a
 # recipe insert `-e VAR` flags (which must precede the image name) before the image.
@@ -100,8 +100,8 @@ INBUILD := $(DOCKER) $(BUILD_IMG)
 #
 # Set PKIDIR to mount it read-only at /pki for the two targets that need it:
 #
-#   PKIDIR=~/qforge-pki make bundle          # a real signature
-#   PKIDIR=~/qforge-pki make test-signing    # incl. the keyring-vs-signing-key check
+#   PKIDIR=~/retroforge-pki make bundle          # a real signature
+#   PKIDIR=~/retroforge-pki make test-signing    # incl. the keyring-vs-signing-key check
 #
 # Unset, both keep their previous behaviour exactly: `bundle` mints an ephemeral dev cert and
 # `test-signing` announces the keyring check as skipped. Resolved with $(realpath ...) so a typo --
@@ -126,51 +126,51 @@ endif
 GENBUNDLE = $(DOCKER) $(PKI_MOUNT) -e RAUC_CERT="$(RAUC_CERT)" -e RAUC_KEY="$(RAUC_KEY)" $(BUILD_IMG) \
 	  $(OTA_DIR)/genbundle.sh
 
-# Dev-only credential env, forwarded into the rootfs assembler (no-op unless QFORGE_DEV=1).
-DEV_ENV := -e QFORGE_DEV -e QFORGE_WIFI -e QFORGE_WIFI_SSID -e QFORGE_WIFI_PSK -e QFORGE_SSH_PUBKEY
+# Dev-only credential env, forwarded into the rootfs assembler (no-op unless RETROFORGE_DEV=1).
+DEV_ENV := -e RETROFORGE_DEV -e RETROFORGE_WIFI -e RETROFORGE_WIFI_SSID -e RETROFORGE_WIFI_PSK -e RETROFORGE_SSH_PUBKEY
 
-# Per-build identity, stamped into /etc/qforge-release by rootfs/assemble-rootfs.sh so a flashed
-# device can name the release it came from. QFORGE_VERSION is set by CI from the release tag and
+# Per-build identity, stamped into /etc/retroforge-release by rootfs/assemble-rootfs.sh so a flashed
+# device can name the release it came from. RETROFORGE_VERSION is set by CI from the release tag and
 # is empty for a local build, which assemble-rootfs.sh renders as `dev`. The git sha is resolved on
 # the HOST: /src is bind-mounted into the container, but git itself is not in the build image.
 #
 # THIS IS THE ONLY VERSION KNOB, and as of 2026-08-03 it is also the bundle's. It used to be one of
 # two: `VERSION` named the RAUC bundle and defaulted to today's date inside genbundle.sh, entirely
 # independently of what the image called itself. The OTA client compares the manifest's identity
-# against the device's /etc/qforge-release to decide whether an update is available, so two
+# against the device's /etc/retroforge-release to decide whether an update is available, so two
 # unrelated strings meant that comparison was meaningless — a device could be offered its own build
 # forever, or never be offered a real one. ota/genbundle.sh now reads the identity back OUT of
 # the assembled image (out/images/rootfs.release) instead of being told, so the bundle cannot name
 # a version the bytes inside it do not carry, and `VERSION` is GONE rather than kept as a
 # cross-check: with $(VERSION_STAMP) below, a stale image cannot survive a version change, so a
 # second knob could only ever be redundant or wrong.
-QFORGE_VERSION ?=
-QFORGE_GIT     := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
-ID_ENV := -e QFORGE_VERSION -e QFORGE_GIT=$(QFORGE_GIT)
+RETROFORGE_VERSION ?=
+RETROFORGE_GIT     := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+ID_ENV := -e RETROFORGE_VERSION -e RETROFORGE_GIT=$(RETROFORGE_GIT)
 
-# QFORGE_VERSION changes the rootfs CONTENT (the /etc/qforge-release it stamps), and make cannot
-# see environment variables — the same trap QFORGE_DEV needed $(MODE_STAMP) for, with the same
-# silent symptom: an existing rootfs.img looks up-to-date to a `QFORGE_VERSION=1.4.0 make bundle`,
+# RETROFORGE_VERSION changes the rootfs CONTENT (the /etc/retroforge-release it stamps), and make cannot
+# see environment variables — the same trap RETROFORGE_DEV needed $(MODE_STAMP) for, with the same
+# silent symptom: an existing rootfs.img looks up-to-date to a `RETROFORGE_VERSION=1.4.0 make bundle`,
 # the assembler is skipped, and you ship a bundle whose image still identifies itself as the
 # previous build. genbundle.sh would then name the bundle after those older bytes, which is honest
 # but not what was asked for. Encode the version in a stamp the rootfs depends on, so changing it
 # re-assembles. A re-assembly, not a base or kernel rebuild — the correct price for changing what
 # the image calls itself.
-VERSION_STAMP := work/.rootfs-version-$(if $(QFORGE_VERSION),$(QFORGE_VERSION),dev)
+VERSION_STAMP := work/.rootfs-version-$(if $(RETROFORGE_VERSION),$(RETROFORGE_VERSION),dev)
 
-# QFORGE_DEV changes the rootfs CONTENT (Wi-Fi profile, SSH host keys + authorized_keys) but is
+# RETROFORGE_DEV changes the rootfs CONTENT (Wi-Fi profile, SSH host keys + authorized_keys) but is
 # an environment variable, which make cannot see. Without this, an existing release rootfs.img looks
-# up-to-date to a `QFORGE_DEV=1 make sdcard`, the assembler is skipped, and you flash a RELEASE
+# up-to-date to a `RETROFORGE_DEV=1 make sdcard`, the assembler is skipped, and you flash a RELEASE
 # root wrapped in a dev-built card — no Wi-Fi, no SSH, and no error anywhere. (Cost me a boot cycle
 # on 2026-07-09.) Encode the mode in a stamp file that rootfs depends on, so flipping it rebuilds.
 # Lives under work/ (host-owned); out/images is written by the container as root.
 #
-# THE NAME: this was QFORGE_TEST until 2026-07-30. It was chosen while debugging the very first
+# THE NAME: this was RETROFORGE_TEST until 2026-07-30. It was chosen while debugging the very first
 # Steam OOBE, where "test" meant a throwaway card, and it long outlived that — this is the normal
 # development cycle now, and the release path is the one that is special. Renamed with the artifact
 # pins, since both turn on the same distinction: who built these bytes.
 # The Wi-Fi profile is a THIRD state, not a sub-detail of dev, and it has to reach the stamp or it
-# fails exactly the way QFORGE_DEV did before this stamp existed. "dev with creds" and "dev
+# fails exactly the way RETROFORGE_DEV did before this stamp existed. "dev with creds" and "dev
 # without creds" produce different rootfs CONTENT (an /etc/NetworkManager profile that auto-joins,
 # or nothing), so sharing work/.rootfs-mode-dev between them means dropping the creds leaves the
 # image looking up-to-date: the assembler is skipped and you flash the PREVIOUS card, still
@@ -179,13 +179,13 @@ VERSION_STAMP := work/.rootfs-version-$(if $(QFORGE_VERSION),$(QFORGE_VERSION),d
 # DEV_WIFI mirrors the assembler's own decision (rootfs/assemble-rootfs.sh, `dev_wifi`) and must
 # keep mirroring it: it is the EFFECTIVE outcome, not the knob. That distinction is the point —
 # forgetting to source dev.env.local is indistinguishable from asking for no Wi-Fi as far as the
-# image is concerned, so both must land on the same stamp. (QFORGE_WIFI=1 with no creds is a hard
+# image is concerned, so both must land on the same stamp. (RETROFORGE_WIFI=1 with no creds is a hard
 # error in the assembler, so make needs no case for it.)
-DEV_WIFI     := $(if $(filter 0,$(QFORGE_WIFI)),,$(if $(QFORGE_WIFI_SSID),$(if $(QFORGE_WIFI_PSK),1,),))
-ROOTFS_MODE  := $(if $(filter 1,$(QFORGE_DEV)),dev$(if $(DEV_WIFI),,-nowifi),release)
+DEV_WIFI     := $(if $(filter 0,$(RETROFORGE_WIFI)),,$(if $(RETROFORGE_WIFI_SSID),$(if $(RETROFORGE_WIFI_PSK),1,),))
+ROOTFS_MODE  := $(if $(filter 1,$(RETROFORGE_DEV)),dev$(if $(DEV_WIFI),,-nowifi),release)
 MODE_STAMP   := work/.rootfs-mode-$(ROOTFS_MODE)
 
-# The BASE tree is mode-dependent for the same reason and needs the same treatment: QFORGE_DEV=1
+# The BASE tree is mode-dependent for the same reason and needs the same treatment: RETROFORGE_DEV=1
 # adds DEV_PKGS (evtest, usbutils) to the bootstrap (rootfs/customize-base.sh:176), so a dev base
 # and a release base are DIFFERENT trees. Every $(BASE_STAMP) prerequisite is a file and none of them
 # encodes the mode, so without this a base built in one mode looks up-to-date to the other and make
@@ -205,12 +205,12 @@ MODE_STAMP   := work/.rootfs-mode-$(ROOTFS_MODE)
 # rebuilds because the mode is in its reuse key too. A flip costs a full base rebuild — the correct
 # price, and the one `make relock` already pays deliberately.
 # Deliberately NOT $(ROOTFS_MODE): that one carries the -nowifi dimension, and the base does not
-# have one. DEV_PKGS keys off QFORGE_DEV alone, and the Wi-Fi profile is written by the ASSEMBLER,
+# have one. DEV_PKGS keys off RETROFORGE_DEV alone, and the Wi-Fi profile is written by the ASSEMBLER,
 # not by the bootstrap — so a dev base is byte-identical whether or not creds were present. Reusing
 # ROOTFS_MODE here would rename this marker on a Wi-Fi flip and charge a full base rebuild (the
 # expensive half of the build) for a change that cannot affect work/base. Toggling Wi-Fi costs a
 # rootfs re-assembly and nothing more.
-BASE_MODE       := $(if $(filter 1,$(QFORGE_DEV)),dev,release)
+BASE_MODE       := $(if $(filter 1,$(RETROFORGE_DEV)),dev,release)
 BASE_MODE_STAMP := work/.base-mode-$(BASE_MODE)
 
 # --- artifacts (real file targets drive incremental rebuilds) -----------------
@@ -232,7 +232,7 @@ FW_EXTRA     := firmware/extra-fw/.fetched.stamp
 # bump propagate: the pins are listed as prerequisites so editing one re-runs customize-base.
 PREBUILT_PINS := $(wildcard packages/*/prebuilt.pin)
 # From-source overlay packages (packages/*/source.pin + patches) — rebuilt holo packages with
-# qforge patches, landed in the local pacman repo work/repo/<arch>/ that customize-base.sh
+# retroforge patches, landed in the local pacman repo work/repo/<arch>/ that customize-base.sh
 # prepends ahead of the holo repos. The repo db is the make target; the union of pins+patches+
 # PKGBUILDs is its prerequisite so ANY overlay input change re-invokes build-overlay.sh. The
 # script is INCREMENTAL: it hashes each package's own inputs and rebuilds only the changed
@@ -245,9 +245,9 @@ OVERLAY_PKGBUILDS := $(wildcard packages/*/PKGBUILD)
 # Overlay packages are ARCH-scoped (a rebuilt aarch64 gamescope serves every aarch64 device),
 # so the repo is shared at work/repo/<arch>/.
 OVERLAY_ARCH    ?= aarch64
-OVERLAY_DB      := work/repo/$(OVERLAY_ARCH)/qforge.db.tar.zst
+OVERLAY_DB      := work/repo/$(OVERLAY_ARCH)/retroforge.db.tar.zst
 # Content stamp advanced by build-overlay.sh ONLY when it actually re-indexes (a package really
-# rebuilt). base keys off THIS, not qforge.db's mtime — the script bumps the db even on a no-op
+# rebuilt). base keys off THIS, not retroforge.db's mtime — the script bumps the db even on a no-op
 # run (to stop make re-invoking it), and that spurious bump used to cascade the whole expensive
 # customize-base off a byte-identical repo.
 OVERLAY_STAMP   := work/repo/$(OVERLAY_ARCH)/.overlay.stamp
@@ -257,21 +257,21 @@ ROOTFS       := $(OUT)/images/rootfs.img
 # Sibling image the assembler emits alongside the root (see image/partition-table.txt):
 # the writable state partition, which also carries the /etc overlay upper.
 VARIMG       := $(OUT)/images/var.img
-# Slot B's var, emitted by the same run. Identical but for /var/lib/qforge/slot, which is the
+# Slot B's var, emitted by the same run. Identical but for /var/lib/retroforge/slot, which is the
 # independent witness of which slot actually mounted (the roots are content-identical by design).
 VARIMG_B     := $(OUT)/images/var-b.img
 INITRAMFS    := $(OUT)/initramfs.cpio.gz
-# The boot splash drawer (apps/qforge-splash): one static aarch64 binary with no shared
+# The boot splash drawer (apps/retroforge-splash): one static aarch64 binary with no shared
 # libraries, and the logo flattened to raw pixels beside it. Both go into the initramfs AND the
 # sealed root, because the same program paints the pre-switch_root phase, the session phase and
 # the shutdown screens.
-SPLASH_BIN   := apps/qforge-splash/build/qforge-splash
+SPLASH_BIN   := apps/retroforge-splash/build/retroforge-splash
 SPLASH_ASSET := work/splash/logo.nds1
-SPLASH_SRC   := apps/qforge-splash/Makefile apps/qforge-splash/src/qforge-splash.c \
-                apps/qforge-splash/src/stb_truetype.h
+SPLASH_SRC   := apps/retroforge-splash/Makefile apps/retroforge-splash/src/retroforge-splash.c \
+                apps/retroforge-splash/src/stb_truetype.h
 # The asset is sized from the widest panel in the device registry (image/mksplash.sh reads it and
 # fails the build when it outgrows the render box), so a new board's conf has to re-run it.
-SPLASH_GEOM  := $(wildcard rootfs/overlay/usr/lib/qforge/devices/*.conf)
+SPLASH_GEOM  := $(wildcard rootfs/overlay/usr/lib/retroforge/devices/*.conf)
 # Stage-1 steamcl (boot/steamcl.sh). The rule's target is steamcl.efi, but the run also emits
 # holo-bootconf, steamcl-version and fonts/default.pf2 into the same out/boot.
 STEAMCL      := $(OUT)/boot/steamcl.efi
@@ -280,21 +280,21 @@ STEAMCL      := $(OUT)/boot/steamcl.efi
 GRUB         := $(OUT)/boot/grubaa64.efi
 SDCARD       := $(OUT)/images/sdcard.img
 # The LD_PRELOAD shim that moves a program's SIGTERM handler onto its GLib main loop
-# (apps/qforge-sigdefer; Snes9x's Exit crash). aarch64, built in the container like the splash.
-SIGDEFER_LIB := apps/qforge-sigdefer/build/libqforge-sigdefer.so
-SIGDEFER_SRC := apps/qforge-sigdefer/Makefile apps/qforge-sigdefer/src/qforge-sigdefer.c
-# The LD_PRELOAD library PortMaster's gptokeyb2 runs with (apps/qforge-gptk-interpose; its exclusive
+# (apps/retroforge-sigdefer; Snes9x's Exit crash). aarch64, built in the container like the splash.
+SIGDEFER_LIB := apps/retroforge-sigdefer/build/libretroforge-sigdefer.so
+SIGDEFER_SRC := apps/retroforge-sigdefer/Makefile apps/retroforge-sigdefer/src/retroforge-sigdefer.c
+# The LD_PRELOAD library PortMaster's gptokeyb2 runs with (apps/retroforge-gptk-interpose; its exclusive
 # pad grab under sdl2-compat). aarch64, built in the container like sigdefer.
-GPTK_LIB     := apps/qforge-gptk-interpose/build/libqforge-gptk-interpose.so
-GPTK_SRC     := apps/qforge-gptk-interpose/Makefile apps/qforge-gptk-interpose/src/qforge-gptk-interpose.c
+GPTK_LIB     := apps/retroforge-gptk-interpose/build/libretroforge-gptk-interpose.so
+GPTK_SRC     := apps/retroforge-gptk-interpose/Makefile apps/retroforge-gptk-interpose/src/retroforge-gptk-interpose.c
 # The LD_PRELOAD shim that hides the menu bar of every QMainWindow after the first
-# (apps/qforge-hidemenu; melonDS's second window on dual-screen boards). aarch64, in the container.
-HIDEMENU_LIB := apps/qforge-hidemenu/build/libqforge-hidemenu.so
-HIDEMENU_SRC := apps/qforge-hidemenu/Makefile apps/qforge-hidemenu/src/qforge-hidemenu.c
-# The QForge OpenGamepadUI plugin (apps/ogui-qforge-plugin): a reproducible zip of plugin/, shipped
-# read-only in the root and copied into the player's plugins folder by qforge-session.
-PLUGIN_ZIP   := $(OUT)/plugins/qforge.zip
-PLUGIN_SRC   := apps/ogui-qforge-plugin/build.sh $(wildcard apps/ogui-qforge-plugin/plugin/*)
+# (apps/retroforge-hidemenu; melonDS's second window on dual-screen boards). aarch64, in the container.
+HIDEMENU_LIB := apps/retroforge-hidemenu/build/libretroforge-hidemenu.so
+HIDEMENU_SRC := apps/retroforge-hidemenu/Makefile apps/retroforge-hidemenu/src/retroforge-hidemenu.c
+# The RetroForge OpenGamepadUI plugin (apps/ogui-retroforge-plugin): a reproducible zip of plugin/, shipped
+# read-only in the root and copied into the player's plugins folder by retroforge-session.
+PLUGIN_ZIP   := $(OUT)/plugins/retroforge.zip
+PLUGIN_SRC   := apps/ogui-retroforge-plugin/build.sh $(wildcard apps/ogui-retroforge-plugin/plugin/*)
 
 # Repo sources the rootfs assembler reads directly (itself + the unified rootfs/overlay/ payload tree
 # it copies in wholesale). find recurses, so files added under rootfs/overlay/ are tracked
@@ -343,7 +343,7 @@ KERNEL_SRC := kernel/SOURCE.pin kernel/embed.list kernel/build.sh \
 # moves (which is the only cheap signal that something MIGHT have changed), but it rewrites
 # itself only when the digest actually differs — so its own mtime advances on real edits alone.
 # Same shape as $(OVERLAY_STAMP) below, which keys off sha256sum $(OVERLAY_DB) rather than
-# qforge.db's mtime for exactly this reason. One file rather than that rule's stamp+.sha pair,
+# retroforge.db's mtime for exactly this reason. One file rather than that rule's stamp+.sha pair,
 # because here the digest IS the marker; there the stamp doubles as a build marker.
 #
 # The file list is inside the digest, not just the file contents, so adding or deleting a patch
@@ -355,7 +355,7 @@ KERNEL_SRC_HASH := work/.kernel-src.hash
 # max_size and push the overlay repo + pacman caches out of the 10 GB repo quota — and losing the
 # overlay cache costs a full emulated rebuild, far more than ccache saves on the kernel.
 # The container does not see the host's CI, so the decision is made here and passed in.
-QFORGE_CCACHE ?= $(if $(CI),0,1)
+RETROFORGE_CCACHE ?= $(if $(CI),0,1)
 
 .DEFAULT_GOAL := help
 
@@ -373,18 +373,18 @@ QFORGE_CCACHE ?= $(if $(CI),0,1)
 FORCE:
 
 help: ## Show this help
-	@echo "qforge build — unified image (all SoCs/boards)"
+	@echo "retroforge build — unified image (all SoCs/boards)"
 	@echo
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n",$$1,$$2}'
 	@echo
-	@echo "Knobs: BASE_CONFIG QFORGE_VERSION ESP   dev build: set -a; . ./dev.env; set +a"
+	@echo "Knobs: BASE_CONFIG RETROFORGE_VERSION ESP   dev build: set -a; . ./dev.env; set +a"
 
 all: sdcard ## Alias for `sdcard` (the full bring-up image)
 
 image: $(ROOTFS) ## Read-only Btrfs root only (out/images/rootfs.img)
 
-toolchain: $(BUILD_STAMP) ## Build the qforge-build cross-compile docker image
+toolchain: $(BUILD_STAMP) ## Build the retroforge-build cross-compile docker image
 kernel:    $(KERNEL)       ## Build Image + all dtbs + modules (in build container)
 fw-linux:  $(FW_LINUX)     ## Fetch open linux-firmware blobs (host, network)
 fw-qcom:   $(FW_QCOM)      ## Fetch device-proprietary firmware from the qcom-firmwares repo (host, network)
@@ -394,9 +394,9 @@ base:      $(BASE_STAMP)   ## Bootstrap the aarch64 root from packages (host; do
 rootfs:    $(ROOTFS)       ## Assemble the read-only root + var images (in container)
 initramfs: $(INITRAMFS)    ## Build the initramfs that mounts ro-root + /etc overlay (in container)
 splash:    $(SPLASH_BIN) $(SPLASH_ASSET) ## Build the boot-splash drawer + flattened logo (in container)
-plugin:    $(PLUGIN_ZIP) ## Build the QForge OpenGamepadUI plugin zip (host, python3)
-sigdefer:  $(SIGDEFER_LIB) ## Build the Snes9x SIGTERM shim, libqforge-sigdefer.so (in container)
-hidemenu:  $(HIDEMENU_LIB) ## Build the melonDS second-window menu shim, libqforge-hidemenu.so (in container)
+plugin:    $(PLUGIN_ZIP) ## Build the RetroForge OpenGamepadUI plugin zip (host, python3)
+sigdefer:  $(SIGDEFER_LIB) ## Build the Snes9x SIGTERM shim, libretroforge-sigdefer.so (in container)
+hidemenu:  $(HIDEMENU_LIB) ## Build the melonDS second-window menu shim, libretroforge-hidemenu.so (in container)
 gptk-interpose: $(GPTK_LIB) ## Build PortMaster gptokeyb2's pad interposer (in container)
 steamcl:   $(STEAMCL)      ## Build the stage-1 steamcl + steamos-bootconf (in container)
 grub:      $(GRUB)         ## Build the stage-2 GRUB + per-slot grub.cfg (in container)
@@ -414,12 +414,12 @@ verify-card: $(SDCARD) | $(BUILD_STAMP) ## Verify the built A/B card image (in c
 # offline coverage at all, and a broken one reached hardware and aborted a real install.
 #
 # HOST-SIDE ON PURPOSE, unlike everything else here. All three scripts execute the shipped artifacts
-# (image/initramfs/init, rootfs/overlay/usr/bin/qforge-bootctl and rootfs/overlay/usr/lib/rauc/
+# (image/initramfs/init, rootfs/overlay/usr/bin/retroforge-bootctl and rootfs/overlay/usr/lib/rauc/
 # post-install.sh) against a sandbox; putting them in the container would test the same files
 # through an extra layer that can only add failure modes.
 #
 # The three cover the update path end to end, each from the side the others cannot see: the
-# initramfs READS the slot state, qforge-bootctl WRITES it, and the post-install hook DRIVES both
+# initramfs READS the slot state, retroforge-bootctl WRITES it, and the post-install hook DRIVES both
 # while reformatting a partition. None of them needs root — the hook suite stubs the commands that
 # would touch real storage.
 # A second's worth of committed-file arithmetic, and the reason it is a PREREQUISITE of `test`
@@ -430,10 +430,10 @@ verify-card: $(SDCARD) | $(BUILD_STAMP) ## Verify the built A/B card image (in c
 # workflow runs `make test`, and it triggers on paths overlay.yml deliberately ignores, so a commit
 # touching ONLY rootfs/manifest.lock is still checked. It covers BOTH manifests — the installer
 # carries gamescope too, and its lock is the one that gets forgotten.
-verify-lock: ## Check both locks' qforge rows against packages/ (host, seconds, no build)
+verify-lock: ## Check both locks' retroforge rows against packages/ (host, seconds, no build)
 	bash packages/verify-lock-rows.sh
 
-# Every board profile's hardware-map pins (QFORGE_HW_*) against what its devicetree makes the
+# Every board profile's hardware-map pins (RETROFORGE_HW_*) against what its devicetree makes the
 # kernel register (tools/check-hw-paths.py). Reads the DTBs `make kernel` staged in out/dtbs; with
 # LINUX_SRC=<a Linux tree> it compiles kernel/dts/qcom against that tree instead, no build needed.
 check-hw-paths: ## Check every board's hardware-map pins against its DTB (out/dtbs, or LINUX_SRC=<tree>)
@@ -516,13 +516,13 @@ test-disk: | $(BUILD_STAMP) ## Run the select-target + carve suites, which need 
 # ==============================================================================
 # No --target: `full` is the last stage in build/Dockerfile, so a plain build selects it.
 $(BUILD_STAMP): build/Dockerfile
-	$(QFORGE_CONTAINER) build -t $(BUILD_IMG) -f build/Dockerfile build
+	$(RETROFORGE_CONTAINER) build -t $(BUILD_IMG) -f build/Dockerfile build
 	@mkdir -p $(@D) && touch $@
 
 # The signing stage alone. Both stamps key off the same Dockerfile, so editing it rebuilds
 # whichever images you actually use rather than coupling them.
 $(SIGN_STAMP): build/Dockerfile
-	$(QFORGE_CONTAINER) build --target signing -t $(SIGN_IMG) -f build/Dockerfile build
+	$(RETROFORGE_CONTAINER) build --target signing -t $(SIGN_IMG) -f build/Dockerfile build
 	@mkdir -p $(@D) && touch $@
 
 # ==============================================================================
@@ -548,7 +548,7 @@ $(FW_EXTRA): firmware/EXTRA_FW.pin
 # ==============================================================================
 # From-source overlay packages (host — build-overlay.sh drives docker + qemu binfmt)
 # ==============================================================================
-# Rebuild changed holo packages with qforge patches into the local pacman repo work/repo/<arch>/.
+# Rebuild changed holo packages with retroforge patches into the local pacman repo work/repo/<arch>/.
 # Union prereq re-invokes the script on any input change; the script self-selects which package(s)
 # to rebuild (per-package input hash). Only when a source.pin exists does `base` depend on it.
 #
@@ -570,7 +570,7 @@ $(OVERLAY_DB): build/builder.pin build/snapshot.pin $(OVERLAY_PINS) $(OVERLAY_PA
 # Advance .overlay.stamp only when the overlay repo's CONTENT actually changed, and do it in THIS
 # target's own recipe so make observes the new mtime within the same invocation (base depends on
 # this stamp). Keying on the db's sha (not its mtime) is what lets build-overlay.sh keep bumping
-# qforge.db's mtime on a no-op run WITHOUT cascading into a base rebuild: the sha is unchanged, so
+# retroforge.db's mtime on a no-op run WITHOUT cascading into a base rebuild: the sha is unchanged, so
 # the stamp is left alone. A REAL re-index changes the sha, we touch the stamp, and base rebuilds
 # right away — the previous ORDER-ONLY `| $(OVERLAY_DB)` form could not, because the stamp was
 # advanced as a side effect of the DB rule and make never re-stat'd it mid-run (a stale-mtime miss
@@ -604,7 +604,7 @@ $(OVERLAY_STAMP): $(OVERLAY_DB)
 # folds its own sha256 into its reuse marker, because the make prereq alone only gets the script
 # RUN -- the marker check inside it would otherwise still short-circuit.
 #
-# $(BASE_MODE_STAMP) is the QFORGE_DEV prerequisite (see its definition): it is the only one of
+# $(BASE_MODE_STAMP) is the RETROFORGE_DEV prerequisite (see its definition): it is the only one of
 # these that changes when nothing on disk does.
 #
 # The mode assertion in the recipe is the other half of that. A marker file saying which mode the
@@ -622,21 +622,21 @@ $(BASE_STAMP): build/builder.pin build/snapshot.pin build/lib-pins.sh $(ROOTFS_D
 	 : "the only symptom would be that remote access silently stops working on a shipped image."; \
 	 for f in usr/bin/python3 usr/bin/ssh-keygen; do \
 	   test -e "work/base/$$f" || { \
-	     echo "qforge-pairingd needs /$$f and the base tree has no such file" >&2; exit 1; }; \
+	     echo "retroforge-pairingd needs /$$f and the base tree has no such file" >&2; exit 1; }; \
 	 done
 	@: "sentinel: the tree must be in the mode this build asked for (see above)"; \
-	 got=release; grep -qx 'dev:1' work/base/usr/lib/qforge/pkgs 2>/dev/null && got=dev; \
+	 got=release; grep -qx 'dev:1' work/base/usr/lib/retroforge/pkgs 2>/dev/null && got=dev; \
 	 [ "$$got" = "$(ROOTFS_MODE)" ] || { \
 	   echo "base tree is a $$got build, this is a $(ROOTFS_MODE) build (stale work/base)" >&2; \
 	   exit 1; }
 	@mkdir -p $(@D) && touch $@   # recency marker outside the root-owned tree (frozen mtimes)
 
-# Switching QFORGE_DEV swaps which marker exists, so the base is rebuilt on the next make. The
+# Switching RETROFORGE_DEV swaps which marker exists, so the base is rebuilt on the next make. The
 # rm is what keeps it a marker rather than a cache: exactly one mode is ever claimed, and it is
 # always the mode work/base was last built in.
 $(BASE_MODE_STAMP):
 	@mkdir -p $(@D) && rm -f work/.base-mode-* && touch $@
-	@echo "[qforge] base mode: $(ROOTFS_MODE)"
+	@echo "[retroforge] base mode: $(ROOTFS_MODE)"
 
 # A built overlay repo is an extra base input: customize-base installs the patched packages
 # from it and folds its content hash into the reuse-cache key. Wire it as a prerequisite only
@@ -665,7 +665,7 @@ $(KERNEL_SRC_HASH): FORCE
 	 [ "$$(cat $@ 2>/dev/null)" = "$$new" ] || printf '%s\n' "$$new" > $@
 
 $(KERNEL): $(KERNEL_SRC_HASH) $(FW_LINUX) $(FW_QCOM) $(FW_EXTRA) | $(BUILD_STAMP)
-	$(DOCKER) $(if $(BASE_CONFIG),-e BASE_CONFIG=/src/$(BASE_CONFIG)) -e QFORGE_CCACHE=$(QFORGE_CCACHE) \
+	$(DOCKER) $(if $(BASE_CONFIG),-e BASE_CONFIG=/src/$(BASE_CONFIG)) -e RETROFORGE_CCACHE=$(RETROFORGE_CCACHE) \
 	  $(BUILD_IMG) kernel/build.sh
 
 # Regenerate rootfs/manifest.lock (Phase 4a). Deliberately NOT a dependency of the image build:
@@ -674,7 +674,7 @@ $(KERNEL): $(KERNEL_SRC_HASH) $(FW_LINUX) $(FW_QCOM) $(FW_EXTRA) | $(BUILD_STAMP
 #
 # It must NOT go through $(BASE_STAMP), which builds in LOCKED mode -- relocking a tree that was
 # itself installed from the lock can only ever reproduce that lock. Re-resolving is the whole
-# point, so this drives customize-base.sh directly in QFORGE_RESOLVE=1 mode: pacman -Sy resolves
+# point, so this drives customize-base.sh directly in RETROFORGE_RESOLVE=1 mode: pacman -Sy resolves
 # PKGS against the pinned snapshot, and genmanifest.sh then records what that produced.
 #
 # The resulting tree is a RESOLVE tree and must never ship, so the stamp is REMOVED rather than
@@ -682,7 +682,7 @@ $(KERNEL): $(KERNEL_SRC_HASH) $(FW_LINUX) $(FW_QCOM) $(FW_EXTRA) | $(BUILD_STAMP
 # rebuilds in locked mode, and so ships a tree actually verified against the new lock.
 # Release-only by construction: genmanifest.sh refuses a dev base.
 #
-# QFORGE_DEV is cleared here rather than passed through: with it set, the base would be built
+# RETROFORGE_DEV is cleared here rather than passed through: with it set, the base would be built
 # with the dev tooling and genmanifest.sh would then refuse it -- correct, but only after a full
 # emulated install. The lock is a release artifact, so force release up front.
 #
@@ -692,7 +692,7 @@ $(KERNEL): $(KERNEL_SRC_HASH) $(FW_LINUX) $(FW_QCOM) $(FW_EXTRA) | $(BUILD_STAMP
 # — locking upstream binaries under a `snapshot` class. That is a silently WRONG lock, which is
 # worse than a failed one, so declare the overlay directly.
 relock: $(if $(OVERLAY_PINS),$(OVERLAY_STAMP)) ## Re-resolve from PKGS and regenerate rootfs/manifest.lock (host; release only)
-	QFORGE_DEV= QFORGE_RESOLVE=1 FORCE=1 $(ROOTFS_DIR)/customize-base.sh
+	RETROFORGE_DEV= RETROFORGE_RESOLVE=1 FORCE=1 $(ROOTFS_DIR)/customize-base.sh
 	$(ROOTFS_DIR)/genmanifest.sh
 	rm -f $(BASE_STAMP) work/.base-mode-*   # the tree left behind is a RESOLVE tree: claim no mode for it
 	@echo "review the diff, commit it, then rebuild: git diff $(ROOTFS_DIR)/manifest.lock"
@@ -716,7 +716,7 @@ relock: $(if $(OVERLAY_PINS),$(OVERLAY_STAMP)) ## Re-resolve from PKGS and regen
 # `make installer` builds the root FIRST and dies on a tree that has never built a kernel — which is
 # every CI runner, and was the first thing the 2026-08-25 smoke run hit.
 #
-# `verify-lock` IS FIRST ON PURPOSE. mkroot.sh's resolve refuses a qforge package built from
+# `verify-lock` IS FIRST ON PURPOSE. mkroot.sh's resolve refuses a retroforge package built from
 # sources installer/manifest.lock does not describe — correct, and the only thing standing between a
 # stale row and a published medium — but it makes that call from inside the root bootstrap, i.e.
 # after $(KERNEL). installer/v0.0.8 spent 56 minutes building 7.2.5 to reach it. verify-lock decides
@@ -745,10 +745,10 @@ installer: installer-root $(KERNEL) $(GRUB) | $(BUILD_STAMP) ## Build the flasha
 # verifying a downloaded or CI-built medium is a normal thing to do, and rebuilding it here from a
 # possibly-newer tree would verify something other than the file in front of you.
 #
-# QFORGE_INSTALLER_ALLOW_DEV=1 to accept a dev medium (sshd + a baked Wi-Fi PSK); without it that
+# RETROFORGE_INSTALLER_ALLOW_DEV=1 to accept a dev medium (sshd + a baked Wi-Fi PSK); without it that
 # is a failure, because a dev medium must never be the one that gets published.
 verify-image: | $(BUILD_STAMP) ## Verify a built installer medium (in container; IMG= to point elsewhere)
-	$(DOCKER) -e QFORGE_INSTALLER_ALLOW_DEV $(BUILD_IMG) installer/verify-image.sh $(IMG)
+	$(DOCKER) -e RETROFORGE_INSTALLER_ALLOW_DEV $(BUILD_IMG) installer/verify-image.sh $(IMG)
 
 # Mirrors `relock` above, including why it must NOT go through the locked path: relocking a tree
 # that was itself installed from the lock can only ever reproduce that lock. FORCE=1 because the
@@ -758,31 +758,31 @@ verify-image: | $(BUILD_STAMP) ## Verify a built installer medium (in container;
 # repo, and without work/repo/aarch64 the resolve would either fail or — worse — satisfy it from a
 # snapshot and lock an unpatched upstream binary under a `snapshot` class.
 relock-installer: $(if $(OVERLAY_PINS),$(OVERLAY_STAMP)) ## Re-resolve installer/pkgs.list and regenerate installer/manifest.lock (host)
-	QFORGE_DEV= QFORGE_RESOLVE=1 FORCE=1 installer/mkroot.sh >/dev/null
+	RETROFORGE_DEV= RETROFORGE_RESOLVE=1 FORCE=1 installer/mkroot.sh >/dev/null
 	installer/genlock.sh
 	@echo "review the diff, commit it, then rebuild: git diff installer/manifest.lock"
 
 # ==============================================================================
 # Read-only root (container) — base userspace + kernel + firmware -> Btrfs image
 # ==============================================================================
-# Switching QFORGE_DEV swaps which stamp exists, so the rootfs is rebuilt on the next make.
+# Switching RETROFORGE_DEV swaps which stamp exists, so the rootfs is rebuilt on the next make.
 $(MODE_STAMP):
 	@mkdir -p $(@D) && rm -f work/.rootfs-mode-* && touch $@
-	@echo "[qforge] rootfs mode: $(ROOTFS_MODE)"
+	@echo "[retroforge] rootfs mode: $(ROOTFS_MODE)"
 
-# Same shape, same reason, for QFORGE_VERSION (see its definition): one marker at a time, and
+# Same shape, same reason, for RETROFORGE_VERSION (see its definition): one marker at a time, and
 # changing the version re-creates it newer than the rootfs, which re-assembles.
 $(VERSION_STAMP):
 	@mkdir -p $(@D) && rm -f work/.rootfs-version-* && touch $@
-	@echo "[qforge] rootfs version: $(if $(QFORGE_VERSION),$(QFORGE_VERSION),dev)"
+	@echo "[retroforge] rootfs version: $(if $(RETROFORGE_VERSION),$(RETROFORGE_VERSION),dev)"
 
 # $(INITRAMFS), $(STEAMCL) and $(GRUB) are prerequisites because the root CARRIES its own boot
-# half: /boot/{Image,initramfs-qforge.img,dtbs} that the slot's stage 2 boots, plus the
-# /usr/lib/qforge/boot mirror the RAUC hook refreshes the ESP and the slot's efi partition FROM.
+# half: /boot/{Image,initramfs-retroforge.img,dtbs} that the slot's stage 2 boots, plus the
+# /usr/lib/retroforge/boot mirror the RAUC hook refreshes the ESP and the slot's efi partition FROM.
 # That is what makes "this root and the software that boots it came from one build" true by
 # construction. No cycle: the initramfs is built from work/base, never from the assembled root.
 $(ROOTFS): $(KERNEL) $(INITRAMFS) $(STEAMCL) $(GRUB) $(BASE_STAMP) $(FW_LINUX) $(FW_QCOM) $(FW_EXTRA) $(PLUGIN_ZIP) $(SIGDEFER_LIB) $(GPTK_LIB) $(HIDEMENU_LIB) $(ASSEMBLE_SRC) $(MODE_STAMP) $(VERSION_STAMP) | $(BUILD_STAMP)
-	$(DOCKER) $(DEV_ENV) $(ID_ENV) -e QFORGE_DEBUG $(BUILD_IMG) \
+	$(DOCKER) $(DEV_ENV) $(ID_ENV) -e RETROFORGE_DEBUG $(BUILD_IMG) \
 	  $(ROOTFS_DIR)/assemble-rootfs.sh /src/work/base
 
 # ==============================================================================
@@ -797,19 +797,19 @@ $(INITRAMFS): $(IMAGE_DIR)/mkinitramfs.sh $(IMAGE_DIR)/initramfs/init $(SPLASH_B
 # which is why they are prerequisites of it rather than of the rootfs alone — a theme or binary
 # change that did not rebuild the cpio would leave the OLD splash on the card with no sign of it.
 $(PLUGIN_ZIP): $(PLUGIN_SRC)
-	apps/ogui-qforge-plugin/build.sh $(OUT)/plugins
+	apps/ogui-retroforge-plugin/build.sh $(OUT)/plugins
 
 $(SPLASH_BIN): $(SPLASH_SRC) | $(BUILD_STAMP)
-	$(INBUILD) -c 'make -C apps/qforge-splash'
+	$(INBUILD) -c 'make -C apps/retroforge-splash'
 
 $(SIGDEFER_LIB): $(SIGDEFER_SRC) | $(BUILD_STAMP)
-	$(INBUILD) -c 'make -C apps/qforge-sigdefer'
+	$(INBUILD) -c 'make -C apps/retroforge-sigdefer'
 
 $(GPTK_LIB): $(GPTK_SRC) | $(BUILD_STAMP)
-	$(INBUILD) -c 'make -C apps/qforge-gptk-interpose'
+	$(INBUILD) -c 'make -C apps/retroforge-gptk-interpose'
 
 $(HIDEMENU_LIB): $(HIDEMENU_SRC) | $(BUILD_STAMP)
-	$(INBUILD) -c 'make -C apps/qforge-hidemenu'
+	$(INBUILD) -c 'make -C apps/retroforge-hidemenu'
 
 $(SPLASH_ASSET): $(IMAGE_DIR)/mksplash.sh $(IMAGE_DIR)/png2nds1.py $(IMAGE_DIR)/splash/logo.svg $(SPLASH_GEOM) | $(BUILD_STAMP)
 	$(INBUILD) $(IMAGE_DIR)/mksplash.sh
@@ -838,23 +838,23 @@ $(GRUB): boot/grub.sh boot/gen-grub-cfg.sh boot/grub.pin boot/boards.map \
 $(VARIMG): $(ROOTFS)
 $(VARIMG_B): $(ROOTFS)
 
-# QFORGE_DEV and QFORGE_SLOT_B have to be FORWARDED, not just set: this rule ran through plain
-# $(INBUILD), so neither reached the container and `QFORGE_SLOT_B=0 make sdcard` silently did
+# RETROFORGE_DEV and RETROFORGE_SLOT_B have to be FORWARDED, not just set: this rule ran through plain
+# $(INBUILD), so neither reached the container and `RETROFORGE_SLOT_B=0 make sdcard` silently did
 # nothing at all. It matters more now that the mode picks the default -- make-sdcard.sh populates
-# slot B for a dev card and leaves it empty for a release card, and an unforwarded QFORGE_DEV
+# slot B for a dev card and leaves it empty for a release card, and an unforwarded RETROFORGE_DEV
 # would build every card release-shaped. No mode stamp is needed on top: $(ROOTFS) already depends
 # on $(MODE_STAMP), so flipping the mode rebuilds the rootfs and this rule with it.
 $(SDCARD): $(ROOTFS) $(VARIMG) $(VARIMG_B) $(STEAMCL) $(GRUB) $(IMAGE_DIR)/make-sdcard.sh | $(BUILD_STAMP)
-	$(DOCKER) -e QFORGE_DEV -e QFORGE_SLOT_B $(BUILD_IMG) $(IMAGE_DIR)/make-sdcard.sh
+	$(DOCKER) -e RETROFORGE_DEV -e RETROFORGE_SLOT_B $(BUILD_IMG) $(IMAGE_DIR)/make-sdcard.sh
 
 # Signed RAUC OTA bundle (Phase 4). Dev builds mint an ephemeral cert. For a real signature use
-# PKIDIR=~/qforge-pki (mounts the PKI at /pki and points RAUC_CERT/RAUC_KEY at it), or set
+# PKIDIR=~/retroforge-pki (mounts the PKI at /pki and points RAUC_CERT/RAUC_KEY at it), or set
 # RAUC_CERT/RAUC_KEY yourself to paths the CONTAINER can see -- repo-relative ones resolve under
 # /src, anything else needs PKIDIR or a mount of your own.
 #
 # No version argument: genbundle.sh reads the identity out of the image it is wrapping
 # (out/images/rootfs.release, written by the same assembler run that produced rootfs.img). Set
-# QFORGE_VERSION before the rootfs is built, not here.
+# RETROFORGE_VERSION before the rootfs is built, not here.
 bundle: $(ROOTFS) | $(BUILD_STAMP) ## Build a signed RAUC update bundle (in container; PKIDIR= to sign for real)
 	$(GENBUNDLE)
 
@@ -892,8 +892,8 @@ sign-bundle: | $(BUILD_STAMP) ## Sign a RAUC bundle around an EXISTING out/image
 # No dependency on `bundle`: publishing a CI artifact or a bundle built on another machine is a
 # normal thing to do, and re-deriving it here from a possibly-newer tree would publish bytes nobody
 # tested. Pass the file you actually installed on a device.
-publish-bundle: ## Publish BUNDLE=<file.raucb> to the OTA server (host; needs QFORGE_OTA_SSH_KEY)
-	@test -n "$(BUNDLE)" || { echo "pass BUNDLE=out/images/qforge-<version>.raucb" >&2; exit 2; }
+publish-bundle: ## Publish BUNDLE=<file.raucb> to the OTA server (host; needs RETROFORGE_OTA_SSH_KEY)
+	@test -n "$(BUNDLE)" || { echo "pass BUNDLE=out/images/retroforge-<version>.raucb" >&2; exit 2; }
 	$(OTA_DIR)/publish-bundle.sh "$(BUNDLE)" $(CHANNEL)
 
 

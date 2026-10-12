@@ -14,7 +14,7 @@ needs root, a device, a bus or a built image.
 | `make test-disk` | `test-select-target.sh`, `test-carve.sh` | Container — they need `sgdisk`, `mtools`, `dosfstools` |
 | `make test-signing` | `test-verify-signing.sh` | Container — it signs real bundles, so it needs `rauc` |
 
-`make test` depends on `verify-lock`, which checks the lock's `qforge` rows against `packages/`
+`make test` depends on `verify-lock`, which checks the lock's `retroforge` rows against `packages/`
 from committed files alone. That runs first because it costs a second and catches a source change
 nobody adopted, before any suite spends real time.
 
@@ -51,5 +51,5 @@ path someone had to remember to type.
 
 Executing the shipped artifact rather than a reimplementation of it is the other standing rule.
 Several scripts under `rootfs/overlay/` carry explicit test seams (an overridable path, a
-`QFORGE_*_PROC` env var) for exactly this reason; use those rather than copying logic into a
+`RETROFORGE_*_PROC` env var) for exactly this reason; use those rather than copying logic into a
 suite, because a copy is free to agree with itself forever.

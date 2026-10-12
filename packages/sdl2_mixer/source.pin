@@ -1,4 +1,4 @@
-# sdl2_mixer — built FROM SOURCE via a qforge-owned PKGBUILD (packages/sdl2_mixer/PKGBUILD).
+# sdl2_mixer — built FROM SOURCE via a retroforge-owned PKGBUILD (packages/sdl2_mixer/PKGBUILD).
 # It is an Arch [extra] package but absent from the pinned holo aarch64 snapshot (its db has
 # sdl2_ttf and sdl2_image, not sdl2_mixer), so there is no repo row to resolve. Same "local
 # PKGBUILD" form as packages/brightnessctl/source.pin.

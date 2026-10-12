@@ -9,9 +9,9 @@ Every `make` invocation below runs from the repo root. A dev build needs its env
 
 ## Prerequisite: the device already runs the ROCKNIX ABL
 
-**qforge ships no bootloader.** A card boots because the device is already running the custom
+**retroforge ships no bootloader.** A card boots because the device is already running the custom
 ABL from [ROCKNIX](https://github.com/ROCKNIX/abl) — an Android bootloader replacement that can
-chainload a UEFI payload off an ESP. On a stock Android ABL a qforge card does nothing, and
+chainload a UEFI payload off an ESP. On a stock Android ABL a retroforge card does nothing, and
 nothing on the card can change that: writing the image is not the first step, flashing that ABL
 is. We consume it and cannot build it — it ships as a signed, per-device ELF.
 
@@ -22,7 +22,7 @@ That process is theirs to own and keep current; it is not reproduced here.
 Two properties of it govern everything below:
 
 - **It has two modes, Android or Linux, and the choice persists in the `devinfo` partition** — so
-  set it in ABL's own menu. qforge never writes `devinfo`: it is in the installer's deny list,
+  set it in ABL's own menu. retroforge never writes `devinfo`: it is in the installer's deny list,
   the format is ABL-private, and on Qualcomm parts that partition also carries unlock and verity
   state. With Linux mode selected, **Volume-Up is a one-time override back to Android** — it
   chooses a mode, not a medium.
@@ -41,14 +41,14 @@ dead card. That is a setting, not a fault.
 
 | # | Partition | Size | FS | Label |
 |---|---|---|---|---|
-| 1 | `esp` | 256M | vfat | `QFORGE-ESP` |
-| 2 | `efi-a` | 128M | vfat | `qforge-efi-A` |
-| 3 | `efi-b` | 128M | vfat | `qforge-efi-B` |
-| 4 | `rootfs-a` | 2G | btrfs | `qforge-root-A` |
-| 5 | `rootfs-b` | 2G | btrfs | `qforge-root-B` |
-| 6 | `var-a` | 256M | ext4 | `qforge-var-A` |
-| 7 | `var-b` | 256M | ext4 | `qforge-var-B` |
-| 8 | `home` | rest | ext4 | `qforge-home` |
+| 1 | `esp` | 256M | vfat | `RETROFORGE-ESP` |
+| 2 | `efi-a` | 128M | vfat | `retroforge-efi-A` |
+| 3 | `efi-b` | 128M | vfat | `retroforge-efi-B` |
+| 4 | `rootfs-a` | 2G | btrfs | `retroforge-root-A` |
+| 5 | `rootfs-b` | 2G | btrfs | `retroforge-root-B` |
+| 6 | `var-a` | 256M | ext4 | `retroforge-var-A` |
+| 7 | `var-b` | 256M | ext4 | `retroforge-var-B` |
+| 8 | `home` | rest | ext4 | `retroforge-home` |
 
 <!-- END AUTO-GENERATED -->
 
@@ -68,7 +68,7 @@ dead card. That is a setting, not a fault.
 ## Get a release card
 
 **A release card is published only by CI**, because the R2 credentials live there — but `make
-sdcard` on a dev box (no `QFORGE_DEV`) builds the same kind of image, which is how a release image's first boot gets
+sdcard` on a dev box (no `RETROFORGE_DEV`) builds the same kind of image, which is how a release image's first boot gets
 tested on hardware without waiting for a run.
 
 Cards are served from Cloudflare R2, not from a GitHub release asset — GitHub caps an asset at 2 GiB,
@@ -93,13 +93,13 @@ up first: the release run compiles the overlay from the sources in the commit it
 (~34 min on top of the image), so a tag is never waiting on a separate pipeline to have published
 anything.
 
-The version and commit a card was built from are stamped into `/etc/qforge-release` on the device
-(`QFORGE_VERSION`, `QFORGE_GIT`), so a running system can name where it came from.
+The version and commit a card was built from are stamped into `/etc/retroforge-release` on the device
+(`RETROFORGE_VERSION`, `RETROFORGE_GIT`), so a running system can name where it came from.
 
 ## Build and flash a dev card
 
 ```sh
-set -a; . ./dev.env; set +a                   # QFORGE_DEV=1 + optional Wi-Fi creds
+set -a; . ./dev.env; set +a                   # RETROFORGE_DEV=1 + optional Wi-Fi creds
 make sdcard                                   # -> out/images/sdcard.img
 make verify-card                              # GPT, ESP, per-slot filesystem identities
 sudo dd if=out/images/sdcard.img of=/dev/sdX bs=4M conv=fsync status=progress
@@ -121,10 +121,10 @@ empty `player` home (`image/lib-homestage.sh`, shared with the internal installe
 the card on first boot. Each `efi-*` partition carries that slot's stage-2 GRUB, its `grub.cfg` and
 the partsets that identify it.
 
-**Whether slot B is populated follows the build mode**, and `QFORGE_SLOT_B=0|1` overrides it:
+**Whether slot B is populated follows the build mode**, and `RETROFORGE_SLOT_B=0|1` overrides it:
 
-* **Dev card** (`QFORGE_DEV=1`): B is populated, carrying a distinct btrfs fsid, because a slot
-  switch cannot be proven against a slot that does not boot. Set `QFORGE_SLOT_B=0` for a faster
+* **Dev card** (`RETROFORGE_DEV=1`): B is populated, carrying a distinct btrfs fsid, because a slot
+  switch cannot be proven against a slot that does not boot. Set `RETROFORGE_SLOT_B=0` for a faster
   local loop, at the cost of a card whose first slot switch can only exercise the failover path.
 * **Release card**: B is left empty **and no `B.conf` is written**. B would be a byte-identical copy
   of an already-compressed root, surviving release compression whole — a second root's worth of
@@ -149,7 +149,7 @@ To install a freshly built stage-1 steamcl onto an already-flashed card's ESP wi
 the image:
 
 ```sh
-make deploy ESP=/run/media/$USER/QFORGE
+make deploy ESP=/run/media/$USER/RETROFORGE
 ```
 
 ## Reach the device
@@ -162,7 +162,7 @@ instrument is the offline card mount — see [Recovery](#recovery-when-it-does-n
 sshd ships **always-on and key-only**, with no host keys baked in and no account with a password.
 Access is granted at runtime by whoever is holding the device:
 
-1. The pairing daemon (`qforge-pairingd`, port 32000) is **always on** for now — there is no
+1. The pairing daemon (`retroforge-pairingd`, port 32000) is **always on** for now — there is no
    on-screen switch yet, so anyone on the same network can register a key.
 2. From the machine you want to connect from:
    ```sh
@@ -176,7 +176,7 @@ invocations and what persists across an update: [`remote-access.md`](remote-acce
 
 ### Dev card
 
-`dev.env` bakes `QFORGE_SSH_PUBKEY` into `root`'s `authorized_keys` and generates a throwaway
+`dev.env` bakes `RETROFORGE_SSH_PUBKEY` into `root`'s `authorized_keys` and generates a throwaway
 identity for it:
 
 ```sh
@@ -184,7 +184,7 @@ ssh -i work/dev-ssh/id_ed25519 root@<device>
 ```
 
 That key survives `make distclean`, so your `known_hosts` entry keeps working across rebuilds. A
-dev card built with no Wi-Fi credentials (or `QFORGE_WIFI=0`) has no network and no SSH by
+dev card built with no Wi-Fi credentials (or `RETROFORGE_WIFI=0`) has no network and no SSH by
 design — that is the shipping first-boot condition, and the only honest way to exercise it.
 
 ## Ship an update
@@ -192,11 +192,11 @@ design — that is the shipping first-boot condition, and the only honest way to
 ### Build and sign a bundle
 
 ```sh
-QFORGE_VERSION=<version> PKIDIR=$HOME/qforge-pki make bundle
+RETROFORGE_VERSION=<version> PKIDIR=$HOME/retroforge-pki make bundle
 ```
 
-**The version has to be set before the rootfs is built, not at bundling time.** `QFORGE_VERSION`
-is stamped into the image's `/etc/qforge-release`, and `genbundle.sh` reads it back out of the
+**The version has to be set before the rootfs is built, not at bundling time.** `RETROFORGE_VERSION`
+is stamped into the image's `/etc/retroforge-release`, and `genbundle.sh` reads it back out of the
 image to name the bundle — so the bundle can never claim a version its payload does not carry. That
 equality is what the device's update check compares, so it is not cosmetic. Changing the version
 re-assembles the rootfs (a few minutes; not a base or kernel rebuild).
@@ -223,7 +223,7 @@ verification` at creation, so a green `make` is not evidence the bundle is valid
 it yourself, **through the shipped config**:
 
 ```sh
-rauc --conf=rootfs/overlay/etc/rauc/system.conf info out/images/qforge-<version>.raucb
+rauc --conf=rootfs/overlay/etc/rauc/system.conf info out/images/retroforge-<version>.raucb
 ```
 
 Do not use `rauc info --keyring <ca>` — that applies rauc's default `smimesign` purpose, which
@@ -234,13 +234,13 @@ with `unsuitable certificate purpose`. It is a false red. The shipped `system.co
 ### Publish it
 
 ```sh
-QFORGE_OTA_HOST=<host> QFORGE_OTA_SSH_KEY=~/.ssh/<key> ota/publish-bundle.sh out/images/qforge-<version>.raucb
+RETROFORGE_OTA_HOST=<host> RETROFORGE_OTA_SSH_KEY=~/.ssh/<key> ota/publish-bundle.sh out/images/retroforge-<version>.raucb
 ```
 
-Puts the bundle on the update server and flips the channel pointer at it. **There is no QForge
-server yet** — the default host, `updates.qforge.invalid`, is a placeholder that never resolves, and
-`qforge-update` on the device currently reports "no update" regardless (it still gates on a Steam
-login file that QForge never creates; see `docs/ota.md`). Until both are resolved, install by hand. **Install it on a device first** (below) — nothing on the device ends an unconfirmed
+Puts the bundle on the update server and flips the channel pointer at it. **There is no RetroForge
+server yet** — the default host, `updates.retroforge.invalid`, is a placeholder that never resolves, and
+`retroforge-update` on the device currently reports "no update" regardless (it still gates on a Steam
+login file that RetroForge never creates; see `docs/ota.md`). Until both are resolved, install by hand. **Install it on a device first** (below) — nothing on the device ends an unconfirmed
 trial boot, so a bundle that comes up to a black screen costs ~6 manual power-cycles to recover on
 hardware with no serial console. Every published bundle gets a hardware install before it ships.
 
@@ -257,7 +257,7 @@ no polkit policy, and its `de.pengutronix.rauc.conf` allows any local user to ca
 signature is the gate. See `docs/ota.md` — it was accepted as a design choice.)
 
 ```sh
-ssh player@<device> rauc install /path/to/qforge-<version>.raucb
+ssh player@<device> rauc install /path/to/retroforge-<version>.raucb
 ```
 
 Not as `root`: `/root` is on the read-only root and does not survive the slot write. Watch for
@@ -275,11 +275,11 @@ finally arms the target for its trial boot through steamos-bootconf. Reboot to l
 ## Read and steer the boot state
 
 ```sh
-qforge-bootctl status               # what booted, and what the ESP/efi say
-qforge-bootctl get-state B          # is slot B fit to boot? (good|bad)
-qforge-bootctl set-primary B        # boot slot B next (starts its trial boot)
-qforge-bootctl set-state B bad      # demote B; the next boot goes to the other slot
-qforge-bootctl mark-good            # confirm THIS boot — ends its trial, clears boot-attempts
+retroforge-bootctl status               # what booted, and what the ESP/efi say
+retroforge-bootctl get-state B          # is slot B fit to boot? (good|bad)
+retroforge-bootctl set-primary B        # boot slot B next (starts its trial boot)
+retroforge-bootctl set-state B bad      # demote B; the next boot goes to the other slot
+retroforge-bootctl mark-good            # confirm THIS boot — ends its trial, clears boot-attempts
 ```
 
 **All of these need root, and a release image ships no `sudo`.** As `player` the tool cannot answer
@@ -288,20 +288,20 @@ read the state off the card offline (below). `rauc install` is the deliberate ex
 through rauc's D-Bus service and its open bus policy, which is why it works as `player`.
 
 These are Valve's SteamOS semantics, surfaced through the same steamos-bootconf that RAUC uses, so
-`qforge-bootctl` and `rauc status` agree by construction. The state that decides a boot lives in
+`retroforge-bootctl` and `rauc status` agree by construction. The state that decides a boot lives in
 the ESP conf of each image:
 
 - **`image-invalid`** — a hard demote. `set-state <slot> bad` sets it (and the boot-health unit's
-  failure path does exactly that, via `qforge-boot-bad.service`); only a completed install clears
+  failure path does exactly that, via `retroforge-boot-bad.service`); only a completed install clears
   it, because the post-install hook is the only place that knows an install completed. **This is
   the only rollback trigger that is live today.**
-- **`boot-attempts`** — the trial counter. The stage-2 `qforge` module bumps it on every kernel
-  boot (`qforge_bootattempts <slot>` in the generated `grub.cfg`), `mark-good` clears it after a
+- **`boot-attempts`** — the trial counter. The stage-2 `retroforge` module bumps it on every kernel
+  boot (`retroforge_bootattempts <slot>` in the generated `grub.cfg`), `mark-good` clears it after a
   healthy session, and steamcl's failsafe offers a menu at ≥3 and auto-picks the other slot at ≥6.
   **HW-validated 2026-08-02.** Two traps when checking it by hand: a healthy boot runs `set-mode
-  booted`, which *clears* the counter — so mask `qforge-boot-good.{path,service}` before the test
+  booted`, which *clears* the counter — so mask `retroforge-boot-good.{path,service}` before the test
   reboot or a working counter and a dead one both read `0`. And GRUB prints
-  `qforge: A boot-attempts 0 -> 1` just before the board menu paints over it, so on a 3s boot you
+  `retroforge: A boot-attempts 0 -> 1` just before the board menu paints over it, so on a 3s boot you
   will usually miss it; the conf is the evidence, not the panel.
 
 > **What that means in practice.** A slot that boots but comes up broken IS demoted — the health
@@ -315,7 +315,7 @@ Three traps, each of which has inverted a conclusion on real hardware:
 - **`rauc status` cannot tell promoted from still-on-trial.** It reports the slot `good` in both
   states. Only the ESP conf distinguishes them — and while `boot-attempts` is unwired, not even
   that does: read `image-invalid` and whether the health unit succeeded this boot
-  (`systemctl status qforge-boot-good`).
+  (`systemctl status retroforge-boot-good`).
 - **A slot that never booted answers `good`.** `get-state` reads `boot-attempts ≥ 1` or
   `image-invalid > 0`; a freshly installed slot has neither, so it is indistinguishable from a
   confirmed one until its first boot. That is by design — a new slot must not report bad before it
@@ -342,7 +342,7 @@ machine. Select force external in ABL and the card boots normally. This is the r
 an interrupted or broken internal install, and it is the only one short of EDL.
 
 Since the ABL itself comes from ROCKNIX, a device that already had ROCKNIX installed to internal
-is the most likely version of this, and it is not a qforge fault to debug — it is the
+is the most likely version of this, and it is not a retroforge fault to debug — it is the
 [boot-order rule](#prerequisite-the-device-already-runs-the-rocknix-abl) working as designed.
 
 Nothing on the SD-card-only path is affected: with no internal ESP present, ABL falls through to
@@ -351,18 +351,18 @@ the card unaided and no option needs setting.
 **The installer medium is the recovery medium.** Force external boots it the same way it boots a
 normal card, and re-running an install is the designed recovery for one that died partway — it takes
 no backups precisely because "run it again" has to work. Its own log comes out on its FAT partition
-as `qforge-install.log`, readable on any computer, and it is written when the installer's unit
+as `retroforge-install.log`, readable on any computer, and it is written when the installer's unit
 STOPS: a device sitting on a failed screen has not produced one yet, so power-cycle before pulling
 the card. Full procedure, including what an install destroys and what it refuses:
 [install-internal.md](install-internal.md).
 
 **The journal is not on the slot's `/var`.** `/var/log` is bind-mounted onto
-`/home/.qforge/offload/var/log`, so it lives on the shared **home** partition and survives both
+`/home/.retroforge/offload/var/log`, so it lives on the shared **home** partition and survives both
 slots:
 
 ```sh
-sudo mount /dev/sdX8 /mnt                     # qforge-home
-sudo journalctl -D /mnt/.qforge/offload/var/log/journal -e
+sudo mount /dev/sdX8 /mnt                     # retroforge-home
+sudo journalctl -D /mnt/.retroforge/offload/var/log/journal -e
 ```
 
 **Do not trust `-b -1` on these devices.** The RTC comes up stale, so the boot index is unreliable
@@ -370,17 +370,17 @@ and relative boot offsets silently select the wrong boot. List the boot IDs and 
 explicitly instead:
 
 ```sh
-sudo journalctl -D /mnt/.qforge/offload/var/log/journal --list-boots
-sudo journalctl -D /mnt/.qforge/offload/var/log/journal _BOOT_ID=<id>
+sudo journalctl -D /mnt/.retroforge/offload/var/log/journal --list-boots
+sudo journalctl -D /mnt/.retroforge/offload/var/log/journal _BOOT_ID=<id>
 ```
 
 The ESP carries the bootconf that decided the boot, and the booted slot's efi partition carries
 its identity:
 
 ```sh
-sudo mount /dev/sdX1 /mnt-esp                 # QFORGE-ESP
+sudo mount /dev/sdX1 /mnt-esp                 # RETROFORGE-ESP
 cat /mnt-esp/SteamOS/conf/A.conf /mnt-esp/SteamOS/conf/B.conf
-sudo mount /dev/sdX2 /mnt-efi                 # qforge-efi-A (the booted slot's efi)
+sudo mount /dev/sdX2 /mnt-efi                 # retroforge-efi-A (the booted slot's efi)
 cat /mnt-efi/SteamOS/partsets/self            # which image this efi partition IS
 ```
 
@@ -400,7 +400,7 @@ That is the acknowledged failure mode of the design, not a bug to work around.
 ## Before a push
 
 ```sh
-make verify-lock                # lock's qforge rows vs packages/ (seconds)
+make verify-lock                # lock's retroforge rows vs packages/ (seconds)
 make test                       # every offline suite under tests/
 make test-signing               # RAUC signing self-test (container)
 ```

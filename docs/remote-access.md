@@ -8,16 +8,16 @@ anywhere in the tree. Host keys are generated per-device the first time sshd sta
 
 Access is granted at runtime, as a **key only**, to the session user `player` (uid 1000, home
 `/home/player`). Delivering that key over the network is the job of a small pairing daemon,
-`qforge-pairingd`.
+`retroforge-pairingd`.
 
 ## Pairing is always on — for now
 
 The design is that a person holding the device turns pairing on with an on-screen switch, and the
 daemon runs only while that switch is on. **There is no such switch yet.** The shell that drew it is
-gone and its replacement does not have one, so `qforge-pairingd.service` is enabled at boot
-(`60-qforge-pairingd.preset`, plus a build-time `multi-user.target.wants` symlink as a fallback) and
+gone and its replacement does not have one, so `retroforge-pairingd.service` is enabled at boot
+(`60-retroforge-pairingd.preset`, plus a build-time `multi-user.target.wants` symlink as a fallback) and
 the daemon is **always on**: **anyone on the same network can register a key** while that is true.
-It restarts on failure; a clean `systemctl stop qforge-pairingd` stops it until the next boot.
+It restarts on failure; a clean `systemctl stop retroforge-pairingd` stops it until the next boot.
 
 When the shell grows a switch, the unit's `[Install]` section and its preset go away again and the
 switch starts and stops the daemon. Everything below about what the daemon accepts and what it
@@ -57,7 +57,7 @@ grants stays as it is.
    works identically there. CRLF line endings in the key file are handled.
 
    `<device>` is the device's IP address. While the daemon is running the device also advertises
-   itself over mDNS, so `qforge.local` usually works too — on Windows that resolves natively on
+   itself over mDNS, so `retroforge.local` usually works too — on Windows that resolves natively on
    recent builds, and otherwise needs Bonjour installed, so prefer the address if the name does not
    resolve.
 3. The key is appended to `player`'s `authorized_keys`. sshd is already running, so you can
@@ -116,7 +116,7 @@ slot write, so a key placed there is gone after the first update.
   into `/etc` under `ProtectSystem=full`, which mounts `/etc` read-only; the write failed `EROFS`
   and took the whole daemon down with it. `tests/test-pairingd.sh` pins that it stays non-fatal.)
 - **The advert is published by systemd-resolved, not avahi.** resolved already answers mDNS on
-  this image — it is what resolves `qforge.local`, since `nsswitch.conf` carries no
+  this image — it is what resolves `retroforge.local`, since `nsswitch.conf` carries no
   `mdns_minimal` and `nss-mdns` is not installed — so avahi existed to publish this one service
   and put a *second* responder on 5353. The daemon registers on the `org.freedesktop.resolve1` bus
   once its socket is bound, and the unit's `ExecStopPost` withdraws it. Two things about that were
@@ -129,7 +129,7 @@ slot write, so a key placed there is gone after the first update.
     express "stop advertising now", which is exactly what a pairing switch needs.
 
   The withdrawal path is fixed by `DNSSD_SERVICE_ID` in the daemon (resolved escapes
-  `qforge-pairing` to `qforge_2dpairing`); change one and you must change the other.
+  `retroforge-pairing` to `retroforge_2dpairing`); change one and you must change the other.
 
   Known limit: the registration lives in resolved's memory, so restarting `systemd-resolved`
   while the daemon runs drops the advert until the daemon is restarted. The advert is a

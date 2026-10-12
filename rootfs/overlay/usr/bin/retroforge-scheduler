@@ -1,0 +1,121 @@
+#!/bin/sh
+# retroforge CPU scheduler helper — the CLI front-end for sched_ext.
+#
+# retroforge-powerd owns the CPU scheduler as a D-Bus property (org.retroforge.Power1.CpuScheduler):
+# "none" is the in-kernel scheduler, "lavd" is scx_lavd via scx.service, the unit is never
+# `enable`d, and powerd applies the saved choice at boot. "none" is the default, so `status` on an
+# untouched device reports it and selecting "lavd" here is what opts a device into sched_ext.
+# The default is NOT a performance verdict: lavd measured FASTER on hardware (issue #32, +56% FPS
+# on Darksiders II). It stays off because enabling an out-of-tree scheduler for every device is a
+# bigger call than the evidence so far supports — two titles, both x86-under-translation.
+#
+# OpenGamepadUI has no scheduler control (and RetroForge ships no OGUI plugin), so this CLI is the
+# only path to the property. It is deliberately a thin wrapper over the same property a future
+# shell control would set, NOT a second mechanism, so the two stay in sync if one ever appears.
+#
+# Talks to powerd on the SYSTEM bus rather than through the player session bus: it then works
+# identically from SSH and from inside the session, with no session env to reconstruct. The org.retroforge.Power policy allows `wheel`, so player can run this unprivileged.
+
+set -eu
+
+BUS=org.retroforge.Power
+PATH_OBJ=/org/retroforge/Power
+IFACE=org.retroforge.Power1
+SCX_STATE=/sys/kernel/sched_ext/state
+ATTACH_TIMEOUT=5
+
+usage() {
+	cat <<'EOF'
+Usage: retroforge-scheduler [status|list|<scheduler>]
+
+  status          show the selected scheduler and what the kernel actually has (default)
+  list            list the schedulers this device can run
+  <scheduler>     select one, e.g. `retroforge-scheduler lavd` or `retroforge-scheduler none`
+
+The choice persists across reboots (retroforge-powerd re-applies it; scx.service stays disabled).
+EOF
+}
+
+# busctl prints properties as a type-tagged line: `s "lavd"` / `as 2 "none" "lavd"`. Drop the
+# type prefix and the quotes so callers get bare words.
+get_prop() {
+	busctl get-property "$BUS" "$PATH_OBJ" "$IFACE" "$1" 2>/dev/null |
+		sed -e 's/^[a-z}{]* //' -e 's/^[0-9]* //' -e 's/"//g'
+}
+
+require_powerd() {
+	if ! busctl status "$BUS" >/dev/null 2>&1; then
+		echo "retroforge-scheduler: retroforge-powerd is not running (systemctl status retroforge-powerd)" >&2
+		exit 1
+	fi
+}
+
+# The kernel's own view. Distinct from the property on purpose: attaching a BPF scheduler takes
+# about a second, and the kernel drops one on its own if the scheduler misbehaves — so a
+# freshly-set property is a request, and this is the outcome.
+kernel_state() {
+	[ -r "$SCX_STATE" ] && cat "$SCX_STATE" || echo "unsupported"
+}
+
+show_status() {
+	selected=$(get_prop CpuScheduler)
+	echo "scheduler:   ${selected:-unknown}"
+	echo "available:   $(get_prop AvailableCpuSchedulers)"
+	echo "sched_ext:   $(kernel_state)"
+}
+
+main() {
+	case "${1-status}" in
+	-h | --help | help)
+		usage
+		exit 0
+		;;
+	status)
+		require_powerd
+		show_status
+		;;
+	list)
+		require_powerd
+		get_prop AvailableCpuSchedulers | tr ' ' '\n'
+		;;
+	-*)
+		usage >&2
+		exit 2
+		;;
+	*)
+		require_powerd
+		target=$1
+		available=$(get_prop AvailableCpuSchedulers)
+		# Reject here as well as in powerd, purely for the better message: powerd can only
+		# answer a property set with a generic failure, and "lavd" being absent usually means
+		# a kernel without sched_ext rather than a typo.
+		for candidate in $available; do
+			[ "$candidate" = "$target" ] && found=1
+		done
+		if [ "${found-}" != 1 ]; then
+			echo "retroforge-scheduler: unknown scheduler '$target' (available: $available)" >&2
+			exit 1
+		fi
+
+		if ! busctl set-property "$BUS" "$PATH_OBJ" "$IFACE" CpuScheduler s "$target"; then
+			echo "retroforge-scheduler: could not select '$target'; see journalctl -u retroforge-powerd -u scx" >&2
+			exit 1
+		fi
+
+		# Wait out the attach window so the reported state is the real one, not the race.
+		want=$([ "$target" = none ] && echo disabled || echo enabled)
+		elapsed=0
+		while [ "$(kernel_state)" != "$want" ] && [ "$elapsed" -lt "$ATTACH_TIMEOUT" ]; do
+			sleep 1
+			elapsed=$((elapsed + 1))
+		done
+		show_status
+		if [ "$(kernel_state)" != "$want" ]; then
+			echo "retroforge-scheduler: kernel did not reach '$want' within ${ATTACH_TIMEOUT}s; see journalctl -u scx" >&2
+			exit 1
+		fi
+		;;
+	esac
+}
+
+main "$@"

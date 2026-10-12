@@ -1,6 +1,6 @@
 Subject: [PATCH] ASoC: qcom: sm8250: pin S16_LE on the qrb4210-rb2 card
 
-qforge, 2026-10-09. Replaces ROCKNIX SM6115 0037 ("constrain BE format mask to S16_LE only"),
+retroforge, 2026-10-09. Replaces ROCKNIX SM6115 0037 ("constrain BE format mask to S16_LE only"),
 which forced 16-bit on every stream of every board the sm8250 machine driver serves. That
 collides with 0870 (Nova-Deck; also ROCKNIX SM8250 0100), which deliberately lets non-compressed
 streams negotiate on the SM8250 boards. Both are right for their boards, so the strict rule is

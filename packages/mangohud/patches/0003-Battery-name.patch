@@ -9,7 +9,7 @@ naming. No board we ship uses it:
   SM8250            /sys/class/power_supply/battery          (pm8150b fuel gauge)
   SM8550/8650/8750  /sys/class/power_supply/qcom-battmgr-bat (PMIC GLINK battmgr)
 
-The previous qforge patch hardcoded the first of those, so on every SM8550 and
+The previous retroforge patch hardcoded the first of those, so on every SM8550 and
 SM8650 board -- i.e. most of the fleet -- the HUD found no battery at all and the
 battery and power fields were blank. Measured on a KONKR Pocket FIT (SM8650).
 

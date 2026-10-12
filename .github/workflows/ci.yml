@@ -1,4 +1,4 @@
-# qforge CI — the offline suites. See also .github/workflows/overlay.yml (the package pipeline).
+# retroforge CI — the offline suites. See also .github/workflows/overlay.yml (the package pipeline).
 #
 # WHERE THE IMAGE BUILD LIVES: .github/workflows/image.yml, called by release-sdcard.yml and
 # release-bundle.yml. It used to be listed here as impossible, then as merely unwired; both old
@@ -47,7 +47,7 @@ jobs:
       # device-tree-compiler for tests/test-hw-dtb.sh, which compiles fabricated devicetrees to
       # check tools/check-hw-paths.py's naming rules; without dtc that half of the suite is skipped.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends grub-common device-tree-compiler
-      # 354 checks over the update path: the initramfs READS the slot state, qforge-bootctl
+      # 354 checks over the update path: the initramfs READS the slot state, retroforge-bootctl
       # WRITES it, and the post-install hook drives both while reformatting a partition. Pure
       # shell against temp-dir sandboxes — no build, no container, no root, no device.
       - run: make test
@@ -60,7 +60,7 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v7
-      # `make test-disk` runs these in qforge-build, which is where sgdisk and mtools already
+      # `make test-disk` runs these in retroforge-build, which is where sgdisk and mtools already
       # live for verify-image. CI does NOT do that: that image is the ~1 GB aarch64 cross-toolchain,
       # and building it to get three apt packages is exactly the cost that moved the signing job off
       # it. The suites need no root, no container and no device — only the tools — so install them.

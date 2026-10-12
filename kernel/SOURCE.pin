@@ -1,4 +1,4 @@
-# qforge kernel source pin — Phase 1
+# retroforge kernel source pin — Phase 1
 # The TARBALL + its sha256 is the canonical pin. Validated 2026-06-17; re-pinned 2026-07-25
 # (7.1.5, HW-validated on Pocket S2 + Pocket ACE); re-pinned 2026-08-03 (7.1.6); re-pinned
 # 2026-08-18 (7.2 — mainline, released 2026-08-16; NOT HW-validated yet, see the gate below);
@@ -113,7 +113,7 @@ git_commit: 7b20d05fd38de8e0be168956f6fd241d750c7d69
 #     backlight 3060/4080. Speaker, touch and gamepad work (operator-confirmed).
 #     1150 + 0140: 100000.clock-controller is a consumer of the `cx` genpd, runtime `active`/`auto`,
 #     before and after two freeze cycles (CPUs 1-7 offlined and back).
-#     0330 v4: THE SUSPEND PATH DOES NOT EXERCISE IT — qforge-suspend cannot reach gamescope
+#     0330 v4: THE SUSPEND PATH DOES NOT EXERCISE IT — retroforge-suspend cannot reach gamescope
 #     and falls back to bl_power, so the crtc stays enabled. Exercised by hand
 #     instead: three `gamescopectl drm_sleep_internal_screen 1/0` cycles, connector disabled ->
 #     enabled each time, zero *ERROR*, WARNING or SMMU fault. While blanked, synaptics_dsx logs
@@ -626,14 +626,14 @@ git_commit: 7b20d05fd38de8e0be168956f6fd241d750c7d69
 # 7.2.6: S2 could not be judged on 0525 while half its panel was dark, and FIT was never booted.
 #
 # WHERE THE LOGS ARE, because this cost time: /var/log is BIND-MOUNTED onto /home by our own
-# var-log.mount, so the journal is NOT under qforge-var-*/log/journal (that dir holds only an
+# var-log.mount, so the journal is NOT under retroforge-var-*/log/journal (that dir holds only an
 # empty `remote/`). Read a card with
-#   journalctl -D /run/media/<you>/qforge-home/.qforge/offload/var/log/journal --list-boots
+#   journalctl -D /run/media/<you>/retroforge-home/.retroforge/offload/var/log/journal --list-boots
 # and note that `-b -1` does NOT work with -D — it reports "no persistent journal was found".
 # Pass the explicit boot ID from --list-boots instead. (Second instance of the -b trap in
 # [[journalctl-traps]].)
 #
-# AND A KNOCK-ON WORTH KNOWING: the "stuck at qforge first-boot grow" seen on ACE was NOT a grow
+# AND A KNOCK-ON WORTH KNOWING: the "stuck at retroforge first-boot grow" seen on ACE was NOT a grow
 # bug. grow-home.sh does a bare `udevadm settle` after systemd-repart, and settle waits on the
 # WHOLE udev queue — including the 90-second ath12k probe. It returned 0.2s after ath12k gave up.
 # The grow itself was correct ("No changes", home already filling the card). Its one error,

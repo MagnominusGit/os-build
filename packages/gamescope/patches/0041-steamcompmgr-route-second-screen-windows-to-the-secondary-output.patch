@@ -1,4 +1,4 @@
-From: qforge
+From: retroforge
 Subject: [PATCH] steamcompmgr: route second-screen windows to the secondary output
 
 NDS/3DS emulators put their second screen in a second top-level window
@@ -24,7 +24,7 @@ control: no appid, overlays or input focus.
 
 Nothing is painted on the secondary output yet (next patch).
 
-(qforge: dual-screen boards, step 3 of the dual-output plan, 2026-10-12.
+(retroforge: dual-screen boards, step 3 of the dual-output plan, 2026-10-12.
 Window shapes read with xprop on the Thor Lite: melonDS 1.1 with
 Window1 enabled, Azahar 2126.1.2 with layout_option=4.)
 ---

@@ -1,6 +1,6 @@
 Subject: [PATCH] usb: typec: tcpc: fusb302: trigger TX via TX_START bit, not TXON token
 
-qforge: hunk regenerated on v7.2.9 (the original's context did not land at fuzz 0 here);
+retroforge: hunk regenerated on v7.2.9 (the original's context did not land at fuzz 0 here);
 the change itself is ROCKNIX SM6115 0058 unchanged.
 
 ---

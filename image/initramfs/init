@@ -1,5 +1,5 @@
 #!/bin/sh
-# qforge initramfs init — Phase 5: mount the booted slot's root (ro) + var, mount the slot's
+# retroforge initramfs init — Phase 5: mount the booted slot's root (ro) + var, mount the slot's
 # efi partition at /efi, stack the /etc overlay, then hand off to systemd.
 #
 # WHAT PICKED THE SLOT IS NOT HERE. Slot selection moved out of the initramfs in Phase 5
@@ -8,11 +8,11 @@
 # the cmdline says:
 #
 #   root=PARTUUID=...                   the slot's btrfs root, mounted ro
-#   qforge.var=PARTUUID=...           the slot's ext4 /var (overlay upper + per-slot identity)
-#   qforge.efi=PARTUUID=...           the slot's efi-a/b partition, mounted at /efi
-#   qforge.slot=A|B                   which slot the above three are
+#   retroforge.var=PARTUUID=...           the slot's ext4 /var (overlay upper + per-slot identity)
+#   retroforge.efi=PARTUUID=...           the slot's efi-a/b partition, mounted at /efi
+#   retroforge.slot=A|B                   which slot the above three are
 #
-#                                       The first three are PARTUUID because every qforge medium
+#                                       The first three are PARTUUID because every retroforge medium
 #                                       carries the same eight PARTLABELs, so with a card inserted
 #                                       on a device installed to internal storage a PARTLABEL
 #                                       resolves to whichever disk enumerates first. Stage 2 reads
@@ -23,13 +23,13 @@
 #                                       bootloader from the partition the stage-2 binary was
 #                                       loaded from. Accepted as a FALLBACK so the two forms can
 #                                       coexist; nothing we ship emits it, because our stage-2
-#                                       grub.cfg states qforge.efi= itself (it knows the slot,
+#                                       grub.cfg states retroforge.efi= itself (it knows the slot,
 #                                       so it knows the partition). See docs/phase5.md.
 #
-# The old design-C machinery — the /QFORGE/STATE.* read/write, slot selection, failover,
+# The old design-C machinery — the /RETROFORGE/STATE.* read/write, slot selection, failover,
 # kernel-mismatch warning and KERNEL.BAK rollback — is gone. The stage-2 boot-attempts counter + stock
 # steamcl's failsafe own "did a slot come up", and the OS owns "is this slot OK" via
-# qforge-boot-good.service (set-mode booted / set-state bad). Nothing here chooses anything.
+# retroforge-boot-good.service (set-mode booted / set-state bad). Nothing here chooses anything.
 #
 # WHY THE /ETC OVERLAY IS IN THE INITRAMFS AT ALL: it cannot be assembled after PID1 starts.
 # systemd reads /etc/fstab (via generators), /etc/machine-id, /etc/hostname and system.conf
@@ -44,8 +44,8 @@
 #
 # Layout (image/partition-table.txt):
 #   root  <- PARTUUID=... (root=)             btrfs, ro
-#   var   <- PARTUUID=... (qforge.var=)     ext4, rw   (overlay upper+work; /lib/qforge/slot)
-#   efi   <- PARTUUID=... (qforge.efi=)     vfat, rw   (the SLOT's efi-a/b: SteamOS/partsets)
+#   var   <- PARTUUID=... (retroforge.var=)     ext4, rw   (overlay upper+work; /lib/retroforge/slot)
+#   efi   <- PARTUUID=... (retroforge.efi=)     vfat, rw   (the SLOT's efi-a/b: SteamOS/partsets)
 #   /etc  <- overlay(lower=/sysroot/etc, upper=/sysroot/var/lib/overlays/etc/upper)
 #
 # The efi mountpoint is INSIDE the btrfs root ($SYSROOT/efi), so the mount survives switch_root:
@@ -67,8 +67,8 @@ set -u
 
 SYSROOT=/sysroot
 
-log()  { printf '<6>qforge-init: %s\n' "$*" >/dev/kmsg 2>/dev/null || :; }
-warn() { printf '<3>qforge-init: %s\n' "$*" >/dev/kmsg 2>/dev/null || :; }
+log()  { printf '<6>retroforge-init: %s\n' "$*" >/dev/kmsg 2>/dev/null || :; }
+warn() { printf '<3>retroforge-init: %s\n' "$*" >/dev/kmsg 2>/dev/null || :; }
 
 # Everything under here is pre-created in the cpio, so no mkdir is needed before /dev exists.
 mount -t proc     -o nosuid,noexec,nodev proc /proc
@@ -87,10 +87,10 @@ for _arg in $_cmdline; do
   case "$_arg" in
     root=*)          ROOTSPEC=${_arg#root=} ;;
     rootfstype=*)    ROOTFSTYPE=${_arg#rootfstype=} ;;
-    qforge.var=*)  VARSPEC=${_arg#qforge.var=} ;;
-    qforge.efi=*)  EFISPEC=${_arg#qforge.efi=} ;;
-    qforge.slot=*) SLOTSPEC=${_arg#qforge.slot=} ;;
-    qforge.splash=*) SPLASH=${_arg#qforge.splash=} ;;
+    retroforge.var=*)  VARSPEC=${_arg#retroforge.var=} ;;
+    retroforge.efi=*)  EFISPEC=${_arg#retroforge.efi=} ;;
+    retroforge.slot=*) SLOTSPEC=${_arg#retroforge.slot=} ;;
+    retroforge.splash=*) SPLASH=${_arg#retroforge.splash=} ;;
     steamos.efi=*)   EFISPEC_ALT=${_arg#steamos.efi=} ;;
   esac
 done
@@ -104,17 +104,17 @@ done
 # The drawer keeps running across switch_root. There is no systemd in this initramfs to kill it
 # and no unit to exempt: it is simply a background process whose binary and libraries the kernel
 # frees when the initramfs is dropped, which is harmless because it is statically linked and has
-# already read everything it needs into memory (see apps/qforge-splash/src/qforge-splash.c).
+# already read everything it needs into memory (see apps/retroforge-splash/src/retroforge-splash.c).
 # Its status and takeover files live on /run, which switch_root moves into the new root, so both
 # paths stay valid on the far side of the pivot.
 #
-# `qforge.splash=0` on the cmdline turns it off. That switch is on the CMDLINE and not in /etc
+# `retroforge.splash=0` on the cmdline turns it off. That switch is on the CMDLINE and not in /etc
 # on purpose: /etc does not exist yet at this point in boot, and on a board with no serial
 # console the ability to take the splash out of the picture is sometimes the only way to see a
 # kernel message that it would otherwise be covering.
 splash_start() {
   [ "$SPLASH" = 0 ] && { log "splash disabled on the cmdline"; return; }
-  [ -x /usr/lib/qforge/qforge-splash ] || { warn "splash binary missing from the initramfs"; return; }
+  [ -x /usr/lib/retroforge/retroforge-splash ] || { warn "splash binary missing from the initramfs"; return; }
 
   # The DPU binds asynchronously, so /dev/dri/card0 does not exist for the first ~3s of boot and
   # the drawer would find no device at all. Poll rather than sleep a fixed amount: the wait is
@@ -128,8 +128,8 @@ splash_start() {
   # neither exists still boots, just without a splash.
   [ -e /dev/dri/card0 ] || warn "no /dev/dri/card0 after 5s; the splash will try fbdev"
 
-  mkdir -p /run/qforge/splash
-  printf 'Starting QForge\n' >/run/qforge/splash/status
+  mkdir -p /run/retroforge/splash
+  printf 'Starting RetroForge\n' >/run/retroforge/splash/status
 
   # Rotation is deliberately NOT passed: the drawer reads the panel's own DRM `panel orientation`
   # property, which the kernel derives from the panel's devicetree `rotation`. That keeps the
@@ -139,15 +139,15 @@ splash_start() {
   # stderr goes to kmsg so that a splash that fails to start says why in the journal, readable
   # offline from the card ([[sm8650-no-uart]]). Without this the failure is a black screen and
   # nothing else.
-  /usr/lib/qforge/qforge-splash \
-      --image /usr/share/qforge/splash/logo.nds1 \
-      --font /usr/share/qforge/splash/font.ttf \
-      --status /run/qforge/splash/status \
-      --takeover /run/qforge/splash/takeover \
+  /usr/lib/retroforge/retroforge-splash \
+      --image /usr/share/retroforge/splash/logo.nds1 \
+      --font /usr/share/retroforge/splash/font.ttf \
+      --status /run/retroforge/splash/status \
+      --takeover /run/retroforge/splash/takeover \
       >/dev/kmsg 2>&1 &
 }
 splash_start
-# qforge.efi= wins when both are present. It comes from the generated grub.cfg, which knows
+# retroforge.efi= wins when both are present. It comes from the generated grub.cfg, which knows
 # which slot it is and therefore which partition to name; steamos.efi= is SteamOS's form, appended
 # by the bootloader from the partition it was chainloaded from. They should always agree, and when they do not it is
 # the config that is authoritative -- it is the file the update path installs alongside the root.
@@ -169,14 +169,14 @@ resolve() {
   return 1
 }
 
-# The slot letter for /run/qforge/boot. Stage 2 states it outright — it is generated per slot, so
+# The slot letter for /run/retroforge/boot. Stage 2 states it outright — it is generated per slot, so
 # it knows statically which one it is — and that is now the only thing that can tell us: the root=
 # spec it emits is a PARTUUID, which carries no slot letter at all.
 #
 # The PARTLABEL match is kept for one boot: an OLD stage-2 grub.cfg on the other slot's efi
 # partition, which has not been rewritten yet because post-install.sh only touches the slot it
 # just installed. Without it, booting back into a not-yet-updated slot reports slot='' and
-# qforge-bootctl mark-good treats a real slot boot as a dev boot — so boot-attempts is never
+# retroforge-bootctl mark-good treats a real slot boot as a dev boot — so boot-attempts is never
 # cleared and a healthy image gets marked bad.
 #
 # Empty on any other root (a dev boot) — which is exactly what mark-good needs to know.
@@ -186,8 +186,8 @@ case "$SLOTSPEC" in
 esac
 if [ -z "$SLOT" ]; then
   case "$ROOTSPEC" in
-    PARTLABEL=qforge-root-A) SLOT=A ;;
-    PARTLABEL=qforge-root-B) SLOT=B ;;
+    PARTLABEL=retroforge-root-A) SLOT=A ;;
+    PARTLABEL=retroforge-root-B) SLOT=B ;;
   esac
 fi
 
@@ -219,7 +219,7 @@ degrade() {
 # and swallow the device names we want to log.
 overlay_ok=0
 if [ -z "$VARSPEC" ]; then
-  degrade "no qforge.var= on the kernel cmdline"
+  degrade "no retroforge.var= on the kernel cmdline"
 elif ! VARDEV=$(resolve "$VARSPEC"); then
   degrade "var device '$VARSPEC' never appeared after 30s"
 elif ! mount -t ext4 "$VARDEV" "$SYSROOT/var"; then
@@ -240,11 +240,11 @@ else
 fi
 
 # ---------------------------------------------------------------------------------------------
-# The slot's efi partition at /efi (qforge.efi=PARTLABEL=, or SteamOS's steamos.efi=PARTUUID=)
+# The slot's efi partition at /efi (retroforge.efi=PARTLABEL=, or SteamOS's steamos.efi=PARTUUID=)
 # ---------------------------------------------------------------------------------------------
 # Either form names the partition the stage-2 GRUB was chainloaded from, so this mounts the
 # partition whose partsets name THIS image. post-install.sh
-# and qforge-bootctl need it (this-image reads partsets/self), and the mount persists across
+# and retroforge-bootctl need it (this-image reads partsets/self), and the mount persists across
 # switch_root because it is on the new root's filesystem.
 efi_ok=0
 if [ -z "$EFISPEC" ]; then
@@ -259,16 +259,16 @@ else
 fi
 
 # Hand the decision to the running system. /run is moved into the new root by switch_root, so
-# this survives the pivot. qforge-bootctl mark-good reads slot= to tell "a slot boot" from a
+# this survives the pivot. retroforge-bootctl mark-good reads slot= to tell "a slot boot" from a
 # "dev/cmdline boot" (nothing to confirm), and the fields are the first evidence when debugging
 # a boot offline.
-mkdir -p /run/qforge
+mkdir -p /run/retroforge
 { printf 'slot=%s\n'   "${SLOT}"
   printf 'source=%s\n' 'grub'
   printf 'root=%s\n'   "${ROOTDEV:-}"
   printf 'var=%s\n'    "${VARDEV:-}"
   printf 'efi=%s\n'    "${EFIDEV:-}"
-} >/run/qforge/boot 2>/dev/null || warn "cannot write /run/qforge/boot"
+} >/run/retroforge/boot 2>/dev/null || warn "cannot write /run/retroforge/boot"
 
 [ "$overlay_ok" -eq 1 ] || warn "DEGRADED: handing off to systemd on a writable, un-overlaid root"
 [ "$efi_ok" -eq 1 ] || warn "DEGRADED: /efi is not mounted — updates and boot confirmation will fail"

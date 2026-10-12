@@ -1,5 +1,5 @@
 # powerstation — ShadowBlip's performance-control D-Bus service, built FROM SOURCE via a
-# qforge-owned PKGBUILD (holo has no powerstation package). OpenGamepadUI's performance menu only
+# retroforge-owned PKGBUILD (holo has no powerstation package). OpenGamepadUI's performance menu only
 # speaks org.shadowblip.PowerStation; without this service it shows "Waiting for PowerStation".
 #
 # Pinned to a COMMIT on main rather than the v0.8.2 tag: main carries the drm.rs driver-query
@@ -8,7 +8,7 @@
 # cores, and the Adreno GPU (a platform device, no PCI ids) is found and clocked through devfreq.
 #
 # It owns the knobs it exposes: core online state (cpuN/online), cpufreq boost, and the GPU
-# devfreq range. qforge-powerd no longer touches any of them at runtime (it keeps the fan, the
+# devfreq range. retroforge-powerd no longer touches any of them at runtime (it keeps the fan, the
 # sched_ext scheduler and the suspend-time clamp, which saves and restores whatever was set).
 #
 # To bump: change _commit + sha256sums, re-apply the patches (drop any upstream merged), and

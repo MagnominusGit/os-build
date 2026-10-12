@@ -3,7 +3,7 @@
 # packages/mesa-android).
 #
 # WHY A SEPARATE FILE, and not a field in ./source.pin: packages/inputhash.sh hashes source.pin
-# into rootfs/manifest.lock's `qforge` rows, so anything in there is a claim that changing it
+# into rootfs/manifest.lock's `retroforge` rows, so anything in there is a claim that changing it
 # changes what gets BUILT. A mirror location cannot change that -- fetch-source.sh verifies the
 # tarball against the sha256 pinned in ./PKGBUILD no matter which host answered, and refuses
 # anything else. Keeping the value here means refreshing it costs neither a `make relock` nor a

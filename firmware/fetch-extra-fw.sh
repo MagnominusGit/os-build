@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge extra-firmware fetch — stage the VENDOR blobs that neither linux-firmware nor the
+# retroforge extra-firmware fetch — stage the VENDOR blobs that neither linux-firmware nor the
 # Nova-Deck/qcom-firmwares repo carries (today: the SM6115 MANGMI Air X's Himax touch firmware,
 # AW88261 amp calibration and WCN3950 Bluetooth), republished by ROCKNIX/extra-firmware.
 # Pinned by commit + per-file sha256 in firmware/EXTRA_FW.pin.
@@ -20,7 +20,7 @@ pin_hdr() { sed -n "s/^$1:[[:space:]]*//p" "$PIN" | head -1; }
 COMMIT="$(pin_hdr commit)"; BASE="$(pin_hdr base)"
 [ -n "$COMMIT" ] && [ -n "$BASE" ] || { echo "pin missing commit/base header" >&2; exit 1; }
 
-echo "[qforge] extra-firmware @ ${COMMIT:0:12} -> ${DEST#"$ROOT"/}"
+echo "[retroforge] extra-firmware @ ${COMMIT:0:12} -> ${DEST#"$ROOT"/}"
 mkdir -p "$DEST"
 n=0 fetched=0
 while read -r src dst sha _rest; do
@@ -45,4 +45,4 @@ while read -r src dst sha _rest; do
   echo "  ok   $src -> $dst"
   fetched=$((fetched + 1))
 done < "$PIN"
-echo "[qforge] $n firmware file(s) present in ${DEST#"$ROOT"/} ($fetched fetched this run)"
+echo "[retroforge] $n firmware file(s) present in ${DEST#"$ROOT"/} ($fetched fetched this run)"

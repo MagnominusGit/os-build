@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-# qforge internal install — PRE-FLIGHT, the spine as a child process, and the progress screen.
+# retroforge internal install — PRE-FLIGHT, the spine as a child process, and the progress screen.
 # Phase 5 of .claude/plans/internal-install.plan.md.
 #
 # THE UI DOES NOT INSTALL ANYTHING, and this is the file where that is easiest to break. It runs
-# installer/qforge-install and reads its output; every figure it puts on a screen was measured by
+# installer/retroforge-install and reads its output; every figure it puts on a screen was measured by
 # the program that will act on it — select-target.sh for the target, carve.sh `plan` for what the
 # carve does to it, device-env for the board. The one time a figure on a consent-adjacent screen
-# was derived independently it said "QForge will use the remaining 0 GiB" while the carve handed
+# was derived independently it said "RetroForge will use the remaining 0 GiB" while the carve handed
 # it 90853 MiB (Pocket ACE, 2026-08-21). A second copy of a rule is how the halves drift apart.
 import os
 import time
@@ -20,25 +20,25 @@ from uipad import TOKEN_BACK, TOKEN_QUIT, log
 # read a partition table and reason about it: select-target.sh says what the target is, carve.sh
 # `plan` says what the carve would do to it, device-env says what board this is. That is not
 # ceremony -- the one time a figure on a consent-adjacent screen was derived independently, it said
-# "QForge will use the remaining 0 GiB" while the carve went on to hand it 90853 MiB (Pocket ACE,
+# "RetroForge will use the remaining 0 GiB" while the carve went on to hand it 90853 MiB (Pocket ACE,
 # 2026-08-21). A second copy of a rule is how the two halves drift apart.
-DEVICE_ENV = os.environ.get("QFORGE_DEVICE_ENV", "/usr/lib/qforge/device-env")
+DEVICE_ENV = os.environ.get("RETROFORGE_DEVICE_ENV", "/usr/lib/retroforge/device-env")
 SELECT_TARGET = os.environ.get(
-    "QFORGE_SELECT_TARGET", "/usr/lib/qforge/install/select-target.sh")
-CARVE = os.environ.get("QFORGE_CARVE", "/usr/lib/qforge/install/carve.sh")
-SPINE = os.environ.get("QFORGE_SPINE", "/usr/lib/qforge/install/qforge-install")
+    "RETROFORGE_SELECT_TARGET", "/usr/lib/retroforge/install/select-target.sh")
+CARVE = os.environ.get("RETROFORGE_CARVE", "/usr/lib/retroforge/install/carve.sh")
+SPINE = os.environ.get("RETROFORGE_SPINE", "/usr/lib/retroforge/install/retroforge-install")
 VERIFY_INSTALL = os.environ.get(
-    "QFORGE_VERIFY_INSTALL", "/usr/lib/qforge/install/verify-install.sh")
+    "RETROFORGE_VERIFY_INSTALL", "/usr/lib/retroforge/install/verify-install.sh")
 # WHERE THE BYTES COME FROM. The OS bundle is resolved from the update channel at install time by
 # installer/release-info, so any medium installs the current release. /home needs nothing from
 # anywhere: the spine stages an empty player home exactly as the card does.
 #
 # The bundle remains overridable, for the hardware stager (installer/hw-install.sh serves one off a
 # laptop) and for the suite.
-RELEASE_INFO = os.environ.get("QFORGE_RELEASE_INFO", "/usr/lib/qforge/install/release-info")
-BUNDLE = os.environ.get("QFORGE_INSTALL_BUNDLE", "")
+RELEASE_INFO = os.environ.get("RETROFORGE_RELEASE_INFO", "/usr/lib/retroforge/install/release-info")
+BUNDLE = os.environ.get("RETROFORGE_INSTALL_BUNDLE", "")
 
-UD_GIB_DEFAULT = int(os.environ.get("QFORGE_UD_GIB", "16"))
+UD_GIB_DEFAULT = int(os.environ.get("RETROFORGE_UD_GIB", "16"))
 UD_GIB_MIN = 4          # carve.sh has its own ANDROID_FLOOR_GIB; this is the UI's coarse guard
 UD_GIB_STEP = 4
 
@@ -63,7 +63,7 @@ def kv(text):
     Not `.strip("'\\"")`. device-env emits with `printf '%s=%q\\n'`, and bash's %q escapes rather
     than quotes when it can: a board called `AYANEO Pocket S2` arrives as `AYANEO\\ Pocket\\ S2`.
     Stripping quotes leaves the backslash in, and it goes on the panel -- measured on a real Pocket
-    S2, 2026-08-22, where the pre-flight title read "Install QForge on AYANEO\\ Pocket\\ S2".
+    S2, 2026-08-22, where the pre-flight title read "Install RetroForge on AYANEO\\ Pocket\\ S2".
     Every offline stub had emitted the single-quoted form, which is the other thing %q produces.
     """
     import shlex
@@ -108,7 +108,7 @@ def plan_carve(disk, gib):
     """carve.sh plan — the resulting free space and the list of partitions it will destroy."""
     rc, out = run_tool([CARVE, "plan", disk, str(gib)])
     if rc != 0:
-        return {"QFORGE_GIB": "unknown", "REPLACES_OURS": "unknown", "destroy": [], "error": out}
+        return {"RETROFORGE_GIB": "unknown", "REPLACES_OURS": "unknown", "destroy": [], "error": out}
     fields = kv(out)
     destroy = []
     for line in out.splitlines():
@@ -117,7 +117,7 @@ def plan_carve(disk, gib):
             if len(parts) == 3:
                 destroy.append({"index": parts[0], "name": parts[1], "fate": parts[2]})
     return {
-        "QFORGE_GIB": fields.get("QFORGE_GIB", "unknown"),
+        "RETROFORGE_GIB": fields.get("RETROFORGE_GIB", "unknown"),
         "REPLACES_OURS": fields.get("REPLACES_OURS", "unknown"),
         "destroy": destroy,
         "error": "",
@@ -133,7 +133,7 @@ def resolve_release():
 
     THE FACTS BELONG TO release-info AND THE WORDS TO THE SCREEN, the same split as netcfg. All this
     does is prefer the environment over the server: the hardware stager serves a bundle off a laptop
-    and names it in QFORGE_INSTALL_BUNDLE.
+    and names it in RETROFORGE_INSTALL_BUNDLE.
 
     Only a resolved release is remembered. Every failure here is one a person can act on -- the
     server was not up yet, the channel had nothing published, DNS was still settling -- and a cached
@@ -225,7 +225,7 @@ def gather_preflight():
     name = "this device"
     drc, dout = run_tool([DEVICE_ENV])
     if drc == 0:
-        name = kv(dout).get("QFORGE_DEVICE_NAME", name)
+        name = kv(dout).get("RETROFORGE_DEVICE_NAME", name)
     facts = {
         "device": name,
         "disk": disk,
@@ -253,7 +253,7 @@ def release_facts():
 # edit on another computer and a reboot. That price is why "network failed" is not an option.
 #
 # The words are here and the facts are in installer/netcfg, the same split the consent gate uses.
-NETCFG = os.environ.get("QFORGE_NETCFG", "/usr/lib/qforge/install/netcfg")
+NETCFG = os.environ.get("RETROFORGE_NETCFG", "/usr/lib/retroforge/install/netcfg")
 
 
 def net_diagnose(action="diagnose"):
@@ -283,14 +283,14 @@ class NetworkScreen:
         # THE STEPS ARE NUMBERED AND THE FILE IS REALLY THERE. This said "copy wifi.conf.example
         # next to it", and until 2026-08-24 no such file existed anywhere -- not in the tree, not on
         # any medium. Instructions naming a file that is not there read as a fault in the person
-        # following them. installer/mkimage.sh now writes it to /qforge/ on the medium's boot
+        # following them. installer/mkimage.sh now writes it to /retroforge/ on the medium's boot
         # partition, which is typed 0700 precisely so Windows and macOS will show it.
         "no-conf": (
             "No Wi-Fi settings on this card",
-            "The installer downloads QForge over the network, and it found no {path} telling it "
+            "The installer downloads RetroForge over the network, and it found no {path} telling it "
             "which network to join.",
             "Power off and take the card out. On another computer, open the NDINSTALLER volume and "
-            "look in the qforge folder: copy wifi.conf.example to a file named wifi.conf, open "
+            "look in the retroforge folder: copy wifi.conf.example to a file named wifi.conf, open "
             "the copy, and put your network name and password in it. Put the card back and switch "
             "on. Or plug in a USB-C Ethernet adapter -- that needs no file at all.",
         ),
@@ -402,7 +402,7 @@ class NetworkScreen:
                  "The installer will connect to '%s' using the password stored on the card. The "
                  "password itself is never shown." % ssid),
                 ("If that is not your network",
-                 "Cancel, power off, and edit qforge/wifi.conf on another computer. A card used "
+                 "Cancel, power off, and edit retroforge/wifi.conf on another computer. A card used "
                  "for an earlier install can still be carrying its old network."),
             ]
             buttons = [{"pos": "S", "label": "Join"}, {"pos": "SELECT", "label": "Cancel"}]
@@ -498,7 +498,7 @@ class PreflightScreen:
         f, d = self.facts, self.facts["disk_facts"]
         destroy = self.plan["destroy"]
         # ONE LINE PER PARTITION DOES NOT FIT, and this screen is the one that must. HW 2026-08-25,
-        # Pocket ACE with QForge already installed: eight partitions at one line each, under a
+        # Pocket ACE with RetroForge already installed: eight partitions at one line each, under a
         # heading, above four more blocks, ran off the bottom of the panel and collided with the
         # SELECT row -- worse after the type scale went up, which it did because these screens were
         # too small to read.
@@ -535,9 +535,9 @@ class PreflightScreen:
             # losing, so it is compacted, never shortened. The wrapper breaks the long group.
             lost = "\n".join("%s:  %s" % (fate, ",  ".join(groups[fate])) for fate in order)
         # WHAT KIND OF INSTALL THIS IS, said before anything else. HW 2026-08-24, Pocket ACE with
-        # QForge already on its internal disk: the screen listed our own eight partitions in the
+        # RetroForge already on its internal disk: the screen listed our own eight partitions in the
         # destroy list and never said the word reinstall, so nothing on it distinguished "install
-        # alongside Android" from "replace the QForge that is already here". The mode was in the
+        # alongside Android" from "replace the RetroForge that is already here". The mode was in the
         # facts the whole time and simply was not drawn.
         #
         # AND THE PLAN REALLY IS A FRESH CARVE. select-target.sh reports MODE=reinstall when our
@@ -548,7 +548,7 @@ class PreflightScreen:
         # choice does not exist yet.
         if f.get("mode") == "reinstall":
             blocks = [
-                ("This device already has QForge",
+                ("This device already has RetroForge",
                  "Everything currently installed will be erased and replaced, INCLUDING /home -- "
                  "your games, saves and settings. This installer cannot yet repair an existing "
                  "install while keeping them; it only does a full replacement."),
@@ -556,13 +556,13 @@ class PreflightScreen:
         else:
             blocks = [
                 ("This device is running Android",
-                 "QForge will be installed alongside it. Android keeps the space you choose "
+                 "RetroForge will be installed alongside it. Android keeps the space you choose "
                  "below, and everything else on that partition is erased."),
             ]
         blocks += [
             ("Target", "%s  %s  %s GiB" % (f["disk"], d["model"], d["size_gib"])),
             ("Android keeps", "%s GiB   (left / right to change)" % self.gib),
-            ("QForge gets", "%s GiB" % self.plan["QFORGE_GIB"]),
+            ("RetroForge gets", "%s GiB" % self.plan["RETROFORGE_GIB"]),
             (lost_head, lost),
             ("To install", self.to_install()),
         ]
@@ -570,8 +570,8 @@ class PreflightScreen:
             "screen": "preflight",
             # The title carries it too: the first block explains, but a person glancing at the panel
             # reads the heading, and "Install" and "Replace" are different promises.
-            "title": ("Replace the QForge on %s" if f.get("mode") == "reinstall"
-                      else "Install QForge on %s") % f["device"],
+            "title": ("Replace the RetroForge on %s" if f.get("mode") == "reinstall"
+                      else "Install RetroForge on %s") % f["device"],
             "blocks": blocks,
             "diamonds": [],
             "prompt": "",
@@ -586,13 +586,13 @@ class PreflightScreen:
 # =================================================================================================
 # the install itself — the spine as a subprocess, and the bar over it
 # =================================================================================================
-# THE UI DOES NOT INSTALL ANYTHING. It runs installer/qforge-install and reads its output, which is
+# THE UI DOES NOT INSTALL ANYTHING. It runs installer/retroforge-install and reads its output, which is
 # what keeps the orchestrator the testable spine and this a view. Two things come back on that pipe:
 #
-#   [qforge-install] == <step> ==     the step markers the spine already prints
+#   [retroforge-install] == <step> ==     the step markers the spine already prints
 #          NN% <message>                rauc's own progress, printed by `rauc install`
 #
-# The plan said to reuse qforge-update's D-Bus subscription for the second one. That is the right
+# The plan said to reuse retroforge-update's D-Bus subscription for the second one. That is the right
 # call THERE, where the client talks to the system rauc; it is the wrong one here, because the rauc
 # the spine drives lives on the PRIVATE system bus rauc-session.sh starts for the occasion, and the
 # UI would have to find that bus to subscribe to it. Reading the percentage off the pipe we already
@@ -610,7 +610,7 @@ PHASES = [
     ("CONFIRM", "Waiting for you"),
     ("carve", "Repartitioning"),
     ("filesystems", "Creating filesystems"),
-    ("root slot", "Installing QForge"),
+    ("root slot", "Installing RetroForge"),
     ("/home", "Setting up /home"),
     ("efi-a / efi-b", "Writing the boot slots"),
     ("ESP", "Writing the boot partition"),
@@ -809,7 +809,7 @@ class VerifyRun(ChildLines):
 
 
 class SpineRun(ChildLines):
-    """installer/qforge-install as a child process, read without blocking the frame."""
+    """installer/retroforge-install as a child process, read without blocking the frame."""
 
     def __init__(self, gib, sock_path, bundle, intent):
         import subprocess
@@ -817,9 +817,9 @@ class SpineRun(ChildLines):
         env = dict(os.environ)
         # THE SPINE MUST ASK US FOR CONSENT. $CONFIRM names who renders; pointing it at our shim is
         # what puts the gate on this screen instead of on a terminal nobody is looking at.
-        env["QFORGE_CONFIRM"] = os.path.join(
+        env["RETROFORGE_CONFIRM"] = os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "confirm-ui")
-        env["QFORGE_UI_SOCK"] = sock_path
+        env["RETROFORGE_UI_SOCK"] = sock_path
         # THE URL COMES FROM THE SCREEN THAT WAS SHOWN, not from a second call to release-info and
         # not from the module's environment defaults. Whatever the pre-flight printed under "To
         # install" is what gets installed: resolving again here would be a second copy of the rule,
@@ -827,8 +827,8 @@ class SpineRun(ChildLines):
         # between the two calls) -- the same drift the screen's every-figure-is-measured rule exists
         # to prevent.
         # --intent IS NOT OPTIONAL, and it was until hardware said so. On a disk that already
-        # carries QForge the spine refuses to pick for us -- "a disk that already carries a
-        # qforge install admits three different answers and this script may not pick one" -- so an
+        # carries RetroForge the spine refuses to pick for us -- "a disk that already carries a
+        # retroforge install admits three different answers and this script may not pick one" -- so an
         # install on such a disk died at select-target, every time, with the UI having done
         # everything else right (Pocket ACE, 2026-08-25). This argument existed and nothing ever
         # passed it, which is why a REQUIRED parameter now rather than a default: the same shape as
@@ -944,11 +944,11 @@ class ProgressScreen:
         # Writing the install record", each twice). `rows` is the renderer; `blocks` carries only
         # what has no row of its own.
         blocks = []
-        title = "Installing QForge"
+        title = "Installing RetroForge"
         note = "Do not power the device off."
         buttons = []
         if self.rc == 0:
-            title = "QForge is installed"
+            title = "RetroForge is installed"
             # THE CARD MUST NOT COME OUT UNTIL THE CHECK HAS SPOKEN. verify-install.sh is the only
             # thing that reads back what was written, and its own header asks to be run "BEFORE the
             # card comes out, while there is still a shell that can fix things" -- so telling the
@@ -971,7 +971,7 @@ class ProgressScreen:
                                     "nothing has read back what was written.\n"
                                     + "\n".join(self.verify_tail[-4:]))]
             else:
-                title = "QForge is installed, but the check did not pass"
+                title = "RetroForge is installed, but the check did not pass"
                 note = ("Do not remove the SD card. Re-running the installer is the recovery.")
                 blocks = blocks + [("What did not check out", "\n".join(self.verify_bad))]
                 buttons = [{"pos": "S", "label": "Try again"},

@@ -57,34 +57,34 @@ bad() { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
 #   $SB/efi   = the RUNNING slot's efi partition, mounted at $EFI (SteamOS/partsets)
 #   $SB/esp   = the shared ESP, mounted at $ESP (SteamOS/conf, EFI/BOOT/bootaa64.efi, ...)
 #   $SB/var   = the RUNNING /var
-#   $SB/fs/qforge-root-<s>, qforge-var-<s>, qforge-efi-<s> = the six slot filesystems
+#   $SB/fs/retroforge-root-<s>, retroforge-var-<s>, retroforge-efi-<s> = the six slot filesystems
 
 sandbox() {
   SB="$(mktemp -d)"
   mkdir -p "$SB"/{bin,dev,fs,log,run,var,mnt,efimnt} \
            "$SB/esp/SteamOS/conf" \
-           "$SB/esp/EFI/BOOT" "$SB/esp/EFI/qforge" \
+           "$SB/esp/EFI/BOOT" "$SB/esp/EFI/retroforge" \
            "$SB/efi/SteamOS/partsets"
   : >"$SB/log/calls"
 
-  touch "$SB"/dev/qforge-{root,var,efi}-{A,B}
+  touch "$SB"/dev/retroforge-{root,var,efi}-{A,B}
   for s in A B; do
-    mkdir -p "$SB/fs/qforge-root-$s/usr/lib/qforge/boot/fonts" \
-             "$SB/fs/qforge-efi-$s/EFI/steamos" \
-             "$SB/fs/qforge-efi-$s/SteamOS" \
-             "$SB/fs/qforge-var-$s/lib/qforge"
+    mkdir -p "$SB/fs/retroforge-root-$s/usr/lib/retroforge/boot/fonts" \
+             "$SB/fs/retroforge-efi-$s/EFI/steamos" \
+             "$SB/fs/retroforge-efi-$s/SteamOS" \
+             "$SB/fs/retroforge-var-$s/lib/retroforge"
     # Stage-2 + stage-1 boot files inside the installed roots, so the hook's source files exist.
     # grub-<slot>.cfg is lowercase (that is boot/grub.sh's output and what the hook looks up).
-    printf 'GRUB-%s\n'    "$s" >"$SB/fs/qforge-root-$s/usr/lib/qforge/boot/grubaa64.efi"
-    printf 'CFG-%s\n'     "$s" >"$SB/fs/qforge-root-$s/usr/lib/qforge/boot/grub-${s,,}.cfg"
-    printf 'FONT-%s\n'    "$s" >"$SB/fs/qforge-root-$s/usr/lib/qforge/boot/fonts/dejavu-mono.pf2"
-    printf 'FONT-%s\n'    "$s" >"$SB/fs/qforge-root-$s/usr/lib/qforge/boot/fonts/default.pf2"
-    printf 'STEAMCL-%s\n' "$s" >"$SB/fs/qforge-root-$s/usr/lib/qforge/boot/steamcl.efi"
-    printf '1.%s\n'       "$s" >"$SB/fs/qforge-root-$s/usr/lib/qforge/boot/steamcl-version"
+    printf 'GRUB-%s\n'    "$s" >"$SB/fs/retroforge-root-$s/usr/lib/retroforge/boot/grubaa64.efi"
+    printf 'CFG-%s\n'     "$s" >"$SB/fs/retroforge-root-$s/usr/lib/retroforge/boot/grub-${s,,}.cfg"
+    printf 'FONT-%s\n'    "$s" >"$SB/fs/retroforge-root-$s/usr/lib/retroforge/boot/fonts/dejavu-mono.pf2"
+    printf 'FONT-%s\n'    "$s" >"$SB/fs/retroforge-root-$s/usr/lib/retroforge/boot/fonts/default.pf2"
+    printf 'STEAMCL-%s\n' "$s" >"$SB/fs/retroforge-root-$s/usr/lib/retroforge/boot/steamcl.efi"
+    printf '1.%s\n'       "$s" >"$SB/fs/retroforge-root-$s/usr/lib/retroforge/boot/steamcl-version"
     # Stale stage 2 on the target efi, so a missed refresh is visible rather than invisible.
-    printf 'OLD-EFI-GRUB-%s\n' "$s" >"$SB/fs/qforge-efi-$s/EFI/steamos/grubaa64.efi"
+    printf 'OLD-EFI-GRUB-%s\n' "$s" >"$SB/fs/retroforge-efi-$s/EFI/steamos/grubaa64.efi"
     # Stale state on the target /var, so a missing reformat is visible rather than invisible.
-    printf 'stale\n' >"$SB/fs/qforge-var-$s/lib/qforge/leftover-from-the-last-install"
+    printf 'stale\n' >"$SB/fs/retroforge-var-$s/lib/retroforge/leftover-from-the-last-install"
   done
 
   # Partsets on the RUNNING efi. Disk-derived content for A/B/dev so the refresh is assertable.
@@ -96,8 +96,8 @@ sandbox() {
   : >"$SB/esp/SteamOS/conf/A.conf"
   : >"$SB/esp/SteamOS/conf/B.conf"
   printf 'OLD-STEAMCL\n' >"$SB/esp/EFI/BOOT/bootaa64.efi"
-  printf 'OLD-STEAMCL\n' >"$SB/esp/EFI/qforge/steamcl.efi"
-  printf '0.9\n'         >"$SB/esp/EFI/qforge/steamcl-version"
+  printf 'OLD-STEAMCL\n' >"$SB/esp/EFI/retroforge/steamcl.efi"
+  printf '0.9\n'         >"$SB/esp/EFI/retroforge/steamcl-version"
 
   seed_var
   write_stubs
@@ -114,11 +114,11 @@ set_efi() {  # <booted-image>  — writes partsets/self + /other on the running 
 
 # A running /var with the pieces that have to survive an update, plus the two that must not.
 seed_var() {
-  mkdir -p "$SB/var/lib/qforge" \
+  mkdir -p "$SB/var/lib/retroforge" \
            "$SB/var/lib/overlays/etc/upper/NetworkManager/system-connections" \
            "$SB/var/lib/overlays/etc/work" "$SB/var/lib/systemd"
-  printf 'a\n'          >"$SB/var/lib/qforge/slot"
-  printf 'de:ad:be:ef:00:01\n' >"$SB/var/lib/qforge/mac-wifi"
+  printf 'a\n'          >"$SB/var/lib/retroforge/slot"
+  printf 'de:ad:be:ef:00:01\n' >"$SB/var/lib/retroforge/mac-wifi"
   printf '7070e56b\n'   >"$SB/var/lib/overlays/etc/upper/machine-id"
   printf '[wifi]\n'     >"$SB/var/lib/overlays/etc/upper/NetworkManager/system-connections/home.nmconnection"
   printf 'ssh-ed25519\n' >"$SB/var/lib/overlays/etc/upper/ssh_host_ed25519_key"
@@ -160,7 +160,7 @@ exit 0
 EOF
   # `btrfs filesystem label` -- the second half of un-sharing the target's identity. The bundle
   # image is slot A's byte for byte, so a raw write leaves BOTH partitions labelled
-  # qforge-root-A until this runs.
+  # retroforge-root-A until this runs.
   cat >"$SB/bin/btrfs" <<'EOF'
 #!/bin/sh
 echo "btrfs $*" >>"$SB/log/calls"
@@ -268,8 +268,8 @@ expect_order() {  # <earlier> <later>
 }
 
 # Contents of the target slot's filesystems, i.e. what the updated slot will actually boot with.
-tvar() { printf '%s' "$SB/fs/qforge-var-$1"; }
-tefi() { printf '%s' "$SB/fs/qforge-efi-$1"; }
+tvar() { printf '%s' "$SB/fs/retroforge-var-$1"; }
+tefi() { printf '%s' "$SB/fs/retroforge-efi-$1"; }
 expect_file() {  # <path> <content>
   [ -f "$1" ] || { bad "missing on the target: ${1#"$SB/fs/"}"; return; }
   local got; got=$(cat "$1")
@@ -294,9 +294,9 @@ t "the-target-is-the-slot-we-did-not-boot"
 run
 expect_rc 0
 expect_has "target slot B"
-expect_call 'btrfstune .*qforge-root-B'
-expect_call 'btrfs filesystem label .*qforge-root-B qforge-root-B'
-expect_call 'mkfs.ext4 .*qforge-var-B'
+expect_call 'btrfstune .*retroforge-root-B'
+expect_call 'btrfs filesystem label .*retroforge-root-B retroforge-root-B'
+expect_call 'mkfs.ext4 .*retroforge-var-B'
 done_
 
 t "booting-b-targets-a"
@@ -304,9 +304,9 @@ set_efi B
 run
 expect_rc 0
 expect_has "target slot A"
-expect_call 'btrfstune .*qforge-root-A'
-expect_call 'btrfs filesystem label .*qforge-root-A qforge-root-A'
-expect_call 'mkfs.ext4 .*qforge-var-A'
+expect_call 'btrfstune .*retroforge-root-A'
+expect_call 'btrfs filesystem label .*retroforge-root-A retroforge-root-A'
+expect_call 'mkfs.ext4 .*retroforge-var-A'
 done_
 
 t "the-running-slot-is-never-touched"
@@ -314,9 +314,9 @@ t "the-running-slot-is-never-touched"
 # the suite would notice, because every other assertion is about the target.
 run
 expect_rc 0
-expect_no_call 'qforge-var-A'
-expect_no_call 'qforge-root-A'
-expect_no_call 'qforge-efi-A'
+expect_no_call 'retroforge-var-A'
+expect_no_call 'retroforge-root-A'
+expect_no_call 'retroforge-efi-A'
 done_
 
 t "rauc-disagreeing-is-fatal"
@@ -333,7 +333,7 @@ t "rauc-agreeing-proceeds"
 RAUC_SLOTS="rootfs.1"
 run
 expect_rc 0
-expect_call 'mkfs.ext4 .*qforge-var-B'
+expect_call 'mkfs.ext4 .*retroforge-var-B'
 done_
 
 t "an-unrecognised-rauc-slot-name-is-not-a-veto"
@@ -342,7 +342,7 @@ t "an-unrecognised-rauc-slot-name-is-not-a-veto"
 RAUC_SLOTS="rootfs.9"
 run
 expect_rc 0
-expect_call 'mkfs.ext4 .*qforge-var-B'
+expect_call 'mkfs.ext4 .*retroforge-var-B'
 done_
 
 t "a-boot-that-resolved-no-slot-is-refused"
@@ -365,7 +365,7 @@ expect_no_call 'mkfs.ext4'
 done_
 
 t "a-missing-slot-device-is-refused-before-anything-is-touched"
-rm -f "$SB/dev/qforge-var-B"
+rm -f "$SB/dev/retroforge-var-B"
 run
 expect_rc 1
 expect_has "no block device"
@@ -396,7 +396,7 @@ t "var-is-reformatted-before-it-is-copied-into"
 run
 expect_rc 0
 expect_order 'mkfs.ext4' 'rsync'
-expect_order 'mkfs.ext4' "mount $SB/dev/qforge-var-B"
+expect_order 'mkfs.ext4' "mount $SB/dev/retroforge-var-B"
 done_
 
 t "the-target-var-is-unmounted-before-the-root-is-mounted"
@@ -437,17 +437,17 @@ done_
 t "the-reformat-drops-the-previous-installs-state"
 run
 expect_rc 0
-expect_absent "$(tvar B)/lib/qforge/leftover-from-the-last-install"
-expect_call 'mkfs.ext4 .*-L qforge-var-B'
+expect_absent "$(tvar B)/lib/retroforge/leftover-from-the-last-install"
+expect_call 'mkfs.ext4 .*-L retroforge-var-B'
 done_
 
 t "the-slot-witness-is-rewritten-to-the-target"
-# /var/lib/qforge/slot records which image this slot is, in the bootconf naming (A/B). Copied
+# /var/lib/retroforge/slot records which image this slot is, in the bootconf naming (A/B). Copied
 # verbatim it would make the target agree with a lie, and it must therefore be written AFTER the
 # wholesale copy, not before. The copy brought slot=a; the witness must be B.
 run
 expect_rc 0
-expect_file "$(tvar B)/lib/qforge/slot" 'B'
+expect_file "$(tvar B)/lib/retroforge/slot" 'B'
 done_
 
 t "the-mac-seed-does-not-survive-the-copy"
@@ -456,7 +456,7 @@ t "the-mac-seed-does-not-survive-the-copy"
 # the copy just carried over — same id, same MAC, so a healthy device sees no change.
 run
 expect_rc 0
-expect_absent "$(tvar B)/lib/qforge/mac-wifi"
+expect_absent "$(tvar B)/lib/retroforge/mac-wifi"
 expect_file "$(tvar B)/lib/overlays/etc/upper/machine-id" '7070e56b'
 done_
 
@@ -478,7 +478,7 @@ t "the-stage-2-comes-out-of-the-new-root"
 # makes the pairing true by construction. The target efi started with stale OLD-EFI-GRUB content.
 run
 expect_rc 0
-expect_call 'mount -o ro .*qforge-root-B'
+expect_call 'mount -o ro .*retroforge-root-B'
 expect_file "$(tefi B)/EFI/steamos/grubaa64.efi" 'GRUB-B'
 expect_file "$(tefi B)/EFI/steamos/grub.cfg" 'CFG-B'
 expect_file "$(tefi B)/EFI/steamos/fonts/dejavu-mono.pf2" 'FONT-B'
@@ -527,9 +527,9 @@ t "a-missing-hasher-dies-before-anything-destructive"
 #
 # It has to fire before step 0. By the use site in step 3 the target's fsid is randomised and its
 # /var reformatted, so dying there leaves an unbootable slot and a run that cannot simply be redone.
-run SHA256=qforge-no-such-hasher
+run SHA256=retroforge-no-such-hasher
 expect_rc 1
-expect_has "qforge-no-such-hasher is missing"
+expect_has "retroforge-no-such-hasher is missing"
 expect_no_call 'btrfstune'              # step 1 -- nothing may have been touched
 expect_no_call 'mkfs.ext4'              # step 2
 expect_no_call 'BC set-mode B reboot'   # step 4 -- and nothing armed
@@ -574,7 +574,7 @@ expect_esp EFI/BOOT/bootaa64.efi 'OLD-STEAMCL'
 done_
 
 t "a-root-with-no-stage-2-is-fatal-and-leaves-the-esp-alone"
-rm -f "$SB/fs/qforge-root-B/usr/lib/qforge/boot/grubaa64.efi"
+rm -f "$SB/fs/retroforge-root-B/usr/lib/retroforge/boot/grubaa64.efi"
 run
 expect_rc 1
 expect_has "carries no stage-2 GRUB"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge RAUC bundle generator — Phase 4.
+# retroforge RAUC bundle generator — Phase 4.
 #
 # Wraps the assembled read-only root (rootfs/assemble-rootfs.sh) into a signed RAUC
 # update bundle for OTA. RAUC computes the rootfs hash/size and signs the bundle; the
@@ -11,18 +11,18 @@
 # release — production bundles must be signed with the release key, see ota/gen-signing-ca.sh).
 #
 # Run inside the build image (needs rauc + openssl):
-#   docker run --rm -v "$PWD":/src -w /src qforge-build ota/genbundle.sh
+#   docker run --rm -v "$PWD":/src -w /src retroforge-build ota/genbundle.sh
 #
 # THERE IS NO VERSION ARGUMENT, deliberately, and this is the second version of this script.
 # The first took one and defaulted it to today's date. That made the bundle's version and the
-# IMAGE's version (/etc/qforge-release, stamped by rootfs/assemble-rootfs.sh from
-# QFORGE_VERSION) two independent strings — and the OTA client decides whether an update is
+# IMAGE's version (/etc/retroforge-release, stamped by rootfs/assemble-rootfs.sh from
+# RETROFORGE_VERSION) two independent strings — and the OTA client decides whether an update is
 # available by comparing exactly those two. Compared across unrelated namespaces, the answer was
 # meaningless: a device could be offered its own build forever, or never offered a real one.
 #
 # So the identity is not passed in, it is READ BACK OUT of the image being wrapped, from the
 # sidecar the assembler drops beside it. The bundle cannot name a version its payload does not
-# carry, because there is only one place the name comes from. Set QFORGE_VERSION before building
+# carry, because there is only one place the name comes from. Set RETROFORGE_VERSION before building
 # the rootfs; by the time the bytes exist, their identity is already decided.
 set -euo pipefail
 
@@ -33,7 +33,7 @@ ROOTFS="$IMGDIR/rootfs.img"
 RELEASE="$IMGDIR/rootfs.release"
 TEMPLATE="$ROOT/ota/rauc/manifest.raucm.in"
 
-command -v rauc >/dev/null 2>&1 || { echo "rauc not found (run inside qforge-build)" >&2; exit 1; }
+command -v rauc >/dev/null 2>&1 || { echo "rauc not found (run inside retroforge-build)" >&2; exit 1; }
 [ -f "$ROOTFS" ]   || { echo "no rootfs image: $ROOTFS (run rootfs/assemble-rootfs.sh first)" >&2; exit 1; }
 [ -f "$TEMPLATE" ] || { echo "no manifest template: $TEMPLATE" >&2; exit 1; }
 # An out/ tree from before the sidecar existed also lands here. Re-assembling is the fix in both
@@ -46,17 +46,17 @@ command -v rauc >/dev/null 2>&1 || { echo "rauc not found (run inside qforge-bui
 }
 
 field() { sed -n "s/^$1=//p" "$RELEASE" | tail -1; }
-IMG_VERSION="$(field QFORGE_VERSION)"
-IMG_BUILD="$(field QFORGE_BUILD)"
-IMG_GIT="$(field QFORGE_GIT)"
+IMG_VERSION="$(field RETROFORGE_VERSION)"
+IMG_BUILD="$(field RETROFORGE_BUILD)"
+IMG_GIT="$(field RETROFORGE_GIT)"
 # dev|release. Read back like everything else rather than re-derived from this process's environment
 # — genbundle.sh may be wrapping an image assembled by an entirely different invocation, and the
 # question "was this built as a test image?" is only answerable by the bytes being wrapped. Empty on
 # an image assembled before this field existed, which ota/publish-bundle.sh treats as "not release".
-IMG_MODE="$(field QFORGE_MODE)"
+IMG_MODE="$(field RETROFORGE_MODE)"
 
 # The identity rule, and it MUST stay in lockstep with identity_of() in rootfs/overlay/usr/bin/
-# qforge-update: the version when the build has a real one, the build timestamp otherwise. A local
+# retroforge-update: the version when the build has a real one, the build timestamp otherwise. A local
 # build renders VERSION as the literal `dev`, which every dev image shares — keying on it would make
 # two different dev bundles look like the same update, and duplicate detection would suppress the
 # second one. Never a bare date (two builds a day collide), never a constant on a dev build.
@@ -74,17 +74,17 @@ case "$VERSION" in
     exit 1 ;;
 esac
 
-BUNDLE="$IMGDIR/qforge-${VERSION}.raucb"
+BUNDLE="$IMGDIR/retroforge-${VERSION}.raucb"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 CERT="${RAUC_CERT:-}"; KEY="${RAUC_KEY:-}"
 if [ -z "$CERT" ] || [ -z "$KEY" ]; then
-  echo "[qforge] no RAUC_CERT/RAUC_KEY — minting an ephemeral dev cert (NOT for release)"
+  echo "[retroforge] no RAUC_CERT/RAUC_KEY — minting an ephemeral dev cert (NOT for release)"
   CERT="$work/dev-cert.pem"; KEY="$work/dev-key.pem"
   openssl req -x509 -newkey rsa:2048 -nodes -keyout "$KEY" -out "$CERT" \
-    -days 7 -subj "/O=qforge/CN=qforge-dev" >/dev/null 2>&1
+    -days 7 -subj "/O=retroforge/CN=retroforge-dev" >/dev/null 2>&1
 fi
 
 # Bundle content dir: manifest (placeholders filled) + the rootfs image.
@@ -97,8 +97,8 @@ sed -e "s/@VERSION@/$VERSION/g" \
 cp "$ROOTFS" "$content/rootfs.img"
 
 rm -f "$BUNDLE"
-echo "[qforge] bundling v$VERSION (build $IMG_BUILD, git $IMG_GIT, mode ${IMG_MODE:-unknown}) -> ${BUNDLE#"$ROOT"/}"
-[ "$IMG_MODE" = release ] || echo "[qforge] NOTE: mode='${IMG_MODE:-unknown}' — installable, but ota/publish-bundle.sh will refuse to publish it"
+echo "[retroforge] bundling v$VERSION (build $IMG_BUILD, git $IMG_GIT, mode ${IMG_MODE:-unknown}) -> ${BUNDLE#"$ROOT"/}"
+[ "$IMG_MODE" = release ] || echo "[retroforge] NOTE: mode='${IMG_MODE:-unknown}' — installable, but ota/publish-bundle.sh will refuse to publish it"
 # THE SQUASHFS BLOCK SIZE IS THE STREAMING REQUEST SIZE (#65). rauc reads the payload THROUGH the
 # squashfs mount -- bundle.c:2950 mounts it on dm-verity, which sits on the nbd stream -- so squashfs
 # decides how large one device read may be, and mksquashfs would otherwise default to `-b 128K`.
@@ -110,11 +110,11 @@ echo "[qforge] bundling v$VERSION (build $IMG_BUILD, git $IMG_GIT, mode ${IMG_MO
 #
 # Overridable so the sizes can be A/B'd without editing this file. Note the single dash: an UNSET
 # variable takes the default, an explicitly EMPTY one omits the flag and restores mksquashfs' own.
-MKSQUASHFS_ARGS="${QFORGE_MKSQUASHFS_ARGS--b 1M}"
+MKSQUASHFS_ARGS="${RETROFORGE_MKSQUASHFS_ARGS--b 1M}"
 bundle_args=()
 if [ -n "$MKSQUASHFS_ARGS" ]; then
   bundle_args+=(--mksquashfs-args="$MKSQUASHFS_ARGS")
-  echo "[qforge] squashfs args: $MKSQUASHFS_ARGS (see #65)"
+  echo "[retroforge] squashfs args: $MKSQUASHFS_ARGS (see #65)"
 fi
 
 rauc bundle --cert="$CERT" --key="$KEY" "${bundle_args[@]}" "$content" "$BUNDLE"

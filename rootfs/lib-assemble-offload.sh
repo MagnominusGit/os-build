@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge read-only root assembler — stage `offload-mounts`.
+# retroforge read-only root assembler — stage `offload-mounts`.
 #
 # SOURCED by rootfs/assemble-rootfs.sh, never executed. Split out of it for issue #43; the code
 # and its rationale are unchanged (tests/test-mkroot.sh reads the `# STAGE <name>` banners out of
@@ -13,7 +13,7 @@
 
 # STAGE offload-mounts — the offload layer (same idea as SteamOS's). The root is read-only and /var is a 256M partition, so the
 # paths that grow without bound are bind-mounted out to the big shared /home partition, under
-# /home/.qforge/offload/ (SteamOS uses /home/.steamos/offload — same idea, our namespace).
+# /home/.retroforge/offload/ (SteamOS uses /home/.steamos/offload — same idea, our namespace).
 #
 # Shape copied from SteamOS: NOT fstab bind lines, but one .mount unit per path plus a target that
 # groups them (cf. steamos-offload.target + var-log.mount et al in steamos-customizations). That
@@ -25,12 +25,12 @@
 # as root and keeps per-user state under its HOME (gnupg/dirmngr's /root/.gnupg, for one) would
 # otherwise be writing to a read-only filesystem.
 #
-# qforge-offload-prepare.service creates each directory on /home before the binds run, and SEEDS
+# retroforge-offload-prepare.service creates each directory on /home before the binds run, and SEEDS
 # it from whatever the read-only root already has at that path. The seeding is not cosmetic: the
 # TEST build bakes an SSH key into /root/.ssh, and an empty bind over /root would shadow it and lock
 # us out of the card. Same reasoning protects anything shipped in /opt or /srv.
-echo "  injecting offload binds: /opt /root /srv + var/{log,tmp,cache/pacman,lib/*} -> /home/.qforge/offload"
-OFFLOAD_ROOT=/home/.qforge/offload
+echo "  injecting offload binds: /opt /root /srv + var/{log,tmp,cache/pacman,lib/*} -> /home/.retroforge/offload"
+OFFLOAD_ROOT=/home/.retroforge/offload
 # unit-name<TAB>path pairs; unit names must be the systemd-escaped path (see systemd-escape -p).
 OFFLOAD_PATHS='opt root srv var/log var/tmp var/cache/pacman var/lib/flatpak var/lib/systemd/coredump'
 
@@ -44,36 +44,36 @@ OFFLOAD_PATHS='opt root srv var/log var/tmp var/cache/pacman var/lib/flatpak var
 # This is the opposite requirement: data that must live somewhere no update touches, precisely
 # because post-install.sh reformats the target /var on every install. Adding it to OFFLOAD_PATHS
 # would give it a bind mount from a slot-local path and quietly reintroduce the problem.
-RAUC_DATA=/home/.qforge/rauc
+RAUC_DATA=/home/.retroforge/rauc
 
-cat >"$stage/usr/lib/systemd/system/qforge-offload.target" <<'UNIT'
+cat >"$stage/usr/lib/systemd/system/retroforge-offload.target" <<'UNIT'
 [Unit]
-Description=qforge offload mounts (bind /opt, /root, /srv and the growable /var paths onto /home)
-Documentation=file:///usr/lib/qforge/offload-prepare.sh
+Description=retroforge offload mounts (bind /opt, /root, /srv and the growable /var paths onto /home)
+Documentation=file:///usr/lib/retroforge/offload-prepare.sh
 # Ordered inside the local-fs stage: after /home is available, before anything that consumes these
 # paths. systemd-journal-flush (sysinit.target) runs later, so /var/log is already bound by then.
-After=home.mount qforge-offload-prepare.service
-Requires=qforge-offload-prepare.service
+After=home.mount retroforge-offload-prepare.service
+Requires=retroforge-offload-prepare.service
 Before=local-fs.target
 UNIT
 
-cat >"$stage/usr/lib/systemd/system/qforge-offload-prepare.service" <<UNIT
+cat >"$stage/usr/lib/systemd/system/retroforge-offload-prepare.service" <<UNIT
 [Unit]
-Description=qforge offload directory preparation (create + seed the bind targets on /home)
+Description=retroforge offload directory preparation (create + seed the bind targets on /home)
 DefaultDependencies=no
 RequiresMountsFor=/home
 After=home.mount
-Before=qforge-offload.target local-fs.target shutdown.target
+Before=retroforge-offload.target local-fs.target shutdown.target
 Conflicts=shutdown.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/lib/qforge/offload-prepare.sh
+ExecStart=/usr/lib/retroforge/offload-prepare.sh
 UNIT
 
-install -d -m0755 "$stage/usr/lib/qforge"
-cat >"$stage/usr/lib/qforge/offload-prepare.sh" <<PREPARE
+install -d -m0755 "$stage/usr/lib/retroforge"
+cat >"$stage/usr/lib/retroforge/offload-prepare.sh" <<PREPARE
 #!/bin/sh
 # Create each offload directory on /home and seed it, ONCE, from the read-only root's copy of that
 # path. Seeding matters: a bare empty bind over /root would hide the TEST build's baked
@@ -96,7 +96,7 @@ for rel in $OFFLOAD_PATHS; do
   mkdir -p "\$dst"
   # cp -a of the root's existing content (may be empty; /opt and /srv usually are).
   if [ -d "/\$rel" ] && [ -n "\$(ls -A "/\$rel" 2>/dev/null)" ]; then
-    cp -a "/\$rel/." "\$dst/" || echo "[qforge-offload] seeding \$dst from /\$rel failed" >&2
+    cp -a "/\$rel/." "\$dst/" || echo "[retroforge-offload] seeding \$dst from /\$rel failed" >&2
   fi
   # Mirror the root's mode/owner so e.g. /root stays 0700 root:root and /var/tmp stays 1777.
   if [ -d "/\$rel" ]; then
@@ -105,7 +105,7 @@ for rel in $OFFLOAD_PATHS; do
   fi
 done
 PREPARE
-chmod 0755 "$stage/usr/lib/qforge/offload-prepare.sh"
+chmod 0755 "$stage/usr/lib/retroforge/offload-prepare.sh"
 
 # One .mount unit per offload path. The unit FILENAME must be the escaped mount point, else systemd
 # refuses to load it ("Where= setting doesn't match unit name").
@@ -113,15 +113,15 @@ for rel in $OFFLOAD_PATHS; do
   unit="$(echo "$rel" | tr '/' '-').mount"
   cat >"$stage/usr/lib/systemd/system/$unit" <<UNIT
 [Unit]
-Description=qforge offload bind of /$rel onto $OFFLOAD_ROOT/$rel
-Documentation=file:///usr/lib/qforge/offload-prepare.sh
+Description=retroforge offload bind of /$rel onto $OFFLOAD_ROOT/$rel
+Documentation=file:///usr/lib/retroforge/offload-prepare.sh
 DefaultDependencies=no
 RequiresMountsFor=/home
-After=qforge-offload-prepare.service
-Requires=qforge-offload-prepare.service
+After=retroforge-offload-prepare.service
+Requires=retroforge-offload-prepare.service
 Before=local-fs.target shutdown.target
 Conflicts=shutdown.target
-PartOf=qforge-offload.target
+PartOf=retroforge-offload.target
 
 [Mount]
 What=$OFFLOAD_ROOT/$rel
@@ -130,15 +130,15 @@ Type=none
 Options=bind
 
 [Install]
-WantedBy=qforge-offload.target
+WantedBy=retroforge-offload.target
 UNIT
-  install -d -m0755 "$stage/etc/systemd/system/qforge-offload.target.wants"
-  ln -sf "/usr/lib/systemd/system/$unit" "$stage/etc/systemd/system/qforge-offload.target.wants/$unit"
+  install -d -m0755 "$stage/etc/systemd/system/retroforge-offload.target.wants"
+  ln -sf "/usr/lib/systemd/system/$unit" "$stage/etc/systemd/system/retroforge-offload.target.wants/$unit"
 done
 
 # Enable the target itself (preset-proof, same pattern as grow-home: 60 < the stock 99 "disable *").
-echo "enable qforge-offload.target" \
-  >>"$stage/usr/lib/systemd/system-preset/60-qforge-storage.preset"
+echo "enable retroforge-offload.target" \
+  >>"$stage/usr/lib/systemd/system-preset/60-retroforge-storage.preset"
 install -d -m0755 "$stage/etc/systemd/system/local-fs.target.wants"
-ln -sf /usr/lib/systemd/system/qforge-offload.target \
-       "$stage/etc/systemd/system/local-fs.target.wants/qforge-offload.target"
+ln -sf /usr/lib/systemd/system/retroforge-offload.target \
+       "$stage/etc/systemd/system/local-fs.target.wants/retroforge-offload.target"

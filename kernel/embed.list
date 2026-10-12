@@ -1,4 +1,4 @@
-# qforge built-in firmware list (CONFIG_EXTRA_FIRMWARE) — the union of blobs baked
+# retroforge built-in firmware list (CONFIG_EXTRA_FIRMWARE) — the union of blobs baked
 # into Image.gz so they are present before the rootfs mounts. One /lib/firmware-relative
 # path per line; kernel/build.sh resolves each against firmware/linux-fw/ (open blobs,
 # fetch-linux-fw.sh) then firmware/qcom-fw/ (device blobs, fetch-qcom-fw.sh) and derives

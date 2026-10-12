@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge steamos-efi (stage-1 steamcl) build.
+# retroforge steamos-efi (stage-1 steamcl) build.
 #
 # Builds Valve's stage-1 bootloader for aarch64 from the pinned source: steamcl.efi (the PE32+ that
 # ABL chainloads as \EFI\BOOT\bootaa64.efi) plus holo-bootconf, the boot-state reader the OS side
@@ -10,7 +10,7 @@
 #
 # Run inside the build image (needs the arm64 toolchain, gnu-efi:arm64, the autotools, fontconfig
 # and grub-mkfont — see build/Dockerfile):
-#   docker run --rm -v "$PWD":/src -w /src qforge-build boot/steamcl.sh
+#   docker run --rm -v "$PWD":/src -w /src retroforge-build boot/steamcl.sh
 set -euo pipefail
 shopt -s nullglob
 
@@ -31,7 +31,7 @@ TARBALL="$WORK/steamos-efi-${SEVER}.tar.gz"
 # from the clock: a datestamp here would make every build a different binary, which in turn would
 # make the RAUC post-install hook rewrite the ESP's live boot files on every single update (it
 # skips the copy when the content is identical) for no change at all.
-RELEASE="${RELEASE_VERSION:-qforge-${SEVER}-${SECOMMIT:0:12}}"
+RELEASE="${RELEASE_VERSION:-retroforge-${SEVER}-${SECOMMIT:0:12}}"
 
 [ -f "$TARBALL" ] || curl -fSL -o "$TARBALL" "$SEURL"
 echo "${SESHA}  ${TARBALL}" | sha256sum -c - || { echo "sha256 mismatch — refusing to build" >&2; exit 1; }

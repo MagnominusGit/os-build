@@ -32,7 +32,7 @@ A5xx entries already set a per-GPU 250 ms.
 
 Signed-off-by: Philippe Simons <simons.philippe@gmail.com>
 ---
-qforge: not posted. Workaround for the trigger, not the GMU root cause.
+retroforge: not posted. Workaround for the trigger, not the GMU root cause.
  drivers/gpu/drm/msm/adreno/a6xx_catalog.c | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 

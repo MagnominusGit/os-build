@@ -1,29 +1,29 @@
 #!/usr/bin/env bash
-# Offline test for /usr/bin/qforge-suspend's PANEL BLANK path.
+# Offline test for /usr/bin/retroforge-suspend's PANEL BLANK path.
 #
 #   tests/test-suspend.sh
 #
-# WHY THIS FILE EXISTS, and why it does not run the engine. qforge-suspend freezes cgroups and
+# WHY THIS FILE EXISTS, and why it does not run the engine. retroforge-suspend freezes cgroups and
 # offlines CPUs; running do_suspend on a workstation would freeze the workstation. So this covers the
 # one part that is pure logic and was the actual defect (#41): what happens to the screen when
 # gamescope cannot be reached.
 #
 # THE DEFECT, HW 2026-07-26: entering suspend by any path that is not Steam's own sleep flow left the
-# panel LIT for the whole frozen window. qforge-suspend runs as systemd-suspend.service (root,
+# panel LIT for the whole frozen window. retroforge-suspend runs as systemd-suspend.service (root,
 # system.slice) and cannot resolve the live gamescope socket from there, so the KMS blank never
 # happened -- and `panel()` reported success anyway, so nothing noticed. Steam's client blank was the
 # only thing turning the screen off.
 #
 # HOW IT WORKS: the two functions are extracted from the SHIPPED script by name and sourced into a
-# sandbox, with QFORGE_BL_GLOB pointed at a fake backlight tree. What runs under test is the text
+# sandbox, with RETROFORGE_BL_GLOB pointed at a fake backlight tree. What runs under test is the text
 # that ships; nothing is reimplemented here. The wiring between them (do_suspend falling back,
 # do_resume unblanking unconditionally) cannot be executed safely, so it is asserted structurally
 # against the same file, and that limit is stated rather than papered over.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SUSPEND="$ROOT/rootfs/overlay/usr/bin/qforge-suspend"
-[ -f "$SUSPEND" ] || { echo "no qforge-suspend: $SUSPEND" >&2; exit 1; }
+SUSPEND="$ROOT/rootfs/overlay/usr/bin/retroforge-suspend"
+[ -f "$SUSPEND" ] || { echo "no retroforge-suspend: $SUSPEND" >&2; exit 1; }
 
 PASS=0; FAIL=0; CASE=""
 ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
@@ -46,11 +46,11 @@ done
 CASE="bl_power-writes-every-backlight"
 mkdir -p "$W/bl/panel0" "$W/bl/panel1"
 echo 0 >"$W/bl/panel0/bl_power"; echo 0 >"$W/bl/panel1/bl_power"
-sh -c ". $W/bl.sh; QFORGE_BL_GLOB=\"$W/bl/*\"; bl_power 4"
+sh -c ". $W/bl.sh; RETROFORGE_BL_GLOB=\"$W/bl/*\"; bl_power 4"
 got="$(cat "$W/bl/panel0/bl_power")$(cat "$W/bl/panel1/bl_power")"
 [ "$got" = "44" ] && ok "4 (FB_BLANK_POWERDOWN) reaches every device" \
                   || bad "devices read '$got', expected '44'"
-sh -c ". $W/bl.sh; QFORGE_BL_GLOB=\"$W/bl/*\"; bl_power 0"
+sh -c ". $W/bl.sh; RETROFORGE_BL_GLOB=\"$W/bl/*\"; bl_power 0"
 got="$(cat "$W/bl/panel0/bl_power")$(cat "$W/bl/panel1/bl_power")"
 [ "$got" = "00" ] && ok "0 restores every device" || bad "devices read '$got', expected '00'"
 
@@ -58,7 +58,7 @@ CASE="bl_power-reports-when-it-did-nothing"
 # The return value is what decides whether the suspend log says "SLEEPING WITH THE PANEL LIT". A
 # fallback that silently no-ops is the same defect as the one this fixes, one layer down.
 mkdir -p "$W/empty"
-sh -c ". $W/bl.sh; QFORGE_BL_GLOB=\"$W/empty/*\"; bl_power 4"
+sh -c ". $W/bl.sh; RETROFORGE_BL_GLOB=\"$W/empty/*\"; bl_power 4"
 [ $? -ne 0 ] && ok "returns non-zero when no writable bl_power exists" \
              || bad "returned 0 with nothing to write to"
 
@@ -71,7 +71,7 @@ CASE="panel-reports-an-unreachable-gamescope"
 # instead makes `sh` itself unfindable, and the test then passes on env's 127 -- which it did on the
 # first run of this file. A marker on stdout proves the function actually ran.
 mkdir -p "$W/nothing"
-out="$(env -i QFORGE_REST_SCREEN=external /bin/sh -c \
+out="$(env -i RETROFORGE_REST_SCREEN=external /bin/sh -c \
   ". $W/panel.sh; PATH=$W/nothing; panel 1; echo \"rc=\$?\"" 2>/dev/null)"
 case "$out" in
   rc=0) bad "reported success with no gamescopectl -- the caller would freeze with the panel lit" ;;

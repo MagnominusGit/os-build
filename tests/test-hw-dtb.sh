@@ -11,7 +11,7 @@
 # 2. The PANELS table against the panel drivers in kernel/patches: a panel marked "dcs" must
 #    register its own backlight, one marked "borrows" must link the devicetree's.
 # 3. The real fleet, when there is something to read: out/dtbs (after `make kernel`), or
-#    QFORGE_LINUX_SRC=<a Linux tree> to compile kernel/dts/qcom here. Skipped otherwise.
+#    RETROFORGE_LINUX_SRC=<a Linux tree> to compile kernel/dts/qcom here. Skipped otherwise.
 # Needs python3; parts 1 and 3 need dtc (device-tree-compiler) and are skipped without it.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -180,15 +180,15 @@ BOARD = r"""
 """
 
 GOOD = {
-    "QFORGE_PRIMARY_CONNECTOR": "DSI-2",
-    "QFORGE_HW_BATTERY": "qcom-battmgr-bat",
-    "QFORGE_HW_CHARGER": "qcom-battmgr-usb",
-    "QFORGE_HW_BACKLIGHT": "ae96000.dsi.0",
-    "QFORGE_HW_THERMAL_CPU": "cpu7-top-thermal",
-    "QFORGE_HW_THERMAL_GPU": "gpuss-0-thermal",
-    "QFORGE_HW_FAN": "pwmfan",
-    "QFORGE_HW_GPU_DEVFREQ": "3d00000.gpu",
-    "QFORGE_HW_LED_GROUPS": "power=power-led ring=rgb:l*",
+    "RETROFORGE_PRIMARY_CONNECTOR": "DSI-2",
+    "RETROFORGE_HW_BATTERY": "qcom-battmgr-bat",
+    "RETROFORGE_HW_CHARGER": "qcom-battmgr-usb",
+    "RETROFORGE_HW_BACKLIGHT": "ae96000.dsi.0",
+    "RETROFORGE_HW_THERMAL_CPU": "cpu7-top-thermal",
+    "RETROFORGE_HW_THERMAL_GPU": "gpuss-0-thermal",
+    "RETROFORGE_HW_FAN": "pwmfan",
+    "RETROFORGE_HW_GPU_DEVFREQ": "3d00000.gpu",
+    "RETROFORGE_HW_LED_GROUPS": "power=power-led ring=rgb:l*",
 }
 
 
@@ -232,22 +232,22 @@ else:
     print("== the checks")
     r = run_check(GOOD)
     ok("every good pin passes", all(o for o, _ in r.values()), {k: v for k, v in r.items() if not v[0]})
-    ok("the primary-panel check ran", "QFORGE_HW_BACKLIGHT:primary" in r)
-    r = run_check(dict(GOOD, QFORGE_HW_BACKLIGHT="ae94000.dsi.0"))
+    ok("the primary-panel check ran", "RETROFORGE_HW_BACKLIGHT:primary" in r)
+    r = run_check(dict(GOOD, RETROFORGE_HW_BACKLIGHT="ae94000.dsi.0"))
     ok("the bottom screen's backlight exists but is not the primary's",
-       r["QFORGE_HW_BACKLIGHT"][0] and not r["QFORGE_HW_BACKLIGHT:primary"][0], r.get("QFORGE_HW_BACKLIGHT:primary"))
-    r = run_check(dict(GOOD, QFORGE_HW_THERMAL_CPU="cpu7-top"))
-    ok("a zone without its -thermal suffix fails", not r["QFORGE_HW_THERMAL_CPU"][0])
-    r = run_check(dict(GOOD, QFORGE_HW_THERMAL_CPU="cpu0-thermal"))
-    ok("a zone whose sensor is disabled fails", not r["QFORGE_HW_THERMAL_CPU"][0])
-    r = run_check(dict(GOOD, QFORGE_HW_BATTERY="battery", QFORGE_HW_CHARGER="qcom-battmgr-bat"))
+       r["RETROFORGE_HW_BACKLIGHT"][0] and not r["RETROFORGE_HW_BACKLIGHT:primary"][0], r.get("RETROFORGE_HW_BACKLIGHT:primary"))
+    r = run_check(dict(GOOD, RETROFORGE_HW_THERMAL_CPU="cpu7-top"))
+    ok("a zone without its -thermal suffix fails", not r["RETROFORGE_HW_THERMAL_CPU"][0])
+    r = run_check(dict(GOOD, RETROFORGE_HW_THERMAL_CPU="cpu0-thermal"))
+    ok("a zone whose sensor is disabled fails", not r["RETROFORGE_HW_THERMAL_CPU"][0])
+    r = run_check(dict(GOOD, RETROFORGE_HW_BATTERY="battery", RETROFORGE_HW_CHARGER="qcom-battmgr-bat"))
     ok("a battery that is not there, and a battery pinned as the charger, fail",
-       not r["QFORGE_HW_BATTERY"][0] and not r["QFORGE_HW_CHARGER"][0])
-    r = run_check(dict(GOOD, QFORGE_HW_FAN="gpio_fan", QFORGE_HW_GPU_DEVFREQ="3d6a000.gmu"))
-    ok("a fan and a devfreq that are not there fail", not r["QFORGE_HW_FAN"][0] and not r["QFORGE_HW_GPU_DEVFREQ"][0])
-    r = run_check(dict(GOOD, QFORGE_HW_LED_GROUPS="ring=*:indicator-[0-9] sticks=left-joystick"))
-    ok("a bracket glob does not take indicator-10", not r["QFORGE_HW_LED_GROUPS:ring"][0])
-    ok("a group of LEDs that never register fails", not r["QFORGE_HW_LED_GROUPS:sticks"][0])
+       not r["RETROFORGE_HW_BATTERY"][0] and not r["RETROFORGE_HW_CHARGER"][0])
+    r = run_check(dict(GOOD, RETROFORGE_HW_FAN="gpio_fan", RETROFORGE_HW_GPU_DEVFREQ="3d6a000.gmu"))
+    ok("a fan and a devfreq that are not there fail", not r["RETROFORGE_HW_FAN"][0] and not r["RETROFORGE_HW_GPU_DEVFREQ"][0])
+    r = run_check(dict(GOOD, RETROFORGE_HW_LED_GROUPS="ring=*:indicator-[0-9] sticks=left-joystick"))
+    ok("a bracket glob does not take indicator-10", not r["RETROFORGE_HW_LED_GROUPS:ring"][0])
+    ok("a group of LEDs that never register fails", not r["RETROFORGE_HW_LED_GROUPS:sticks"][0])
 
     # The S2K/S2: one panel bonded over both links (DSI-1 only); the Odin 2: an HDMI bridge on dsi0,
     # so the panel on dsi1 is DSI-1.
@@ -268,11 +268,11 @@ else:
     print("== a run, with known gaps")
     devdir = tmp / "devices"
     devdir.mkdir()
-    (devdir / "defaults.conf").write_text((root / "rootfs/overlay/usr/lib/qforge/devices/defaults.conf").read_text())
+    (devdir / "defaults.conf").write_text((root / "rootfs/overlay/usr/lib/retroforge/devices/defaults.conf").read_text())
     for name in ("bonded", "bridged"):
         (tmp / "dtbs" / f"{name}.dtb").unlink()
-    conf = "".join(f"{k}='{v}'\n" for k, v in dict(GOOD, QFORGE_DEVICE_ID="ayn-thor",
-                   QFORGE_HW_LED_GROUPS="power=power-led ring=rgb:l* sticks=left-joystick").items())
+    conf = "".join(f"{k}='{v}'\n" for k, v in dict(GOOD, RETROFORGE_DEVICE_ID="ayn-thor",
+                   RETROFORGE_HW_LED_GROUPS="power=power-led ring=rgb:l* sticks=left-joystick").items())
     (devdir / "ayn-thor.conf").write_text(conf)
     xf = tmp / "xfail"
 
@@ -282,13 +282,13 @@ else:
                                "--device-dir", str(devdir)], capture_output=True, text=True)
 
     p = run("")
-    ok("an unlisted failure fails the run", p.returncode == 1 and "FAIL  QFORGE_HW_LED_GROUPS:sticks" in p.stdout, p.stdout)
-    p = run("ayn-thor QFORGE_HW_LED_GROUPS:sticks the PWM chip is disabled\n")
-    ok("a listed one is a known gap", p.returncode == 0 and "xfail QFORGE_HW_LED_GROUPS:sticks" in p.stdout, p.stdout)
-    p = run("ayn-thor QFORGE_HW_LED_GROUPS:ring not a gap any more\n"
-            "ayn-thor QFORGE_HW_LED_GROUPS:sticks the PWM chip is disabled\n")
+    ok("an unlisted failure fails the run", p.returncode == 1 and "FAIL  RETROFORGE_HW_LED_GROUPS:sticks" in p.stdout, p.stdout)
+    p = run("ayn-thor RETROFORGE_HW_LED_GROUPS:sticks the PWM chip is disabled\n")
+    ok("a listed one is a known gap", p.returncode == 0 and "xfail RETROFORGE_HW_LED_GROUPS:sticks" in p.stdout, p.stdout)
+    p = run("ayn-thor RETROFORGE_HW_LED_GROUPS:ring not a gap any more\n"
+            "ayn-thor RETROFORGE_HW_LED_GROUPS:sticks the PWM chip is disabled\n")
     ok("a listed one that passes fails the run (XPASS)", p.returncode == 1 and "XPASS" in p.stdout, p.stdout)
-    p = run("ayn-thor QFORGE_HW_LED_GROUPS:sticks the PWM chip is disabled\nno-such-board QFORGE_HW_FAN gone\n")
+    p = run("ayn-thor RETROFORGE_HW_LED_GROUPS:sticks the PWM chip is disabled\nno-such-board RETROFORGE_HW_FAN gone\n")
     ok("a listed check that never ran fails the run", p.returncode == 1 and "names no check that ran" in p.stdout, p.stdout)
 
 print("== patch filtering")
@@ -326,10 +326,10 @@ PASS=$((PASS + p)); FAIL=$((FAIL + f)); SKIP=$((SKIP + s))
 echo "== the fleet"
 if ls "$ROOT"/out/dtbs/*.dtb >/dev/null 2>&1; then
   python3 "$CHECK" --dtbs "$ROOT/out/dtbs" && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
-elif [ -n "${QFORGE_LINUX_SRC:-}" ] && command -v dtc >/dev/null; then
-  python3 "$CHECK" --linux-src "$QFORGE_LINUX_SRC" && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
+elif [ -n "${RETROFORGE_LINUX_SRC:-}" ] && command -v dtc >/dev/null; then
+  python3 "$CHECK" --linux-src "$RETROFORGE_LINUX_SRC" && PASS=$((PASS+1)) || FAIL=$((FAIL+1))
 else
-  echo "  skip: no out/dtbs (make kernel) and no QFORGE_LINUX_SRC to compile kernel/dts/qcom against"
+  echo "  skip: no out/dtbs (make kernel) and no RETROFORGE_LINUX_SRC to compile kernel/dts/qcom against"
   SKIP=$((SKIP+1))
 fi
 

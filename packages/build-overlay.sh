@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge overlay package builder — rebuild holo packages FROM SOURCE with qforge patches.
+# retroforge overlay package builder — rebuild holo packages FROM SOURCE with retroforge patches.
 #
 # For every packages/<name>/source.pin: fetch the holo PKGBUILD (raw, at the pinned commit —
 # anonymous read), drop our patches in, bump pkgrel so the build outranks the holo binary, and
@@ -16,7 +16,7 @@
 # self-selects which packages actually need the slow build.
 #
 # That hash is computed by packages/inputhash.sh, NOT here, because it has a second job: it is
-# also what rootfs/manifest.lock records for the `qforge` rows (our builds are not
+# also what rootfs/manifest.lock records for the `retroforge` rows (our builds are not
 # bit-reproducible, so the lock pins the sources rather than the artifact bytes — see that script
 # and rootfs/fetchlock.sh). Three readers, one formula.
 #
@@ -93,10 +93,10 @@ mkdir -p "$STAGE" "$REPO_DIR" "$STAMPS"
 # not go through cc for its own crates). Host-side and per-arch, beside the repo it feeds, so it
 # outlives the throwaway containers; srcdir is /stage/<pkg>/src on every run, so paths line up.
 # Not an input of inputhash.sh: the cache only decides how fast an object is produced, never
-# what it is. QFORGE_CCACHE=0 builds without it. OFF by default on CI (CI=true): a runner's
+# what it is. RETROFORGE_CCACHE=0 builds without it. OFF by default on CI (CI=true): a runner's
 # cache dies with it, and carrying one in actions/cache would crowd the repo quota (see Makefile).
-CCACHE_HOST="${QFORGE_CCACHE_DIR:-$ROOT/work/ccache/overlay-$ARCH}"
-if [ -n "${CI:-}" ]; then USE_CCACHE="${QFORGE_CCACHE:-0}"; else USE_CCACHE="${QFORGE_CCACHE:-1}"; fi
+CCACHE_HOST="${RETROFORGE_CCACHE_DIR:-$ROOT/work/ccache/overlay-$ARCH}"
+if [ -n "${CI:-}" ]; then USE_CCACHE="${RETROFORGE_CCACHE:-0}"; else USE_CCACHE="${RETROFORGE_CCACHE:-1}"; fi
 CCACHE_MOUNT=()
 # No host-side mkdir: the kernel build container creates work/ccache as root, so a host mkdir of
 # a sibling fails with EACCES. `docker -v` creates a missing source itself, and the build below
@@ -126,7 +126,7 @@ for pin in "${PINS[@]}"; do
   #
   # Delegated to packages/inputhash.sh rather than computed here, because this value is no longer
   # only a local cache key: rootfs/genmanifest.sh writes the same digest into manifest.lock as the
-  # `qforge` rows' pin and rootfs/fetchlock.sh re-derives it, so all three have to agree byte for
+  # `retroforge` rows' pin and rootfs/fetchlock.sh re-derives it, so all three have to agree byte for
   # byte. That script also documents why it is deliberately path-independent — the formula that
   # used to be inlined here was not, which was harmless for a per-machine stamp and would have
   # quietly broken the lock across machines.
@@ -181,7 +181,7 @@ for pin in "${PINS[@]}"; do
   # staging dir so a re-stage never mixes with a prior attempt.
   bd="$STAGE/$name"; rm -rf "$bd"; mkdir -p "$bd"
   if [ -n "$local_pb" ]; then
-    # Local PKGBUILD: a qforge-owned recipe checked in at packages/<name>/<pkgbuild_local>,
+    # Local PKGBUILD: a retroforge-owned recipe checked in at packages/<name>/<pkgbuild_local>,
     # used when there is no suitable holo PKGBUILD to fetch (e.g. a version bump or a
     # driver-trimmed build the holo recipe doesn't cover). makepkg still pulls the upstream
     # source the PKGBUILD names (e.g. a release tarball) just the same.
@@ -256,7 +256,7 @@ done
 
 # --prune-retired: stamps for a package that no longer HAS a source.pin — an overlay retired back
 # to the upstream build. Nothing above visits it, so its artifacts would stay in the repo and be
-# re-indexed forever, and since [qforge] sits AHEAD of core/extra (rootfs/conf/pacman.conf), that
+# re-indexed forever, and since [retroforge] sits AHEAD of core/extra (rootfs/conf/pacman.conf), that
 # stale build would keep winning the install over the package it was retired in favour of.
 # image.yml restores this repo from a cache whose fallback key can be an older package set, so CI
 # passes this. Opt-in because on a dev box the stamps are shared by every BRANCH in the checkout:
@@ -304,11 +304,11 @@ done
 # Falling through to the index step instead is both the fix and exactly what a freshly pulled repo
 # needs: one cheap container, no compiles.
 if [ ${#BUILD_NAMES[@]} -eq 0 ] && [ "$stale_foreign" -eq 0 ] && [ "$retired" -eq 0 ] \
-   && [ -f "$REPO_DIR/qforge.db.tar.zst" ]; then
+   && [ -f "$REPO_DIR/retroforge.db.tar.zst" ]; then
   echo "[overlay] all overlay packages up-to-date — nothing to rebuild" >&2
   # Bump the db mtime so make sees $(OVERLAY_DB) as satisfied against the touched inputs and
   # does not keep re-invoking this script every build.
-  touch "$REPO_DIR/qforge.db.tar.zst"
+  touch "$REPO_DIR/retroforge.db.tar.zst"
   echo "[overlay] repo: ${REPO_DIR#"$ROOT"/}" >&2
   exit 0
 fi
@@ -360,7 +360,7 @@ for name in "${BUILD_NAMES[@]}"; do
       # PKGDEST separates what makepkg PRODUCED from what it merely DOWNLOADED. Without it the
       # copy below is a glob over the build directory, which also matches any .pkg.tar.zst a
       # PKGBUILD fetches as a SOURCE (e.g. a foreign-arch sysroot assembled in prepare()) — and a
-      # from-packages bootstrap would then resolve those as installable [qforge] packages.
+      # from-packages bootstrap would then resolve those as installable [retroforge] packages.
       mkdir -p "/stage/$PKG/out"
       chown -R builder "/stage/$PKG" /repo
       echo "[overlay] makepkg in /stage/$PKG" >&2
@@ -425,14 +425,14 @@ ctr run --rm --platform linux/arm64 \
         *) echo "[overlay] dropping foreign-arch artifact from an $ARCH repo: $f" >&2; rm -f "$f" ;;
       esac
     done
-    rm -f qforge.db.tar.zst qforge.db qforge.files.tar.zst qforge.files
-    repo-add qforge.db.tar.zst *.pkg.tar.zst
+    rm -f retroforge.db.tar.zst retroforge.db retroforge.files.tar.zst retroforge.files
+    repo-add retroforge.db.tar.zst *.pkg.tar.zst
     chown -R "$HOSTUID:$HOSTGID" /repo
   ' >&2
 fi
 
 # NOTE: we do NOT advance work/repo/<arch>/.overlay.stamp here. The Makefile's $(OVERLAY_STAMP) rule
-# owns it, keyed on the CONTENT hash of the re-indexed qforge.db — so a real re-index (db content
+# owns it, keyed on the CONTENT hash of the re-indexed retroforge.db — so a real re-index (db content
 # changed) advances the stamp and rebuilds the base within the SAME make run, while the db-mtime bump
 # on a no-op run (above) does not cascade. Touching it here too was redundant AND could only advance
 # it as a side effect the same make invocation never re-stat'd (the stale-mtime miss the rule fixes).

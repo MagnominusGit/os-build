@@ -21,7 +21,7 @@
 # publish the corrupt bundle AND report failure. Every failure case below checks the pointer.
 #
 # HOW IT WORKS: the real, shipped ota/publish-bundle.sh is executed — not a copy. Its seams are the
-# QFORGE_OTA_* environment variables it already documents, plus PATH: ssh, rsync, curl and rauc
+# RETROFORGE_OTA_* environment variables it already documents, plus PATH: ssh, rsync, curl and rauc
 # are stubbed on disk. The "server" is a local directory, so the ssh stub runs the remote command
 # with bash -c and every remote-side effect (mv, chmod, sha256sum, the prune) is real shell against
 # real files. Nothing here needs a network, a key, a container or a 4G bundle.
@@ -43,7 +43,7 @@ W="$(mktemp -d)"
 trap 'rm -rf "$W"' EXIT
 
 VERSION="9.9.9"
-NAME="qforge-$VERSION.raucb"
+NAME="retroforge-$VERSION.raucb"
 
 # --- the sandbox ---------------------------------------------------------------------------------
 mkdir -p "$W/bin" "$W/srv"
@@ -72,7 +72,7 @@ cat >"$W/bin/df" <<'STUB'
 printf 'Filesystem 1024-blocks Used Available Capacity Mounted\nx 1 1 999999999 1%% /\n'
 STUB
 
-# rsync: last two args are src and dest. Strip user@host: and copy. QFORGE_TEST_CORRUPT makes the
+# rsync: last two args are src and dest. Strip user@host: and copy. RETROFORGE_TEST_CORRUPT makes the
 # landed file differ from the source WITHOUT changing its size -- a truncation would be caught by
 # the existing size check, and the point of step 3b is the corruption that is not.
 cat >"$W/bin/rsync" <<'STUB'
@@ -83,7 +83,7 @@ src="${args[$((n-2))]}"; dest="${args[$((n-1))]}"
 dest="${dest#*:}"
 printf 'rsync %s -> %s\n' "$src" "$dest" >> "$SSHLOG"
 cp "$src" "$dest" || exit 1
-if [ "${QFORGE_TEST_CORRUPT:-0}" = 1 ] && [ "${src##*.}" = raucb ]; then
+if [ "${RETROFORGE_TEST_CORRUPT:-0}" = 1 ] && [ "${src##*.}" = raucb ]; then
   # FLIP the byte, never ASSIGN it. This used to write a constant 'X' at offset 3, and the fixture
   # is 4096 bytes of /dev/urandom -- so roughly one run in 256 drew 0x58 there already, the write
   # changed nothing, the sha matched, publish-bundle.sh correctly published, and all six assertions
@@ -116,12 +116,12 @@ cat >"$W/bin/rauc" <<STUB
 case "\$*" in
   *--output-format=shell*)
     echo "RAUC_MF_VERSION='$VERSION'"
-    echo "RAUC_MF_COMPATIBLE='qforge'"
-    echo "RAUC_META_QFORGE_BUILD='20260101T000000Z'"
-    echo "RAUC_META_QFORGE_GIT='abc1234'"
-    echo "RAUC_META_QFORGE_MODE='release'"
+    echo "RAUC_MF_COMPATIBLE='retroforge'"
+    echo "RAUC_META_RETROFORGE_BUILD='20260101T000000Z'"
+    echo "RAUC_META_RETROFORGE_GIT='abc1234'"
+    echo "RAUC_META_RETROFORGE_MODE='release'"
     ;;
-  *) echo "Verified inline signature by 'O = qforge, CN = qforge OTA release'" ;;
+  *) echo "Verified inline signature by 'O = retroforge, CN = retroforge OTA release'" ;;
 esac
 STUB
 chmod +x "$W/bin/ssh" "$W/bin/df" "$W/bin/rsync" "$W/bin/curl" "$W/bin/rauc"
@@ -137,11 +137,11 @@ run() { # <env assignments...>
   : >"$W/ssh.log"; : >"$W/curl.log"
   OUT="$(env PATH="$W/bin:$PATH" \
       SSHLOG="$W/ssh.log" CURLLOG="$W/curl.log" DOCROOT="$W/srv" \
-      QFORGE_OTA_HOST="updates.example" \
-      QFORGE_OTA_USER="tester" \
-      QFORGE_OTA_DOCROOT="$W/srv" \
-      QFORGE_OTA_URL="https://updates.example" \
-      QFORGE_OTA_SSH_KEY="" \
+      RETROFORGE_OTA_HOST="updates.example" \
+      RETROFORGE_OTA_USER="tester" \
+      RETROFORGE_OTA_DOCROOT="$W/srv" \
+      RETROFORGE_OTA_URL="https://updates.example" \
+      RETROFORGE_OTA_SSH_KEY="" \
       "${envs[@]}" bash "$PUBLISH" "$BUNDLE" test 2>"$W/err")"
   RC=$?
   ERR="$(cat "$W/err")"
@@ -176,7 +176,7 @@ actual_sha="$(sha256sum "$W/srv/test/$NAME" | cut -d' ' -f1)"
 CASE="corrupt-upload-is-caught"
 # The bytes change in flight and the size does not, so nothing before step 3b can notice.
 reset_server
-run QFORGE_TEST_CORRUPT=1
+run RETROFORGE_TEST_CORRUPT=1
 [ "$RC" != 0 ] && ok "exit $RC -- refuses to publish bytes that changed in flight" \
                || bad "exit 0: a corrupt upload was published"
 printf '%s' "$ERR" | grep -q 'CORRUPT UPLOAD' \
@@ -198,15 +198,15 @@ CASE="corrupt-upload-leaves-the-previous-release"
 # not a failed publish, it is taking a working update path down.
 reset_server
 mkdir -p "$W/srv/test"
-prev='{"version":"1.0.0","bundle":"qforge-1.0.0.raucb","size":10,"sha256":"deadbeef"}'
+prev='{"version":"1.0.0","bundle":"retroforge-1.0.0.raucb","size":10,"sha256":"deadbeef"}'
 printf '%s\n' "$prev" >"$W/srv/test/latest.json"
-head -c 10 /dev/zero >"$W/srv/test/qforge-1.0.0.raucb"
-run QFORGE_TEST_CORRUPT=1
+head -c 10 /dev/zero >"$W/srv/test/retroforge-1.0.0.raucb"
+run RETROFORGE_TEST_CORRUPT=1
 [ "$RC" != 0 ] && ok "still fails" || bad "exit 0 on corrupt bytes"
 [ "$(pointer)" = "$prev" ] \
   && ok "the previous release is still pointed at, byte for byte" \
   || bad "latest.json was modified: $(pointer)"
-[ -f "$W/srv/test/qforge-1.0.0.raucb" ] \
+[ -f "$W/srv/test/retroforge-1.0.0.raucb" ] \
   && ok "the previous bundle was not pruned by a failed publish" \
   || bad "the failed publish pruned the release the fleet is running"
 
@@ -217,8 +217,8 @@ run QFORGE_TEST_CORRUPT=1
 # first runs for real on the FOURTH ota/v* release, against the live fleet's docroot.
 #
 # Seeded bundles are 1 byte; nothing here re-uploads them, so their contents never matter.
-seed() { for v in "$@"; do printf 'x' >"$W/srv/test/qforge-$v.raucb"; done; }
-have() { [ -f "$W/srv/test/qforge-$1.raucb" ]; }
+seed() { for v in "$@"; do printf 'x' >"$W/srv/test/retroforge-$v.raucb"; done; }
+have() { [ -f "$W/srv/test/retroforge-$1.raucb" ]; }
 
 CASE="prune-deletes-only-beyond-keep"
 reset_server
@@ -233,7 +233,7 @@ have 9.9.4 && have 9.9.5 && have 9.9.9 \
   && ok "kept exactly the newest KEEP=3" \
   || bad "pruned inside the retention budget"
 [ -f "$W/srv/test/latest.json" ] \
-  && ok "latest.json is not swept up by the qforge-*.raucb glob" \
+  && ok "latest.json is not swept up by the retroforge-*.raucb glob" \
   || bad "the prune deleted latest.json"
 
 CASE="prune-spares-the-bundle-the-pointer-names"
@@ -270,7 +270,7 @@ CASE="keep-0-disables-the-prune"
 reset_server
 mkdir -p "$W/srv/test"
 seed 9.9.1 9.9.2 9.9.3 9.9.4 9.9.5
-run QFORGE_OTA_KEEP=0
+run RETROFORGE_OTA_KEEP=0
 [ "$RC" = 0 ] && ok "exit 0" || bad "exit $RC: $ERR"
 have 9.9.1 && have 9.9.2 && have 9.9.3 && have 9.9.4 && have 9.9.5 \
   && ok "nothing was pruned" \

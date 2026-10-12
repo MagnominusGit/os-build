@@ -7,7 +7,7 @@ Subject: [PATCH] arch: arm64: Implement unaligned atomic
 
 Integration points ported to Linux 7.2.6, applied after 0504 (compat-input).
 
-qforge fix, Load128: the 128-bit atomic load is an ldaxp/stlxp pair (the
+retroforge fix, Load128: the 128-bit atomic load is an ldaxp/stlxp pair (the
 store-back is what makes it single-copy atomic), but only the ldaxp had an
 exception-table entry. When the page is readable but not writable at that
 instant -- copy-on-write, a clean page under dirty tracking, one just

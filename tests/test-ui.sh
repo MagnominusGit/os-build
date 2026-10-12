@@ -11,7 +11,7 @@
 # real thing rather than inherit the confidence.
 #
 # HOW IT RUNS WITH NO SDL, NO PANEL AND NO PAD. installer/ui imports pygame lazily, inside its view
-# only, and takes its input from a file of tokens when QFORGE_UI_EVENTS is set. So the real
+# only, and takes its input from a file of tokens when RETROFORGE_UI_EVENTS is set. So the real
 # shipped file — not a copy, not a mangled variant — runs here as its own state machine, answers a
 # real unix socket, and is driven by the real installer/confirm-ui. What is NOT covered is anything
 # with a pixel in it: the drawing is asserted through describe(), which is what the view is handed.
@@ -39,7 +39,7 @@ trap 'rm -rf "$T"; pkill -f "$UI" 2>/dev/null' EXIT
 # Loading installer/ui as a module writes a __pycache__ next to it, which the installer image build
 # would then copy verbatim. Keep the bytecode in the sandbox. Same reason as tests/test-update.sh.
 export PYTHONPYCACHEPREFIX="$T/pycache"
-export QFORGE_UI_DEADLINE=30
+export RETROFORGE_UI_DEADLINE=30
 
 cat >"$T/facts-wipe" <<'EOF'
 SCREEN=android-wipe
@@ -49,7 +49,7 @@ SECTOR=512
 UD_INDEX=11
 UD_GIB_NOW=96
 UD_GIB_AFTER=16
-QFORGE_GIB=80
+RETROFORGE_GIB=80
 REPLACES_OURS=0
 HOME_ACTION=create
 EOF
@@ -69,7 +69,7 @@ SECTOR=512
 UD_INDEX=11
 UD_GIB_NOW=96
 UD_GIB_AFTER=16
-QFORGE_GIB=90
+RETROFORGE_GIB=90
 REPLACES_OURS=1
 HOME_GIB=180
 HOME_ACTION=create
@@ -82,14 +82,14 @@ EOF
 ui_ask() {  # <events-file> <facts> <sequence>
   local events="$1" facts="$2" seq="$3" i=0
   SOCK="$T/sock.$RANDOM"
-  QFORGE_UI_SOCK="$SOCK" QFORGE_UI_EVENTS="$events" QFORGE_UI_INPUT_DEVICES="${DEVFILE-}" \
+  RETROFORGE_UI_SOCK="$SOCK" RETROFORGE_UI_EVENTS="$events" RETROFORGE_UI_INPUT_DEVICES="${DEVFILE-}" \
     "$UI" >"$T/ui.log" 2>&1 &
   UI_PID=$!
   while [ ! -S "$SOCK" ]; do
     i=$((i+1)); [ "$i" -gt 300 ] && { echo "the UI never created its socket" >&2; return 9; }
     sleep 0.02
   done
-  QFORGE_UI_SOCK="$SOCK" "$SHIM" --facts "$facts" --sequence "$seq" >"$T/out" 2>"$T/err"
+  RETROFORGE_UI_SOCK="$SOCK" "$SHIM" --facts "$facts" --sequence "$seq" >"$T/out" 2>"$T/err"
   local rc=$?
   wait "$UI_PID" 2>/dev/null
   OUT="$(cat "$T/out")"; ERR="$(cat "$T/err")"
@@ -157,7 +157,7 @@ fi
   || bad "an abort put something on stdout: $(printf '%q' "$OUT")"
 
 CASE="confirm-ui: it fails closed when there is no UI to ask"
-QFORGE_UI_SOCK="$T/nothing-here.sock" QFORGE_UI_CONNECT_TIMEOUT=1 \
+RETROFORGE_UI_SOCK="$T/nothing-here.sock" RETROFORGE_UI_CONNECT_TIMEOUT=1 \
   "$SHIM" --facts "$T/facts-wipe" --sequence SWNE >"$T/out" 2>"$T/err" \
   && bad "the shim exited 0 with no UI running" \
   || ok "no UI means a non-zero exit -- 'we could not ask' must never look like 'they said yes'"
@@ -178,7 +178,7 @@ c.close(); s.close(); os.unlink(p)
 PY
 DEAD=$!
 for _ in $(seq 1 100); do [ -S "$T/dead.sock" ] && break; sleep 0.02; done
-QFORGE_UI_SOCK="$T/dead.sock" "$SHIM" --facts "$T/facts-wipe" --sequence SWNE \
+RETROFORGE_UI_SOCK="$T/dead.sock" "$SHIM" --facts "$T/facts-wipe" --sequence SWNE \
   >"$T/out" 2>"$T/err" \
   && bad "a connection that closed without answering exited 0" \
   || ok "a UI that goes away mid-wait exits non-zero"
@@ -246,15 +246,15 @@ printf '%s' "$a" | grep -qi 'asked to erase /home' \
 
 CASE="ui: it never reassures about the thing it is deleting"
 # The finding of 2026-08-21, which cost the tty screen a hardware run: `fresh` on a disk that is
-# already ours destroys the qforge /home, and "your game library is safe" is true only when the
+# already ours destroys the retroforge /home, and "your game library is safe" is true only when the
 # games are on the SD card.
 r="$(describe "$T/facts-replaces" SWNE)"
 printf '%s' "$r" | grep -q 'your game library is safe' \
   && bad "it still reassures 'your game library is safe' while erasing the disk holding it" \
   || ok "the SD-card reassurance drops its second clause when /home is being replaced"
-printf '%s' "$r" | grep -qi 'deletes the QForge install already here' \
+printf '%s' "$r" | grep -qi 'deletes the RetroForge install already here' \
   && ok "and it says outright that the existing install is going" \
-  || bad "it does not disclose that an existing qforge install is destroyed"
+  || bad "it does not disclose that an existing retroforge install is destroyed"
 printf '%s' "$r" | grep -q '180 GiB' \
   && ok "quoting what that /home is using today" \
   || bad "it does not quote the /home size at risk"
@@ -321,8 +321,8 @@ EOF
 chmod +x "$T/bin"/*
 
 netcfg() {  # <mode> -- prints netcfg's key=value output
-  PATH="$T/bin:$PATH" QFORGE_WIFI_CONF="${CONF-$T/net/wifi.conf}" \
-    QFORGE_OTA_URL="https://ota.example" QFORGE_NET_TIMEOUT=1 \
+  PATH="$T/bin:$PATH" RETROFORGE_WIFI_CONF="${CONF-$T/net/wifi.conf}" \
+    RETROFORGE_OTA_URL="https://ota.example" RETROFORGE_NET_TIMEOUT=1 \
     "$NETCFG" "${1:-diagnose}" 2>/dev/null
 }
 state() { printf '%s\n' "$1" | sed -n 's/^STATE=//p'; }
@@ -462,29 +462,29 @@ netcfg join | grep -q 'hunter2' \
   || ok "the PSK appears in no state, on any path"
 unset NET_LEASE NET_HOST_RC
 
-CASE="§4b: netcfg and qforge-update agree on which host 'reachable' means"
-# THE URL IS WRITTEN THREE TIMES -- shell here, Python in rootfs/overlay/usr/bin/qforge-update, Python
+CASE="§4b: netcfg and retroforge-update agree on which host 'reachable' means"
+# THE URL IS WRITTEN THREE TIMES -- shell here, Python in rootfs/overlay/usr/bin/retroforge-update, Python
 # again in installer/release-info -- and this assertion is the only thing that keeps them the same
 # URL. It is not hypothetical: netcfg shipped for an hour with an invented default
-# (`ota.qforge.org`), which would have reported every healthy network as `no-host`, the exact
+# (`ota.retroforge.org`), which would have reported every healthy network as `no-host`, the exact
 # misdiagnosis §4b's table exists to prevent. Same shape as test-update.sh's identity-rules-agree,
 # and for the same reason. The third copy is the one that would hurt most quietly: netcfg would
 # report `online` against one host while release-info fetched a manifest from another.
 net_default="$(sed -n 's/^OTA_DEFAULT_URL=//p' "$NETCFG" | head -1)"
-upd_default="$(sed -n 's/^DEFAULT_URL = "\(.*\)"$/\1/p' "$ROOT/rootfs/overlay/usr/bin/qforge-update" | head -1)"
+upd_default="$(sed -n 's/^DEFAULT_URL = "\(.*\)"$/\1/p' "$ROOT/rootfs/overlay/usr/bin/retroforge-update" | head -1)"
 rel_default="$(sed -n 's/^DEFAULT_URL = "\(.*\)"$/\1/p' "$ROOT/installer/release-info" | head -1)"
 [ -n "$net_default" ] && [ "$net_default" = "$upd_default" ] \
   && ok "both default to $net_default" \
-  || bad "netcfg says '$net_default', qforge-update says '$upd_default'"
+  || bad "netcfg says '$net_default', retroforge-update says '$upd_default'"
 [ -n "$rel_default" ] && [ "$rel_default" = "$net_default" ] \
   && ok "and release-info fetches its manifest from the host netcfg pronounced reachable" \
   || bad "release-info says '$rel_default', netcfg says '$net_default'"
 # And the config file the running system actually carries wins over both.
 printf 'OTA_URL=https://from-the-conf.example\n' >"$T/net/ota.conf"
-NET_LEASE=1 NET_HOST_RC=0 QFORGE_OTA_CONFIG="$T/net/ota.conf" PATH="$T/bin:$PATH" \
-  QFORGE_WIFI_CONF="$T/net/wifi.conf" "$NETCFG" diagnose 2>/dev/null \
+NET_LEASE=1 NET_HOST_RC=0 RETROFORGE_OTA_CONFIG="$T/net/ota.conf" PATH="$T/bin:$PATH" \
+  RETROFORGE_WIFI_CONF="$T/net/wifi.conf" "$NETCFG" diagnose 2>/dev/null \
   | grep -q 'from-the-conf.example' \
-  && ok "and /etc/qforge/ota.conf overrides the built-in, as it does for the OTA client" \
+  && ok "and /etc/retroforge/ota.conf overrides the built-in, as it does for the OTA client" \
   || bad "the config file was ignored"
 
 CASE="§5: the button that says Power off powers off"
@@ -563,14 +563,14 @@ import uiflow
 s = uiflow.NetworkScreen(uiflow.kv(os.environ["FACTS"].replace(";", "\n")))
 print(json.dumps(s.describe()))'
 }
-n="$(netscreen 'STATE=no-conf;PATH_=/esp/qforge/wifi.conf')"
+n="$(netscreen 'STATE=no-conf;PATH_=/esp/retroforge/wifi.conf')"
 printf '%s' "$n" | grep -q 'wifi.conf.example' \
   && ok "no-conf points at the example file that is on the card for exactly this" \
   || bad "no-conf does not say how to create the file"
 printf '%s' "$n" | grep -qi 'Ethernet' \
   && ok "and names the adapter path that needs no file at all" \
   || bad "no-conf hides the zero-config alternative"
-n="$(netscreen 'STATE=unparsable;PATH_=/esp/qforge/wifi.conf;LINE=2')"
+n="$(netscreen 'STATE=unparsable;PATH_=/esp/retroforge/wifi.conf;LINE=2')"
 printf '%s' "$n" | grep -q 'line 2' \
   && ok "unparsable quotes the line number the user has to go and look at" \
   || bad "the line number is not on the screen"
@@ -646,7 +646,7 @@ EOF
 } >"$T/devices-kbd"
 
 keycheck() {  # <devices-file> -> prints True/False
-  QFORGE_UI_INPUT_DEVICES="$1" python3 -c '
+  RETROFORGE_UI_INPUT_DEVICES="$1" python3 -c '
 import os, sys
 sys.path.insert(0, os.path.join(os.environ["ROOT"], "installer"))
 import uipad
@@ -844,7 +844,7 @@ grep -qE 'base = max\(16, int\(self\.h / 28\)\)' "$VIEW" \
 CASE="ui: the consent socket is root-only"
 printf 'SHOWN\n' >"$T/ev-perm"
 SOCK="$T/perm.sock"
-QFORGE_UI_SOCK="$SOCK" QFORGE_UI_EVENTS="$T/ev-perm" "$UI" >/dev/null 2>&1 &
+RETROFORGE_UI_SOCK="$SOCK" RETROFORGE_UI_EVENTS="$T/ev-perm" "$UI" >/dev/null 2>&1 &
 p=$!
 for _ in $(seq 1 200); do [ -S "$SOCK" ] && break; sleep 0.02; done
 mode="$(stat -c %a "$SOCK" 2>/dev/null)"
@@ -868,16 +868,16 @@ export REL_CALLS="$T/rel/curl-calls"
 relinfo() {  # prints release-info's key=value output
   : >"$REL_CALLS"
   PATH="$T/bin:$PATH" NET_CURL_CALLS="$REL_CALLS" \
-    QFORGE_OTA_URL="${REL_URL-https://ota.example}" \
-    QFORGE_OTA_CONFIG="${REL_CONF-/dev/null}" \
+    RETROFORGE_OTA_URL="${REL_URL-https://ota.example}" \
+    RETROFORGE_OTA_CONFIG="${REL_CONF-/dev/null}" \
     "$RELINFO" 2>/dev/null
 }
-MANIFEST='{"version":"0.2.0","build":"20260825","bundle":"qforge-0.2.0.raucb","size":4294967296,"sha256":"deadbeef"}'
+MANIFEST='{"version":"0.2.0","build":"20260825","bundle":"retroforge-0.2.0.raucb","size":4294967296,"sha256":"deadbeef"}'
 
 CASE="release-info: a published release becomes a bundle URL"
 out="$(NET_CURL_BODY="$MANIFEST" relinfo)"
 [ "$(state "$out")" = ok ] && ok "a manifest that parses is STATE=ok" || bad "not ok: $out"
-printf '%s' "$out" | grep -qx 'BUNDLE=https://ota.example/stable/qforge-0.2.0.raucb' \
+printf '%s' "$out" | grep -qx 'BUNDLE=https://ota.example/stable/retroforge-0.2.0.raucb' \
   && ok "the bundle URL is the channel's, with the manifest's bare filename on the end" \
   || bad "the bundle URL is wrong: $out"
 # THE BUNDLE IS THE ONLY THING IT RESOLVES. /home is staged empty on the device, so there is no
@@ -886,7 +886,7 @@ printf '%s' "$out" | grep -qx 'BUNDLE=https://ota.example/stable/qforge-0.2.0.ra
 printf '%s' "$out" | grep -q '^SEED=' \
   && bad "release-info emits a SEED url -- /home needs nothing downloaded" \
   || ok "and nothing but the bundle: /home is built on the device, not fetched"
-printf '%s' "$out" | grep -q '^DETAIL=QForge 0.2.0, 4.0 GiB from ota.example' \
+printf '%s' "$out" | grep -q '^DETAIL=RetroForge 0.2.0, 4.0 GiB from ota.example' \
   && ok "one line for the panel: the version, the download size and the host it comes from" \
   || bad "the detail line is not what the screen puts under 'To install': $out"
 
@@ -908,7 +908,7 @@ CASE="release-info: a manifest that does not parse is not a release"
   && ok "a captive portal's HTML is STATE=malformed, not a bundle" \
   || bad "non-JSON was accepted"
 [ "$(state "$(NET_CURL_BODY='{"version":"1","bundle":"b.raucb"}' relinfo)")" = malformed ] \
-  && ok "a manifest with no size is refused, as qforge-update refuses it" \
+  && ok "a manifest with no size is refused, as retroforge-update refuses it" \
   || bad "a sizeless manifest was accepted"
 [ "$(state "$(NET_CURL_BODY='{"bundle":"b.raucb","size":10}' relinfo)")" = malformed ] \
   && ok "and one that names no version, which is what the screen would have to call it" \
@@ -917,7 +917,7 @@ CASE="release-info: a manifest that does not parse is not a release"
 CASE="release-info: the manifest cannot aim this medium at another host"
 # THE MANIFEST IS NOT A TRUST BOUNDARY. Left unchecked, `bundle` is a redirect primitive: the
 # signature would still reject whatever came back, but a manifest must not be able to point the
-# installer somewhere else at all. These are qforge-update's shapes, checked against the port.
+# installer somewhere else at all. These are retroforge-update's shapes, checked against the port.
 for b in 'http://evil.example/x.raucb' '../../etc/passwd' '/etc/passwd' '..\\x.raucb' '.hidden'; do
   out="$(NET_CURL_BODY="{\"version\":\"1\",\"bundle\":\"$b\",\"size\":10}" relinfo)"
   if [ "$(state "$out")" = malformed ] && ! printf '%s' "$out" | grep -q '^BUNDLE='; then
@@ -931,7 +931,7 @@ CASE="release-info: the channel comes from the same file the OTA client reads"
 printf 'OTA_CHANNEL=dev\n' >"$T/rel/ota.conf"
 out="$(REL_CONF="$T/rel/ota.conf" NET_CURL_BODY="$MANIFEST" relinfo)"
 printf '%s' "$out" | grep -qx 'URL=https://ota.example/dev/latest.json' \
-  && ok "/etc/qforge/ota.conf's OTA_CHANNEL steers it, as it steers qforge-update" \
+  && ok "/etc/retroforge/ota.conf's OTA_CHANNEL steers it, as it steers retroforge-update" \
   || bad "the channel from the config file was ignored: $out"
 printf '%s' "$out" | grep -q 'BUNDLE=https://ota.example/dev/' \
   && ok "and the bundle comes from that channel, not from stable" \
@@ -958,9 +958,9 @@ EOF
 cat >"$T/bin/carve.sh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$CARVE_CALLS"
-printf 'CEIL=999\nNEW_END=500\nQFORGE_MIB=81920\nQFORGE_GIB=%s\nREPLACES_OURS=1\n' "$(( 96 - $3 ))"
+printf 'CEIL=999\nNEW_END=500\nRETROFORGE_MIB=81920\nRETROFORGE_GIB=%s\nREPLACES_OURS=1\n' "$(( 96 - $3 ))"
 printf 'DESTROY=11 userdata data-erased\n'
-printf 'DESTROY=17 qforge-home replaced\n'
+printf 'DESTROY=17 retroforge-home replaced\n'
 EOF
 # EMITTED THE WAY THE REAL ONE EMITS IT: device-env uses `printf '%s=%q\n'`, and bash's %q escapes
 # rather than quotes when it can, so a board name arrives as `AYANEO\ Pocket\ ACE`. The stub used to
@@ -968,8 +968,8 @@ EOF
 # quotes passed here while putting a backslash on the panel of a real Pocket S2.
 cat >"$T/bin/device-env" <<'EOF'
 #!/usr/bin/env bash
-printf '%s=%q\n' QFORGE_DEVICE_NAME 'AYANEO Pocket ACE'
-printf '%s=%q\n' QFORGE_SOC_CLASS SM8550
+printf '%s=%q\n' RETROFORGE_DEVICE_NAME 'AYANEO Pocket ACE'
+printf '%s=%q\n' RETROFORGE_SOC_CLASS SM8550
 EOF
 chmod +x "$T/bin"/*
 export CARVE_CALLS="$T/carve-calls"; : >"$CARVE_CALLS"
@@ -982,10 +982,10 @@ mkdir -p "$T/rel"
 # short-circuits.
 flow() {  # <python snippet reading `pf` (a PreflightScreen)>
   PATH="$T/bin:$PATH" \
-  QFORGE_SELECT_TARGET="$T/bin/select-target.sh" QFORGE_CARVE="$T/bin/carve.sh" \
-  QFORGE_DEVICE_ENV="$T/bin/device-env" QFORGE_INSTALL_BUNDLE="${BUNDLE_OVERRIDE-https://x/b.raucb}" \
-  QFORGE_RELEASE_INFO="${RELINFO_OVERRIDE-$ROOT/installer/release-info}" \
-  QFORGE_OTA_URL=https://ota.example QFORGE_OTA_CONFIG=/dev/null \
+  RETROFORGE_SELECT_TARGET="$T/bin/select-target.sh" RETROFORGE_CARVE="$T/bin/carve.sh" \
+  RETROFORGE_DEVICE_ENV="$T/bin/device-env" RETROFORGE_INSTALL_BUNDLE="${BUNDLE_OVERRIDE-https://x/b.raucb}" \
+  RETROFORGE_RELEASE_INFO="${RELINFO_OVERRIDE-$ROOT/installer/release-info}" \
+  RETROFORGE_OTA_URL=https://ota.example RETROFORGE_OTA_CONFIG=/dev/null \
   SNIPPET="$1" python3 - <<'PY'
 import json, os, sys
 sys.path.insert(0, os.path.join(os.environ["ROOT"], "installer"))
@@ -1022,7 +1022,7 @@ printf '%s' "$out" | grep -q '/dev/sda' \
 printf '%s' "$out" | grep -q 'p11' && printf '%s' "$out" | grep -q 'p17' \
   && ok "the full list of partitions about to be destroyed is on the screen, by index" \
   || bad "the destroy list is not rendered: $out"
-printf '%s' "$out" | grep -qi 'qforge-home' \
+printf '%s' "$out" | grep -qi 'retroforge-home' \
   && ok "including /home, which is the one that costs a user their games" \
   || bad "/home is not named in the destroy list"
 printf '%s' "$out" | grep -q 'data erased:  p11 userdata' \
@@ -1042,9 +1042,9 @@ CASE="pre-flight: a reinstall's partition list fits on the panel"
 cat >"$T/bin/carve.sh" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"$CARVE_CALLS"
-printf 'CEIL=999\nNEW_END=500\nQFORGE_MIB=81920\nQFORGE_GIB=%s\nREPLACES_OURS=1\n' "$(( 96 - $3 ))"
+printf 'CEIL=999\nNEW_END=500\nRETROFORGE_MIB=81920\nRETROFORGE_GIB=%s\nREPLACES_OURS=1\n' "$(( 96 - $3 ))"
 printf 'DESTROY=11 userdata data-erased\n'
-for i in 1 2 3 4 5 6 7 8; do printf 'DESTROY=%s qforge-p%s replaced\n' "$i" "$i"; done
+for i in 1 2 3 4 5 6 7 8; do printf 'DESTROY=%s retroforge-p%s replaced\n' "$i" "$i"; done
 EOF
 chmod +x "$T/bin/carve.sh"
 nine="$(flow 'print(json.dumps(pf.describe()))')"
@@ -1054,12 +1054,12 @@ printf '%s' "$nine" | grep -q 'These 9 partitions will be destroyed' \
 printf '%s' "$nine" | grep -q 'data erased:  p11 userdata' \
   && ok "userdata is grouped under its own fate" \
   || bad "the data-erased group is missing: $nine"
-printf '%s' "$nine" | grep -q 'replaced:  p1 qforge-p1,  p2 qforge-p2' \
+printf '%s' "$nine" | grep -q 'replaced:  p1 retroforge-p1,  p2 retroforge-p2' \
   && ok "and our eight share one 'replaced' line instead of eight of their own" \
   || bad "the replaced group is not one line: $nine"
 missing=""
 for i in 1 2 3 4 5 6 7 8; do
-  printf '%s' "$nine" | grep -q "p$i qforge-p$i" || missing="$missing p$i"
+  printf '%s' "$nine" | grep -q "p$i retroforge-p$i" || missing="$missing p$i"
 done
 printf '%s' "$nine" | grep -q 'p11 userdata' || missing="$missing p11"
 [ -z "$missing" ] \
@@ -1101,7 +1101,7 @@ out="$(BUNDLE_OVERRIDE= NET_CURL_BODY="$MANIFEST" \
 printf '%s' "$out" | grep -q '"r": \["start", 16\]' \
   && ok "a resolved release makes the screen startable with nothing else configured" \
   || bad "it will not start against a published release: $out"
-printf '%s' "$out" | grep -q 'QForge 0.2.0, 4.0 GiB from ota.example' \
+printf '%s' "$out" | grep -q 'RetroForge 0.2.0, 4.0 GiB from ota.example' \
   && ok "and 'To install' names the version, the size and the host" \
   || bad "the screen does not say what it would download: $out"
 printf '%s' "$out" | grep -q '"seed"' \
@@ -1120,7 +1120,7 @@ printf '%s\n' "\$*" >"$T/rel/spine-argv"
 EOF
 chmod +x "$T/bin/spine-recorder"
 rm -f "$T/rel/spine-argv"
-BUNDLE_OVERRIDE= NET_CURL_BODY="$MANIFEST" QFORGE_SPINE="$T/bin/spine-recorder" \
+BUNDLE_OVERRIDE= NET_CURL_BODY="$MANIFEST" RETROFORGE_SPINE="$T/bin/spine-recorder" \
   flow '
 import time
 r = uiflow.SpineRun(16, "/nonexistent.sock", pf.facts["bundle"], "fresh")
@@ -1128,7 +1128,7 @@ for _ in range(500):
     if r.returncode() is not None: break
     time.sleep(0.01)' >/dev/null 2>&1
 argv="$(cat "$T/rel/spine-argv" 2>/dev/null)"
-printf '%s' "$argv" | grep -q -- '--bundle https://ota.example/stable/qforge-0.2.0.raucb' \
+printf '%s' "$argv" | grep -q -- '--bundle https://ota.example/stable/retroforge-0.2.0.raucb' \
   && ok "the resolved bundle URL reaches the spine's command line" \
   || bad "the spine was started with something else: $argv"
 printf '%s' "$argv" | grep -qi 'seed' \
@@ -1137,7 +1137,7 @@ printf '%s' "$argv" | grep -qi 'seed' \
 grep -q 'top.facts\["bundle"\], "fresh")' "$ROOT/installer/ui" \
   && ok "and the loop passes the SCREEN's facts, so nothing re-resolves behind the consent" \
   || bad "installer/ui does not hand SpineRun the screen's own bundle"
-# --intent, WHICH HARDWARE FOUND MISSING. On a disk that already carries QForge the spine refuses
+# --intent, WHICH HARDWARE FOUND MISSING. On a disk that already carries RetroForge the spine refuses
 # to choose for us, so an install there died at select-target every time -- with the UI having done
 # everything else right (Pocket ACE, 2026-08-25). The argument existed; nothing passed it.
 printf '%s' "$argv" | grep -q -- '--intent fresh' \
@@ -1167,7 +1167,7 @@ printf '%s' "$out" | grep -q '"r": \["recheck"\]' \
   || bad "the press produced no recheck: $out"
 
 CASE="pre-flight: the hardware stager's overrides win, and cost no round trip"
-# installer/hw-install.sh serves a bundle off a laptop and names it in QFORGE_INSTALL_BUNDLE. With
+# installer/hw-install.sh serves a bundle off a laptop and names it in RETROFORGE_INSTALL_BUNDLE. With
 # that set there is nothing to ask.
 cat >"$T/bin/release-info-marker" <<EOF
 #!/usr/bin/env bash
@@ -1186,9 +1186,9 @@ printf '%s' "$out" | grep -q 'https://x/b.raucb' \
 CASE="pre-flight: a failed resolution is never cached, or Check again could not work"
 # The button's whole promise. A cached "no" would make it redraw the same screen forever, and the
 # operator would be pressing a button that cannot answer -- the shape §4b already paid for once.
-twice="$(PATH="$T/bin:$PATH" QFORGE_RELEASE_INFO="$ROOT/installer/release-info" \
-  QFORGE_OTA_URL=https://ota.example QFORGE_OTA_CONFIG=/dev/null \
-  QFORGE_INSTALL_BUNDLE= \
+twice="$(PATH="$T/bin:$PATH" RETROFORGE_RELEASE_INFO="$ROOT/installer/release-info" \
+  RETROFORGE_OTA_URL=https://ota.example RETROFORGE_OTA_CONFIG=/dev/null \
+  RETROFORGE_INSTALL_BUNDLE= \
   MANIFEST="$MANIFEST" python3 - <<'PY'
 import json, os, sys
 sys.path.insert(0, os.path.join(os.environ["ROOT"], "installer"))
@@ -1221,11 +1221,11 @@ printf '%s' "$twice" | grep -q '\["no-release", "ok", "ok"' \
 # clears it. The real metrics still come from a real SDL on the device.
 CONSENT='desc = {"screen": "consent", "title": "Erase Android data on AYANEO Pocket ACE?",
   "blocks": [("This device is running Android",
-              "QForge will be installed alongside it. Android keeps the space you chose and "
+              "RetroForge will be installed alongside it. Android keeps the space you chose and "
               "everything else on that partition is erased, including apps, saves and photos. "
               "This cannot be undone and there is no backup."),
              ("What happens next",
-              "The disk is repartitioned, QForge is downloaded and written, and the device "
+              "The disk is repartitioned, RetroForge is downloaded and written, and the device "
               "reboots into it. Android still boots afterwards, factory-reset.")],
   "diamonds": [{"pos": p, "name": n, "done": False} for p, n in
                (("S","BOTTOM"),("W","LEFT"),("N","TOP"),("E","RIGHT"))],
@@ -1299,7 +1299,7 @@ import json, os, sys
 sys.path.insert(0, os.path.join(os.environ["ROOT"], "installer"))
 import uiflow
 class FakeRun:
-    tail = ["mkfs.ext4: No such file or directory", "qforge-install: ERROR: the carve failed"]
+    tail = ["mkfs.ext4: No such file or directory", "retroforge-install: ERROR: the carve failed"]
 p = uiflow.ProgressScreen(FakeRun())
 def feed(*lines):
     for l in lines: p.feed(l)
@@ -1309,7 +1309,7 @@ PY
 
 CASE="progress: the phases are the spine's own step markers"
 out="$(progress '
-feed("[qforge-install] == recon ==", "[qforge-install] == carve ==")
+feed("[retroforge-install] == recon ==", "[retroforge-install] == carve ==")
 print(json.dumps(p.describe()))')"
 printf '%s' "$out" | python3 -c '
 import json,sys
@@ -1319,13 +1319,13 @@ sys.exit(0 if len(active) == 1 and active[0]["label"] == "Repartitioning" else 1
   && ok "the step the spine last printed is the one shown as running" \
   || bad "the active phase does not follow the spine: $out"
 out="$(progress '
-feed("[qforge-install] == root slot ==", "  42% Copying image to rootfs.0")
+feed("[retroforge-install] == root slot ==", "  42% Copying image to rootfs.0")
 print(json.dumps(p.describe()))')"
 printf '%s' "$out" | grep -q '42' \
   && ok "and rauc's own percentage is read off the same pipe -- no second bus client in the installer" \
   || bad "the rauc percentage was not picked up: $out"
 out="$(progress '
-feed("[qforge-install] == recon ==", "  42% something")
+feed("[retroforge-install] == recon ==", "  42% something")
 print(json.dumps(p.describe()))')"
 printf '%s' "$out" | python3 -c '
 import json,sys
@@ -1337,8 +1337,8 @@ sys.exit(0 if all(r["percent"] is None for r in rows if r["state"] != "active") 
 # It was: describe() built one plain-text block per reached phase as well as the row, and every
 # phase the spine reached appeared twice. Observed on an AYANEO Pocket ACE, 2026-08-25.
 out="$(progress '
-feed("[qforge-install] == recon ==", "[qforge-install] == select-target ==",
-     "[qforge-install] == install record ==")
+feed("[retroforge-install] == recon ==", "[retroforge-install] == select-target ==",
+     "[retroforge-install] == install record ==")
 print(json.dumps(p.describe()))')"
 printf '%s' "$out" | python3 -c '
 import json,sys
@@ -1353,7 +1353,7 @@ CASE="progress: a failure says WHICH of two states the device is in"
 # The one thing a failure owes the user. "It failed" is not actionable; "nothing was written" and
 # "Android's data is already gone" are different situations and only one needs anything done.
 out="$(progress '
-feed("[qforge-install] == verify sources ==")
+feed("[retroforge-install] == verify sources ==")
 p.finish(1); print(json.dumps(p.describe()))')"
 printf '%s' "$out" | grep -qi 'Nothing was written' \
   && ok "a failure before the carve says the device is exactly as it was" \
@@ -1362,7 +1362,7 @@ printf '%s' "$out" | grep -qi 'was modified' \
   && bad "it claims the disk was modified when the carve never ran" \
   || ok "and it does not claim otherwise"
 out="$(progress '
-feed("[qforge-install] == carve ==", "[qforge-install] == filesystems ==")
+feed("[retroforge-install] == carve ==", "[retroforge-install] == filesystems ==")
 p.finish(1); print(json.dumps(p.describe()))')"
 printf '%s' "$out" | grep -qi 'disk WAS modified' \
   && ok "a failure after the carve says so, and that Android's data is already gone" \
@@ -1388,9 +1388,9 @@ printf '%s' "$out" | grep -q 'Power off' \
 
 out="$(progress '
 p.finish(0); p.begin_verify()
-p.feed_verify("    !!  qforge-root-A is empty")
+p.feed_verify("    !!  retroforge-root-A is empty")
 p.finish_verify(1); print(json.dumps(p.describe()))')"
-printf '%s' "$out" | grep -q 'qforge-root-A is empty' \
+printf '%s' "$out" | grep -q 'retroforge-root-A is empty' \
   && ok "a failed check puts the !! line on screen, not just a verdict" \
   || bad "the failing check is not named: $out"
 # NOT a bare grep for "Remove the SD card": the correct screen says "Do NOT remove the SD card",
@@ -1443,19 +1443,19 @@ SAVELOG="$ROOT/installer/save-log.sh"
 
 cat >"$T/bin/device-env-panel" <<'EOF'
 #!/usr/bin/env bash
-printf "QFORGE_DEVICE_NAME='AYANEO Pocket ACE'\n"
-printf 'QFORGE_PRIMARY_CONNECTOR=DSI-1\n'
-printf 'QFORGE_PANEL_NATIVE_WIDTH=1080\n'
-printf 'QFORGE_PANEL_NATIVE_HEIGHT=1620\n'
-printf 'QFORGE_PANEL_REFRESH_RATES=60,120\n'
+printf "RETROFORGE_DEVICE_NAME='AYANEO Pocket ACE'\n"
+printf 'RETROFORGE_PRIMARY_CONNECTOR=DSI-1\n'
+printf 'RETROFORGE_PANEL_NATIVE_WIDTH=1080\n'
+printf 'RETROFORGE_PANEL_NATIVE_HEIGHT=1620\n'
+printf 'RETROFORGE_PANEL_REFRESH_RATES=60,120\n'
 EOF
 printf '#!/bin/sh\nexit 1\n' >"$T/bin/no-seatd"        # "no seatd is running"
 chmod +x "$T/bin"/*
 
 session() {  # env overrides passed through
-  QFORGE_INSTALLER_DRYRUN=1 QFORGE_XDG_RUNTIME_DIR="$T/xdg" QFORGE_UI="$UI" QFORGE_SEATD_PGREP="$T/bin/no-seatd" \
-    QFORGE_DEVICE_ENV="${DEVENV-$T/bin/device-env-panel}" \
-    QFORGE_SEATD_SOCK="${SOCKARG-$T/seatd.sock}" "$SESSION" 2>"$T/session.err"
+  RETROFORGE_INSTALLER_DRYRUN=1 RETROFORGE_XDG_RUNTIME_DIR="$T/xdg" RETROFORGE_UI="$UI" RETROFORGE_SEATD_PGREP="$T/bin/no-seatd" \
+    RETROFORGE_DEVICE_ENV="${DEVENV-$T/bin/device-env-panel}" \
+    RETROFORGE_SEATD_SOCK="${SOCKARG-$T/seatd.sock}" "$SESSION" 2>"$T/session.err"
 }
 
 CASE="session: the command line is the one bring-up validated on hardware"
@@ -1510,8 +1510,8 @@ grep -qi 'stale' "$T/session.err" \
 # But only when nothing is listening: removing a LIVE seatd's socket breaks a running session.
 : >"$T/seatd.sock"
 printf '#!/bin/sh\nexit 0\n' >"$T/bin/yes-seatd"; chmod +x "$T/bin/yes-seatd"
-QFORGE_INSTALLER_DRYRUN=1 QFORGE_XDG_RUNTIME_DIR="$T/xdg" QFORGE_UI="$UI" QFORGE_SEATD_PGREP="$T/bin/yes-seatd" \
-  QFORGE_DEVICE_ENV="$T/bin/device-env-panel" QFORGE_SEATD_SOCK="$T/seatd.sock" \
+RETROFORGE_INSTALLER_DRYRUN=1 RETROFORGE_XDG_RUNTIME_DIR="$T/xdg" RETROFORGE_UI="$UI" RETROFORGE_SEATD_PGREP="$T/bin/yes-seatd" \
+  RETROFORGE_DEVICE_ENV="$T/bin/device-env-panel" RETROFORGE_SEATD_SOCK="$T/seatd.sock" \
   "$SESSION" >/dev/null 2>&1
 [ -e "$T/seatd.sock" ] \
   && ok "a socket with a live seatd behind it is left alone" \
@@ -1675,7 +1675,7 @@ echo 'STATE=no-lease'
 echo 'DETAIL=associated with the network, but no address was offered'
 EOF
 chmod +x "$T/bin/netcfg-chatty"
-join_out="$(QFORGE_NETCFG="$T/bin/netcfg-chatty" python3 - <<'PY' 2>&1
+join_out="$(RETROFORGE_NETCFG="$T/bin/netcfg-chatty" python3 - <<'PY' 2>&1
 import os, sys, time
 sys.path.insert(0, os.environ["ROOT"] + "/installer")
 import uiflow
@@ -1698,7 +1698,7 @@ printf '%s' "$join_out" | grep -q 'netcfg: STATE=no-lease' \
   || ok "without re-logging the key=value lines the facts already carry"
 # nmcli's own default gave up before slow access points finished (HW 2026-08-25). Association is
 # quick; DHCP is what drags, and a timed-out join costs the operator a full retry.
-grep -q 'JOIN_TIMEOUT=${QFORGE_NET_JOIN_TIMEOUT:-90}' "$ROOT/installer/netcfg" \
+grep -q 'JOIN_TIMEOUT=${RETROFORGE_NET_JOIN_TIMEOUT:-90}' "$ROOT/installer/netcfg" \
   && ok "the join waits 90s, not nmcli's default" || bad "the join timeout is nmcli's default again"
 grep -q '"\$NMCLI" -w "\$JOIN_TIMEOUT" device wifi connect' "$ROOT/installer/netcfg" \
   && ok "and nmcli is actually told about it" || bad "JOIN_TIMEOUT is set but never passed to nmcli"
@@ -1745,7 +1745,7 @@ import uiflow
 print(uiflow.NetworkScreen.TABLE["no-conf"][2])' 2>&1)"
 printf '%s' "$conf" | grep -qi 'wifi.conf.example' \
   && ok "the screen names the example file" || bad "the screen does not name it"
-printf '%s' "$conf" | grep -qi 'qforge folder' \
+printf '%s' "$conf" | grep -qi 'retroforge folder' \
   && ok "and where to find it" || bad "the screen does not say where the file is"
 printf '%s' "$conf" | grep -qiE 'ethernet' \
   && ok "and still offers the no-file alternative" || bad "the USB-C Ethernet route was lost"
@@ -1759,7 +1759,7 @@ CASE="no-conf offers no retry, because a retry cannot succeed"
 # first, while Power off -- what the advice text actually asks for -- was secondary.
 btns="$(cd "$ROOT/installer" && python3 -c '
 import uiflow
-s = uiflow.NetworkScreen({"STATE": "no-conf", "PATH_": "/esp/qforge/wifi.conf"})
+s = uiflow.NetworkScreen({"STATE": "no-conf", "PATH_": "/esp/retroforge/wifi.conf"})
 print(",".join(b["label"] for b in s.describe()["buttons"]))
 s.handle("S"); print("S=%r" % (s.result,))' 2>&1)"
 printf '%s' "$btns" | head -1 | grep -qi 'power off' \
@@ -1867,7 +1867,7 @@ printf '%s' "$foreign" | grep -qi 'another operating system' \
   && ok "a foreign install is named as such" \
   || bad "rule 3b does not tell the operator there is another OS: $foreign"
 printf '%s' "$foreign" | grep -qi 'remove that installation first' \
-  && ok "and says it must be removed before QForge can install" \
+  && ok "and says it must be removed before RetroForge can install" \
   || bad "it does not say what to do about it"
 printf '%s' "$foreign" | grep -qi 'running from its internal disk is refused' \
   && bad "it still asserts the running-disk cause on a foreign-OS refusal" \
@@ -1933,9 +1933,9 @@ CASE="session: XDG_RUNTIME_DIR is provided, because nothing else does"
 # ENVIRONMENT, not the command: a dry run must still leave the directory there, 0700, because that
 # is the side effect gamescope depends on.
 rm -rf "$T/xdg2"
-QFORGE_INSTALLER_DRYRUN=1 QFORGE_XDG_RUNTIME_DIR="$T/xdg2" QFORGE_UI="$UI" \
-  QFORGE_SEATD_PGREP="$T/bin/yes-seatd" QFORGE_DEVICE_ENV="$T/bin/device-env-panel" \
-  QFORGE_SEATD_SOCK="$T/seatd.sock" "$SESSION" >/dev/null 2>&1
+RETROFORGE_INSTALLER_DRYRUN=1 RETROFORGE_XDG_RUNTIME_DIR="$T/xdg2" RETROFORGE_UI="$UI" \
+  RETROFORGE_SEATD_PGREP="$T/bin/yes-seatd" RETROFORGE_DEVICE_ENV="$T/bin/device-env-panel" \
+  RETROFORGE_SEATD_SOCK="$T/seatd.sock" "$SESSION" >/dev/null 2>&1
 [ -d "$T/xdg2" ] \
   && ok "the runtime directory is created" \
   || bad "no XDG_RUNTIME_DIR is created -- gamescope aborts on its wayland socket"
@@ -1958,8 +1958,8 @@ CASE="session: a seatd that is already running is used, not duplicated"
 # enables seatd.service (Pocket S2, 2026-08-22: pid 710, /run/seatd.sock root:seat 0770). An
 # installer-session that always reached for seatd-launch would die before gamescope started.
 : >"$T/seatd.sock"
-cmd="$(QFORGE_INSTALLER_DRYRUN=1 QFORGE_XDG_RUNTIME_DIR="$T/xdg" QFORGE_UI="$UI" QFORGE_SEATD_PGREP="$T/bin/yes-seatd" \
-  QFORGE_DEVICE_ENV="$T/bin/device-env-panel" QFORGE_SEATD_SOCK="$T/seatd.sock" \
+cmd="$(RETROFORGE_INSTALLER_DRYRUN=1 RETROFORGE_XDG_RUNTIME_DIR="$T/xdg" RETROFORGE_UI="$UI" RETROFORGE_SEATD_PGREP="$T/bin/yes-seatd" \
+  RETROFORGE_DEVICE_ENV="$T/bin/device-env-panel" RETROFORGE_SEATD_SOCK="$T/seatd.sock" \
   "$SESSION" 2>"$T/session.err")"
 grep -qi 'using the seatd already running' "$T/session.err" \
   && ok "it takes the seat from the running daemon instead of launching a second" \
@@ -1971,7 +1971,7 @@ printf '%s' "$cmd" | grep -q 'seatd-launch -- ' \
   || bad "it stopped using seatd-launch when nothing was running: $cmd"
 
 CASE="session: it refuses rather than drawing nothing"
-QFORGE_INSTALLER_DRYRUN=1 QFORGE_UI="$T/not-here" QFORGE_DEVICE_ENV="$T/bin/device-env-panel" \
+RETROFORGE_INSTALLER_DRYRUN=1 RETROFORGE_UI="$T/not-here" RETROFORGE_DEVICE_ENV="$T/bin/device-env-panel" \
   "$SESSION" >/dev/null 2>&1 \
   && bad "it started a session with no UI to run" \
   || ok "a missing UI is a loud failure at second zero, not a black panel"
@@ -1991,13 +1991,13 @@ chmod +x "$T/bin"/*
 mkdir -p "$T/esp" "$T/run/install"
 printf 'consent: given at 2026-08-22T10:00:00Z, sequence SWNE, attempt 1\n' >"$T/run/install/record"
 
-printf 'QFORGE_VARIANT=installer\nQFORGE_BUILD=20260825T090000Z\nQFORGE_VERSION=1.2.3\nQFORGE_GIT=abc1234\nQFORGE_MODE=release\n' >"$T/run/qforge-release"
+printf 'RETROFORGE_VARIANT=installer\nRETROFORGE_BUILD=20260825T090000Z\nRETROFORGE_VERSION=1.2.3\nRETROFORGE_GIT=abc1234\nRETROFORGE_MODE=release\n' >"$T/run/retroforge-release"
 
 savelog() {
-  PATH="$T/bin:$PATH" QFORGE_INSTALL_RUNDIR="$T/run" QFORGE_INSTALL_LOG="$T/run/install.log" \
-    QFORGE_INSTALLER_ESP="${ESPARG-$T/esp}" QFORGE_INSTALL_RECORD="$T/run/install/record" \
-    QFORGE_INSTALL_CONSOLE="$T/console" JOURNALCTL="${JC-$T/bin/journalctl}" \
-    QFORGE_INSTALL_RELEASE="${RELARG-$T/run/qforge-release}" \
+  PATH="$T/bin:$PATH" RETROFORGE_INSTALL_RUNDIR="$T/run" RETROFORGE_INSTALL_LOG="$T/run/install.log" \
+    RETROFORGE_INSTALLER_ESP="${ESPARG-$T/esp}" RETROFORGE_INSTALL_RECORD="$T/run/install/record" \
+    RETROFORGE_INSTALL_CONSOLE="$T/console" JOURNALCTL="${JC-$T/bin/journalctl}" \
+    RETROFORGE_INSTALL_RELEASE="${RELARG-$T/run/retroforge-release}" \
     "$SAVELOG" "$@" 2>"$T/savelog.err"
 }
 
@@ -2009,7 +2009,7 @@ grep -q 'could not open /dev/dri/card0' "$T/run/install.log" \
 grep -q 'consent: given' "$T/run/install.log" \
   && ok "and the spine's own install record, which the journal does not carry" \
   || bad "the install record is missing from the log"
-cmp -s "$T/run/install.log" "$T/esp/qforge-install.log" \
+cmp -s "$T/run/install.log" "$T/esp/retroforge-install.log" \
   && ok "copied to the installer medium's ESP -- pull the card, read it on a PC" \
   || bad "the log did not reach the ESP"
 
@@ -2019,10 +2019,10 @@ CASE="fallback: the log says which medium produced it"
 # installer/mkimage.sh started stamping one. The ESP copy is the one artefact that leaves a device
 # that could not finish, so the identity belongs in its header rather than in a journal that stays
 # on the machine.
-grep -q '^medium: .*QFORGE_VERSION=1.2.3' "$T/run/install.log" \
+grep -q '^medium: .*RETROFORGE_VERSION=1.2.3' "$T/run/install.log" \
   && ok "the header names the version the medium was built as" \
   || bad "the log does not identify the medium: $(head -3 "$T/run/install.log")"
-grep -q '^medium: .*QFORGE_MODE=release' "$T/run/install.log" \
+grep -q '^medium: .*RETROFORGE_MODE=release' "$T/run/install.log" \
   && ok "and whether it is a dev medium, which changes what is baked into it" \
   || bad "the mode is not in the header"
 RELARG="$T/run/absent" savelog
@@ -2035,7 +2035,7 @@ CASE="fallback: the log carries the network's side of the story too"
 # HW 2026-08-25: the first join reached no-lease in 10.2s of a 90s budget and a retry was online in
 # 3.9s, and this log could say nothing about why -- only the installer's own unit was collected, so
 # the association, the DHCP transaction and any ath12k scan refusal were all absent.
-grep -q 'journalctl-args:.*-u qforge-installer.service' "$T/run/install.log" \
+grep -q 'journalctl-args:.*-u retroforge-installer.service' "$T/run/install.log" \
   && ok "the installer's own unit is collected" \
   || bad "the installer's journal is missing"
 grep -q 'journalctl-args:.*-u NetworkManager.service' "$T/run/install.log" \
@@ -2055,9 +2055,9 @@ grep -q 'no journalctl' "$T/run/install.log" \
   && ok "and it says which part is missing" \
   || bad "the log does not record why it is empty"
 printf '#!/bin/sh\nexit 1\n' >"$T/bin/mountpoint"      # "not a mount point"
-rm -f "$T/esp/qforge-install.log"
+rm -f "$T/esp/retroforge-install.log"
 savelog && ok "an ESP that is not mounted is not an error either" || bad "an unmounted ESP failed"
-[ ! -e "$T/esp/qforge-install.log" ] \
+[ ! -e "$T/esp/retroforge-install.log" ] \
   && ok "and nothing is copied into a directory that is merely SHAPED like the mount" \
   || bad "it copied into an unmounted /esp, where nobody will ever find it"
 grep -qi 'not a mount point' "$T/savelog.err" \
@@ -2096,9 +2096,9 @@ cat >"$T/bin/umount" <<EOF
 rm -f "$T/mounted"
 EOF
 chmod +x "$T/bin"/*
-rm -f "$T/mounted" "$T/esp/qforge-install.log"
+rm -f "$T/mounted" "$T/esp/retroforge-install.log"
 savelog && ok "it exits 0" || bad "save-log.sh failed after mounting the ESP itself"
-cmp -s "$T/run/install.log" "$T/esp/qforge-install.log" \
+cmp -s "$T/run/install.log" "$T/esp/retroforge-install.log" \
   && ok "the log reaches the ESP even though nothing had mounted it" \
   || bad "an unmounted ESP still loses the log"
 grep -qi 'mounted it to save the log' "$T/savelog.err" \
@@ -2111,10 +2111,10 @@ grep -qi 'mounted it to save the log' "$T/savelog.err" \
 CASE="fallback: a mount that will not mount is still not an error"
 printf '#!/bin/sh\nexit 1\n' >"$T/bin/mount"      # "no such device", a read-only medium, anything
 chmod +x "$T/bin"/*
-rm -f "$T/mounted" "$T/esp/qforge-install.log"
+rm -f "$T/mounted" "$T/esp/retroforge-install.log"
 savelog && ok "an ESP that cannot be mounted exits 0 like every other saving failure" \
   || bad "a failed mount failed the unit"
-[ ! -e "$T/esp/qforge-install.log" ] \
+[ ! -e "$T/esp/retroforge-install.log" ] \
   && ok "and nothing is written into the bare directory, where nobody would ever find it" \
   || bad "it copied into an unmounted /esp"
 grep -qi 'could not be mounted' "$T/savelog.err" \
@@ -2125,7 +2125,7 @@ CASE="fallback: an fstab mount is never stolen from whoever owns it"
 printf '#!/bin/sh\n: >"'"$T"'/mounted"\n' >"$T/bin/mount"
 chmod +x "$T/bin"/*
 : >"$T/mounted"                                   # already mounted, by fstab, before this ran
-rm -f "$T/esp/qforge-install.log"
+rm -f "$T/esp/retroforge-install.log"
 savelog && ok "it exits 0" || bad "save-log.sh failed against an already-mounted ESP"
 [ -e "$T/mounted" ] \
   && ok "and leaves the mount alone -- unmounting under a running installer is the worse bug" \
@@ -2133,30 +2133,30 @@ savelog && ok "it exits 0" || bad "save-log.sh failed against an already-mounted
 
 CASE="units: the fallback is actually armed"
 UNITDIR="$ROOT/installer/units"
-grep -q '^OnFailure=qforge-installer-console.service' "$UNITDIR/qforge-installer.service" \
+grep -q '^OnFailure=retroforge-installer-console.service' "$UNITDIR/retroforge-installer.service" \
   && ok "the session names the console unit on failure" \
   || bad "nothing starts the fallback console"
-grep -q '^ConditionKernelCommandLine=!qforge.install.debug' "$UNITDIR/qforge-installer.service" \
-  && ok "qforge.install.debug skips the GUI entirely, as a condition" \
+grep -q '^ConditionKernelCommandLine=!retroforge.install.debug' "$UNITDIR/retroforge-installer.service" \
+  && ok "retroforge.install.debug skips the GUI entirely, as a condition" \
   || bad "the debug cmdline escape is missing"
 # An OnFailure= activation still evaluates conditions, so a condition on the console unit would
 # disarm the fallback on exactly the boots it exists for.
-grep -q '^ConditionKernelCommandLine' "$UNITDIR/qforge-installer-console.service" \
+grep -q '^ConditionKernelCommandLine' "$UNITDIR/retroforge-installer-console.service" \
   && bad "the console unit carries a condition, which would disarm it on a normal boot" \
   || ok "and the console unit carries no condition of its own"
-grep -qE '^(TTYPath|StandardInput=tty)' "$UNITDIR/qforge-installer.service" \
+grep -qE '^(TTYPath|StandardInput=tty)' "$UNITDIR/retroforge-installer.service" \
   && bad "the session unit binds a TTY -- that made gamescope exit 0 at boot on the main image" \
   || ok "the session unit binds no TTY, which is what bring-up paid to learn"
-grep -q '^ExecStopPost=-/usr/lib/qforge/install/save-log.sh' "$UNITDIR/qforge-installer.service" \
+grep -q '^ExecStopPost=-/usr/lib/retroforge/install/save-log.sh' "$UNITDIR/retroforge-installer.service" \
   && ok "and every stop, successful or not, tries to save the log" \
   || bad "the log is not collected on stop"
 # The ExecStopPost above writes to /esp, and units stop in the REVERSE of their After= order, so
 # this line is the whole reason the mount is still there when it runs. fstab's `nofail` drops the
 # mount's Before=local-fs.target, so nothing else orders these two at all.
-grep -q '^After=esp.mount' "$UNITDIR/qforge-installer.service" \
+grep -q '^After=esp.mount' "$UNITDIR/retroforge-installer.service" \
   && ok "and /esp is ordered so shutdown cannot unmount it out from under that log" \
   || bad "nothing keeps /esp mounted while the log is being written to it"
-grep -qE '^(Requires|RequiresMountsFor)=.*esp' "$UNITDIR/qforge-installer.service" \
+grep -qE '^(Requires|RequiresMountsFor)=.*esp' "$UNITDIR/retroforge-installer.service" \
   && bad "the session REQUIRES /esp -- an ESP that will not mount would black out the panel" \
   || ok "and wants it rather than requiring it, so a bad ESP costs the log and not the installer"
 

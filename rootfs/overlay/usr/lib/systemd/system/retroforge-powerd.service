@@ -1,0 +1,19 @@
+[Unit]
+Description=retroforge power daemon (fan curve, LEDs, boot CPU governor, sched_ext)
+# The fan and LEDs come from the hardware map (/run/retroforge/hw); without it powerd scans sysfs.
+Wants=retroforge-hw.service
+After=retroforge-hw.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=dbus
+BusName=org.retroforge.Power
+NotifyAccess=main
+ExecStart=/usr/bin/retroforge-powerd
+ExecStopPost=/usr/bin/retroforge-powerd --fan-safe
+Restart=always
+RestartSec=1
+WatchdogSec=15
+
+[Install]
+WantedBy=multi-user.target

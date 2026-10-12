@@ -1,0 +1,526 @@
+#!/usr/bin/env python3
+# retroforge-emu — installs, updates and removes the emulators ROM cards run (plan Phase 4, part 2).
+#
+#     retroforge-emu list                 -> JSON on stdout: every catalog emulator, pinned vs installed
+#     retroforge-emu install <emulator>   -> `N%` lines on stdout, forward-only, ending at 100%
+#     retroforge-emu remove <emulator>
+#
+# THE CALLER IS THE RETROFORGE OGUI PLUGIN, which parses stdout: progress lines and JSON only;
+# everything else goes to stderr. Exit status: 0 ok, 2 bad invocation or unknown emulator,
+# 3 network (GitHub API or download failed), 4 verification (the release or the bytes are not the
+# ones RetroForge tested; nothing changes on disk), 5 local (no space, file system).
+#
+# Emulators are upstream AppImages, never mirrored. The catalog pins, per emulator, one tested
+# release tag and the sha256 + size of its arm64 asset. An install:
+#   1. asks the GitHub API for that tag and picks the asset the catalog's pattern matches;
+#   2. refuses (exit 4) unless GitHub's per-asset digest and size equal the catalog's -- an upstream
+#      that re-uploads under the same tag must not reach players untested -- and unless the
+#      download URL is https;
+#   3. downloads with curl locked to https, redirects included, into a hidden .part file;
+#   4. checks the bytes' sha256 and size against the catalog again (exit 4, .part deleted);
+#   5. renames it to <tag>.AppImage and flips `current` atomically (symlink + rename), keeping the
+#      previous AppImage for a rollback and deleting older ones.
+# A failure at any step leaves the working install as it was.
+#
+# NIGHTLY CHANNEL (catalog "channel": "nightly", no "sha256"; "size" is only an estimate for the
+# page): the entry follows an upstream's rolling release instead of a pin -- Cemu, whose only
+# aarch64 release (2.6) predates its AArch64 recompiler and dies with SIGILL (user decision
+# 2026-10-07). Every install asks GitHub for the release's current asset and REQUIRES its per-asset
+# sha256 digest (exit 4 without one); the bytes must hash to it. The build is installed as
+# nightly-<id>, <id> = the asset pattern's first capture group (the commit in pkgforge-dev's file
+# names), else the digest's first 12 hex digits. Same build as `current`: nothing is downloaded and
+# stderr says "already the latest". Nobody at RetroForge tested that build: the page says "Nightly".
+#
+# DATA FILES (catalog "data": [{"url": "https://...", "to": "<path under $HOME>"}], optional): files
+# an emulator needs but never fetches the way RetroForge runs it -- RPCS3 downloads its per-game config
+# database (api.rpcs3.net/config) only from its Qt game list, never with --no-gui (HW 2026-10-07).
+# Fetched after each successful install or update (not when the pin is already current), https
+# only, at most DATA_MAX bytes, swapped in atomically. They are living upstream files, so NOT
+# checksummed: the emulator reads them as data. A failed fetch keeps the previous file and never
+# fails the install (the emulator itself is in place): a warning on stderr.
+#
+# UNPACKED ARCHIVES (catalog "unpack": {"to": "<folder under $HOME>", "version": "<file in it>"},
+# optional): the asset is a zip with ONE top-level folder, unpacked into `to` instead of becoming an
+# AppImage -- PortMaster, a folder of scripts that every port it installs finds through
+# /roms/ports/PortMaster (plan Phase 4b). Downloaded and verified exactly like an AppImage, then
+# unpacked into a hidden staging folder beside `to` and renamed into place; over an existing folder
+# it unpacks on top instead, as PortMaster's own updater does, so what the tool added (its runtimes,
+# its config) stays. Refused (exit 4, nothing written): a member outside the top folder ('..', an
+# absolute path), a symlink or special file, more than one top folder, or a version file that is not
+# the pinned tag. Executable bits are kept, setuid/setgid/sticky never. The installed version is the
+# folder's own version file. A MARKER (.retroforge-emu, naming the emulator) is written into the folder,
+# and remove deletes the folder only when the marker is there: a catalog `to` pointing at a folder
+# retroforge-emu never unpacked can never delete it. A folder that was already there (a PortMaster the
+# player installed by hand) is unpacked over and marked, i.e. adopted: Delete then removes it, as
+# the page says. `to` is never the home itself nor a folder holding ~/emulators, and never a symlink.
+# Unpacking over a folder copies the version file last, so a copy that fails half way (no space)
+# still reports the old version.
+# "self_update": true (only with "unpack"): the tool updates itself after the first install
+# (PortMaster asks the player, then unzips its new release over its folder -- user decision
+# 2026-10-11). The pin is then the FIRST install only: no update is ever offered, and install on an
+# existing install downloads nothing.
+#
+# Layout (what retroforge-launch runs): /home/player/emulators/<emulator>/{<tag>.AppImage, current}, or
+# for an unpacked archive the catalog's `to` (/home/player/emulators/<emulator>/ then only holds the
+# install lock and the download in progress).
+#
+# CATALOG: $RETROFORGE_CATALOG, else the plugin's copy of the hosted catalog
+# (~/.cache/retroforge/catalog.json), else the image's (/usr/share/retroforge/catalog.json, the offline
+# fallback). retroforge-emu never fetches the catalog itself; the plugin does.
+#
+# TEST SEAMS (tests/test-emu.sh runs this file): RETROFORGE_CURL, RETROFORGE_EMU_DIR, RETROFORGE_CATALOG.
+import fcntl
+import hashlib
+import json
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import time
+import zlib
+import zipfile
+
+EXIT_OK, EXIT_USAGE, EXIT_NET, EXIT_VERIFY, EXIT_LOCAL = 0, 2, 3, 4, 5
+
+CURL = os.environ.get("RETROFORGE_CURL", "curl")
+EMU_DIR = os.environ.get("RETROFORGE_EMU_DIR", "/home/player/emulators")
+CATALOGS = [
+    os.environ.get("RETROFORGE_CATALOG", ""),
+    os.path.join(os.path.expanduser("~"), ".cache/retroforge/catalog.json"),
+    "/usr/share/retroforge/catalog.json",
+]
+GITHUB_API = "https://api.github.com"
+EMU_ID = re.compile(r"[a-z0-9_-]+")
+# A tag names a file (<tag>.AppImage) and a URL path segment: no '/', nothing a shell or URL reads
+# specially. '@' is allowed: pkgforge-dev's AppImage repos tag releases as <version>@<date>_<id>.
+SAFE_TAG = re.compile(r"[A-Za-z0-9._@-]+")
+CHANNELS = {"nightly"}
+SPACE_MARGIN = 16 << 20  # bytes kept free beyond the AppImage itself
+DATA_MAX = 16 << 20  # bytes, per data file
+HOME = os.path.expanduser("~")
+POLL = 0.25  # s between progress samples
+MARKER = ".retroforge-emu"  # in an unpacked folder: names the emulator that unpacked it
+
+
+class Fail(Exception):
+    def __init__(self, code, msg):
+        super().__init__(msg)
+        self.code = code
+
+
+def log(msg):
+    print(f"retroforge-emu: {msg}", file=sys.stderr, flush=True)
+
+
+def load_catalog():
+    path = next((p for p in CATALOGS if p and os.path.isfile(p)), None)
+    if not path:
+        raise Fail(EXIT_LOCAL, "no emulator catalog found")
+    try:
+        with open(path) as f:
+            cat = json.load(f)
+    except (OSError, ValueError) as e:
+        raise Fail(EXIT_LOCAL, f"unreadable catalog {path}: {e}")
+    if cat.get("schema") != 1 or not isinstance(cat.get("emulators"), dict):
+        raise Fail(EXIT_LOCAL, f"{path} is not a schema 1 catalog")
+    return cat["emulators"]
+
+
+def entry(emus, emu):
+    if not EMU_ID.fullmatch(emu or "") or emu not in emus:
+        raise Fail(EXIT_USAGE, f"no emulator '{emu}' in the catalog")
+    return emus[emu]
+
+
+def unpack_spec(emu, e):
+    """For an "unpack" entry: (absolute folder, version file in it); None for an AppImage entry."""
+    spec = e.get("unpack")
+    if spec is None:
+        if e.get("self_update"):
+            raise Fail(EXIT_VERIFY, f"{emu}: self_update needs an unpacked archive")
+        return None
+    if not (isinstance(spec, dict) and set(spec) == {"to", "version"}
+            and safe_relative(spec["to"]) and safe_relative(spec["version"])):
+        raise Fail(EXIT_VERIFY, f"{emu}: bad unpack entry {spec!r} (to, version: relative paths)")
+    dest = os.path.join(HOME, spec["to"])
+    emus = os.path.abspath(EMU_DIR)
+    if os.path.commonpath([dest, emus]) == dest:
+        raise Fail(EXIT_VERIFY, f"{emu}: unpack target {dest} holds {emus}")
+    return dest, spec["version"]
+
+
+def installed_tag(emu, e=None):
+    """The installed version, or None when nothing (valid) is installed. An AppImage's is the tag
+    `current` points at; an unpacked archive's is its own version file."""
+    spec = unpack_spec(emu, e) if e is not None else None
+    if spec is not None:
+        try:
+            with open(os.path.join(*spec)) as f:
+                ver = f.read(256).strip()
+        except OSError:
+            return None
+        return ver if SAFE_TAG.fullmatch(ver) else None
+    current = os.path.join(EMU_DIR, emu, "current")
+    target = os.readlink(current) if os.path.islink(current) else ""
+    if not target.endswith(".AppImage") or not os.path.isfile(current):
+        return None
+    return target[: -len(".AppImage")]
+
+
+def curl_base():
+    # --retry-all-errors: handheld Wi-Fi drops connections (curl 55 seen on HW, 2026-10-04), and
+    # plain --retry only covers timeouts and HTTP 408/429/5xx. Retrying is safe: nothing is
+    # trusted until the sha256 check, and the download restarts its .part from zero.
+    return [CURL, "--fail", "--silent", "--show-error", "--location",
+            "--proto", "=https", "--proto-redir", "=https", "--connect-timeout", "20",
+            "--retry", "3", "--retry-all-errors", "--retry-delay", "2"]
+
+
+def release_asset(e):
+    """The asset to fetch: {"url", "tag" (local name), "sha256", "size"}."""
+    url = f"{GITHUB_API}/repos/{e['github']}/releases/tags/{e['tag']}"
+    try:
+        out = subprocess.run(curl_base() + ["--max-time", "60",
+                                            "-H", "Accept: application/vnd.github+json", url],
+                             capture_output=True, check=True, timeout=90).stdout
+        rel = json.loads(out)
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, ValueError) as err:
+        raise Fail(EXIT_NET, f"GitHub release {e['github']} {e['tag']} not readable: {err}")
+    pattern = re.compile(e["asset"])
+    assets = [a for a in rel.get("assets", []) if pattern.fullmatch(str(a.get("name", "")))]
+    if len(assets) != 1:
+        raise Fail(EXIT_VERIFY, f"{e['tag']}: the asset pattern matches {len(assets)} assets, not 1")
+    a = assets[0]
+    url = str(a.get("browser_download_url", ""))
+    if not url.startswith("https://"):
+        raise Fail(EXIT_VERIFY, f"refusing a non-https download URL: {url}")
+    if "channel" not in e:
+        if a.get("digest") != f"sha256:{e['sha256']}" or a.get("size") != e["size"]:
+            raise Fail(EXIT_VERIFY, f"{e['tag']}/{a.get('name')} on GitHub is not the build RetroForge pinned "
+                                    f"(digest {a.get('digest')}, size {a.get('size')})")
+        return {"url": url, "tag": e["tag"], "sha256": e["sha256"], "size": e["size"]}
+    return nightly_build(e, pattern, a, url)
+
+
+def nightly_build(e, pattern, a, url):
+    """A rolling release's asset, named nightly-<id> and checked against GitHub's own digest."""
+    digest = str(a.get("digest") or "")
+    size = a.get("size")
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest) or not isinstance(size, int) or size <= 0:
+        raise Fail(EXIT_VERIFY, f"{a.get('name')}: GitHub gives no sha256 digest and size to check "
+                                f"the nightly against (digest {digest!r}, size {size!r})")
+    sha = digest[len("sha256:"):]
+    m = pattern.fullmatch(str(a["name"]))
+    build = m.group(1) if m.groups() and m.group(1) else sha[:12]
+    tag = f"{e['channel']}-{build}"
+    if not SAFE_TAG.fullmatch(tag):
+        raise Fail(EXIT_VERIFY, f"unsafe build name from {a.get('name')!r}: {tag!r}")
+    return {"url": url, "tag": tag, "sha256": sha, "size": size}
+
+
+def download(url, part, size):
+    """curl into `part`, printing forward-only N% (capped at 99 until verified)."""
+    shown = -1
+    try:
+        proc = subprocess.Popen(curl_base() + ["-o", part, url],
+                                stdout=subprocess.DEVNULL)
+    except OSError as err:
+        raise Fail(EXIT_NET, f"cannot run curl: {err}")
+    while True:
+        rc = proc.poll()
+        done = os.path.getsize(part) if os.path.exists(part) else 0
+        pct = min(99, done * 100 // size) if size else 0
+        if pct > shown:
+            print(f"{pct}%", flush=True)
+            shown = pct
+        if rc is not None:
+            break
+        time.sleep(POLL)
+    if rc != 0:
+        raise Fail(EXIT_NET, f"download failed (curl exit {rc}): {url}")
+
+
+def verify(part, build):
+    h = hashlib.sha256()
+    with open(part, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    if os.path.getsize(part) != build["size"] or h.hexdigest() != build["sha256"]:
+        raise Fail(EXIT_VERIFY, f"downloaded file does not match the expected build (sha256 {h.hexdigest()})")
+
+
+def activate(d, tag):
+    """Point `current` at <tag>.AppImage atomically; keep the previous one, delete the rest."""
+    current = os.path.join(d, "current")
+    previous = os.readlink(current) if os.path.islink(current) else None
+    tmp = os.path.join(d, ".current.tmp")
+    if os.path.lexists(tmp):
+        os.unlink(tmp)
+    os.symlink(f"{tag}.AppImage", tmp)
+    os.replace(tmp, current)
+    keep = {f"{tag}.AppImage", previous}
+    for name in os.listdir(d):
+        if name.endswith(".AppImage") and name not in keep:
+            os.unlink(os.path.join(d, name))
+
+
+def unpack(emu, archive, dest, version, tag):
+    """Unpack the zip's single top folder into `dest` (see UNPACKED ARCHIVES above)."""
+    parent, name = os.path.split(dest)
+    stage = os.path.join(parent, f".{name}.retroforge-new")
+    try:
+        os.makedirs(parent, exist_ok=True)
+        if os.path.islink(dest):
+            raise Fail(EXIT_LOCAL, f"{dest} is a symlink: refusing to unpack through it")
+        over = os.path.lexists(dest)
+        discard(stage)
+        with zipfile.ZipFile(archive) as z:
+            members = z.infolist()
+            tops = {m.filename.split("/", 1)[0] for m in members}
+            if len(tops) != 1 or "" in tops:
+                raise Fail(EXIT_VERIFY, f"the archive's entries are not all in one top-level folder")
+            top = tops.pop()
+            # Over an existing folder the files exist twice for a moment: the stage and the copy.
+            need = sum(m.file_size for m in members) * (2 if over else 1)
+            if shutil.disk_usage(parent).free < need + SPACE_MARGIN:
+                raise Fail(EXIT_LOCAL, f"not enough free space in {parent} to unpack")
+            os.mkdir(stage, 0o755)
+            for m in members:
+                unpack_member(z, m, top, stage)
+        with open(os.path.join(stage, version)) as f:
+            found = f.read(256).strip()
+        if found != tag:
+            raise Fail(EXIT_VERIFY, f"the archive says it is version {found!r}, the catalog pinned {tag!r}")
+        with open(os.path.join(stage, MARKER), "w") as f:
+            f.write(f"{emu}\n")
+        if over:
+            shutil.copytree(stage, dest, symlinks=True, dirs_exist_ok=True,
+                            ignore=lambda d, names: [n for n in names if os.path.join(d, n) == os.path.join(stage, version)])
+            shutil.copy2(os.path.join(stage, version), os.path.join(dest, version))
+        else:
+            os.rename(stage, dest)
+    except OSError as err:
+        raise Fail(EXIT_LOCAL, f"cannot unpack into {dest}: {err}")
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, zlib.error, EOFError, ValueError,
+            RuntimeError, NotImplementedError) as err:
+        raise Fail(EXIT_VERIFY, f"cannot read the archive: {err}")
+    finally:
+        try:
+            discard(stage)
+        except OSError as err:
+            log(f"warning: could not clean {stage}: {err}")
+
+
+def discard(path):
+    """Remove a leftover staging entry, whatever it is (a folder, a file, a symlink)."""
+    if os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path)
+    elif os.path.lexists(path):
+        os.unlink(path)
+
+
+def unpack_member(z, m, top, stage):
+    """Write one archive member under `stage`, refusing anything that is not a plain file or folder
+    inside the top folder."""
+    rel = m.filename[len(top):].strip("/")
+    if not m.filename.startswith(top) or m.filename[len(top):len(top) + 1] not in ("", "/"):
+        raise Fail(EXIT_VERIFY, f"archive member outside its folder: {m.filename!r}")
+    if not rel:
+        return
+    if not safe_relative(rel):
+        raise Fail(EXIT_VERIFY, f"unsafe archive member: {m.filename!r}")
+    mode = m.external_attr >> 16
+    kind = stat.S_IFMT(mode)
+    target = os.path.join(stage, rel)
+    if m.is_dir():
+        os.makedirs(target, 0o755, exist_ok=True)
+        return
+    if kind not in (0, stat.S_IFREG):
+        raise Fail(EXIT_VERIFY, f"archive member is not a plain file: {m.filename!r}")
+    os.makedirs(os.path.dirname(target), 0o755, exist_ok=True)
+    with z.open(m) as src, open(target, "wb") as dst:
+        shutil.copyfileobj(src, dst)
+    os.chmod(target, 0o755 if mode & 0o111 else 0o644)
+
+
+def safe_relative(path):
+    return (isinstance(path, str) and path not in ("", ".") and "\0" not in path and not os.path.isabs(path)
+            and os.path.normpath(path) == path and ".." not in path.split("/"))
+
+
+def fetch_data(emu, e):
+    """The catalog's data files for this emulator (see DATA FILES above). Never raises."""
+    for item in e.get("data", []):
+        url = item.get("url") if isinstance(item, dict) else None
+        to = item.get("to") if isinstance(item, dict) else None
+        if not (isinstance(url, str) and url.startswith("https://") and safe_relative(to)):
+            log(f"warning: {emu}: skipping a bad data entry {item!r} (https url, relative path)")
+            continue
+        dst = os.path.join(HOME, to)
+        part = dst + ".retroforge-part"
+        try:
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            subprocess.run(curl_base() + ["--max-time", "120", "--max-filesize", str(DATA_MAX),
+                                          "-o", part, url],
+                           stdout=subprocess.DEVNULL, check=True, timeout=180)
+            if os.path.getsize(part) == 0:
+                raise OSError("empty download")
+            os.replace(part, dst)
+            log(f"{emu}: fetched ~/{to}")
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as err:
+            log(f"warning: {emu}: could not fetch ~/{to} from {url} ({err}); keeping what was there")
+        finally:
+            if os.path.exists(part):
+                os.unlink(part)
+
+
+def cmd_install(emu):
+    e = entry(load_catalog(), emu)
+    tag = e["tag"]
+    if not SAFE_TAG.fullmatch(tag):
+        raise Fail(EXIT_VERIFY, f"unsafe tag in the catalog: {tag!r}")
+    channel = e.get("channel")
+    if channel is not None and channel not in CHANNELS:
+        raise Fail(EXIT_VERIFY, f"unknown channel in the catalog: {channel!r}")
+    if channel is None and "sha256" not in e:
+        raise Fail(EXIT_VERIFY, f"{emu}: a pinned catalog entry needs a sha256")
+    spec = unpack_spec(emu, e)
+    inst = installed_tag(emu, e)
+    if inst is not None and e.get("self_update"):
+        print("100%", flush=True)
+        log(f"{emu} {inst} is installed and updates itself")
+        return EXIT_OK
+    if channel is None and inst == tag:
+        print("100%", flush=True)
+        return EXIT_OK
+    d = os.path.join(EMU_DIR, emu)
+    try:
+        os.makedirs(d, exist_ok=True)
+        lock = os.open(d, os.O_RDONLY)
+        fcntl.flock(lock, fcntl.LOCK_EX)  # one install per emulator at a time
+    except OSError as err:
+        raise Fail(EXIT_LOCAL, f"cannot use {d}: {err}")
+    # Named after the catalog tag, so the plugin can follow its size for a nightly too (and for an
+    # archive: the plugin follows this one name whatever the download is).
+    part = os.path.join(d, f".{tag}.AppImage.part")
+    try:
+        build = release_asset(e)
+        tag = build["tag"]
+        if channel is not None and installed_tag(emu, e) == tag:
+            print("100%", flush=True)
+            log(f"{emu} {tag} is already the latest {channel}")
+            return EXIT_OK
+        if shutil.disk_usage(d).free < build["size"] + SPACE_MARGIN:
+            raise Fail(EXIT_LOCAL, f"not enough free space in {d} for {build['size']} bytes")
+        download(build["url"], part, build["size"])
+        verify(part, build)
+        if spec is not None:
+            unpack(emu, part, spec[0], spec[1], tag)
+        else:
+            os.chmod(part, 0o755)
+            os.replace(part, os.path.join(d, f"{tag}.AppImage"))
+            activate(d, tag)
+    except OSError as err:
+        raise Fail(EXIT_LOCAL, f"install of {emu} {tag} failed: {err}")
+    finally:
+        if os.path.exists(part):
+            os.unlink(part)
+        os.close(lock)
+    fetch_data(emu, e)
+    print("100%", flush=True)
+    log(f"{emu} {tag} installed")
+    return EXIT_OK
+
+
+def cmd_list():
+    out = {}
+    for emu, e in load_catalog().items():
+        if not EMU_ID.fullmatch(emu):
+            continue
+        try:
+            inst = installed_tag(emu, e)
+        except Fail as f:
+            log(f"warning: {f}")
+            continue
+        out[emu] = {
+            "name": e.get("name", emu),
+            "systems": e.get("systems", []),
+            "pinned": e.get("tag"),
+            "channel": e.get("channel"),
+            "installed": inst,
+            # A nightly's newest build is only known online: install checks it.
+            "update": (inst is not None and "channel" not in e and not e.get("self_update")
+                       and inst != e.get("tag")),
+            "self_update": bool(e.get("self_update")),
+            "size": e.get("size"),
+            "author": e.get("author"),
+            "homepage": e.get("homepage"),
+            "licence": e.get("licence"),
+        }
+    print(json.dumps({"emulators": out}, sort_keys=True))
+    return EXIT_OK
+
+
+def cmd_remove(emu):
+    if not EMU_ID.fullmatch(emu or ""):
+        raise Fail(EXIT_USAGE, f"bad emulator name '{emu}'")
+    remove_unpacked(emu)
+    d = os.path.join(EMU_DIR, emu)
+    try:
+        shutil.rmtree(d)
+    except FileNotFoundError:
+        pass
+    except OSError as err:
+        raise Fail(EXIT_LOCAL, f"cannot remove {d}: {err}")
+    return EXIT_OK
+
+
+def remove_unpacked(emu):
+    """Delete an unpacked archive's folder -- only when retroforge-emu's marker names this emulator."""
+    try:
+        e = load_catalog().get(emu)
+    except Fail:
+        return
+    spec = unpack_spec(emu, e) if isinstance(e, dict) else None
+    if spec is None:
+        return
+    dest = spec[0]
+    try:
+        with open(os.path.join(dest, MARKER)) as f:
+            owner = f.read(256).strip()
+    except FileNotFoundError:
+        if os.path.lexists(dest):
+            log(f"warning: {dest} was not unpacked by retroforge-emu: left alone")
+        return
+    except OSError as err:
+        raise Fail(EXIT_LOCAL, f"cannot read {dest}/{MARKER}: {err}")
+    if owner != emu:
+        log(f"warning: {dest} belongs to {owner!r}, not {emu}: left alone")
+        return
+    try:
+        shutil.rmtree(dest)
+    except OSError as err:
+        raise Fail(EXIT_LOCAL, f"cannot remove {dest}: {err}")
+
+
+def main(argv):
+    usage = "usage: retroforge-emu list | install <emulator> | remove <emulator>"
+    if argv == ["list"]:
+        return cmd_list()
+    if len(argv) == 2 and argv[0] == "install":
+        return cmd_install(argv[1])
+    if len(argv) == 2 and argv[0] == "remove":
+        return cmd_remove(argv[1])
+    raise Fail(EXIT_USAGE, usage)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except Fail as f:
+        log(str(f))
+        sys.exit(f.code)
+    except KeyboardInterrupt:
+        sys.exit(EXIT_LOCAL)

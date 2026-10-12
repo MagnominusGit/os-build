@@ -1,0 +1,27 @@
+#!/bin/bash
+#
+# SPDX-License-Identifier: MIT
+#
+# RetroForge (copied into PortMaster's folder by RetroForge's launcher; edits here do not last).
+# NOTE: as every libgl_*.txt, it uses $PWD: the port must cd to its own folder first.
+#
+# Desktop OpenGL comes from Mesa (freedreno on Adreno), so a port that ships gl4es does not need it.
+# gl4es only when glxinfo finds no desktop GL, and then on X11 (gamescope's Xwayland), never with
+# LIBGL_FB=4: that draws straight to the KMS device gamescope owns (PortMaster's libgl_default.txt).
+if ! glxinfo 2>/dev/null | grep -q "OpenGL version string"; then
+  export LIBGL_ES=2
+  export LIBGL_GL=21
+
+  if [ -d "$PWD/gl4es.$DEVICE_ARCH" ]; then
+    export LD_LIBRARY_PATH="$PWD/gl4es.$DEVICE_ARCH:$LD_LIBRARY_PATH"
+  elif [ -d "$PWD/gl4es" ]; then
+    export LD_LIBRARY_PATH="$PWD/gl4es:$LD_LIBRARY_PATH"
+  fi
+fi
+
+# This sets up the standard libs directory.
+if [ -d "$PWD/libs.$DEVICE_ARCH" ]; then
+  export LD_LIBRARY_PATH="$PWD/libs.$DEVICE_ARCH:$LD_LIBRARY_PATH"
+elif [ -d "$PWD/libs" ]; then
+  export LD_LIBRARY_PATH="$PWD/libs:$LD_LIBRARY_PATH"
+fi

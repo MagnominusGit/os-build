@@ -1,4 +1,4 @@
-# qforge gamescope — built FROM SOURCE via a qforge-owned PKGBUILD (pkgbuild_local in
+# retroforge gamescope — built FROM SOURCE via a retroforge-owned PKGBUILD (pkgbuild_local in
 # packages/gamescope/source.pin), NOT fetched from the holo monorepo. This is a near-verbatim copy
 # of the upstream Arch / holo gamescope recipe (same maintainers) with ONE deliberate change: the
 # version is bumped from holo's pinned 3.16.17 to the pkgver below.
@@ -167,7 +167,7 @@ build() {
   # than discarded. Upstream disables it for its own SteamOS builds (e77e1848).
   #
   # enable_openvr_support defaults to TRUE and builds the OpenVR backend (gamescope inside SteamVR)
-  # from the openvr submodule, a large clone that is slow under arm64 emulation. QForge runs no
+  # from the openvr submodule, a large clone that is slow under arm64 emulation. RetroForge runs no
   # SteamVR, so the backend, its source and its submodule are dropped.
   arch-meson gamescope build \
     -Dforce_fallback_for=glm,stb,libdisplay-info,libliftoff,vkroots,wlroots,wayland-protocols \

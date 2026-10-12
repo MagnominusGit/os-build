@@ -1,6 +1,6 @@
 Subject: [PATCH] input: joystick: add MANGMI Pocket Max / Air Y Pro SPI joypad
 
-qforge: ROCKNIX SM8250 0060 at its 2026-10 state, which added the Air Y Pro variant (four ADC
+retroforge: ROCKNIX SM8250 0060 at its 2026-10 state, which added the Air Y Pro variant (four ADC
 channels, digital L2/R2) to the Pocket Max driver; Makefile hunk re-rolled on 0750 (JOYSTICK_RETROID precedes PSXPAD_SPI here).
  
 diff --git a/drivers/input/joystick/Kconfig b/drivers/input/joystick/Kconfig

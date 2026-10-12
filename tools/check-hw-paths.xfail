@@ -1,4 +1,4 @@
 # Known gaps for tools/check-hw-paths.py: <profile-id> <check> <reason>. A listed check that starts
 # passing fails the run, so a fixed gap has to come off this list.
-ayn-odin-2	QFORGE_HW_LED_GROUPS:ring-left	both SN3112 PWM chips under the stick lights are status = "disabled" in qcs8550-ayn-odin2.dts
-ayn-odin-2	QFORGE_HW_LED_GROUPS:ring-right	both SN3112 PWM chips under the stick lights are status = "disabled" in qcs8550-ayn-odin2.dts
+ayn-odin-2	RETROFORGE_HW_LED_GROUPS:ring-left	both SN3112 PWM chips under the stick lights are status = "disabled" in qcs8550-ayn-odin2.dts
+ayn-odin-2	RETROFORGE_HW_LED_GROUPS:ring-right	both SN3112 PWM chips under the stick lights are status = "disabled" in qcs8550-ayn-odin2.dts

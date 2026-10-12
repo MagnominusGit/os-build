@@ -1,8 +1,8 @@
 #!/bin/sh
-# qforge internal install — put the run's log somewhere it can actually be read. Phase 5 of
+# retroforge internal install — put the run's log somewhere it can actually be read. Phase 5 of
 # .claude/plans/internal-install.plan.md.
 #
-#   save-log.sh              collect the log to /run/qforge/install.log and copy it to the ESP
+#   save-log.sh              collect the log to /run/retroforge/install.log and copy it to the ESP
 #   save-log.sh --console    also print the end of it to the panel's tty
 #
 # "That single decision is worth more than the rest of the UI" -- §5, and it is not hyperbole. The
@@ -19,33 +19,33 @@ set -u
 PROG=${0##*/}
 log() { printf '[%s] %s\n' "$PROG" "$*" >&2; }
 
-RUNDIR=${QFORGE_INSTALL_RUNDIR:-/run/qforge}
-LOGFILE=${QFORGE_INSTALL_LOG:-$RUNDIR/install.log}
+RUNDIR=${RETROFORGE_INSTALL_RUNDIR:-/run/retroforge}
+LOGFILE=${RETROFORGE_INSTALL_LOG:-$RUNDIR/install.log}
 # Where the installer medium's own FAT ESP is mounted. Phase 6 fixes this in the image's fstab; it
 # is a variable here so the suite can point it at a sandbox and so an operator can redirect it.
-ESP=${QFORGE_INSTALLER_ESP:-/esp}
+ESP=${RETROFORGE_INSTALLER_ESP:-/esp}
 # Mounting it OURSELVES is the fallback, and both tools are seams so the suite can drive the branch
 # without root and without a real filesystem.
-MOUNT=${QFORGE_INSTALLER_MOUNT:-mount}
-UMOUNT=${QFORGE_INSTALLER_UMOUNT:-umount}
+MOUNT=${RETROFORGE_INSTALLER_MOUNT:-mount}
+UMOUNT=${RETROFORGE_INSTALLER_UMOUNT:-umount}
 # NETWORKMANAGER IS HERE BECAUSE THE INSTALLER'S OWN JOURNAL CANNOT ANSWER A NETWORK QUESTION.
 # HW 2026-08-25: the first join reached `no-lease` after 10.2s of a 90s budget and a second attempt
 # was online in 3.9s, and this log could say nothing about WHY -- the association, the DHCP
 # transaction and the address that never arrived all belong to NM, which was not collected. The
 # installer downloads the OS over the network, so "the network half-worked" is not a side issue
 # here, it is the failure mode.
-UNITS=${QFORGE_INSTALL_UNITS:-qforge-installer.service NetworkManager.service}
+UNITS=${RETROFORGE_INSTALL_UNITS:-retroforge-installer.service NetworkManager.service}
 JOURNALCTL=${JOURNALCTL:-journalctl}
-CONSOLE=${QFORGE_INSTALL_CONSOLE:-/dev/tty1}
-RECORD=${QFORGE_INSTALL_RECORD:-$RUNDIR/install/record}
+CONSOLE=${RETROFORGE_INSTALL_CONSOLE:-/dev/tty1}
+RECORD=${RETROFORGE_INSTALL_RECORD:-$RUNDIR/install/record}
 # The per-build identity installer/mkimage.sh stamps. Same path as the shipped image's, so a person
 # reading either log finds the answer in the same place.
-RELEASE_FILE=${QFORGE_INSTALL_RELEASE:-/etc/qforge-release}
+RELEASE_FILE=${RETROFORGE_INSTALL_RELEASE:-/etc/retroforge-release}
 
 mkdir -p "$RUNDIR" 2>/dev/null || true
 
 {
-    printf '=== qforge installer log, %s ===\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)"
+    printf '=== retroforge installer log, %s ===\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)"
     # WHICH MEDIUM PRODUCED THIS LOG. The file is meant to be read on another computer, hours later,
     # possibly next to logs from a different build, and until installer/mkimage.sh started stamping an
     # identity every medium answered that question identically. Printed here rather than left to the
@@ -116,12 +116,12 @@ fi
 
 COPIED=
 if esp_mounted; then
-    if cp -f "$LOGFILE" "$ESP/qforge-install.log" 2>/dev/null; then
+    if cp -f "$LOGFILE" "$ESP/retroforge-install.log" 2>/dev/null; then
         # FAT has no fsync-on-close guarantee anyone should rely on, and the next thing that happens
         # to this machine is usually a power cut by a person holding it.
         sync 2>/dev/null || true
         COPIED=1
-        log "log copied to $ESP/qforge-install.log -- readable on a PC by pulling the medium"
+        log "log copied to $ESP/retroforge-install.log -- readable on a PC by pulling the medium"
     else
         log "could not copy the log to $ESP (read-only medium?)"
     fi
@@ -131,14 +131,14 @@ fi
 
 if [ "${1:-}" = --console ] && [ -w "$CONSOLE" ]; then
     {
-        printf '\n=== the QForge installer stopped. The last lines of its log: ===\n\n'
+        printf '\n=== the RetroForge installer stopped. The last lines of its log: ===\n\n'
         tail -n 25 "$LOGFILE" 2>/dev/null
         printf '\nFull log: %s' "$LOGFILE"
         # The COPY, not the mount: "something is mounted at /esp" was never the question a person
         # reading this needs answered, and it is now wrong as well -- the unmount below can have
         # already run by the time this line matters.
         if [ -n "$COPIED" ]; then
-            printf ' and %s/qforge-install.log on the installer medium' "$ESP"
+            printf ' and %s/retroforge-install.log on the installer medium' "$ESP"
         fi
         printf '\n\n'
     } >"$CONSOLE" 2>/dev/null || true

@@ -7,7 +7,7 @@
 # Why we build it: from 1.30 Arch splits the CLI (/usr/bin/libinput, /usr/lib/libinput/*) out of
 # `libinput` into `libinput-tools`, and that package depends on gtk4 for ONE tool, `debug-gui` —
 # resolving it adds 25 packages (~39 MiB compressed: gtk4, gstreamer, adwaita icons, …) to the
-# image. qforge-powerbuttond and qforge-suspend need only `libinput debug-events` (a C tool),
+# image. retroforge-powerbuttond and retroforge-suspend need only `libinput debug-events` (a C tool),
 # and without the split package both fail their `command -v libinput` check: the power key does
 # nothing and a sleep resumes immediately (HW, Pocket ACE, 2026-09-23).
 #

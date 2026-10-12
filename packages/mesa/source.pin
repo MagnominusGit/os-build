@@ -1,6 +1,6 @@
-# mesa — built FROM SOURCE off the upstream RELEASE TARBALL via a qforge-owned PKGBUILD,
+# mesa — built FROM SOURCE off the upstream RELEASE TARBALL via a retroforge-owned PKGBUILD,
 # NOT fetched from the holo monorepo and NOT a git clone. holo ships an old (25.2.7), all-driver
-# mesa; qforge only targets Qualcomm Adreno, so packages/mesa/PKGBUILD builds just the freedreno
+# mesa; retroforge only targets Qualcomm Adreno, so packages/mesa/PKGBUILD builds just the freedreno
 # gallium (GL) driver + the freedreno Vulkan driver (Turnip) from the latest mesa release, LLVM/
 # rust and every other driver off. build-overlay.sh sees `pkgbuild_local` below and uses that
 # checked-in PKGBUILD instead of curl'ing one; makepkg still downloads the tarball named in it.

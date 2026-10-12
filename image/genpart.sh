@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge partition-script generator — Phase 4, extended for internal install in Phase 2 of
+# retroforge partition-script generator — Phase 4, extended for internal install in Phase 2 of
 # .claude/plans/internal-install.plan.md.
 #
 # Turns partition-table.txt into a runnable sgdisk script that lays down the A/B GPT on a
@@ -10,18 +10,18 @@
 #   image/genpart.sh --min            # print only the minimum target size in MiB
 #   image/genpart.sh <target>         # also apply to <target> (disk or image file)
 #   image/genpart.sh --append         # print the APPEND script (no zap; indices discovered)
-#   QFORGE_APPEND_FLOOR=<sector> image/genpart.sh --append <target>
+#   RETROFORGE_APPEND_FLOOR=<sector> image/genpart.sh --append <target>
 #                                      # also apply it, and print the name=index map. The floor is
 #                                      # REQUIRED to apply -- see "THE FLOOR IS MANDATORY" below.
 #
-# THIS FILE IS SHIPPED VERBATIM into /usr/lib/qforge/install/ of the built root, alongside
+# THIS FILE IS SHIPPED VERBATIM into /usr/lib/retroforge/install/ of the built root, alongside
 # partition-table.txt, and a host test asserts the two copies are byte-identical. That is why the
 # table is resolved NEXT TO THIS SCRIPT rather than through a repo-relative path: the same file has
-# to work from image/ in the repo and from /usr/lib/qforge/install/ on a device.
+# to work from image/ in the repo and from /usr/lib/retroforge/install/ on a device.
 set -euo pipefail
 
 SELFDIR="$(cd "$(dirname "$0")" && pwd)"
-TABLE="${QFORGE_PARTITION_TABLE:-$SELFDIR/partition-table.txt}"
+TABLE="${RETROFORGE_PARTITION_TABLE:-$SELFDIR/partition-table.txt}"
 [ -f "$TABLE" ] || { echo "no partition table: $TABLE" >&2; exit 1; }
 
 # lib-gpt.sh ships beside this script and beside the table, and is resolved the same way for the
@@ -30,9 +30,9 @@ TABLE="${QFORGE_PARTITION_TABLE:-$SELFDIR/partition-table.txt}"
 # as an environment variable and the emitted TEXT stays identical whichever copy generated it --
 # which is what tests/test-install.sh case 9 asserts, and what would break if the resolved path
 # were baked into the output.
-LIBGPT="${QFORGE_LIB_GPT:-}"
+LIBGPT="${RETROFORGE_LIB_GPT:-}"
 if [ -z "$LIBGPT" ]; then
-  for c in "$SELFDIR/lib-gpt.sh" /usr/lib/qforge/install/lib-gpt.sh "$SELFDIR/../image/lib-gpt.sh"; do
+  for c in "$SELFDIR/lib-gpt.sh" /usr/lib/retroforge/install/lib-gpt.sh "$SELFDIR/../image/lib-gpt.sh"; do
     [ -r "$c" ] && { LIBGPT="$c"; break; }
   done
 fi
@@ -70,7 +70,7 @@ partlines="$(awk '
   }' "$TABLE")"
 
 emit() {
-  echo "# qforge A/B GPT — generated from partition-table.txt"
+  echo "# retroforge A/B GPT — generated from partition-table.txt"
   echo "# minimum target size: ${minmib} MiB ('home' expands to fill the rest)"
   echo 'DISK="${DISK:?set DISK to the target disk or image}"'
   echo 'sgdisk -Z "$DISK"   # zap any existing GPT/MBR'
@@ -99,7 +99,7 @@ emit() {
 # CONTAINMENT IS NOT THIS SCRIPT'S JOB, with one exception. Phase 3 owns the rule that every sector
 # written lies inside the old userdata span; it deletes userdata and recreates it smaller, which is
 # what makes the freed tail the largest free block and so the one start sector 0 selects. Because
-# that is an inference about a disk this script cannot see, QFORGE_APPEND_FLOOR exists: set it to
+# that is an inference about a disk this script cannot see, RETROFORGE_APPEND_FLOOR exists: set it to
 # the first sector our partitions may occupy -- the sector the shrunk userdata stops at, plus one --
 # and the run refuses unless sgdisk agrees that is where it is about to start.
 #
@@ -117,7 +117,7 @@ appendrows="$(awk '
     printf "nd_newpart %s %s %s %s\n", $2, $3, $5, attrs }' "$TABLE")"
 
 emit_append() {
-  echo "# qforge A/B GPT, APPENDED to an existing table — generated from partition-table.txt"
+  echo "# retroforge A/B GPT, APPENDED to an existing table — generated from partition-table.txt"
   echo "nd_min_mib=$minmib   # the fixed rows plus slack; home needs whatever is left over"
   cat <<'PREAMBLE'
 DISK="${DISK:?set DISK to the target disk or image}"
@@ -127,15 +127,15 @@ DISK="${DISK:?set DISK to the target disk or image}"
 # disk, so a missing floor is refused identically whatever state the target is in.
 # No apostrophe in that message: bash opens a quote on a ' inside ${var:?...} even within double
 # quotes, and the parse error it causes surfaces dozens of lines later.
-: "${QFORGE_APPEND_FLOOR:?required -- set it to the first sector our partitions may occupy}"
-: "${QFORGE_APPEND_CEIL:?required -- set it to the last sector our partitions may occupy}"
-for nd_v in QFORGE_APPEND_FLOOR QFORGE_APPEND_CEIL; do
+: "${RETROFORGE_APPEND_FLOOR:?required -- set it to the first sector our partitions may occupy}"
+: "${RETROFORGE_APPEND_CEIL:?required -- set it to the last sector our partitions may occupy}"
+for nd_v in RETROFORGE_APPEND_FLOOR RETROFORGE_APPEND_CEIL; do
   case "${!nd_v}" in
     *[!0-9]*|'') echo "genpart: $nd_v must be a sector number, got '${!nd_v}'" >&2; exit 1 ;;
   esac
 done
-[ "$QFORGE_APPEND_CEIL" -gt "$QFORGE_APPEND_FLOOR" ] \
-  || { echo "genpart: ceiling $QFORGE_APPEND_CEIL is not above floor $QFORGE_APPEND_FLOOR" >&2; exit 1; }
+[ "$RETROFORGE_APPEND_CEIL" -gt "$RETROFORGE_APPEND_FLOOR" ] \
+  || { echo "genpart: ceiling $RETROFORGE_APPEND_CEIL is not above floor $RETROFORGE_APPEND_FLOOR" >&2; exit 1; }
 
 sgdisk -p "$DISK" >/dev/null 2>&1 \
   || { echo "genpart: $DISK has no readable GPT -- append needs one (use create mode)" >&2; exit 1; }
@@ -153,7 +153,7 @@ nd_per_mib=$(( 1048576 / nd_ss ))
 # Does what we are about to lay down actually fit between the floor and the ceiling? Asked BEFORE
 # the first sgdisk -n, because the alternative is what a too-small window used to produce: three
 # partitions created, the fourth refused, and a half-appended GPT on a disk the user cannot boot.
-nd_window=$(( QFORGE_APPEND_CEIL - QFORGE_APPEND_FLOOR + 1 ))
+nd_window=$(( RETROFORGE_APPEND_CEIL - RETROFORGE_APPEND_FLOOR + 1 ))
 if [ "$nd_window" -lt "$(( nd_min_mib * nd_per_mib ))" ]; then
   echo "genpart: the window is $(( nd_window / nd_per_mib )) MiB, and the layout needs ${nd_min_mib} MiB -- refusing" >&2
   echo "genpart: nothing has been written to $DISK" >&2
@@ -172,7 +172,7 @@ fi
 # exist, and a refusal there that promised an untouched disk would be a lie at the worst moment.
 # The containment check below prints that line itself, where it is true.
 die() { echo "genpart: $1" >&2; exit 1; }
-nd_libgpt="${QFORGE_LIB_GPT:-/usr/lib/qforge/install/lib-gpt.sh}"
+nd_libgpt="${RETROFORGE_LIB_GPT:-/usr/lib/retroforge/install/lib-gpt.sh}"
 [ -r "$nd_libgpt" ] || die "cannot read $nd_libgpt -- the containment check cannot run without it"
 # shellcheck source=lib-gpt.sh
 . "$nd_libgpt"
@@ -183,8 +183,8 @@ nd_libgpt="${QFORGE_LIB_GPT:-/usr/lib/qforge/install/lib-gpt.sh}"
 # partition is ever written, and it holds whatever the caller got wrong.
 while read -r nd_idx nd_start nd_end _; do
   [ -n "$nd_idx" ] || continue
-  if [ "$nd_start" -le "$QFORGE_APPEND_CEIL" ] && [ "$nd_end" -ge "$QFORGE_APPEND_FLOOR" ]; then
-    echo "genpart: partition $nd_idx occupies $nd_start..$nd_end, inside the window $QFORGE_APPEND_FLOOR..$QFORGE_APPEND_CEIL -- refusing" >&2
+  if [ "$nd_start" -le "$RETROFORGE_APPEND_CEIL" ] && [ "$nd_end" -ge "$RETROFORGE_APPEND_FLOOR" ]; then
+    echo "genpart: partition $nd_idx occupies $nd_start..$nd_end, inside the window $RETROFORGE_APPEND_FLOOR..$RETROFORGE_APPEND_CEIL -- refusing" >&2
     echo "genpart: nothing has been written to $DISK" >&2
     exit 1
   fi
@@ -205,13 +205,13 @@ nd_index_of() {  # <gpt-name> -> index on stdout
 # re-resolves the largest free block on every call: measured 2026-08-10, once the two 7 GiB roots
 # had consumed the freed tail, var-A/var-B/home jumped to a bigger hole elsewhere on the disk and
 # the run reported success. A floor check cannot catch that -- it only ever sees the first call.
-nd_cursor="$QFORGE_APPEND_FLOOR"
+nd_cursor="$RETROFORGE_APPEND_FLOOR"
 
 nd_newpart() {  # <size> <typecode> <gpt-name> <attrs>
   local size="$1" type="$2" name="$3" attrs="$4" spec idx bit
   # 'rest' ends at the ceiling, not at `0`: with an explicit START, sgdisk reads end 0 as the last
   # sector of the DISK and refuses the moment that span crosses a partition (measured, same run).
-  if [ "$size" = rest ]; then spec="0:$nd_cursor:$QFORGE_APPEND_CEIL"; else spec="0:$nd_cursor:+$size"; fi
+  if [ "$size" = rest ]; then spec="0:$nd_cursor:$RETROFORGE_APPEND_CEIL"; else spec="0:$nd_cursor:+$size"; fi
   sgdisk -n "$spec" -t "0:$type" -c "0:$name" "$DISK" >/dev/null \
     || { echo "genpart: cannot create $name" >&2; exit 1; }
   idx="$(nd_index_of "$name")" \
@@ -224,8 +224,8 @@ nd_newpart() {  # <size> <typecode> <gpt-name> <attrs>
   last="$(sgdisk -i "$idx" "$DISK" | sed -n 's/^Last sector: \([0-9]*\).*/\1/p')"
   [ -n "$last" ] \
     || { echo "genpart: cannot read the end sector of $name (p$idx)" >&2; exit 1; }
-  [ "$last" -le "$QFORGE_APPEND_CEIL" ] \
-    || { echo "genpart: $name ends at $last, past the ceiling $QFORGE_APPEND_CEIL" >&2; exit 1; }
+  [ "$last" -le "$RETROFORGE_APPEND_CEIL" ] \
+    || { echo "genpart: $name ends at $last, past the ceiling $RETROFORGE_APPEND_CEIL" >&2; exit 1; }
   nd_cursor=$(( last + 1 ))
   if [ "$attrs" != "-" ]; then
     local IFS=,
@@ -243,12 +243,12 @@ PREAMBLE
 # --- drive --------------------------------------------------------------------------------------
 if [ "$MODE" = append ]; then
   if [ -z "$TARGET" ]; then emit_append; exit 0; fi
-  command -v sgdisk >/dev/null 2>&1 || { echo "sgdisk not found (run inside qforge-build)" >&2; exit 1; }
+  command -v sgdisk >/dev/null 2>&1 || { echo "sgdisk not found (run inside retroforge-build)" >&2; exit 1; }
   command -v sfdisk >/dev/null 2>&1 \
     || { echo "sfdisk not found -- the containment check reads type GUIDs with it" >&2; exit 1; }
-  [ -n "$LIBGPT" ] && [ -r "$LIBGPT" ] || { echo "genpart: cannot find lib-gpt.sh (set QFORGE_LIB_GPT)" >&2; exit 1; }
-  echo "[qforge] appending the A/B GPT to $TARGET (min ${minmib} MiB of free space)" >&2
-  DISK="$TARGET" QFORGE_LIB_GPT="$LIBGPT" bash -euo pipefail -c "$(emit_append)"
+  [ -n "$LIBGPT" ] && [ -r "$LIBGPT" ] || { echo "genpart: cannot find lib-gpt.sh (set RETROFORGE_LIB_GPT)" >&2; exit 1; }
+  echo "[retroforge] appending the A/B GPT to $TARGET (min ${minmib} MiB of free space)" >&2
+  DISK="$TARGET" RETROFORGE_LIB_GPT="$LIBGPT" bash -euo pipefail -c "$(emit_append)"
   exit 0
 fi
 
@@ -257,9 +257,9 @@ if [ -z "$TARGET" ]; then
   exit 0
 fi
 
-command -v sgdisk >/dev/null 2>&1 || { echo "sgdisk not found (run inside qforge-build)" >&2; exit 1; }
-# "A/B" is not said here on purpose: QFORGE_PARTITION_TABLE also serves installer/medium-table.txt,
+command -v sgdisk >/dev/null 2>&1 || { echo "sgdisk not found (run inside retroforge-build)" >&2; exit 1; }
+# "A/B" is not said here on purpose: RETROFORGE_PARTITION_TABLE also serves installer/medium-table.txt,
 # a two-partition installer medium with no slots at all, and a build log announcing an A/B layout
 # for it describes something that is not happening. The table names itself in the line instead.
-echo "[qforge] applying the GPT from ${TABLE##*/} to $TARGET (min ${minmib} MiB)" >&2
+echo "[retroforge] applying the GPT from ${TABLE##*/} to $TARGET (min ${minmib} MiB)" >&2
 DISK="$TARGET" bash -euo pipefail -c "$(emit)"

@@ -2,7 +2,7 @@
 # Offline tests for carve.sh, the DESTRUCTIVE half — Phase 3 of
 # .claude/plans/internal-install.plan.md.
 #
-#   tests/test-carve.sh          # needs sgdisk; run inside qforge-build
+#   tests/test-carve.sh          # needs sgdisk; run inside retroforge-build
 #
 # THIS IS THE SCRIPT THAT DELETES PARTITIONS, so the assertion budget goes on the two claims that
 # stand between a user and an EDL recovery, and both are checked against the RESULTING GPT rather
@@ -33,16 +33,16 @@ for f in "$CARVE" "$CAPTURES" "$ROOT/installer/select-target.sh" "$ROOT/image/ge
   [ -e "$f" ] || { echo "missing input: $f" >&2; exit 1; }
 done
 command -v sgdisk >/dev/null 2>&1 || {
-  CASE="prerequisites"; skip "sgdisk is not installed -- run this inside qforge-build"
+  CASE="prerequisites"; skip "sgdisk is not installed -- run this inside retroforge-build"
   printf '\ntest-carve.sh: %d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "$SKIP"; exit 0
 }
 
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
-export QFORGE_SELECT_FIXTURE=1
+export RETROFORGE_SELECT_FIXTURE=1
 . "$ROOT/tests/lib-gptfixture.sh"
 
-OUR_NAMES=(QFORGE-ESP qforge-efi-A qforge-efi-B qforge-root-A qforge-root-B \
-           qforge-var-A qforge-var-B qforge-home)
+OUR_NAMES=(RETROFORGE-ESP retroforge-efi-A retroforge-efi-B retroforge-root-A retroforge-root-B \
+           retroforge-var-A retroforge-var-B retroforge-home)
 BOARDS=("AYANEO Pocket S2" "AYANEO Pocket ACE" "AYN Odin 2" "KONKR Pocket FIT" "MANGMI Pocket Max")
 
 carve()  { bash "$CARVE" "$@" 2>&1; }
@@ -89,7 +89,7 @@ for board in "${BOARDS[@]}"; do
     && ok "$board: userdata still starts where it did" \
     || bad "$board: userdata moved to $(udfield "$img" 'First sector'), was $ud_start_before"
   # The map is the output contract: eight name=index lines the spine turns into parts.env.
-  [ "$(printf '%s\n' "$out" | grep -cE '^(QFORGE-ESP|qforge-[a-z]+-?[AB]?)=[0-9]+$')" = 8 ] \
+  [ "$(printf '%s\n' "$out" | grep -cE '^(RETROFORGE-ESP|retroforge-[a-z]+-?[AB]?)=[0-9]+$')" = 8 ] \
     && ok "$board: emitted eight name=index lines" \
     || bad "$board: the name=index map is not eight lines"
 done
@@ -243,7 +243,7 @@ out="$(carve reinstall "$re")"
 # A partial set is an interrupted install: it cannot be repaired in place, because re-laying the
 # missing ones moves the floor and takes /home with it. Refuse and say so.
 part="$T/partial.img"; cp --sparse=always "$re" "$part"
-sgdisk -d "$(rows "$part" | awk '$4=="qforge-var-B" {print $1}')" "$part" >/dev/null 2>&1
+sgdisk -d "$(rows "$part" | awk '$4=="retroforge-var-B" {print $1}')" "$part" >/dev/null 2>&1
 snap="$(rows "$part")"
 out="$(carve reinstall "$part")"
 { [ "$(rows "$part")" = "$snap" ] && printf '%s\n' "$out" | grep -q "run a fresh install instead"; } \
@@ -255,10 +255,10 @@ out="$(carve reinstall "$part")"
 # which on a disk we own is our own ESP -- a window of zero sectors. carve computes its own ceiling by
 # skipping anything of ours, so without this the "I want a different split" path cannot run at all.
 CASE="plan answers what fresh WOULD do, and writes nothing"
-# The mode exists because the consent screen has to quote the space QForge ends up with, and the
+# The mode exists because the consent screen has to quote the space RetroForge ends up with, and the
 # only correct source for that is effective_ceiling here. Until 2026-08-21 the spine derived it from
 # select-target's CEIL instead, which stops at our own ESP on a disk we already own -- so the screen
-# told a Pocket ACE operator "the remaining 0 GiB" while this code handed QForge 90853 MiB.
+# told a Pocket ACE operator "the remaining 0 GiB" while this code handed RetroForge 90853 MiB.
 pl="$T/plan.img"; cp --sparse=always "$(board_img "AYANEO Pocket S2")" "$pl"
 pl_before="$(rows "$pl")"
 plan_stock="$(carve plan "$pl" 33)"
@@ -268,10 +268,10 @@ plan_stock="$(carve plan "$pl" 33)"
 printf '%s\n' "$plan_stock" | grep -qx 'REPLACES_OURS=0' \
   && ok "and reports that nothing of ours is being replaced" \
   || bad "REPLACES_OURS is not 0 on a stock disk: $plan_stock"
-stock_gib="$(printf '%s\n' "$plan_stock" | sed -n 's/^QFORGE_GIB=//p')"
+stock_gib="$(printf '%s\n' "$plan_stock" | sed -n 's/^RETROFORGE_GIB=//p')"
 [ -n "$stock_gib" ] && [ "$stock_gib" -gt 0 ] \
   && ok "and quotes a real figure ($stock_gib GiB)" \
-  || bad "plan reported no usable QFORGE_GIB: $plan_stock"
+  || bad "plan reported no usable RETROFORGE_GIB: $plan_stock"
 
 # THE CASE THAT WAS BROKEN. Carve it for real, then ask plan again: the disk now carries our eight,
 # which is exactly the shape where select-target's CEIL collapses to userdata's own end.
@@ -284,7 +284,7 @@ plan_ours="$(carve plan "$pl" 33)"
 printf '%s\n' "$plan_ours" | grep -qx 'REPLACES_OURS=1' \
   && ok "and reports that an existing install -- and its /home -- is being replaced" \
   || bad "REPLACES_OURS is not 1 on a disk we already own: $plan_ours"
-ours_gib="$(printf '%s\n' "$plan_ours" | sed -n 's/^QFORGE_GIB=//p')"
+ours_gib="$(printf '%s\n' "$plan_ours" | sed -n 's/^RETROFORGE_GIB=//p')"
 [ -n "$ours_gib" ] && [ "$ours_gib" -gt 0 ] \
   && ok "and the figure is NOT zero ($ours_gib GiB) -- the whole point of the mode" \
   || bad "plan reported '$ours_gib' GiB on a disk we own; this is the 0 GiB bug"
@@ -308,7 +308,7 @@ ours_destroy="$(printf '%s\n' "$plan_ours" | grep '^DESTROY=' || true)"
 [ "$(printf '%s\n' "$ours_destroy" | grep -c .)" -eq 9 ] \
   && ok "a disk that already carries our eight loses nine -- userdata and all eight of ours" \
   || bad "the list on a disk we own is not userdata plus our eight: $ours_destroy"
-printf '%s\n' "$ours_destroy" | grep -q 'qforge-home replaced' \
+printf '%s\n' "$ours_destroy" | grep -q 'retroforge-home replaced' \
   && ok "and /home is named on it, which is the one a user has to see before consenting" \
   || bad "/home is missing from the destroy list on a disk we own"
 # Every index it names must actually be on the disk: a list quoting partitions that are not there
@@ -326,7 +326,7 @@ CASE="a resize on a disk that is already ours"
 rz="$(board_img "AYN Odin 2")"
 before="$(foreign "$rz")"
 carve fresh "$rz" 33 >/dev/null 2>&1
-home_before="$(rows "$rz" | awk '$4=="qforge-home" {print $3}')"
+home_before="$(rows "$rz" | awk '$4=="retroforge-home" {print $3}')"
 if out="$(carve fresh "$rz" 64)"; then
   ok "a 33 -> 64 GiB resize carves"
 else
@@ -341,7 +341,7 @@ fi
 [ "$(foreign "$rz")" = "$before" ] \
   && ok "the resize moved no foreign partition either" \
   || bad "a resize moved something outside the span"
-[ "$(rows "$rz" | awk '$4=="qforge-home" {print $3}')" = "$home_before" ] \
+[ "$(rows "$rz" | awk '$4=="retroforge-home" {print $3}')" = "$home_before" ] \
   && ok "home still ends at the ceiling" \
   || bad "home ends somewhere new after a resize"
 
@@ -352,7 +352,7 @@ fi
 CASE="re-running completes an interrupted carve"
 ip="$T/interrupted.img"; cp --sparse=always "$(board_img "AYANEO Pocket S2")" "$ip"
 carve fresh "$ip" 33 >/dev/null 2>&1
-for n in qforge-home qforge-var-B qforge-root-B; do
+for n in retroforge-home retroforge-var-B retroforge-root-B; do
   sgdisk -d "$(rows "$ip" | awk -v w="$n" '$4==w {print $1}')" "$ip" >/dev/null 2>&1
 done
 [ "$(ours "$ip")" = 5 ] || bad "the interrupted fixture is not in the state the case assumes"
@@ -430,7 +430,7 @@ for delta in 0 -1; do
   out="$(carve fresh "$img" 33)"
   if [ "$delta" = 0 ]; then
     { [ "$(ours "$img")" = 8 ] \
-      && [ "$(rows "$img" | awk '$4=="qforge-home" {print $3}')" = "$(( oem_start - 1 ))" ] \
+      && [ "$(rows "$img" | awk '$4=="retroforge-home" {print $3}')" = "$(( oem_start - 1 ))" ] \
       && [ "$(rows "$img" | grep ' oem-late$')" = "$(printf '%s\n' "$snap" | grep ' oem-late$')" ]; } \
       && ok "a window that is EXACTLY the minimum -> carves, home ends one sector before oem-late" \
       || bad "the exact-minimum window did not carve cleanly: $out"

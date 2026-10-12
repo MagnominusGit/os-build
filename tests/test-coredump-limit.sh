@@ -19,7 +19,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONF="$ROOT/rootfs/overlay/etc/systemd/coredump.conf.d/10-qforge-coredump-limit.conf"
+CONF="$ROOT/rootfs/overlay/etc/systemd/coredump.conf.d/10-retroforge-coredump-limit.conf"
 
 PASS=0; FAIL=0; SKIP=0
 ok()  { PASS=$((PASS+1)); printf '  ok   %s\n' "$1"; }

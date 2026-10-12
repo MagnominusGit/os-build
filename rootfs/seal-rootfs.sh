@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge rootfs sealer — strip the package manager from the release root (Phase 4a step 3).
+# retroforge rootfs sealer — strip the package manager from the release root (Phase 4a step 3).
 #
 #   rootfs/seal-rootfs.sh <staged-root>
 #
@@ -19,13 +19,13 @@
 # daemon" stall. Deleting the daemon is the fix; masking it would leave the runtime on the image.
 #
 # PROVENANCE IS PRESERVED, NOT DESTROYED: the local package database is MOVED to
-# /usr/lib/qforge/pkgdb before anything is deleted — out of every path a package manager would
+# /usr/lib/retroforge/pkgdb before anything is deleted — out of every path a package manager would
 # consult, but still on the image, so a device can still answer "what was I built from". The
-# removal list is copied alongside it as /usr/lib/qforge/seal.list, so the image also states
+# removal list is copied alongside it as /usr/lib/retroforge/seal.list, so the image also states
 # what it no longer has. rootfs/genmanifest.sh reads the same list and marks those rows
 # `stripped` in rootfs/manifest.lock, so one artifact describes the real image.
 #
-# Not called under QFORGE_DEV=1 — see rootfs/assemble-rootfs.sh.
+# Not called under RETROFORGE_DEV=1 — see rootfs/assemble-rootfs.sh.
 set -euo pipefail
 shopt -s nullglob
 
@@ -33,7 +33,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 STAGE="${1:?usage: rootfs/seal-rootfs.sh <staged-root>}"
 LIST="$ROOT/rootfs/conf/seal.list"
 DB="$STAGE/var/lib/pacman/local"
-KEEP="$STAGE/usr/lib/qforge/pkgdb"
+KEEP="$STAGE/usr/lib/retroforge/pkgdb"
 
 [ -d "$STAGE" ] || { echo "no staged root: $STAGE" >&2; exit 2; }
 [ -f "$LIST" ] || { echo "no removal list: $LIST" >&2; exit 1; }
@@ -85,7 +85,7 @@ echo "  sealing: stripping ${#pkgs[@]} packages + ${#paths[@]} paths (rootfs/con
 
 # Preserve the database first: everything below reads its file lists, and `var/lib/pacman` is
 # itself on the removal list.
-install -d -m0755 "$STAGE/usr/lib/qforge"
+install -d -m0755 "$STAGE/usr/lib/retroforge"
 mv "$DB" "$KEEP"
 
 # Remove each package's own files. Directories the package listed are collected rather than
@@ -134,8 +134,8 @@ if [ "${#dirs[@]}" -gt 0 ]; then
 fi
 
 # State on the image what the image no longer has.
-install -Dm0644 "$LIST" "$STAGE/usr/lib/qforge/seal.list"
+install -Dm0644 "$LIST" "$STAGE/usr/lib/retroforge/seal.list"
 
 after_kib="$(du -sk "$STAGE" | cut -f1)"
 echo "  sealed: $files_removed files, $dirs_removed empty dirs, $(( (before_kib - after_kib + 512) / 1024 ))MiB freed"
-echo "  package db preserved -> /usr/lib/qforge/pkgdb ($(du -sh "$KEEP" | cut -f1))"
+echo "  package db preserved -> /usr/lib/retroforge/pkgdb ($(du -sh "$KEEP" | cut -f1))"

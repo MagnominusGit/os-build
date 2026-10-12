@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# qforge read-only root assembler — Phase 5.
+# retroforge read-only root assembler — Phase 5.
 #
-# Stages a base rootfs, injects the qforge kernel + dtbs + initramfs (from kernel/build.sh and
+# Stages a base rootfs, injects the retroforge kernel + dtbs + initramfs (from kernel/build.sh and
 # image/mkinitramfs.sh) and the device firmware (from firmware/fetch-qcom-fw.sh), then splits
 # the staged tree into the TWO filesystem images the partition table wants
 # (image/partition-table.txt):
@@ -15,8 +15,8 @@
 # set by RAUC at deploy time (needs a mount), so it is not applied here. The kernel mounts
 # it `ro` regardless (rootfstype=btrfs ... ro on the stage-2 grub.cfg cmdline).
 #
-# The root carries its own boot half (docs/archive/phase5.md): /boot/{Image, initramfs-qforge.img,
-# dtbs} that the slot's stage-2 GRUB boots, plus the /usr/lib/qforge/boot mirror + the
+# The root carries its own boot half (docs/archive/phase5.md): /boot/{Image, initramfs-retroforge.img,
+# dtbs} that the slot's stage-2 GRUB boots, plus the /usr/lib/retroforge/boot mirror + the
 # /esp//efi mountpoints the update path reads. The stage-1/2 binaries reach the cards through
 # the ESP/efi partitions laid by image/make-sdcard.sh and refreshed by the RAUC hook.
 #
@@ -24,7 +24,7 @@
 #   BASE_ROOTFS=<dir> rootfs/assemble-rootfs.sh
 #
 # Run inside the build image (needs btrfs-progs + rsync):
-#   docker run --rm -v "$PWD":/src -w /src qforge-build rootfs/assemble-rootfs.sh sm8650 /path/to/base
+#   docker run --rm -v "$PWD":/src -w /src retroforge-build rootfs/assemble-rootfs.sh sm8650 /path/to/base
 set -euo pipefail
 shopt -s nullglob
 
@@ -37,7 +37,7 @@ XFW="$ROOT/firmware/extra-fw"
 IMGDIR="$OUT/images"
 IMG="$IMGDIR/rootfs.img"
 VARIMG="$IMGDIR/var.img"     # -> var-a  (ext4, carries the /etc overlay upper+work)
-VARIMG_B="$IMGDIR/var-b.img" # -> var-b  (identical but for /var/lib/qforge/slot; see section 5)
+VARIMG_B="$IMGDIR/var-b.img" # -> var-b  (identical but for /var/lib/retroforge/slot; see section 5)
 # The rootfs image is auto-sized by mkfs.btrfs --rootdir --shrink (see section 6); no fixed SIZE.
 VAR_SIZE_MIB="${VAR_SIZE_MIB:-256}"   # matches var-a/-b in partition-table.txt (a hard ceiling)
 
@@ -45,11 +45,11 @@ VAR_SIZE_MIB="${VAR_SIZE_MIB:-256}"   # matches var-a/-b in partition-table.txt 
 [ -d "$BASE" ]        || { echo "no base rootfs dir: $BASE" >&2; exit 2; }
 [ -f "$OUT/Image" ]       || { echo "no kernel: $OUT/Image (run kernel/build.sh first)" >&2; exit 1; }
 [ -f "$OUT/initramfs.cpio.gz" ] || { echo "no initramfs: $OUT/initramfs.cpio.gz (run make initramfs)" >&2; exit 1; }
-command -v mkfs.btrfs >/dev/null 2>&1 || { echo "mkfs.btrfs not found (run inside qforge-build)" >&2; exit 1; }
+command -v mkfs.btrfs >/dev/null 2>&1 || { echo "mkfs.btrfs not found (run inside retroforge-build)" >&2; exit 1; }
 
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
-echo "[qforge] assembling unified read-only root (base=$BASE)"
+echo "[retroforge] assembling unified read-only root (base=$BASE)"
 
 # STAGE base-userspace — the Holo aarch64 preview rootfs.
 if command -v rsync >/dev/null 2>&1; then rsync -aHAX --numeric-ids "$BASE"/ "$stage"/
@@ -74,12 +74,12 @@ else cp -a "$BASE"/. "$stage"/; fi
 # archive can still place arbitrary paths in the root. Two marker names were never a guard for
 # that; see issues #35 and #36 for the real one (assert every file is package-owned or declared).
 
-# STAGE kernel-boot — qforge kernel + dtbs + initramfs under /boot. These are what the stage-2 grub.cfg boots
-# (docs/archive/phase5.md): `linux ($root)/boot/Image`, `initrd ($root)/boot/initramfs-qforge.img`,
+# STAGE kernel-boot — retroforge kernel + dtbs + initramfs under /boot. These are what the stage-2 grub.cfg boots
+# (docs/archive/phase5.md): `linux ($root)/boot/Image`, `initrd ($root)/boot/initramfs-retroforge.img`,
 # `devicetree ($root)/boot/dtbs/<dtb>.dtb`. The kernel must be the UNCOMPRESSED Image — the
 # embedded gzio filter is not in grubaa64.efi's module set, so Image.gz would not decompress.
 install -Dm0644 "$OUT/Image" "$stage/boot/Image"
-install -Dm0644 "$OUT/initramfs.cpio.gz" "$stage/boot/initramfs-qforge.img"
+install -Dm0644 "$OUT/initramfs.cpio.gz" "$stage/boot/initramfs-retroforge.img"
 for dtb in "$OUT"/dtbs/*.dtb; do install -Dm0644 "$dtb" "$stage/boot/dtbs/$(basename "$dtb")"; done
 
 # STAGE kernel-modules — loadable kernel modules under /lib/modules (from kernel/build.sh modules_install).
@@ -143,42 +143,42 @@ fi
 # STAGE release-marker — so the running system can identify the slot's provenance.
 #
 # This is the file rootfs/conf/os-release designates for per-build identity ("NO PER-BUILD FIELDS ... the
-# per-build identity is written by rootfs/assemble-rootfs.sh to /etc/qforge-release, which is where
+# per-build identity is written by rootfs/assemble-rootfs.sh to /etc/retroforge-release, which is where
 # anything wanting to know which image is running should look"), so the release name belongs here
 # rather than churning the static os-release on every build.
 #
-# QFORGE_VERSION is set by CI from the release tag (`card/v1.3.0` -> `1.3.0`, likewise `ota/`), and
+# RETROFORGE_VERSION is set by CI from the release tag (`card/v1.3.0` -> `1.3.0`, likewise `ota/`), and
 # is empty for a local build — rendered `dev`, which is the honest answer for bytes that came off
 # someone's box. Without these two fields the only per-build identity was a timestamp, which cannot
 # answer "is this device on the card I flashed, or an OTA past it?".
-# QFORGE_MODE answers "is this a test image or a shippable one?", which nothing else could. A DEV
+# RETROFORGE_MODE answers "is this a test image or a shippable one?", which nothing else could. A DEV
 # image carries Wi-Fi credentials and an authorized_keys (the dev-wifi-ssh stage) and must never reach a
 # device that is not the builder's own — yet a dev image signed with the real release key is
 # INDISTINGUISHABLE from a release one to every check that existed before this line: the signature
 # is over the bytes, not over their provenance, and version/build/git are stamped the same either
 # way. ota/publish-bundle.sh refuses to publish a bundle that does not say `release` here.
 #
-# Derived from QFORGE_DEV rather than from a mode string passed in, because that is the SAME
+# Derived from RETROFORGE_DEV rather than from a mode string passed in, because that is the SAME
 # variable the dev-only injection blocks below are gated on. The stamp cannot disagree with what
 # actually went into the image, because both read the one flag.
 mkdir -p "$stage/etc"
 {
-  echo "QFORGE_VARIANT=unified"
-  echo "QFORGE_BUILD=$(date -u +%Y%m%dT%H%M%SZ)"
-  echo "QFORGE_VERSION=${QFORGE_VERSION:-dev}"
-  echo "QFORGE_GIT=${QFORGE_GIT:-unknown}"
-  if [ "${QFORGE_DEV:-}" = "1" ]; then echo "QFORGE_MODE=dev"; else echo "QFORGE_MODE=release"; fi
-} >"$stage/etc/qforge-release"
+  echo "RETROFORGE_VARIANT=unified"
+  echo "RETROFORGE_BUILD=$(date -u +%Y%m%dT%H%M%SZ)"
+  echo "RETROFORGE_VERSION=${RETROFORGE_VERSION:-dev}"
+  echo "RETROFORGE_GIT=${RETROFORGE_GIT:-unknown}"
+  if [ "${RETROFORGE_DEV:-}" = "1" ]; then echo "RETROFORGE_MODE=dev"; else echo "RETROFORGE_MODE=release"; fi
+} >"$stage/etc/retroforge-release"
 
 # STAGE os-release-fields — the same identity, in the field names OTHER software reads.
 #
 # UIs render OS Variant / Version / Build / Codename straight out of /etc/os-release, which
 # would show them BLANK because our os-release carries only the static NAME/ID block. The values existed the whole time — they are the file
-# written just above — under names nothing but qforge knows to look for.
+# written just above — under names nothing but retroforge knows to look for.
 #
 # APPENDED HERE rather than added to rootfs/conf/os-release, because that file is committed and
 # deliberately static ("NO PER-BUILD FIELDS ... so that rebuilding does not churn the tree"), and
-# VERSION_ID/BUILD_ID are per-build by definition. Same rule as qforge-release: the identity is
+# VERSION_ID/BUILD_ID are per-build by definition. Same rule as retroforge-release: the identity is
 # stamped ONCE, in one place, and everything downstream reads it back — so these cannot drift from
 # the file above the way the bundle version once drifted from the image's.
 #
@@ -188,22 +188,22 @@ mkdir -p "$stage/etc"
 {
   echo "VARIANT=\"unified\""
   echo "VARIANT_ID=unified"
-  echo "VERSION_ID=${QFORGE_VERSION:-dev}"
-  echo "VERSION=\"${QFORGE_VERSION:-dev} (${QFORGE_GIT:-unknown})\""
-  echo "BUILD_ID=$(sed -n 's/^QFORGE_BUILD=//p' "$stage/etc/qforge-release")"
+  echo "VERSION_ID=${RETROFORGE_VERSION:-dev}"
+  echo "VERSION=\"${RETROFORGE_VERSION:-dev} (${RETROFORGE_GIT:-unknown})\""
+  echo "BUILD_ID=$(sed -n 's/^RETROFORGE_BUILD=//p' "$stage/etc/retroforge-release")"
 } >>"$stage/etc/os-release"
 
 # The same three fields are needed OUTSIDE the image, by ota/genbundle.sh: a RAUC bundle has to
 # name the version it carries, and the OTA client compares that name against this very file on the
 # device. Deriving it a second time from the environment is how those two drifted apart in the first
-# place (see the Makefile's QFORGE_VERSION block) — the bundle was date-stamped while the image
+# place (see the Makefile's RETROFORGE_VERSION block) — the bundle was date-stamped while the image
 # called itself something else, and the comparison the whole update path rests on compared two
 # unrelated strings. So the identity is stamped ONCE, here, and everything downstream reads it back.
 #
 # It is copied rather than re-generated for the same reason, and it is copied AT THE END of this
 # script (section 5's `mkdir -p "$IMGDIR"` is the first thing that may create the directory) so a
 # failed assembly cannot leave a sidecar describing an image that was never written.
-release_file="$stage/etc/qforge-release"
+release_file="$stage/etc/retroforge-release"
 
 # STAGE overlay-payload — the RELEASE overlay. Every SoC-agnostic rootfs overlay —
 # the gamescope-session plumbing, the HW-support backings, the InputPlumber device/profile
@@ -242,7 +242,7 @@ fi
 # reads them (issue #43). dev_wifi stays here: it is the default the release path leaves at 0, and
 # the Makefile's DEV_WIFI mirrors this decision.
 dev_wifi=0
-if [ "${QFORGE_DEV:-}" = "1" ]; then
+if [ "${RETROFORGE_DEV:-}" = "1" ]; then
   . "$ROOT/rootfs/lib-assemble-devcard.sh"
 fi
 
@@ -261,8 +261,8 @@ fi
 # hidemenu-shim runs on EVERY build.
 . "$ROOT/rootfs/lib-assemble-hidemenu.sh"
 
-# debug-capture is DEBUG-ONLY, same construction -- and independent of QFORGE_DEV.
-if [ "${QFORGE_DEBUG:-}" = "1" ]; then
+# debug-capture is DEBUG-ONLY, same construction -- and independent of RETROFORGE_DEV.
+if [ "${RETROFORGE_DEBUG:-}" = "1" ]; then
   . "$ROOT/rootfs/lib-assemble-debug.sh"
 fi
 
@@ -273,7 +273,7 @@ fi
 # the keyring package with its vendor-enabled weekly timer — the timer being what activates the
 # dirmngr that then burns a 90s stop timeout at every shutdown. See rootfs/conf/seal.list for the
 # declaration and rootfs/seal-rootfs.sh for the mechanism; the package database survives as
-# provenance under /usr/lib/qforge/pkgdb.
+# provenance under /usr/lib/retroforge/pkgdb.
 #
 # TEST builds keep it all: on-device pacman is a real bring-up affordance and the divergence is
 # confined to TOOLING — it touches neither the boot nor the session path, so it does not repeat
@@ -289,7 +289,7 @@ fi
 #
 # Dev builds skip it for the same reason they keep pacman: deleting files out from under a live
 # package database would make every on-device `pacman -Qkk` and reinstall lie.
-if [ "${QFORGE_DEV:-}" = "1" ]; then
+if [ "${RETROFORGE_DEV:-}" = "1" ]; then
   echo "  [DEV] keeping the package manager on the image (release builds are sealed)"
   echo "  [DEV] skipping the trim (a live package db must keep describing its own files)"
 else
@@ -304,13 +304,13 @@ fi
 # and enforced in none, and the built tree had one — measured 2026-07-28 on rootfs.img: a real
 # 33-byte id, identical on every unit ever flashed from that image. Two silent consequences:
 #
-#   - rootfs/overlay/usr/lib/qforge/gen-mac.sh seeds the Wi-Fi MAC from /etc/machine-id, falling back
+#   - rootfs/overlay/usr/lib/retroforge/gen-mac.sh seeds the Wi-Fi MAC from /etc/machine-id, falling back
 #     to /sys/devices/soc0/serial_number and then to random. The SoC serial IS per-unit, so the
 #     fallback would already give every device a distinct MAC — a populated machine-id is exactly
 #     what stops line 27 ever falling through to it. The bug is not that the chain is wrong; it is
 #     that a baked seed always wins and makes the whole chain unreachable.
 #   - a populated machine-id means systemd does NOT treat the first boot as first, so preset-all
-#     never runs and the 60-qforge-*.preset files do nothing. Service enablement only survived
+#     never runs and the 60-retroforge-*.preset files do nothing. Service enablement only survived
 #     because the explicit multi-user.target.wants symlinks ship too; anything preset-only was off.
 #     This half CANNOT be fixed in gen-mac.sh — systemd's first-boot detection keys on this file.
 #
@@ -318,7 +318,7 @@ fi
 # per-unit MAC and working presets just as much. Guard assertion 6 checks it on release trees.
 #
 # DOES NOT FIX AN ALREADY-FLASHED DEVICE. gen-mac.sh persists the derived address write-once to
-# /var/lib/qforge/mac-wifi and prefers it forever after, so a device that already booted keeps
+# /var/lib/retroforge/mac-wifi and prefers it forever after, so a device that already booted keeps
 # the colliding MAC until that file is removed or its /var is reformatted. Worth knowing for the
 # RAUC /var migration hook too: copying /var across slots copies the bad address with it.
 #
@@ -433,7 +433,7 @@ fi
 # The OTA path fills a target slot's /var by rsyncing the RUNNING one -- there is a live system that
 # describes this device, and copying it is the whole point. An install has no such source: the
 # running system is the INSTALLER, whose /var describes the installer. So the /var a fresh slot
-# starts from ships inside the root, and rootfs/overlay/usr/lib/qforge/install/lib-slotwrite.sh's
+# starts from ships inside the root, and rootfs/overlay/usr/lib/retroforge/install/lib-slotwrite.sh's
 # seed_var unpacks it (that function takes a directory OR a tarball for exactly this reason).
 #
 # It is the same $varstage the two var images below are built from, so a slot installed from the
@@ -445,17 +445,17 @@ fi
 # a private host key is group/world-readable, so a mode-losing pack would take SSH down on an
 # installed device and nowhere else.
 #
-# lib/qforge/slot is EXCLUDED because it is the one file in /var that is per-slot -- seed_var
+# lib/retroforge/slot is EXCLUDED because it is the one file in /var that is per-slot -- seed_var
 # writes it after unpacking, and a copy baked in here would be a second answer to the question
-# "which slot is this", of the kind /var/lib/qforge/slot exists to be the independent witness for.
+# "which slot is this", of the kind /var/lib/retroforge/slot exists to be the independent witness for.
 # ~13 MiB of /var, so a few MiB compressed: negligible against a 7 G slot.
-install -d -m0755 "$stage/usr/lib/qforge"
+install -d -m0755 "$stage/usr/lib/retroforge"
 tar --numeric-owner --xattrs --acls --zstd \
-    --exclude=./lib/qforge/slot --exclude=./lib/qforge/mac-wifi \
-    -cf "$stage/usr/lib/qforge/var-seed.tar.zst" -C "$varstage" . \
+    --exclude=./lib/retroforge/slot --exclude=./lib/retroforge/mac-wifi \
+    -cf "$stage/usr/lib/retroforge/var-seed.tar.zst" -C "$varstage" . \
   || { echo "cannot pack the installer's /var seed" >&2; exit 1; }
-chmod 0444 "$stage/usr/lib/qforge/var-seed.tar.zst"
-echo "  var-seed.tar.zst  $(du -h "$stage/usr/lib/qforge/var-seed.tar.zst" | cut -f1) (installer /var seed, from the same staged tree as var-a/-b)"
+chmod 0444 "$stage/usr/lib/retroforge/var-seed.tar.zst"
+echo "  var-seed.tar.zst  $(du -h "$stage/usr/lib/retroforge/var-seed.tar.zst" | cut -f1) (installer /var seed, from the same staged tree as var-a/-b)"
 
 # STAGE guard — assert the sealed tree against its declaration (Phase 4a step 4).
 #
@@ -466,7 +466,7 @@ echo "  var-seed.tar.zst  $(du -h "$stage/usr/lib/qforge/var-seed.tar.zst" | cut
 #
 # Release-only, mirroring the seal — a dev tree deliberately keeps the package manager and carries
 # DEV_PKGS the lock does not describe. See rootfs/guard-rootfs.sh for what it asserts and why.
-if [ "${QFORGE_DEV:-}" = "1" ]; then
+if [ "${RETROFORGE_DEV:-}" = "1" ]; then
   echo "  [DEV] skipping the sealed-root guard (nothing was sealed)"
 else
   "$ROOT/rootfs/guard-rootfs.sh" "$stage"
@@ -480,39 +480,39 @@ mkdir -p "$IMGDIR"
 # finalized, size-checked and packed as the installer's seed by var-finalize, above the guard; what
 # is left here is turning it into the two per-slot images.
 #
-# One var image per slot (Phase 4b). They differ by exactly one file: /var/lib/qforge/slot.
+# One var image per slot (Phase 4b). They differ by exactly one file: /var/lib/retroforge/slot.
 #
 # The two root images are content-identical by design -- that is what an A/B update produces, and
 # RAUC will write the same bytes into whichever slot is inactive. So slot identity can never come
 # from the root's CONTENT; it has to come from where the initramfs mounted it. The initramfs
-# records its own decision in /run/qforge/boot, but that comes from the code doing the choosing.
-# This file is an INDEPENDENT witness: /run/qforge/boot says which slot the initramfs thinks it
-# picked, /var/lib/qforge/slot says which var actually got mounted. If those two ever disagree,
+# records its own decision in /run/retroforge/boot, but that comes from the code doing the choosing.
+# This file is an INDEPENDENT witness: /run/retroforge/boot says which slot the initramfs thinks it
+# picked, /var/lib/retroforge/slot says which var actually got mounted. If those two ever disagree,
 # the selection is lying -- which is exactly the symptom of two btrfs filesystems sharing an fsid
 # (see image/make-sdcard.sh). Four lines, and it is the only cross-check that does not share a
 # failure mode with the thing it checks.
 #
 # Two mkfs runs also give the two images distinct ext4 UUIDs for free, which matters for the same
 # reason: /home is mounted by LABEL, and duplicate filesystem identity across slots is the hazard.
-install -d -m0755 "$varstage/lib/qforge"
+install -d -m0755 "$varstage/lib/retroforge"
 for slot in a b; do
   # UPPERCASE, matching the boot chain and the installer. The loop variable stays lowercase because
-  # it names the images and the partitions (var-a, qforge-var-A via ${slot^^}), but the WITNESS is
-  # in bootconf naming: the kernel command line carries qforge.slot=A|B, seed_var writes $SLOT,
+  # it names the images and the partitions (var-a, retroforge-var-A via ${slot^^}), but the WITNESS is
+  # in bootconf naming: the kernel command line carries retroforge.slot=A|B, seed_var writes $SLOT,
   # and tests/test-post-install.sh asserts 'B'. This wrote 'a' and was the only thing in the
   # system spelling it lowercase -- discovered 2026-08-22 when installer/verify-install.sh, which
   # runs the card's check list against a real install, disagreed with image/verify-card.sh about
   # the same file. Nothing reads it at runtime (the initramfs takes the slot from the cmdline), so
   # this was cosmetic -- but a witness that answers differently depending on how the disk was made
   # is not a witness.
-  printf '%s\n' "${slot^^}" >"$varstage/lib/qforge/slot"
+  printf '%s\n' "${slot^^}" >"$varstage/lib/retroforge/slot"
   case "$slot" in
     a) img=$VARIMG ;;
     b) img=$VARIMG_B ;;
   esac
   rm -f "$img"
   truncate -s "${VAR_SIZE_MIB}M" "$img"
-  mkfs.ext4 -q -F -L qforge-var-"${slot^^}" -m0 -d "$varstage" "$img"
+  mkfs.ext4 -q -F -L retroforge-var-"${slot^^}" -m0 -d "$varstage" "$img"
   echo "  ok   var-$slot  -> ${img#"$ROOT"/}  (${VAR_SIZE_MIB}MiB ext4, ${var_used_mib}MiB used)"
 done
 
@@ -538,10 +538,10 @@ install -d -m0755 "$varstage"
 # the fsid of) the slot it just wrote. Labelling here rather than in make-sdcard.sh is what avoids
 # a second full multi-gigabyte copy of the image purely to stamp eleven characters on it.
 rm -f "$IMG"
-mkfs.btrfs --rootdir "$stage" --compress zstd --shrink -L qforge-root-A -f "$IMG" >/dev/null
+mkfs.btrfs --rootdir "$stage" --compress zstd --shrink -L retroforge-root-A -f "$IMG" >/dev/null
 
 # The identity sidecar (see release-marker), beside the image and written only now that there is an image
-# to describe. This is the /etc/qforge-release that is INSIDE $IMG, byte for byte — genbundle.sh
+# to describe. This is the /etc/retroforge-release that is INSIDE $IMG, byte for byte — genbundle.sh
 # reads it to name the bundle, and the device compares the bundle's name against its own copy.
 # Reading it back out of the btrfs image instead would need `btrfs restore` for four lines.
 cp "$release_file" "$IMGDIR/rootfs.release"

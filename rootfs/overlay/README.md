@@ -1,6 +1,6 @@
 # rootfs/overlay — the unified rootfs overlay payload
 
-Every SoC-agnostic file that qforge lays over the base rootfs lives here, in **one tree that
+Every SoC-agnostic file that retroforge lays over the base rootfs lives here, in **one tree that
 mirrors the target filesystem exactly**. `rootfs/assemble-rootfs.sh` injects it with a single
 `cp -a rootfs/overlay/. "$stage/"` (the `overlay-payload` stage). The tree carries final paths, executable
 bits (tracked in git), and the systemd presets + `*.target.wants` symlinks that enable each
@@ -19,30 +19,30 @@ matches by hardware, so non-matching configs are inert. It overrides the package
 configs in `devices.d/` and capability maps in `capability_maps.d/`. Do **not** rename them to the
 un-suffixed `devices`/`capability_maps` (those apply only under `/usr/share`) or the configs load
 from nowhere and no composite device is built. Enabled by a shipped
-`usr/lib/systemd/system-preset/60-qforge.preset` (60 < the stock 99 "disable *") plus a
+`usr/lib/systemd/system-preset/60-retroforge.preset` (60 < the stock 99 "disable *") plus a
 `multi-user.target.wants/inputplumber.service` symlink.
 
 **Session — gamescope-session plumbing**
-The boot-to-compositor path: launcher `/usr/bin/qforge-session` + its `/etc/qforge/session.conf`,
-`qforge-session.service` (systemd logs `player` in through its own PAM stack — no display
+The boot-to-compositor path: launcher `/usr/bin/retroforge-session` + its `/etc/retroforge/session.conf`,
+`retroforge-session.service` (systemd logs `player` in through its own PAM stack — no display
 manager), and `default.target -> graphical.target`. The device boots straight into it, giving a REAL active `seat0` logind session (so stock polkit authorizes
 Wi-Fi/timezone). `seatd.service` stays enabled as an unused fallback; gamescope takes the seat
-through logind. The shell gamescope hosts is `QFORGE_SESSION_CMD` in `session.conf` (a `vkcube`
-liveness placeholder until OpenGamepadUI lands), plus `QFORGE_GAMESCOPE_SHELL_ARGS` for the
+through logind. The shell gamescope hosts is `RETROFORGE_SESSION_CMD` in `session.conf` (a `vkcube`
+liveness placeholder until OpenGamepadUI lands), plus `RETROFORGE_GAMESCOPE_SHELL_ARGS` for the
 gamescope flags that shell needs.
 
 **HW-support — Qualcomm backings for handheld affordances**
-`qforge-rest` (userspace "rest mode"/fake-suspend), the suspend engine (a `systemd-suspend.service`
-drop-in redirects logind `Suspend()` into `qforge-suspend`; `qforge-powerbuttond` runs a
+`retroforge-rest` (userspace "rest mode"/fake-suspend), the suspend engine (a `systemd-suspend.service`
+drop-in redirects logind `Suspend()` into `retroforge-suspend`; `retroforge-powerbuttond` runs a
 configurable short/long-press action, suspend and power-off by default), the power-policy daemon
-`qforge-powerd`, the key-pairing agent `qforge-pairingd`, Bluetooth, and `systemd-timesyncd`.
+`retroforge-powerd`, the key-pairing agent `retroforge-pairingd`, Bluetooth, and `systemd-timesyncd`.
 All enabled via shipped presets + `*.target.wants` symlinks. No Wi-Fi resume hook ships (NM
 re-associates unaided).
 
 **Update and storage entry points**
-`usr/bin/qforge-update` is the OS update client (RAUC), including its channel picker
-(`channels` / `set-channel`); `usr/bin/qforge-format-sdcard` / `qforge-format-device` pkexec into
-`usr/lib/qforge/storage/format-device.sh`. `50-qforge-timezone.rules` is the one polkit grant
+`usr/bin/retroforge-update` is the OS update client (RAUC), including its channel picker
+(`channels` / `set-channel`); `usr/bin/retroforge-format-sdcard` / `retroforge-format-device` pkexec into
+`usr/lib/retroforge/storage/format-device.sh`. `50-retroforge-timezone.rules` is the one polkit grant
 stock polkit still prompts for.
 
 **Audio — ALSA UCM2 machine profiles**
@@ -67,7 +67,7 @@ until that verb returns.
 Four files that are not a subsystem but are load-bearing for the immutable A/B model, because on
 this image `/etc/passwd` and `/var` are *build products* rather than device state:
 
-- `usr/lib/sysusers.d/01-qforge-enforce-ids.conf` — pins every system UID/GID that
+- `usr/lib/sysusers.d/01-retroforge-enforce-ids.conf` — pins every system UID/GID that
   `systemd-sysusers` would otherwise allocate by counting down from 999. Adding one package with a
   sysusers entry shifts every id below it, and the RAUC post-install hook copies `/var` wholesale
   across an update, so drifting ids reassign the ownership of persisted state. **This file is also
@@ -75,13 +75,13 @@ this image `/etc/passwd` and `/var` are *build products* rather than device stat
   transaction — the pin only works if it is there when the sysusers hook runs. Its sha is in the
   base reuse key, and `rootfs/guard-rootfs.sh` assertion 8 checks the built tree against it. There
   is no end-of-line comment syntax in sysusers.d; a trailing `#` silently rejects the line.
-- `usr/lib/tmpfiles.d/qforge-var.conf` — declares the `/var` hierarchy in the ROOT. A fresh flash
+- `usr/lib/tmpfiles.d/retroforge-var.conf` — declares the `/var` hierarchy in the ROOT. A fresh flash
   gets `/var` from the build; an *updated* slot gets the previous version's `/var`, so a directory a
   new version needs has to be asserted at boot or it will not exist. New `/var` paths go here.
-- `usr/lib/systemd/system/earlyoom.service.d/qforge.conf` — OOM policy: absolute thresholds
+- `usr/lib/systemd/system/earlyoom.service.d/retroforge.conf` — OOM policy: absolute thresholds
   (RAM spans 8–16 GB across supported SKUs, so percentages mean different headroom per unit),
   reports off (the default is one journal line per second, onto an SD card), and the session spine
-  protected. Enabled by `60-qforge-earlyoom.preset` + a `multi-user.target.wants` symlink.
+  protected. Enabled by `60-retroforge-earlyoom.preset` + a `multi-user.target.wants` symlink.
 - `usr/lib/systemd/zram-generator.conf` — the image's only swap device, `ram/2` compressed in RAM.
   **Coupled to the kernel:** it needs `CONFIG_ZRAM` + the zstd backend, which `kernel/build.sh`
   asserts, because without them there is no `zram0`, no swap, and no error.

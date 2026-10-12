@@ -1,4 +1,4 @@
-From: qforge
+From: retroforge
 Subject: [PATCH] composite-blit: keep the rotated copy of an unchanged layer
 
 On a panel whose planes can't rotate, --composite-blit copies every
@@ -16,7 +16,7 @@ let the per-slot ring hand back the previous copy when texture, commit
 and rotation all match. The ring only advances for a fresh copy, so the
 image written next is still never the one being scanned out.
 
-(qforge: perf, MANGMI Air X, 2026-10-10.)
+(retroforge: perf, MANGMI Air X, 2026-10-10.)
 ---
 diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
 index d9cb7bf..4bd74fd 100644

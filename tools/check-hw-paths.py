@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """check-hw-paths: every board profile's hardware-map pins against its compiled devicetree.
 
-The profiles (rootfs/overlay/usr/lib/qforge/devices/*.conf, QFORGE_HW_*) name sysfs nodes the
+The profiles (rootfs/overlay/usr/lib/retroforge/devices/*.conf, RETROFORGE_HW_*) name sysfs nodes the
 kernel creates on the device: a power_supply, a backlight, thermal zone types, a hwmon, the GPU's
 devfreq, LED class devices. No board needs to be in hand to check most of them, because every one
 of those names is the devicetree plus a fixed rule in the driver that registers it. This reads each
@@ -25,7 +25,7 @@ left one, which zone runs hottest, whether a GPIO is really the enable. hw-map's
 covers a wrong guess on the device (it logs the pin and detects).
 
 DTBs come from the kernel build (--dtbs out/dtbs, what `make check-hw-paths` passes) or are
-compiled here from kernel/dts/qcom against a Linux tree with QForge's devicetree patches applied
+compiled here from kernel/dts/qcom against a Linux tree with RetroForge's devicetree patches applied
 (--linux-src). Each DTB's root `model` goes through the real device-env, so the pins checked are
 the ones a booted board gets. A known gap goes in tools/check-hw-paths.xfail; a listed check that
 starts passing fails the run, so the list cannot go stale.
@@ -41,8 +41,8 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-DEVICE_DIR = ROOT / "rootfs/overlay/usr/lib/qforge/devices"
-DEVICE_ENV = ROOT / "rootfs/overlay/usr/lib/qforge/device-env"
+DEVICE_DIR = ROOT / "rootfs/overlay/usr/lib/retroforge/devices"
+DEVICE_ENV = ROOT / "rootfs/overlay/usr/lib/retroforge/device-env"
 XFAIL = ROOT / "tools/check-hw-paths.xfail"
 
 # ------------------------------------------------------------------------------- the driver tables
@@ -492,27 +492,27 @@ def check(board, pins):
         res.append((field, ok, value if ok else f"{value}: no such {what}; the board has "
                     f"{', '.join(sorted(have)) or 'none'}"))
 
-    one("QFORGE_HW_BATTERY", pins.get("QFORGE_HW_BATTERY"),
+    one("RETROFORGE_HW_BATTERY", pins.get("RETROFORGE_HW_BATTERY"),
         {k for k, v in board.supplies.items() if v == "battery"}, "battery")
-    one("QFORGE_HW_CHARGER", pins.get("QFORGE_HW_CHARGER"),
+    one("RETROFORGE_HW_CHARGER", pins.get("RETROFORGE_HW_CHARGER"),
         {k for k, v in board.supplies.items() if v == "charger"}, "charger")
-    one("QFORGE_HW_BACKLIGHT", pins.get("QFORGE_HW_BACKLIGHT"), board.backlights, "backlight")
-    bl, conn = pins.get("QFORGE_HW_BACKLIGHT"), pins.get("QFORGE_PRIMARY_CONNECTOR") or ""
+    one("RETROFORGE_HW_BACKLIGHT", pins.get("RETROFORGE_HW_BACKLIGHT"), board.backlights, "backlight")
+    bl, conn = pins.get("RETROFORGE_HW_BACKLIGHT"), pins.get("RETROFORGE_PRIMARY_CONNECTOR") or ""
     if bl and bl in board.backlights and conn.startswith("DSI-"):
         want, why = board.primary_backlight(conn)
         if want is not None:   # a primary panel with no backlight of its own leaves nothing to compare
-            res.append(("QFORGE_HW_BACKLIGHT:primary", want == bl,
+            res.append(("RETROFORGE_HW_BACKLIGHT:primary", want == bl,
                         f"{bl} dims {why}" if want == bl else
                         f"{bl} is not the primary panel's backlight: {why} -> {want}"))
     for role in ("CPU", "GPU", "BATTERY", "SKIN"):
-        one(f"QFORGE_HW_THERMAL_{role}", pins.get(f"QFORGE_HW_THERMAL_{role}"), board.zones,
+        one(f"RETROFORGE_HW_THERMAL_{role}", pins.get(f"RETROFORGE_HW_THERMAL_{role}"), board.zones,
             "thermal zone")
-    one("QFORGE_HW_FAN", pins.get("QFORGE_HW_FAN"), board.fans, "fan")
-    one("QFORGE_HW_GPU_DEVFREQ", pins.get("QFORGE_HW_GPU_DEVFREQ"), board.gpus, "GPU devfreq")
-    for spec in (pins.get("QFORGE_HW_LED_GROUPS") or "").split():
+    one("RETROFORGE_HW_FAN", pins.get("RETROFORGE_HW_FAN"), board.fans, "fan")
+    one("RETROFORGE_HW_GPU_DEVFREQ", pins.get("RETROFORGE_HW_GPU_DEVFREQ"), board.gpus, "GPU devfreq")
+    for spec in (pins.get("RETROFORGE_HW_LED_GROUPS") or "").split():
         group, _, globs = spec.partition("=")
         hits = sorted({l for g in globs.split(",") for l in board.leds if fnmatch.fnmatchcase(l, g)})
-        res.append((f"QFORGE_HW_LED_GROUPS:{group}", bool(hits),
+        res.append((f"RETROFORGE_HW_LED_GROUPS:{group}", bool(hits),
                     f"{group}={len(hits)} LEDs" if hits else
                     f"{group}={globs} matches no LED; the board has "
                     f"{', '.join(sorted(board.leds)) or 'none'}"))
@@ -521,8 +521,8 @@ def check(board, pins):
 
 def device_env(model, device_dir=DEVICE_DIR):
     """The pins a board with this model gets, from the real device-env."""
-    script = 'eval "$("$1")"; for v in $(compgen -v QFORGE_); do printf "%s=%s\\0" "$v" "${!v}"; done'
-    env = dict(os.environ, QFORGE_MODEL=model, QFORGE_DEVICE_DIR=str(device_dir))
+    script = 'eval "$("$1")"; for v in $(compgen -v RETROFORGE_); do printf "%s=%s\\0" "$v" "${!v}"; done'
+    env = dict(os.environ, RETROFORGE_MODEL=model, RETROFORGE_DEVICE_DIR=str(device_dir))
     out = subprocess.run(["bash", "-c", script, "_", str(DEVICE_ENV)], env=env, check=True,
                          capture_output=True).stdout.decode()
     return dict(kv.split("=", 1) for kv in out.split("\0") if "=" in kv)
@@ -564,8 +564,8 @@ def dts_patch_hunks(patch):
 
 
 def compile_dtbs(linux, work):
-    """kernel/build.sh's devicetree half, on the host: Linux's qcom dts dir, QForge's patches'
-    devicetree hunks applied in order, QForge's own dts/dtsi on top, cpp + dtc per board."""
+    """kernel/build.sh's devicetree half, on the host: Linux's qcom dts dir, RetroForge's patches'
+    devicetree hunks applied in order, RetroForge's own dts/dtsi on top, cpp + dtc per board."""
     tree = work / "linux"
     qcom = tree / "arch/arm64/boot/dts/qcom"
     shutil.copytree(linux / "arch/arm64/boot/dts/qcom", qcom)
@@ -637,7 +637,7 @@ def main(argv=None):
             tree = Tree(dtb.read_bytes())
             board = Board(tree)
             pins = device_env(tree.model or "", args.device_dir)
-            pid = pins.get("QFORGE_DEVICE_ID", "unknown")
+            pid = pins.get("RETROFORGE_DEVICE_ID", "unknown")
             if pid == "unknown":
                 print(f"FAIL {dtb.name}: model {tree.model!r} has no device profile")
                 failed += 1

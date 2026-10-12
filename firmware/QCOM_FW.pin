@@ -1,4 +1,4 @@
-# qforge qcom-firmware pin — DEVICE-PROPRIETARY firmware blobs (GPU zap shaders,
+# retroforge qcom-firmware pin — DEVICE-PROPRIETARY firmware blobs (GPU zap shaders,
 # adsp/cdsp DSP images, AudioReach tplg, ath12k Wi-Fi/BT, Renesas xHCI), republished
 # from each device's Android vendor image to the Nova-Deck/qcom-firmwares repo.
 #

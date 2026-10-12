@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# qforge internal install — the installer UI's VIEW. Phase 5 of
+# retroforge internal install — the installer UI's VIEW. Phase 5 of
 # .claude/plans/internal-install.plan.md.
 #
 # This file is the only one in the installer that knows what a pixel is, and it is a separate file
@@ -33,7 +33,7 @@ class PygameView:
 
         self.pygame = pygame
         pygame.init()
-        pygame.display.set_caption("QForge installer")
+        pygame.display.set_caption("RetroForge installer")
         self.surface = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
         self.w, self.h = self.surface.get_size()
         # THE PANEL IS HELD AT ARM'S LENGTH, NOT SAT IN FRONT OF. h/34 came from reading these

@@ -1,30 +1,30 @@
 # The update server
 
-Where a device in the field gets its OS updates from. The device half — the `qforge-update` client,
+Where a device in the field gets its OS updates from. The device half — the `retroforge-update` client,
 the RAUC A/B install, the trial boot and rollback — is in `docs/RUNBOOK.md`; this file is the server
 and the act of publishing.
 
-**There is no QForge update server yet.** Every default in the tree names the placeholder
-`updates.qforge.invalid`, which never resolves: `qforge-update`'s `DEFAULT_URL`, the installer
+**There is no RetroForge update server yet.** Every default in the tree names the placeholder
+`updates.retroforge.invalid`, which never resolves: `retroforge-update`'s `DEFAULT_URL`, the installer
 medium's `netcfg` and `release-info`, `ota/publish-bundle.sh`, `ota/setup-server.sh` and the
 `release-bundle.yml` publish job. A device built today checks, cannot resolve the host, fails closed
 and reports "no update" — rather than asking a host someone else owns. Everything below describes the
 server the `ota/` scripts stand up and how publishing to it works; until one exists, read *the host*
 as whatever you set up.
 
-> **The first-boot gate.** `qforge-update`'s `check` and apply paths both begin with `setup_done()`:
+> **The first-boot gate.** `retroforge-update`'s `check` and apply paths both begin with `setup_done()`:
 > until OpenGamepadUI's first-boot flow has written `[general] first_boot=false` into
 > `/home/player/.local/share/opengamepadui/settings.cfg`, the client exits 7 ("no update") without
-> contacting any server, and `qforge-update status` shows `setup: first boot not finished (updates
+> contacting any server, and `retroforge-update status` shows `setup: first boot not finished (updates
 > deferred)`. A device that has finished setup checks normally.
 
 | | |
 |---|---|
-| Host | **placeholder** `updates.qforge.invalid` — `QFORGE_OTA_DOMAIN` (`setup-server.sh`), `QFORGE_OTA_HOST` (`publish-bundle.sh`), the `OTA_HOST` repo variable (CI) |
+| Host | **placeholder** `updates.retroforge.invalid` — `RETROFORGE_OTA_DOMAIN` (`setup-server.sh`), `RETROFORGE_OTA_HOST` (`publish-bundle.sh`), the `OTA_HOST` repo variable (CI) |
 | OS the scripts assume | Ubuntu with apt, login `ubuntu` with passwordless sudo (written against Ubuntu 24.04 on Oracle Cloud) |
 | Serves | nginx, TLS via Let's Encrypt (`certbot certonly --webroot`) |
-| Docroot | `/srv/qforge-ota`, **read-only to the internet** |
-| Retention | 3 bundles per channel (`QFORGE_OTA_KEEP`) |
+| Docroot | `/srv/retroforge-ota`, **read-only to the internet** |
+| Retention | 3 bundles per channel (`RETROFORGE_OTA_KEEP`) |
 | Repo | `ota/` — vhost, bootstrap, publisher |
 
 ## Layout
@@ -33,49 +33,49 @@ as whatever you set up.
 the first path segment:
 
 ```
-/srv/qforge-ota/
+/srv/retroforge-ota/
   stable/
     latest.json               -> https://<host>/stable/latest.json
-    qforge-0.2.0.raucb        -> https://<host>/stable/qforge-0.2.0.raucb
+    retroforge-0.2.0.raucb        -> https://<host>/stable/retroforge-0.2.0.raucb
   beta/
   .well-known/acme-challenge/ (certbot)
 ```
 
-The host itself comes from `OTA_URL` in `/etc/qforge/ota.conf` or `QFORGE_OTA_URL` in the
+The host itself comes from `OTA_URL` in `/etc/retroforge/ota.conf` or `RETROFORGE_OTA_URL` in the
 environment, falling back to `DEFAULT_URL`. A channel is a directory, not a migration. The client's
 `OTA_CHANNEL` selects one, from the first of these that has it:
 
 | source | who can write it | note |
 |---|---|---|
-| `QFORGE_OTA_CHANNEL` | whoever runs the command | one invocation only |
-| `/etc/qforge/ota.conf` | root | only a **dev** card ships this file, pinned to `dev` so the card is never offered a stable release |
-| `~/.config/qforge/ota.conf` | the user, no root needed | `/home/player/.config/qforge/ota.conf` (spelled out, not `$HOME`); the only one reachable on a release device |
+| `RETROFORGE_OTA_CHANNEL` | whoever runs the command | one invocation only |
+| `/etc/retroforge/ota.conf` | root | only a **dev** card ships this file, pinned to `dev` so the card is never offered a stable release |
+| `~/.config/retroforge/ota.conf` | the user, no root needed | `/home/player/.config/retroforge/ota.conf` (spelled out, not `$HOME`); the only one reachable on a release device |
 | built-in `stable` | — | |
 
 `/etc` outranks `$HOME` on purpose: a file in `$HOME` must not silently undo the dev card's pin. On
-a release image `/etc/qforge/ota.conf` does not exist, so the user's file is the only entry in the
+a release image `/etc/retroforge/ota.conf` does not exist, so the user's file is the only entry in the
 chain. It may set `OTA_CHANNEL` **only** — `OTA_URL` is read from `/etc` and the environment, never
 from `$HOME`, because which host a device fetches from is an operator decision and one writable file
 under `$HOME` must not repoint every future update.
 
-`qforge-update status` prints which of them supplied the channel in effect, which is the fastest
-answer to "why is it checking that channel". `qforge-update channel` prints the same pair
+`retroforge-update status` prints which of them supplied the channel in effect, which is the fastest
+answer to "why is it checking that channel". `retroforge-update channel` prints the same pair
 tab-separated for a program to read, so a future channel picker does not re-derive the precedence and
 then disagree with the fetch.
 
 ### The client contract
 
-`qforge-update` keeps the exit-code contract it was written to: `check` exits 0 and prints the
+`retroforge-update` keeps the exit-code contract it was written to: `check` exits 0 and prints the
 available version on stdout, or exits 7 for "none" — and 7 is also how every recoverable failure
 exits (unreachable server, malformed manifest), so a check fails closed. Apply (no argument) emits
 forward-only `N%` lines on stdout and everything else on stderr. An update already installed and
-waiting for a reboot is reported by reprinting its version. The caller is the QForge shell plugin's
+waiting for a reboot is reported by reprinting its version. The caller is the RetroForge shell plugin's
 updates screen; it can also be run by hand over SSH as `player`.
 
-Channel selection lives in the same program: `qforge-update channels` lists what a picker offers
+Channel selection lives in the same program: `retroforge-update channels` lists what a picker offers
 (`stable`, `beta`, plus the channel in effect if it is neither, and a `pinned<TAB><source>` line
-when `/etc` or the environment outranks the user's choice), and `qforge-update set-channel <name>`
-writes `~/.config/qforge/ota.conf`. The old Steam-shaped `qforge-select-branch` is gone.
+when `/etc` or the environment outranks the user's choice), and `retroforge-update set-channel <name>`
+writes `~/.config/retroforge/ota.conf`. The old Steam-shaped `retroforge-select-branch` is gone.
 
 **Which channels exist:** `stable` and `beta`. `ota/setup-server.sh` creates both, and
 `release-bundle.yml` decides between them from the tag's semver pre-release suffix — `ota/v0.3.0`
@@ -100,7 +100,7 @@ download 404s after the user has already said yes.
 
 ```json
 { "version": "0.2.0", "build": "20260803T120000Z", "git": "abc1234",
-  "bundle": "qforge-0.2.0.raucb", "size": 3758096384, "sha256": "…" }
+  "bundle": "retroforge-0.2.0.raucb", "size": 3758096384, "sha256": "…" }
 ```
 
 `version` is the identity the client compares and dedupes on (`build` stands in when the version is
@@ -120,16 +120,16 @@ refuses up front rather than discovering this minutes in.
 
 ```sh
 # 1. build and sign — the version must be set BEFORE the rootfs, see docs/RUNBOOK.md
-QFORGE_VERSION=0.2.0 PKIDIR=$HOME/qforge-pki make bundle
+RETROFORGE_VERSION=0.2.0 PKIDIR=$HOME/retroforge-pki make bundle
 
 # 2. install it on a device and confirm it boots, BEFORE anyone else gets it
-ssh player@<device> rauc install /path/to/qforge-0.2.0.raucb
+ssh player@<device> rauc install /path/to/retroforge-0.2.0.raucb
 
 # 3. publish
-QFORGE_OTA_HOST=<host> QFORGE_OTA_SSH_KEY=~/.ssh/<key> ota/publish-bundle.sh out/images/qforge-0.2.0.raucb
+RETROFORGE_OTA_HOST=<host> RETROFORGE_OTA_SSH_KEY=~/.ssh/<key> ota/publish-bundle.sh out/images/retroforge-0.2.0.raucb
 ```
 
-Step 2 installs from a **local file**. The device streams when `qforge-update` drives it (below), but
+Step 2 installs from a **local file**. The device streams when `retroforge-update` drives it (below), but
 a local `rauc install <file>` is unaffected: rauc's adaptive path is best-effort with an
 unconditional fall-through to a plain full-slot copy, so a workstation install writes the same bytes
 it always did. It simply gains nothing from adaptive — there is no download to shrink.
@@ -140,7 +140,7 @@ recover — on a device with no serial console. Every published bundle gets a ha
 
 ### The device streams; it does not download
 
-`qforge-update` hands rauc the bundle's **https URL**, not a downloaded file. rauc creates an NBD
+`retroforge-update` hands rauc the bundle's **https URL**, not a downloaded file. rauc creates an NBD
 device backed by an unprivileged helper (user `nobody`) that turns block reads into HTTP `Range`
 requests, so a bundle never occupies storage on the device — there is no staging directory to fill
 and no free-space precondition on an update.
@@ -157,12 +157,12 @@ concurrent Range requests, which is the request pattern HTTP/1 serialises — an
 at the start of every stream (`using HTTP/1 for streaming, expect slow installation`), observed on a
 Pocket ACE. The bundle is fetched by rauc; the only thing curl fetches is `<channel>/latest.json`, a
 few hundred bytes. `listen 443 ssl http2` (the pre-1.25 spelling, which is what Ubuntu 24.04's
-nginx 1.24 understands) is in `ota/nginx-qforge-ota.conf`.
+nginx 1.24 understands) is in `ota/nginx-retroforge-ota.conf`.
 
 Consequences worth knowing before reading a slow first result:
 
 - **rauc runs from the RUNNING slot**, so it is that slot's `system.conf` and that slot's
-  `qforge-update` which decide whether an install is adaptive — not the bundle's. A slot whose
+  `retroforge-update` which decide whether an install is adaptive — not the bundle's. A slot whose
   config has no `data-directory` installs any bundle as a plain full-slot write.
 - **The first adaptive install still saves; it is just slower.** With no stored index for either
   slot rauc generates them on demand, which costs one pass of hashing both slots. Indices are then
@@ -210,32 +210,32 @@ keeps running.
 # 1. the device: build the new boot flow locally and flash it. Give the CARD a version too, or
 #    both ends render `dev` and there is no version change to detect.
 set -a; . ./dev.env; set +a
-QFORGE_VERSION=<base> PKIDIR=$HOME/qforge-pki make sdcard    # dev card, new boot flow
+RETROFORGE_VERSION=<base> PKIDIR=$HOME/retroforge-pki make sdcard    # dev card, new boot flow
 
 # 2. a bundle the device will accept: a DEV image with a REAL signature.
 #    rauc gates on the signature, so this installs exactly like a release bundle.
-QFORGE_VERSION=<bumped> PKIDIR=$HOME/qforge-pki make bundle
+RETROFORGE_VERSION=<bumped> PKIDIR=$HOME/retroforge-pki make bundle
 
 # 3. install it with rauc directly (no server needed). rauc also accepts an https URL and
-#    streams it; with a server, `qforge-update` on the device does the same.
-scp out/images/qforge-<bumped>.raucb player@<device>:
-ssh player@<device> rauc install qforge-<bumped>.raucb
+#    streams it; with a server, `retroforge-update` on the device does the same.
+scp out/images/retroforge-<bumped>.raucb player@<device>:
+ssh player@<device> rauc install retroforge-<bumped>.raucb
 ```
 
-Then reboot and confirm the new slot booted and `/etc/qforge-release` changed. Once the client is
+Then reboot and confirm the new slot booted and `/etc/retroforge-release` changed. Once the client is
 driven by the shell, the same test runs through a TEST channel on your server instead: hand-place the
-bundle and a hand-written `latest.json` (schema above) under `/srv/qforge-ota/test/`, point the device
+bundle and a hand-written `latest.json` (schema above) under `/srv/retroforge-ota/test/`, point the device
 at it with
 
 ```sh
-ssh player@<device> 'mkdir -p ~/.config/qforge && echo OTA_CHANNEL=test > ~/.config/qforge/ota.conf'
+ssh player@<device> 'mkdir -p ~/.config/retroforge && echo OTA_CHANNEL=test > ~/.config/retroforge/ota.conf'
 ```
 
-(on a DEV card `/etc/qforge/ota.conf` pins `dev` and outranks this file, so edit that one — you have
+(on a DEV card `/etc/retroforge/ota.conf` pins `dev` and outranks this file, so edit that one — you have
 root on a dev card), and drive check → install → restart from the shell. Then check again — it must
 report up-to-date and **not** re-offer. **Reset the channel when you are done**: `~/.config` is on
 `/home`, shared by both slots, so `OTA_CHANNEL=test` survives the update and the device silently
-keeps reading it forever. `qforge-update status` names the file it came from.
+keeps reading it forever. `retroforge-update status` names the file it came from.
 
 **`ota/publish-bundle.sh` refuses dev bundles, and that does not obstruct this.** The mode gate
 protects `stable` from a test image reaching the fleet; hand-placing a bundle in a channel of your
@@ -262,7 +262,7 @@ The previous bundles are still on the server — that is what `KEEP=3` is for. E
 
 ```sh
 ssh ubuntu@<host> \
-  "cd /srv/qforge-ota/stable && sed -i 's/qforge-0.2.0.raucb/qforge-0.1.0.raucb/' latest.json"
+  "cd /srv/retroforge-ota/stable && sed -i 's/retroforge-0.2.0.raucb/retroforge-0.1.0.raucb/' latest.json"
 ```
 
 Update `version`, `size` and `sha256` to match the older bundle too — `version` is what the client
@@ -278,27 +278,27 @@ tar cz ota | ssh -i <admin key> ubuntu@<host> \
 
 # 2. stand it up, or re-run it — idempotent, and a second run reports state without changing it
 tar cz ota | ssh -i <admin key> ubuntu@<host> \
-  'sudo tar xz -C /tmp && sudo QFORGE_OTA_DOMAIN=<host> QFORGE_OTA_EMAIL=<you> bash /tmp/ota/setup-server.sh'
+  'sudo tar xz -C /tmp && sudo RETROFORGE_OTA_DOMAIN=<host> RETROFORGE_OTA_EMAIL=<you> bash /tmp/ota/setup-server.sh'
 
 # is it alive?
 curl -I https://<host>/healthz
 ```
 
 > **Known gap in `setup-server.sh`:** it installs the committed vhost and then substitutes the
-> domain with a pattern that matches an old hostname, not the `updates.qforge.invalid` the vhost now
-> carries. A non-default `QFORGE_OTA_DOMAIN` therefore leaves `server_name` and the certificate paths
+> domain with a pattern that matches an old hostname, not the `updates.retroforge.invalid` the vhost now
+> carries. A non-default `RETROFORGE_OTA_DOMAIN` therefore leaves `server_name` and the certificate paths
 > naming the placeholder, and `nginx -t` fails on the missing certificate. Until that is fixed, put
-> your host into `ota/nginx-qforge-ota.conf` before copying `ota/` up.
+> your host into `ota/nginx-retroforge-ota.conf` before copying `ota/` up.
 
-Then point the device side at it: `DEFAULT_URL` in `qforge-update`, `installer/release-info` and
+Then point the device side at it: `DEFAULT_URL` in `retroforge-update`, `installer/release-info` and
 `installer/netcfg` (`tests/test-ui.sh` asserts the three agree), or `OTA_URL` in a device's
-`/etc/qforge/ota.conf`; and set the `OTA_HOST` repo variable for CI.
+`/etc/retroforge/ota.conf`; and set the `OTA_HOST` repo variable for CI.
 
 **Order matters, and only in one direction.** `setup-server.sh` defaults the docroot owner to
 `otapub` and *dies* if that account does not exist — it will not create a login itself, because the
 one property this account exists to have is *no privileges*, and a server bootstrap that quietly
 invents accounts is how that gets lost. Run `setup-ci-user.sh` first, or pass
-`QFORGE_OTA_OWNER=ubuntu` to stand up a server with no CI principal at all.
+`RETROFORGE_OTA_OWNER=ubuntu` to stand up a server with no CI principal at all.
 
 ### The two publishing principals
 
@@ -311,7 +311,7 @@ invents accounts is how that gets lost. Run `setup-ci-user.sh` first, or pass
 `authorized_keys` entry is prefixed `restrict`, so no pty and no forwarding of any kind. The public
 half is committed at `ota/ci-publish.pub`; the private half exists only as the CI secret.
 
-**A forced command was considered and rejected.** `command="rrsync /srv/qforge-ota"` covers rsync,
+**A forced command was considered and rejected.** `command="rrsync /srv/retroforge-ota"` covers rsync,
 and `publish-bundle.sh` is not an rsync wrapper — it also runs `mkdir`, `df`, `mv`, `chmod`,
 `sha256sum` and a `bash -s` prune over ssh. A wrapper whitelisting those becomes a second,
 unversioned copy of the publish protocol: two things that must change together and will eventually
@@ -328,7 +328,7 @@ appending, so the old key stops working — and `gh secret set OTA_SSH_KEY --env
 `/healthz` exists because `stable/` is legitimately empty between releases, so every other probe
 answers 404 and a dead server looks exactly like a quiet one.
 
-The vhost is `ota/nginx-qforge-ota.conf` and **the repo is authoritative** — `setup-server.sh`
+The vhost is `ota/nginx-retroforge-ota.conf` and **the repo is authoritative** — `setup-server.sh`
 copies it. This is why certbot is run as `certonly --webroot` and never `--nginx`: the `--nginx`
 installer edits the vhost in place, and the running config would stop matching the committed one
 with nothing to signal the drift.
@@ -338,17 +338,17 @@ with nothing to signal the drift.
 Free space on the server is not spare capacity — it **is** the retention budget. Keeping the
 previous releases is what makes a bad update recoverable fleet-wide by re-pointing `latest.json`
 (see *Rolling back a bad release*), and that only works while those bytes are still on the server.
-A bundle is ~4G and `QFORGE_OTA_KEEP=3` per channel, so budget ~12G per channel plus headroom.
+A bundle is ~4G and `RETROFORGE_OTA_KEEP=3` per channel, so budget ~12G per channel plus headroom.
 
 `publish-bundle.sh` protects it from the front. Before it moves a single byte it runs
 `df -kP` on the destination **over ssh** and requires the bundle's exact size plus 512 MiB of
-headroom, then dies telling you to lower `QFORGE_OTA_KEEP` or prune by hand — rather than discovering
+headroom, then dies telling you to lower `RETROFORGE_OTA_KEEP` or prune by hand — rather than discovering
 it after a 4G transfer.
 
 That check is only as good as the free space it measures, which is why the journal is capped.
 Ubuntu ships journald with no `SystemMaxUse`, so the built-in default applies — 10% of the
 filesystem, up to 4G — spent slowly on logs for a server that only hands out static files.
-`setup-server.sh` installs `/etc/systemd/journald.conf.d/10-qforge-cap.conf` with
+`setup-server.sh` installs `/etc/systemd/journald.conf.d/10-retroforge-cap.conf` with
 `SystemMaxUse=200M` and vacuums once, so the cap applies to what has already accumulated. The
 failure this prevents is *not* corruption: an unbounded journal makes a future publish refuse to
 start, at a confusing distance from the cause.
@@ -356,7 +356,7 @@ start, at a confusing distance from the cause.
 ```sh
 # what is actually being used
 ssh -i <key> ubuntu@<host> \
-  'df -h /srv/qforge-ota; journalctl --disk-usage; du -sh /srv/qforge-ota/*'
+  'df -h /srv/retroforge-ota; journalctl --disk-usage; du -sh /srv/retroforge-ota/*'
 ```
 
 ### Certificate renewal
@@ -375,7 +375,7 @@ Two things have to work and only the first is automatic:
 `setup-server.sh` installs `/etc/letsencrypt/renewal-hooks/deploy/10-reload-nginx.sh` for exactly
 that. If you rebuild a host by hand, that hook is the step that gets forgotten.
 
-Expiry notices go to `QFORGE_OTA_EMAIL`; set it when running `setup-server.sh`, or the script's own
+Expiry notices go to `RETROFORGE_OTA_EMAIL`; set it when running `setup-server.sh`, or the script's own
 default address is registered with Let's Encrypt.
 
 ## Diagnosing an unreachable server

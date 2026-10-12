@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge lock materializer — turn rootfs/manifest.lock into a verified install list
+# retroforge lock materializer — turn rootfs/manifest.lock into a verified install list
 # (Phase 4a step 2). Host-side: no container, no emulation, everything it needs is a file.
 #
 #   rootfs/fetchlock.sh <install-list-out> [lock]     (default lock: rootfs/manifest.lock)
@@ -16,7 +16,7 @@
 # signature check is a no-op here — the reviewed hash in a committed artifact is what actually
 # pins these bytes. A same-version upstream rebuild fails here rather than shipping silently.
 #
-# THE `qforge` ROWS ARE CHECKED DIFFERENTLY, and the difference is deliberate — see below.
+# THE `retroforge` ROWS ARE CHECKED DIFFERENTLY, and the difference is deliberate — see below.
 #
 # Three of the lock's four provenance classes are installable and handled here:
 #
@@ -29,7 +29,7 @@
 #             rootfs/seal-rootfs.sh deletes them from the release tree afterwards (Phase 4a
 #             step 3). Before Phase 4c they came in with the base image and there was no file
 #             to fetch, which is why this class used to be skipped here.
-#   qforge  built from source by packages/build-overlay.sh into work/repo/aarch64, mounted
+#   retroforge  built from source by packages/build-overlay.sh into work/repo/aarch64, mounted
 #             at /novarepo. NEVER fetched — there is nowhere to fetch it from. The lock's hash
 #             for these rows is NOT the artifact's sha256: it is packages/inputhash.sh over the
 #             package's committed sources (source.pin + patches + local PKGBUILD), so what is
@@ -127,7 +127,7 @@ fetch_pkg() {
     curl -fsSL "$url" -o "$dest.part" 2>/dev/null || continue
     if echo "$sha  $dest.part" | sha256sum -c --status -; then
       mv -f "$dest.part" "$dest"
-      echo "[qforge] lock: fetched $file ($repo)" >&2
+      echo "[retroforge] lock: fetched $file ($repo)" >&2
       return 0
     fi
     rm -f "$dest.part"
@@ -159,7 +159,7 @@ while read -r name ver arch src sha; do
       fi
       list+="/var/cache/pacman/pkg/$file"$'\n'
       ;;
-    qforge)
+    retroforge)
       # Not fetchable: this is our own build artifact. The file must be there, and the sources it
       # was built from must be the ones the lock names — a plain rebuild is fine and changes
       # nothing here, an edited patch or bumped pin is what has to move the lock.
@@ -180,18 +180,18 @@ while read -r name ver arch src sha; do
         echo "    tree: ${entry%%	*}   (${entry#*	}: source.pin + patches + PKGBUILD)" >&2
         # A dev card is not a provenance artifact, and requiring the lock to be adopted mid-loop
         # means every edit to an overlay package's sources costs a `make relock` — which rebuilds
-        # the overlay AND (because relock clears QFORGE_DEV) the base, twice, before you can
+        # the overlay AND (because relock clears RETROFORGE_DEV) the base, twice, before you can
         # flash the thing you just compiled. That is the same round-trip argument the artifact-pin
         # split already makes in this file's header; this is the other half of it. So under
-        # QFORGE_DEV=1 an unadopted source change is a WARNING: the row's file still has to
+        # RETROFORGE_DEV=1 an unadopted source change is a WARNING: the row's file still has to
         # exist and still has to be claimed by a source.pin (both checked above, in every mode) —
         # the only relaxed claim is "these bytes came from the sources the lock names", which is
         # exactly the claim a dev build cannot make and does not need to.
         #
-        # Release builds are untouched: QFORGE_DEV is unset there, and `make relock` clears it
+        # Release builds are untouched: RETROFORGE_DEV is unset there, and `make relock` clears it
         # explicitly, so the relock path itself still sees the strict check.
-        if [ "${QFORGE_DEV:-}" = "1" ]; then
-          echo "  QFORGE_DEV=1: continuing with the locally built package" >&2
+        if [ "${RETROFORGE_DEV:-}" = "1" ]; then
+          echo "  RETROFORGE_DEV=1: continuing with the locally built package" >&2
           unadopted=$((unadopted + 1))
           overlay=$((overlay + 1))
           list+="/novarepo/$file"$'\n'
@@ -215,11 +215,11 @@ done < "$LOCK"
 # Write the list only once every row verified, so a failure can never leave a partial list
 # behind for the container to install from.
 printf '%s' "$list" >"$OUT"
-echo "[qforge] lock: $rows packages verified ($cached cached, $fetched fetched, $overlay overlay)" >&2
+echo "[retroforge] lock: $rows packages verified ($cached cached, $fetched fetched, $overlay overlay)" >&2
 
 # Last line of the run, so it survives a long build log. Per-row warnings scroll away; this does
 # not, and it names the one command that clears the state.
 if [ "$unadopted" -gt 0 ]; then
-  echo "[qforge] lock: $unadopted overlay row(s) built from UNADOPTED sources (dev build)." >&2
-  echo "[qforge]       run \`$RELOCK\` before committing or building a release." >&2
+  echo "[retroforge] lock: $unadopted overlay row(s) built from UNADOPTED sources (dev build)." >&2
+  echo "[retroforge]       run \`$RELOCK\` before committing or building a release." >&2
 fi

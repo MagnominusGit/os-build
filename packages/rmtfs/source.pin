@@ -1,5 +1,5 @@
 # rmtfs — Qualcomm modem userspace (rmtfs + libqrtr + tqftpserv), built FROM SOURCE via a
-# qforge-owned PKGBUILD (packages/rmtfs/PKGBUILD). Needed by SM6115 (MANGMI Air X) for Wi-Fi: the
+# retroforge-owned PKGBUILD (packages/rmtfs/PKGBUILD). Needed by SM6115 (MANGMI Air X) for Wi-Fi: the
 # WCN3950 WLAN firmware runs on the modem DSP, which only boots with rmtfs serving its EFS and
 # tqftpserv serving its firmware. Not in the holo snapshot at all; see the PKGBUILD header for why
 # the three daemons are one package.

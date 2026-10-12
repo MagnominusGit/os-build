@@ -32,14 +32,14 @@ done
 for t in sgdisk mkfs.vfat mcopy; do
   command -v "$t" >/dev/null 2>&1 || {
     CASE="prerequisites"
-    skip "$t is not installed -- run this inside qforge-build"
+    skip "$t is not installed -- run this inside retroforge-build"
     printf '\ntest-select-target.sh: %d passed, %d failed, %d skipped\n' "$PASS" "$FAIL" "$SKIP"
     exit 0
   }
 done
 
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
-export QFORGE_SELECT_FIXTURE=1
+export RETROFORGE_SELECT_FIXTURE=1
 
 # --- rebuild a captured disk as a real GPT --------------------------------------------------------
 # Shared with tests/test-carve.sh, which needs the same five boards as REAL GPTs. A second copy of
@@ -251,12 +251,12 @@ if [ -n "$esp_idx" ]; then
     || bad "an ESP holding neither file blocked the install"
 
   # Ours is exempt, or a reinstall refuses itself as foreign.
-  sgdisk -c "$esp_idx:QFORGE-ESP" "$fit" >/dev/null 2>&1
+  sgdisk -c "$esp_idx:RETROFORGE-ESP" "$fit" >/dev/null 2>&1
   mmd -i "$fat" ::/EFI ::/EFI/BOOT >/dev/null 2>&1
   mcopy -i "$fat" "$T/bootaa64.efi" ::/EFI/BOOT/bootaa64.efi >/dev/null 2>&1
   dd if="$fat" of="$fit" bs=512 seek="$esp_s" conv=notrunc status=none
   bash "$SELECT" "$fit" >/dev/null 2>&1 \
-    && ok "our own QFORGE-ESP carrying bootaa64.efi -> accepted" \
+    && ok "our own RETROFORGE-ESP carrying bootaa64.efi -> accepted" \
     || bad "a reinstall refused its own ESP as foreign"
   # --- rule 3b must not be SKIPPABLE by a missing tool ---------------------------------------
   # THE DEFECT THIS CASE EXISTS FOR, found on the Pocket FIT 2026-08-21 and invisible to every
@@ -296,15 +296,15 @@ else
 fi
 
 # --- 5. reinstall ordering ------------------------------------------------------------------------
-# The case that destroys a game library if rule ordering regresses: on a QForge disk the largest
+# The case that destroys a game library if rule ordering regresses: on a RetroForge disk the largest
 # partition is our own /home, so identity must be settled before size is consulted.
-CASE="an already-QForge disk is a reinstall"
+CASE="an already-RetroForge disk is a reinstall"
 cp --sparse=always "$base" "$T/re.img"
-sgdisk -c "1:qforge-root-A" "$T/re.img" >/dev/null 2>&1
+sgdisk -c "1:retroforge-root-A" "$T/re.img" >/dev/null 2>&1
 out=$(bash "$SELECT" "$T/re.img" 2>&1)
 [ "$(field "$out" MODE)" = reinstall ] \
-  && ok "MODE=reinstall when qforge-root-A is present" \
-  || bad "an already-QForge disk reported MODE=$(field "$out" MODE)"
+  && ok "MODE=reinstall when retroforge-root-A is present" \
+  || bad "an already-RetroForge disk reported MODE=$(field "$out" MODE)"
 
 # --- 6. a damaged or absent GPT ---------------------------------------------------------------------
 # `sgdisk -v` REGENERATES a missing header in memory and then reports "No problems found" about what
@@ -372,7 +372,7 @@ CASE="a running disk that cannot be resolved refuses EVERYTHING"
 # disk is examined, which is the property.
 printf '#!/bin/sh\nexit 1\n' >"$T/bin/findmnt"       # findmnt answers nothing at all
 chmod +x "$T/bin/findmnt"
-out=$(PATH="$T/bin:$PATH" QFORGE_SELECT_FIXTURE= QFORGE_SELECT_DISKS="$T/running.img" \
+out=$(PATH="$T/bin:$PATH" RETROFORGE_SELECT_FIXTURE= RETROFORGE_SELECT_DISKS="$T/running.img" \
       bash "$SELECT" 2>&1); rc=$?
 [ "$rc" != 0 ] && ok "the scan refuses (exit $rc) rather than proceeding with one fewer rule" \
                || bad "an unresolvable running disk still selected something: $out"
@@ -383,22 +383,22 @@ printf '%s\n' "$out" | grep -q "cannot determine which disk" \
   && ok "with no TARGET emitted for a caller to act on" \
   || bad "it emitted a target anyway: $out"
 # The same must hold for an explicit target, which is the path installer/hw-install.sh drives.
-out=$(PATH="$T/bin:$PATH" QFORGE_SELECT_FIXTURE= bash "$SELECT" "$T/running.img" 2>&1); rc=$?
+out=$(PATH="$T/bin:$PATH" RETROFORGE_SELECT_FIXTURE= bash "$SELECT" "$T/running.img" 2>&1); rc=$?
 [ "$rc" != 0 ] && ok "an explicit target is refused too -- naming a disk does not answer the question" \
                || bad "an explicit target bypassed the refusal: $out"
 # lsblk failing where findmnt succeeded is the other half: a source with no resolvable parent.
 printf '#!/bin/sh\necho /dev/nvme0n1p2\n' >"$T/bin/findmnt"
 printf '#!/bin/sh\nexit 1\n' >"$T/bin/lsblk"
 chmod +x "$T/bin/findmnt" "$T/bin/lsblk"
-out=$(PATH="$T/bin:$PATH" QFORGE_SELECT_FIXTURE= QFORGE_SELECT_DISKS="$T/running.img" \
+out=$(PATH="$T/bin:$PATH" RETROFORGE_SELECT_FIXTURE= RETROFORGE_SELECT_DISKS="$T/running.img" \
       bash "$SELECT" 2>&1); rc=$?
 [ "$rc" != 0 ] \
   && ok "a source whose parent cannot be resolved refuses as well" \
   || bad "an unresolvable parent still selected: $out"
 # And the flag relaxes exactly this, which is what keeps the other 90 cases runnable in a container.
-out=$(PATH="$T/bin:$PATH" QFORGE_SELECT_DISKS="$T/running.img" bash "$SELECT" 2>&1)
+out=$(PATH="$T/bin:$PATH" RETROFORGE_SELECT_DISKS="$T/running.img" bash "$SELECT" 2>&1)
 [ -n "$(field "$out" TARGET)" ] \
-  && ok "and under QFORGE_SELECT_FIXTURE it is relaxed, as the three sysfs checks are" \
+  && ok "and under RETROFORGE_SELECT_FIXTURE it is relaxed, as the three sysfs checks are" \
   || bad "the fixture flag no longer relaxes the running-disk rule: $out"
 # RESTORE case 7's shims: the scan cases below depend on them to make running.img the running disk.
 printf '#!/bin/sh\necho /dev/nvme0n1p2\n' >"$T/bin/findmnt"
@@ -408,30 +408,30 @@ chmod +x "$T/bin/findmnt" "$T/bin/lsblk"
 # --- 8. the scan -- rule 9, which the explicit-target path cannot reach -----------------------------
 # Zero says why, one prints it, two or more refuses rather than picks. The last is the rule with
 # teeth: on a disk it did not choose, every geometric guarantee in this script is about the wrong
-# device. QFORGE_SELECT_DISKS exists for these four cases and for nothing else.
+# device. RETROFORGE_SELECT_DISKS exists for these four cases and for nothing else.
 CASE="the scan picks exactly one disk or none"
 cp --sparse=always "$base" "$T/one.img"
 cp --sparse=always "$base" "$T/two.img"
 rows_for "AYANEO Pocket S2" /dev/sdb | build "$T/nolun.img"
 
-out=$(QFORGE_SELECT_DISKS="$T/one.img $T/nolun.img" bash "$SELECT" 2>&1)
+out=$(RETROFORGE_SELECT_DISKS="$T/one.img $T/nolun.img" bash "$SELECT" 2>&1)
 [ "$(field "$out" TARGET)" = "$T/one.img" ] \
   && ok "one eligible disk among ineligible ones -> selected" \
   || bad "the scan did not select the only eligible disk: $out"
 
-out=$(QFORGE_SELECT_DISKS="$T/one.img $T/two.img" bash "$SELECT" 2>&1)
+out=$(RETROFORGE_SELECT_DISKS="$T/one.img $T/two.img" bash "$SELECT" 2>&1)
 { printf '%s\n' "$out" | grep -q "more than one disk qualifies" && [ -z "$(field "$out" TARGET)" ]; } \
   && ok "two eligible disks -> refused, and nothing is emitted to act on" \
   || bad "the scan chose between two eligible disks: $out"
 
-out=$(QFORGE_SELECT_DISKS="$T/nolun.img" bash "$SELECT" 2>&1)
+out=$(RETROFORGE_SELECT_DISKS="$T/nolun.img" bash "$SELECT" 2>&1)
 { printf '%s\n' "$out" | grep -q "no disk qualifies" && printf '%s\n' "$out" | grep -q "not supported yet"; } \
   && ok "no eligible disk -> refused, naming what was rejected and why" \
   || bad "an empty scan did not say what it rejected: $out"
 
 # The running disk is excluded from the SCAN too, not only from an explicit target -- and this is the
 # arm that runs unattended, so it is the one where a miss is not caught by a human reading the screen.
-out=$(PATH="$T/bin:$PATH" QFORGE_SELECT_DISKS="$RUN_PATH $T/one.img" bash "$SELECT" 2>&1)
+out=$(PATH="$T/bin:$PATH" RETROFORGE_SELECT_DISKS="$RUN_PATH $T/one.img" bash "$SELECT" 2>&1)
 [ "$(field "$out" TARGET)" = "$T/one.img" ] \
   && ok "the scan skips the running disk and takes the other" \
   || bad "the scan did not exclude the running disk: $out"
@@ -453,7 +453,7 @@ grep -q '/dev/mmcblk?' "$SELECT" \
   || bad "the scan glob does not enumerate mmcblk devices -- an eMMC board would be invisible"
 
 emmc="$T/mmcblk0"; cp --sparse=always "$base" "$emmc"
-out=$(QFORGE_SELECT_DISKS="$emmc" bash "$SELECT" 2>&1)
+out=$(RETROFORGE_SELECT_DISKS="$emmc" bash "$SELECT" 2>&1)
 { [ "$(field "$out" TARGET)" = "$emmc" ] && [ -n "$(field "$out" UD_INDEX)" ]; } \
   && ok "a disk whose name carries no partition-suffix convention is selected, p$(field "$out" UD_INDEX) emitted" \
   || bad "an mmcblk-named disk was not selected: $out"
@@ -461,7 +461,7 @@ out=$(QFORGE_SELECT_DISKS="$emmc" bash "$SELECT" 2>&1)
 # The emitted block must be identical to the same image under an sdX name: anything that differs is
 # a rule reading the device NAME, which is exactly the dependency that cannot be tested on hardware.
 sdx="$T/sda-same"; cp --sparse=always "$base" "$sdx"
-out_sdx=$(QFORGE_SELECT_DISKS="$sdx" bash "$SELECT" 2>&1)
+out_sdx=$(RETROFORGE_SELECT_DISKS="$sdx" bash "$SELECT" 2>&1)
 [ "$(printf '%s\n' "$out"     | grep -v '^TARGET=')" \
 = "$(printf '%s\n' "$out_sdx" | grep -v '^TARGET=')" ] \
   && ok "the same image under an mmcblk name and an sdX name emits identical geometry" \
@@ -471,7 +471,7 @@ out_sdx=$(QFORGE_SELECT_DISKS="$sdx" bash "$SELECT" 2>&1)
 # The plan states it plainly: as captured, the FIT is refused partly BY ACCIDENT OF PROPORTIONS --
 # STORAGE (380 GiB) is larger than userdata (64 GiB). An install that had left userdata at 300 GiB
 # and taken 100 would have passed every rule that existed before 3b and SUCCEEDED, producing one disk
-# carrying Android, another distribution and QForge, three of them believing they own the boot
+# carrying Android, another distribution and RetroForge, three of them believing they own the boot
 # chain. Section 4 above tests 3b on the proportions the capture happens to have; this tests it on
 # the ones that made the rule necessary.
 CASE="a foreign install is refused on content, not on proportions"
@@ -539,7 +539,7 @@ if rows_for "$RESIDUE_BOARD" /dev/sda | FIXTURE_LAYOUT=captured build "$res"; th
   if out=$(bash "$SELECT" "$res" 2>&1); then
     ok "accepted, where every scan used to count the residue as something in the way"
     [ "$(field "$out" MODE)" = fresh ] \
-      && ok "MODE=fresh -- zeroed entries are not a qforge install" \
+      && ok "MODE=fresh -- zeroed entries are not a retroforge install" \
       || bad "MODE is '$(field "$out" MODE)', want fresh"
     [ "$(field "$out" UD_INDEX)" = 11 ] \
       && ok "picked p11, the regrown userdata" \
@@ -552,9 +552,9 @@ if rows_for "$RESIDUE_BOARD" /dev/sda | FIXTURE_LAYOUT=captured build "$res"; th
       || bad "CEIL is $(field "$out" CEIL), want the last usable sector $lastu"
     # The other half of #56: ROCKNIX stamps userdata Linux-filesystem on its way out, and a carve
     # that preserved what it found would hand Android a partition it does not recognise.
-    [ "$(field "$out" UD_TYPE)" = "$QFORGE_ANDROID_USERDATA_GUID" ] \
+    [ "$(field "$out" UD_TYPE)" = "$RETROFORGE_ANDROID_USERDATA_GUID" ] \
       && ok "UD_TYPE is restored to the Android vendor type, not the Linux type left on the disk" \
-      || bad "UD_TYPE is $(field "$out" UD_TYPE), want $QFORGE_ANDROID_USERDATA_GUID"
+      || bad "UD_TYPE is $(field "$out" UD_TYPE), want $RETROFORGE_ANDROID_USERDATA_GUID"
   else
     bad "refused: $out"
   fi

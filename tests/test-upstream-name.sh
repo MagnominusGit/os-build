@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Offline check that the tree carries qforge's name, not the one it was derived from.
+# Offline check that the tree carries retroforge's name, not the one it was derived from.
 #
 #   tests/test-upstream-name.sh
 #
-# WHY THIS EXISTS. qforge started from a copy of NovaDeck's build tree, and the old name was in
+# WHY THIS EXISTS. retroforge started from a copy of NovaDeck's build tree, and the old name was in
 # ~5000 places: file names, D-Bus names, units, labels, env vars. A leftover is not cosmetic — a
 # unit that still names /usr/lib/novadeck/ points at a path that no longer exists, and nothing
 # fails until that unit runs on a device. So every mention is an error, except ATTRIBUTION, which

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Offline test for the gamescope session profile: which shell qforge-session hosts, and with what.
+# Offline test for the gamescope session profile: which shell retroforge-session hosts, and with what.
 #
 #   tests/test-session.sh
 #
 # WHY THIS EXISTS. The shell is three files that never change together: session.conf names it and
-# its gamescope flags, qforge-session turns those into a gamescope command line, and the
+# its gamescope flags, retroforge-session turns those into a gamescope command line, and the
 # OpenGamepadUI prebuilt pin decides where the shell lands in the image. Each failure is a black or
 # frozen panel on a device with no console:
 #
@@ -20,8 +20,8 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CONF="$ROOT/rootfs/overlay/etc/qforge/session.conf"
-SESSION="$ROOT/rootfs/overlay/usr/bin/qforge-session"
+CONF="$ROOT/rootfs/overlay/etc/retroforge/session.conf"
+SESSION="$ROOT/rootfs/overlay/usr/bin/retroforge-session"
 PKG="$ROOT/packages/opengamepadui"
 PIN="$PKG/source.pin"
 PKGBUILD="$PKG/PKGBUILD"
@@ -36,63 +36,63 @@ for f in "$CONF" "$SESSION" "$PIN" "$PKGBUILD" "$BASE" "$TRIM"; do
   [ -f "$f" ] || { echo "missing input: $f" >&2; exit 1; }
 done
 
-# session.conf is sh, sourced by qforge-session. Source it the same way, in a subshell, and read
+# session.conf is sh, sourced by retroforge-session. Source it the same way, in a subshell, and read
 # back what the session would see — not a grep for a line that might be commented out.
 conf() { (set +u; . "$CONF"; eval "printf '%s' \"\${$1-}\""); }
 pin_field() { sed -n "s/^$1:[[:space:]]*//p" "$PIN" | head -1; }
 
 # =================================================================================================
 CASE="the shell"
-cmd="$(conf QFORGE_SESSION_CMD)"
+cmd="$(conf RETROFORGE_SESSION_CMD)"
 [ "${cmd%% *}" = "opengamepadui" ] \
-  && ok "QFORGE_SESSION_CMD is upstream's launcher, opengamepadui" \
-  || bad "QFORGE_SESSION_CMD is '$cmd', not opengamepadui"
+  && ok "RETROFORGE_SESSION_CMD is upstream's launcher, opengamepadui" \
+  || bad "RETROFORGE_SESSION_CMD is '$cmd', not opengamepadui"
 # OGUI's update pack is the x86_64 build: applying one at start leaves a black panel on this device,
 # and any update pack would override the OS image's shell version.
 case " $cmd " in
   *" --skip-update-pack "*) ok "the shell never applies a downloaded update pack (--skip-update-pack)" ;;
-  *) bad "QFORGE_SESSION_CMD '$cmd' lacks --skip-update-pack — a downloaded x86_64 update.zip would replace the shell" ;;
+  *) bad "RETROFORGE_SESSION_CMD '$cmd' lacks --skip-update-pack — a downloaded x86_64 update.zip would replace the shell" ;;
 esac
 sh -n "$CONF" 2>/dev/null && ok "session.conf parses as sh" || bad "session.conf is not valid sh"
 # pam_systemd gives every login session an ambient CAP_WAKE_ALARM; inherited by the shell and its
 # games, it made the game's /proc/<pid>/fdinfo unreadable to mangoapp, which aborted every few seconds
 # (blinking, frozen Performance Overlay, HW 2026-10-04).
-grep -Eq '^setpriv --inh-caps=-all --ambient-caps=-all \$QFORGE_SESSION_CMD ' "$SESSION" \
+grep -Eq '^setpriv --inh-caps=-all --ambient-caps=-all \$RETROFORGE_SESSION_CMD ' "$SESSION" \
   && ok "the shell starts with no inherited/ambient capabilities (setpriv)" \
   || bad "the shell is not started under setpriv --ambient-caps=-all: games inherit CAP_WAKE_ALARM again"
 
 # =================================================================================================
 CASE="gamescope flags for OGUI"
-args=" $(conf QFORGE_GAMESCOPE_SHELL_ARGS) "
+args=" $(conf RETROFORGE_GAMESCOPE_SHELL_ARGS) "
 case "$args" in *" --steam "*) ok "--steam is passed (OGUI's control atoms need it)";;
                 *) bad "no --steam: gamescope would ignore OGUI's focus and overlay atoms";; esac
 case "$args" in *" --xwayland-count 2 "*) ok "two nested Xwaylands (shell + game)";;
                 *) bad "not --xwayland-count 2: '$args'";; esac
-grep -q '\$QFORGE_GAMESCOPE_SHELL_ARGS -R ' "$SESSION" \
-  && ok "qforge-session puts the shell args on the gamescope command line, before the handshake" \
-  || bad "qforge-session does not apply QFORGE_GAMESCOPE_SHELL_ARGS"
+grep -q '\$RETROFORGE_GAMESCOPE_SHELL_ARGS -R ' "$SESSION" \
+  && ok "retroforge-session puts the shell args on the gamescope command line, before the handshake" \
+  || bad "retroforge-session does not apply RETROFORGE_GAMESCOPE_SHELL_ARGS"
 if sed 's,#.*,,' "$SESSION" | grep -q -- '--steam'; then
-  bad "qforge-session hard-codes --steam — it belongs to the shell profile in session.conf"
+  bad "retroforge-session hard-codes --steam — it belongs to the shell profile in session.conf"
 else
-  ok "qforge-session itself stays shell-agnostic (no hard-coded --steam)"
+  ok "retroforge-session itself stays shell-agnostic (no hard-coded --steam)"
 fi
 
 # =================================================================================================
 CASE="dual-screen boards"
-# The second panel (device-env QFORGE_SECONDARY_CONNECTOR) becomes gamescope's second output
+# The second panel (device-env RETROFORGE_SECONDARY_CONNECTOR) becomes gamescope's second output
 # (patches/0040). Without the guard a single-panel board would pass a bare --secondary-output and
 # gamescope would take the next argument as the connector name.
-if grep -Fq 'if [ -n "${QFORGE_SECONDARY_CONNECTOR:-}" ]; then' "$SESSION" &&
-   grep -Fq 'GS_ARGS="$GS_ARGS --secondary-output $QFORGE_SECONDARY_CONNECTOR"' "$SESSION"; then
+if grep -Fq 'if [ -n "${RETROFORGE_SECONDARY_CONNECTOR:-}" ]; then' "$SESSION" &&
+   grep -Fq 'GS_ARGS="$GS_ARGS --secondary-output $RETROFORGE_SECONDARY_CONNECTOR"' "$SESSION"; then
   ok "--secondary-output is passed only when the board declares a second panel"
 else
-  bad "qforge-session does not pass --secondary-output under a QFORGE_SECONDARY_CONNECTOR guard"
+  bad "retroforge-session does not pass --secondary-output under a RETROFORGE_SECONDARY_CONNECTOR guard"
 fi
-if grep -Fq 'if [ -n "${QFORGE_SECONDARY_TOUCHSCREEN:-}" ]; then' "$SESSION" &&
-   grep -Fq 'GS_ARGS="$GS_ARGS --secondary-touch-device $QFORGE_SECONDARY_TOUCHSCREEN"' "$SESSION"; then
+if grep -Fq 'if [ -n "${RETROFORGE_SECONDARY_TOUCHSCREEN:-}" ]; then' "$SESSION" &&
+   grep -Fq 'GS_ARGS="$GS_ARGS --secondary-touch-device $RETROFORGE_SECONDARY_TOUCHSCREEN"' "$SESSION"; then
   ok "--secondary-touch-device is passed only when the board names its second digitizer"
 else
-  bad "qforge-session does not pass --secondary-touch-device under a QFORGE_SECONDARY_TOUCHSCREEN guard"
+  bad "retroforge-session does not pass --secondary-touch-device under a RETROFORGE_SECONDARY_TOUCHSCREEN guard"
 fi
 grep -q '0043-wlserver-route-the-secondary-touchscreen-to-the-secondary-output.patch' "$ROOT/packages/gamescope/source.pin" \
   && ok "the gamescope build carries --secondary-touch-device (patch 0043 in source.pin)" \
@@ -169,10 +169,10 @@ for row in usr/lib/systemd/user/systemd-sysext-updater.service \
 done
 
 # =================================================================================================
-# Behaviour: run the real qforge-session with a fake gamescope and a fake shell client.
+# Behaviour: run the real retroforge-session with a fake gamescope and a fake shell client.
 # PAMName= puts the session in the logind scope, so systemd's stop reaches ONLY this script. With
 # the client in the foreground, sh held the TERM trap until the client returned, nothing told the
-# client to quit, and every `systemctl restart qforge-session` waited out the 90 s stop timeout
+# client to quit, and every `systemctl restart retroforge-session` waited out the 90 s stop timeout
 # (HW 2026-10-03). The client must get SIGTERM from the script and the session must end promptly.
 CASE="session stop"
 T="$(mktemp -d)" && [ -d "$T" ] || { echo "mktemp -d failed" >&2; exit 1; }
@@ -207,7 +207,7 @@ exit 5
 EOF
 # OGUI's reaper is a binary found by its executable path, so the fake is a copy of bash (its
 # /proc/PID/exe is then $T/reaper) running a script: start the game in its own session, as
-# qforge-launch starts an emulator, and exit once no child is left.
+# retroforge-launch starts an emulator, and exit once no child is left.
 cp "$(command -v bash)" "$T/reaper"
 cat > "$T/reaper.sh" <<EOF
 echo \$\$ > "$T/reaper.pid"; echo \$\$ >> "$T/fakes.pids"
@@ -229,15 +229,15 @@ EOF
 chmod +x "$T/bin/gamescope" "$T/client" "$T/game"
 run_session() {
   : > "$T/log"; rm -f "$T/client-exit"
-  PATH="$T/bin:$PATH" XDG_RUNTIME_DIR="$T/run" HOME="$T/home" QFORGE_SESSION_CMD="$T/client" \
-    QFORGE_OGUI_REAPER="$T/reaper" QFORGE_GAME_STOP_TIMEOUT=1 \
+  PATH="$T/bin:$PATH" XDG_RUNTIME_DIR="$T/run" HOME="$T/home" RETROFORGE_SESSION_CMD="$T/client" \
+    RETROFORGE_OGUI_REAPER="$T/reaper" RETROFORGE_GAME_STOP_TIMEOUT=1 \
     sh "$SESSION" < "$T/stdin" > "$T/session.out" 2>&1 &
   spid=$!; spids+=("$spid")
 }
 waitfor() { for _ in $(seq 100); do eval "$1" && return 0; sleep 0.05; done; return 1; }
 : > "$T/stdin"
-if [ -e /etc/qforge/session.conf ] || [ -e /usr/lib/qforge/device-env ]; then
-  ok "skipped: this host has QForge's session.conf/device-env, which would override the fakes"
+if [ -e /etc/retroforge/session.conf ] || [ -e /usr/lib/retroforge/device-env ]; then
+  ok "skipped: this host has RetroForge's session.conf/device-env, which would override the fakes"
 else
   run_session
   if waitfor 'grep -qx client-up "$T/log"'; then
@@ -274,8 +274,8 @@ fi
 
 # -------------------------------------------------------------------------------------------------
 CASE="session stop with a game running"
-if [ -e /etc/qforge/session.conf ] || [ -e /usr/lib/qforge/device-env ]; then
-  ok "skipped (host has QForge's session.conf/device-env)"
+if [ -e /etc/retroforge/session.conf ] || [ -e /usr/lib/retroforge/device-env ]; then
+  ok "skipped (host has RetroForge's session.conf/device-env)"
 else
   # Index of a line in the log: the order is the point (game before shell before gamescope).
   at() { grep -nx "$1" "$T/log" | head -1 | cut -d: -f1; }
@@ -311,7 +311,7 @@ else
     bad "the fake game never started (crash case)"
   fi
 
-  # A game that ignores SIGTERM is killed after QFORGE_GAME_STOP_TIMEOUT (1 s here).
+  # A game that ignores SIGTERM is killed after RETROFORGE_GAME_STOP_TIMEOUT (1 s here).
   touch "$T/game-stubborn"
   run_session
   if waitfor 'grep -qx game-up "$T/log"'; then
@@ -341,7 +341,7 @@ CASE="gamescope teardown"
 extract() { sed -n "/^$1() {/,/^}/p" "$SESSION"; }
 { extract gs_running; extract cleanup; } > "$T/cleanup.sh"
 if [ -z "$(extract gs_running)" ] || [ -z "$(extract cleanup)" ]; then
-  bad "could not extract gs_running() and cleanup() from qforge-session"
+  bad "could not extract gs_running() and cleanup() from retroforge-session"
 else
   # Prints "<elapsed ms> <fake state>", the state read BEFORE anything reaps the child: "gone" or
   # "Z" means its fds are closed (DRM released); anything else means it is still running.
@@ -349,7 +349,7 @@ else
     /bin/sh -c '
       . "$1"
       GS_RUNDIR="$2/td-rundir"; mkdir -p "$GS_RUNDIR"
-      QFORGE_GAMESCOPE_STOP_TIMEOUT="$4"
+      RETROFORGE_GAMESCOPE_STOP_TIMEOUT="$4"
       /bin/sh -c "$3" &
       GS_PID=$!
       fake=$GS_PID   # cleanup() clears GS_PID once it is done with it
@@ -385,7 +385,7 @@ else
 
   # The EXIT trap can run cleanup() after an explicit call; the second must be a clean no-op.
   out="$(/bin/sh -c '
-    . "$1"; GS_RUNDIR="$2/td-rundir2"; mkdir -p "$GS_RUNDIR"; QFORGE_GAMESCOPE_STOP_TIMEOUT=10
+    . "$1"; GS_RUNDIR="$2/td-rundir2"; mkdir -p "$GS_RUNDIR"; RETROFORGE_GAMESCOPE_STOP_TIMEOUT=10
     /bin/sh -c "exit 0" & GS_PID=$!
     cleanup && cleanup && echo twice-ok
   ' sh "$T/cleanup.sh" "$T" 2>&1)"
@@ -394,10 +394,10 @@ fi
 
 # =================================================================================================
 CASE="session unit limits"
-UNIT="$ROOT/rootfs/overlay/usr/lib/systemd/system/qforge-session.service"
+UNIT="$ROOT/rootfs/overlay/usr/lib/systemd/system/retroforge-session.service"
 grep -qx 'LimitMEMLOCK=infinity' "$UNIT" \
   && ok "no locked-memory cap for the session and its games (RPCS3 mlocks emulated memory)" \
-  || bad "qforge-session.service lacks LimitMEMLOCK=infinity: RPCS3 fails to lock memory at 8 MiB"
+  || bad "retroforge-session.service lacks LimitMEMLOCK=infinity: RPCS3 fails to lock memory at 8 MiB"
 
 printf '\ntest-session.sh: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

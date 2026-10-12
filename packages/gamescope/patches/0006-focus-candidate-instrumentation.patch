@@ -4,7 +4,7 @@
  	return false;
  }
  
-+// qforge: focus-candidate instrumentation.
++// retroforge: focus-candidate instrumentation.
 +//
 +// The Steam bootstrapper's client-update dialog (an override-redirect GLX window carrying
 +// STEAM_BIGPICTURE=1) is never presented on our arm64 handheld: gamescope commits ZERO atomic

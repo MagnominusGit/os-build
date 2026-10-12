@@ -1,4 +1,4 @@
-From: qforge
+From: retroforge
 Subject: [PATCH] feat(Settings): an Animated Effects toggle, off by default, for the god-rays and shine shaders
 
 The home screen's banner carries a god-rays ColorRect whose shader samples
@@ -22,7 +22,7 @@ god-rays node (and follows the toggle live), and cards skip the god-rays
 and shine fade-ins; the fade-outs still run for whatever is visible, so
 turning the toggle off while a card is focused cleans up on unfocus.
 
-(qforge: ours, for upstream. Upstream may prefer the default on.)
+(retroforge: ours, for upstream. Upstream may prefer the default on.)
 ---
 diff -ruN a/core/ui/card_ui/home/cardui_home.gd b/core/ui/card_ui/home/cardui_home.gd
 --- a/core/ui/card_ui/home/cardui_home.gd	2026-10-10 06:29:00

@@ -1,4 +1,4 @@
-# rauc — built FROM SOURCE at 1.15.2 via a qforge-owned PKGBUILD. This is the holo recipe
+# rauc — built FROM SOURCE at 1.15.2 via a retroforge-owned PKGBUILD. This is the holo recipe
 # (holo/holo-core-aarch64-preview extra-aarch64/r/rauc/1.14-1, itself Arch's) with the VERSION
 # BUMPED and nothing else redesigned. Keep it that way: the next bump should be pkgver + the two
 # checksums, and a re-check of the two deviations noted below.

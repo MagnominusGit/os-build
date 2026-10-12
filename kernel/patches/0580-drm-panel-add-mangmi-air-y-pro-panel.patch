@@ -1,6 +1,6 @@
 Subject: [PATCH] drm/panel: add MANGMI Air Y Pro panel
 
-qforge: Kconfig/Makefile hunks regenerated behind this tree's own panel entries (0505-0575);
+retroforge: Kconfig/Makefile hunks regenerated behind this tree's own panel entries (0505-0575);
 the driver is ROCKNIX SM8250 0064 unchanged.
  
 diff --git a/drivers/gpu/drm/panel/Kconfig b/drivers/gpu/drm/panel/Kconfig

@@ -22,9 +22,9 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PROGRESS="$ROOT/rootfs/overlay/usr/lib/qforge/splash-progress"
-STALL="$ROOT/rootfs/overlay/usr/lib/qforge/splash-stall"
-UNIT="$ROOT/rootfs/overlay/usr/lib/systemd/system/qforge-splash-stall.service"
+PROGRESS="$ROOT/rootfs/overlay/usr/lib/retroforge/splash-progress"
+STALL="$ROOT/rootfs/overlay/usr/lib/retroforge/splash-stall"
+UNIT="$ROOT/rootfs/overlay/usr/lib/systemd/system/retroforge-splash-stall.service"
 
 PASS=0; FAIL=0
 ok()  { printf '  ok   %s\n' "$1"; PASS=$((PASS + 1)); }
@@ -36,7 +36,7 @@ for f in "$PROGRESS" "$STALL"; do
 done
 
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
-RUN="$TMP/run/qforge/splash"
+RUN="$TMP/run/retroforge/splash"
 STATUS="$RUN/status"
 TAKEOVER="$RUN/takeover"
 
@@ -62,13 +62,13 @@ export PATH="$TMP/bin:$PATH"
 # splash-progress
 # ---------------------------------------------------------------------------------------------
 echo "splash-progress:"
-export QFORGE_SPLASH_STATUS="$STATUS"
+export RETROFORGE_SPLASH_STATUS="$STATUS"
 
-"$PROGRESS" Preparing QForge
-check "writes the message" "$(cat "$STATUS" 2>/dev/null)" "Preparing QForge"
+"$PROGRESS" Preparing RetroForge
+check "writes the message" "$(cat "$STATUS" 2>/dev/null)" "Preparing RetroForge"
 
 # It has to create its own directory: the first caller in a boot may well arrive before anything
-# else has made /run/qforge/splash.
+# else has made /run/retroforge/splash.
 rm -rf "$TMP/run"
 "$PROGRESS" Early caller
 [[ -f $STATUS ]] && ok "creates the run directory when it is missing" \
@@ -114,13 +114,13 @@ check "the published file is world-readable (the session drawer runs as player)"
 # ---------------------------------------------------------------------------------------------
 echo
 echo "splash-stall:"
-export QFORGE_SPLASH_TAKEOVER="$TAKEOVER"
-export QFORGE_SPLASH_PROGRESS="$PROGRESS"
-export QFORGE_SPLASH_STALL_SECS=2
-export QFORGE_SPLASH_STALL_MAX=25
+export RETROFORGE_SPLASH_TAKEOVER="$TAKEOVER"
+export RETROFORGE_SPLASH_PROGRESS="$PROGRESS"
+export RETROFORGE_SPLASH_STALL_SECS=2
+export RETROFORGE_SPLASH_STALL_MAX=25
 
 mkdir -p "$RUN"
-printf 'Starting QForge\n' >"$STATUS"
+printf 'Starting RetroForge\n' >"$STATUS"
 printf '4242\n' >"$TAKEOVER"          # the drawer's own pid: it still owns the display
 printf '1 systemd-repart.service start running\n' >"$TMP/jobs"
 printf 'systemd-repart.service Repartition Root Disk\n' >"$TMP/desc"
@@ -128,7 +128,7 @@ printf 'systemd-repart.service Repartition Root Disk\n' >"$TMP/desc"
 "$STALL" & stall_pid=$!
 # Silence for STALL_SECS, then it should name the running job.
 for _ in $(seq 1 20); do
-    [[ "$(cat "$STATUS")" != "Starting QForge" ]] && break
+    [[ "$(cat "$STATUS")" != "Starting RetroForge" ]] && break
     sleep 0.5
 done
 check "names the running job after the stall window" \
@@ -171,13 +171,13 @@ done
 wait "$stall_pid" 2>/dev/null
 
 # A missing Description must fall back to the unit name rather than printing "Waiting for".
-printf 'Starting QForge\n' >"$STATUS"
+printf 'Starting RetroForge\n' >"$STATUS"
 printf '4242\n' >"$TAKEOVER"
 printf '9 mystery.service start running\n' >"$TMP/jobs"
 : >"$TMP/desc"
 "$STALL" & stall_pid=$!
 for _ in $(seq 1 20); do
-    [[ "$(cat "$STATUS")" != "Starting QForge" ]] && break
+    [[ "$(cat "$STATUS")" != "Starting RetroForge" ]] && break
     sleep 0.5
 done
 check "falls back to the unit name when it has no Description" \
@@ -188,7 +188,7 @@ printf 'sddm\n' >"$TAKEOVER"; wait "$stall_pid" 2>/dev/null
 # The unit
 # ---------------------------------------------------------------------------------------------
 echo
-echo "qforge-splash-stall.service:"
+echo "retroforge-splash-stall.service:"
 # DefaultDependencies=no is the whole reason this unit can see a first-boot repart stall. With
 # default dependencies it would get an implicit After=sysinit.target and could only ever narrate
 # boots that already went fine.
@@ -199,10 +199,10 @@ grep -q '^Before=sysinit.target' "$UNIT" && ok "ordered before sysinit.target" \
     || bad "not ordered before sysinit.target"
 grep -q '^Conflicts=shutdown.target' "$UNIT" && ok "stopped on shutdown" \
     || bad "missing Conflicts=shutdown.target (DefaultDependencies=no units need it explicitly)"
-grep -q '^ConditionKernelCommandLine=!qforge.splash=0' "$UNIT" \
-    && ok "honours the same qforge.splash=0 switch the initramfs does" \
-    || bad "does not honour qforge.splash=0"
-[[ -L "$ROOT/rootfs/overlay/etc/systemd/system/sysinit.target.wants/qforge-splash-stall.service" ]] \
+grep -q '^ConditionKernelCommandLine=!retroforge.splash=0' "$UNIT" \
+    && ok "honours the same retroforge.splash=0 switch the initramfs does" \
+    || bad "does not honour retroforge.splash=0"
+[[ -L "$ROOT/rootfs/overlay/etc/systemd/system/sysinit.target.wants/retroforge-splash-stall.service" ]] \
     && ok "enabled via sysinit.target.wants" \
     || bad "not enabled — the unit ships but never runs"
 
@@ -212,8 +212,8 @@ grep -q '^ConditionKernelCommandLine=!qforge.splash=0' "$UNIT" \
 echo
 echo "shutdown + reboot screens:"
 
-SHUT="$ROOT/rootfs/overlay/usr/lib/systemd/system/qforge-splash-shutdown.service"
-REBOOT="$ROOT/rootfs/overlay/usr/lib/systemd/system/qforge-splash-reboot.service"
+SHUT="$ROOT/rootfs/overlay/usr/lib/systemd/system/retroforge-splash-shutdown.service"
+REBOOT="$ROOT/rootfs/overlay/usr/lib/systemd/system/retroforge-splash-reboot.service"
 WANTS="$ROOT/rootfs/overlay/etc/systemd/system"
 
 for u in "$SHUT" "$REBOOT"; do
@@ -242,26 +242,26 @@ for u in "$SHUT" "$REBOOT"; do
         && bad "${rel##*/} passes --takeover, but nothing succeeds it on the way down" \
         || ok "${rel##*/} passes no --takeover (nothing succeeds it)"
 
-    grep -q '^ConditionKernelCommandLine=!qforge.splash=0' "$u" \
-        && ok "${rel##*/} honours qforge.splash=0" \
-        || bad "${rel##*/} ignores qforge.splash=0"
+    grep -q '^ConditionKernelCommandLine=!retroforge.splash=0' "$u" \
+        && ok "${rel##*/} honours retroforge.splash=0" \
+        || bad "${rel##*/} ignores retroforge.splash=0"
 
     # A splash must never be why a device will not power off.
     grep -q '^Restart=no' "$u" && ok "${rel##*/} will not restart itself" \
                               || bad "${rel##*/} may restart during shutdown"
 
     # The status file still holds the boot's last line; without this the panel says
-    # "Starting QForge" on the way down.
-    grep -q '^ExecStartPre=-/usr/lib/qforge/splash-progress' "$u" \
+    # "Starting RetroForge" on the way down.
+    grep -q '^ExecStartPre=-/usr/lib/retroforge/splash-progress' "$u" \
         && ok "${rel##*/} sets its own message before drawing" \
         || bad "${rel##*/} draws whatever the boot left in the status file"
 done
 
 # Each screen has to be reachable from the target that actually runs. poweroff and halt are
 # DIFFERENT targets and a device told to halt would otherwise show nothing.
-for link in poweroff.target.wants/qforge-splash-shutdown.service \
-            halt.target.wants/qforge-splash-shutdown.service \
-            reboot.target.wants/qforge-splash-reboot.service; do
+for link in poweroff.target.wants/retroforge-splash-shutdown.service \
+            halt.target.wants/retroforge-splash-shutdown.service \
+            reboot.target.wants/retroforge-splash-reboot.service; do
     [[ -L "$WANTS/$link" ]] && ok "enabled: ${link%%/*}" \
                            || bad "not enabled for ${link%%/*} — the unit ships but never runs"
 done

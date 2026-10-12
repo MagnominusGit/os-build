@@ -2,7 +2,7 @@
 # Reading a GPT that still lists partitions it no longer has — issue #56.
 #
 # SOURCED, never executed (hence mode 0444, like lib-slotwrite.sh). SHIPPED verbatim into
-# /usr/lib/qforge/install/ beside genpart.sh and partition-table.txt, because genpart.sh is
+# /usr/lib/retroforge/install/ beside genpart.sh and partition-table.txt, because genpart.sh is
 # shipped and sources it; rootfs/guard-rootfs.sh diffs the two copies at build time.
 #
 # WHY THIS FILE EXISTS. A GPT entry whose type GUID is all zeroes is UNUSED by the spec (UEFI
@@ -41,12 +41,12 @@
 # cannot open the disk at all, which turns an unreadable device into an apparently empty one. One
 # `sfdisk --dump` per call has neither problem.
 
-QFORGE_DEAD_TYPE_GUID="00000000-0000-0000-0000-000000000000"
+RETROFORGE_DEAD_TYPE_GUID="00000000-0000-0000-0000-000000000000"
 
 # The vendor type stock Android userdata carries. Four of the five Phase 0 boards show it (Pocket
 # S2, Pocket ACE, Odin 2, Pocket Max); the fifth, the Pocket FIT, shows 0FC63DAF -- Linux
 # filesystem data -- because it had already been carved by somebody else when we captured it.
-QFORGE_ANDROID_USERDATA_GUID="1B81E7E6-F50D-419B-A739-2AEEF8DA3335"
+RETROFORGE_ANDROID_USERDATA_GUID="1B81E7E6-F50D-419B-A739-2AEEF8DA3335"
 
 # die() is the caller's if it has one, so a refusal keeps the prefix that script's suite asserts
 # (`carve: `, `select-target: `, `genpart: `). Same rule, and same reason, as lib-slotwrite.sh.
@@ -73,7 +73,7 @@ gpt_live_indices() {  # <disk> -> live partition indices, one per line
   # (`/dev/mmcblk0p11`, `/dev/nvme0n1p11`, `/dev/loop0p11`). Taking the index off the END of the
   # device path -- rather than trusting row order -- is what makes this correct on a table with
   # gaps, which is exactly the table this function exists for.
-  printf '%s\n' "$dump" | awk -v dead="$QFORGE_DEAD_TYPE_GUID" '
+  printf '%s\n' "$dump" | awk -v dead="$RETROFORGE_DEAD_TYPE_GUID" '
     /^device:/ { dev = $2; next }
     dev == "" || index($0, dev) != 1 { next }
     $0 !~ /: *start=/ { next }
@@ -130,11 +130,11 @@ gpt_rows() {  # <disk> -> "index start end code name" for entries the GPT actual
 gpt_drop_dead_entries() {  # <disk> -> rewrites the table without its unused entries
   local disk="$1" before after dropped
   before="$(gpt_live_indices "$disk")"
-  dropped="$(sfdisk --dump "$disk" 2>/dev/null | grep -ci ": *start=.*type=$QFORGE_DEAD_TYPE_GUID")" || true
+  dropped="$(sfdisk --dump "$disk" 2>/dev/null | grep -ci ": *start=.*type=$RETROFORGE_DEAD_TYPE_GUID")" || true
   [ "${dropped:-0}" -gt 0 ] || return 0
 
   sfdisk --dump "$disk" 2>/dev/null \
-    | awk -v dead="$QFORGE_DEAD_TYPE_GUID" '
+    | awk -v dead="$RETROFORGE_DEAD_TYPE_GUID" '
         $0 ~ ": *start=" && index($0, "type=" dead) > 0 { next }
         { print }' \
     | sfdisk --force "$disk" >/dev/null 2>&1 \
@@ -154,5 +154,5 @@ gpt_has_dead_entries() {  # <disk> -> 0 if any unused entry still carries LBAs
   local disk="$1" dump
   dump="$(sfdisk --dump "$disk" 2>/dev/null)" || return 1
   printf '%s\n' "$dump" \
-    | grep -qi ": *start=.*type=$QFORGE_DEAD_TYPE_GUID"
+    | grep -qi ": *start=.*type=$RETROFORGE_DEAD_TYPE_GUID"
 }

@@ -1,4 +1,4 @@
-From: qforge
+From: retroforge
 Subject: [PATCH] fix(CPU): keep the fastest cores online first
 
 SetCoresEnabled walked the cores in number order and kept the first N

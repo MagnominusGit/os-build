@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge dev deploy — install the stage-1 steamcl tree onto a mounted ESP (Phase 5).
+# retroforge dev deploy — install the stage-1 steamcl tree onto a mounted ESP (Phase 5).
 #
 # ABL chainloads /EFI/BOOT/bootaa64.efi when it is present. This is the dev-side quick flash for
 # iterating on stage 1 only: it writes the same ESP layout that image/make-sdcard.sh seeds and the
@@ -9,7 +9,7 @@
 #   boot/deploy.sh <esp-mountpoint>
 #
 # e.g. (host side, ESP already mounted):
-#   boot/deploy.sh /run/media/$USER/QFORGE
+#   boot/deploy.sh /run/media/$USER/RETROFORGE
 #
 # The ESP layout this writes is decided by steamcl's own path resolution, not by us: the flag files
 # and the font are opened RELATIVE to the chainloader (chainloader/util.c resolve_path), so they

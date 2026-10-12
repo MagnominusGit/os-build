@@ -3,7 +3,7 @@
  * (and LDAPR) exactly as the kernel patch does and runs each as an LDXR/STXR compare-exchange loop
  * between full barriers. Keeps itself first in line for SIGILL (interposes sigaction/signal and
  * chains to the application's handler for anything that is not LSE).
- * QFORGE_LSE_STATS=1 prints the emulation count per process at exit. */
+ * RETROFORGE_LSE_STATS=1 prints the emulation count per process at exit. */
 #define _GNU_SOURCE
 #include <dlfcn.h>
 #include <errno.h>
@@ -144,7 +144,7 @@ int sigprocmask(int how, const sigset_t *set, sigset_t *old) {
 	sigset_t c; if (!real_sigprocmask) real_sigprocmask = dlsym(RTLD_NEXT, "sigprocmask");
 	return real_sigprocmask(how, keep_ill(how, set, &c), old);
 }
-static void stats(void) { if (getenv("QFORGE_LSE_STATS")) fprintf(stderr, "lse_shim[%d %s]: %llu LSE instructions emulated\n", getpid(), program_invocation_short_name, emulated); }
+static void stats(void) { if (getenv("RETROFORGE_LSE_STATS")) fprintf(stderr, "lse_shim[%d %s]: %llu LSE instructions emulated\n", getpid(), program_invocation_short_name, emulated); }
 __attribute__((constructor)) static void init(void) {
 	real_sigaction = dlsym(RTLD_NEXT, "sigaction"); install(); atexit(stats);
 }

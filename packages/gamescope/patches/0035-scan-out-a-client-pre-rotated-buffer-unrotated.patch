@@ -1,4 +1,4 @@
-From: qforge
+From: retroforge
 Subject: [PATCH] scan out a client's pre-rotated buffer unrotated
 
 On a panel the planes can't rotate, every game frame is turned by a
@@ -23,7 +23,7 @@ has to composite, and a screenshot or PipeWire capture, gets the layer
 copied back unrotated first (once per
 commit, cached per slot) and restored afterwards for the caller.
 
-(qforge: perf, MANGMI Air X, 2026-10-10.)
+(retroforge: perf, MANGMI Air X, 2026-10-10.)
 ---
 diff --git a/src/commit.cpp b/src/commit.cpp
 index c9d0001..de6c254 100644

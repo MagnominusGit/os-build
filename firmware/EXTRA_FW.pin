@@ -1,4 +1,4 @@
-# qforge extra-firmware pin — VENDOR blobs that are neither in linux-firmware nor in the
+# retroforge extra-firmware pin — VENDOR blobs that are neither in linux-firmware nor in the
 # Nova-Deck/qcom-firmwares repo, republished by ROCKNIX in ROCKNIX/extra-firmware (one
 # directory per SoC, pulled from each device's Android image). Pinned by commit + per-file sha256,
 # fetched by firmware/fetch-extra-fw.sh into firmware/extra-fw/ (git-ignored) — the same row

@@ -56,7 +56,7 @@ linear. That is a black screen, not a slow one. The compositor-side escape
 hatch is to force composite rotation on those configurations.
 
 Authored by tiopex <tiopxyz@gmail.com> as two per-SoC patches. Adapted here
-into one, because qforge builds a single Image for every board: the SM8550
+into one, because retroforge builds a single Image for every board: the SM8550
 and SM8650 halves share all of their dpu_plane.c, dpu_rm.c and
 dpu_hw_catalog.c changes, so the shared hunks are carried once and the two
 rotation configs (identical -- both v2.0.1, both 1088 lines) are collapsed
@@ -89,7 +89,7 @@ to within 7 mW, so the gap is ~29x the run-to-run spread. That is the IDLE
 figure; the composite pass is per presented frame, so a game should widen it.
 
 The compositor-side escape hatch for a panel over the cap is wired up in
-rootfs/overlay/etc/qforge/session.conf, keyed on the panel's native width.
+rootfs/overlay/etc/retroforge/session.conf, keyed on the panel's native width.
 
 --- a/drivers/gpu/drm/msm/disp/dpu1/catalog/dpu_9_0_sm8550.h
 +++ b/drivers/gpu/drm/msm/disp/dpu1/catalog/dpu_9_0_sm8550.h

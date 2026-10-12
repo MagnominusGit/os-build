@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Offline check for the editable fan curve (rootfs/overlay/usr/bin/qforge-powerd).
+# Offline check for the editable fan curve (rootfs/overlay/usr/bin/retroforge-powerd).
 #
 #   tests/test-fan-curve.sh
 #
@@ -22,19 +22,19 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-POWERD="$ROOT/rootfs/overlay/usr/bin/qforge-powerd"
-FACTORY="$ROOT/rootfs/overlay/usr/share/qforge/power.conf"
+POWERD="$ROOT/rootfs/overlay/usr/bin/retroforge-powerd"
+FACTORY="$ROOT/rootfs/overlay/usr/share/retroforge/power.conf"
 
-[[ -f $POWERD ]]  || { echo "qforge-powerd missing: $POWERD" >&2; exit 1; }
+[[ -f $POWERD ]]  || { echo "retroforge-powerd missing: $POWERD" >&2; exit 1; }
 [[ -f $FACTORY ]] || { echo "power.conf missing: $FACTORY" >&2; exit 1; }
 
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
 
-# Loading qforge-powerd as a module writes a __pycache__ into rootfs/overlay/usr/bin, which the
+# Loading retroforge-powerd as a module writes a __pycache__ into rootfs/overlay/usr/bin, which the
 # assembler copies into the rootfs verbatim. Keep the bytecode in the sandbox.
 export PYTHONPYCACHEPREFIX="$TMP/pycache"
 
-QFORGE_POWERD_FACTORY="$FACTORY" QFORGE_POWERD_ETC="$TMP/etc" \
+RETROFORGE_POWERD_FACTORY="$FACTORY" RETROFORGE_POWERD_ETC="$TMP/etc" \
 python3 - "$POWERD" "$ROOT" "$TMP" <<'PYEOF'
 import configparser
 import importlib.machinery
@@ -62,14 +62,14 @@ def raises(name, fn):
         return
     results.append(("FAIL (no exception)", name))
 
-etc = pathlib.Path(os.environ["QFORGE_POWERD_ETC"])
+etc = pathlib.Path(os.environ["RETROFORGE_POWERD_ETC"])
 etc.mkdir(parents=True, exist_ok=True)
 
 # __init__ globs sysfs and writes pwm1, so build the object without it and stub the
 # device-touching half of the reload path. What stays real is everything this suite is
 # about: the config layering, the curve maths, and the drop-in read/write.
 def fresh():
-    obj = pd.QforgePower.__new__(pd.QforgePower)
+    obj = pd.RetroForgePower.__new__(pd.RetroForgePower)
     obj.cpu_scheduler = pd.DEFAULT_CPU_SCHEDULER
     obj.discover = lambda: None
     obj.apply_cpu_governor = lambda: None
@@ -276,7 +276,7 @@ power_gov = fresh()
 power_gov.cpu_governor = "ondemand"
 power_gov.cpu_policies = [fake_policy(f"apply{i}", None, ["ondemand", "performance"])
                           for i in range(3)]
-pd.QforgePower.apply_cpu_governor(power_gov)
+pd.RetroForgePower.apply_cpu_governor(power_gov)
 check("the governor lands on every policy",
       [pd.read_text(p / "scaling_governor") for p in power_gov.cpu_policies],
       ["ondemand"] * 3)
@@ -286,19 +286,19 @@ check("the governor lands on every policy",
 calls = []
 power_boot = fresh()
 power_boot.apply_cpu_governor = lambda: calls.append("applied")
-pd.BOOT_GOVERNOR_MARKER = pathlib.Path(os.environ["QFORGE_POWERD_ETC"]).parent / "run/boot-governor-applied"
-pd.QforgePower.apply_boot_cpu_governor(power_boot)
-pd.QforgePower.apply_boot_cpu_governor(power_boot)
+pd.BOOT_GOVERNOR_MARKER = pathlib.Path(os.environ["RETROFORGE_POWERD_ETC"]).parent / "run/boot-governor-applied"
+pd.RetroForgePower.apply_boot_cpu_governor(power_boot)
+pd.RetroForgePower.apply_boot_cpu_governor(power_boot)
 check("the boot governor is applied once per boot", calls, ["applied"])
 check("the boot marker is left behind", pd.BOOT_GOVERNOR_MARKER.exists(), True)
 power_boot.discover = lambda: None
-pd.QforgePower.reload_config(power_boot)
+pd.RetroForgePower.reload_config(power_boot)
 check("a reload leaves the governor alone", calls, ["applied"])
 
 # The governor the shipped config names must be one the kernel config builds, or the fallback
 # above silently replaces it.
 factory = configparser.ConfigParser()
-factory.read(os.path.join(root, "rootfs/overlay/usr/share/qforge/power.conf"))
+factory.read(os.path.join(root, "rootfs/overlay/usr/share/retroforge/power.conf"))
 named = factory.get("cpu", "governor")
 kconfig = pathlib.Path(root, "kernel/kernel.config").read_text()
 check("the shipped governor is built =y",
@@ -354,7 +354,7 @@ pd.apply_leds(found, (0, 96, 255), 64)
 check("led: colour written", (leds / "rgb:l1" / "multi_intensity").read_text().strip(), "0 96 255")
 check("led: brightness written", (leds / "rgb:l2" / "brightness").read_text().strip(), "64")
 check("led: plain LED untouched", (leds / "mmc0::" / "brightness").read_text().strip(), "0")
-lp = configparser.ConfigParser(); lp.read(pathlib.Path(root) / "rootfs/overlay/usr/share/qforge/power.conf")
+lp = configparser.ConfigParser(); lp.read(pathlib.Path(root) / "rootfs/overlay/usr/share/retroforge/power.conf")
 check("led: factory config parses", pd.parse_led_config(lp), {"enabled": True, "color": (0, 96, 255), "brightness": 64})
 bad = configparser.ConfigParser(); bad.read_string("[led]\ncolor=1,2\n")
 raises("led: a two-channel colour is rejected", lambda: pd.parse_led_config(bad))
@@ -414,7 +414,7 @@ check("a stopped fan stays stopped until off_below + 3", pd.fan_stopped(60, 62, 
 check("... and restarts at off_below + 3", pd.fan_stopped(60, 63, True), False)
 check("no temperature never stops the fan", pd.fan_stopped(60, 0, False), False)
 check("board fan keys: digits only, mapped to [fan] keys",
-      pd.board_fan_config({"QFORGE_FAN_MIN_PWM": "80", "QFORGE_FAN_OFF_BELOW": "", "QFORGE_X": "1"}),
+      pd.board_fan_config({"RETROFORGE_FAN_MIN_PWM": "80", "RETROFORGE_FAN_OFF_BELOW": "", "RETROFORGE_X": "1"}),
       {"min_pwm": "80"})
 pwm = tmp / "fanpwm1"; pwm.write_text("0\n")
 t = pd.FanTest(pwm, 255, True, 100, 25); t.start()

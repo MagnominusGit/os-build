@@ -9,7 +9,7 @@ ABL  →  steamcl (stage 1, shared ESP)  →  GRUB (stage 2, the slot's efi-a/b)
 ```
 
 Two independent choices, made by two different stages. Which **slot** boots is stage 1's, driven
-by the boot confs on the shared ESP and steered by `qforge-bootctl` / RAUC. Which **board** this
+by the boot confs on the shared ESP and steered by `retroforge-bootctl` / RAUC. Which **board** this
 is — one image serves all 15 — is stage 2's, and it is the one thing the card cannot work out for
 itself, so it is a menu on first boot and a saved answer afterwards.
 
@@ -18,7 +18,7 @@ itself, so it is a menu on first boot and a saved answer afterwards.
 | `steamos-efi.pin` | Pinned source for stage 1: the arm64 fork of Valve's `steamos-efi`. |
 | `steamcl.sh` | Cross-build it → `out/boot/{steamcl.efi, holo-bootconf, steamcl-version, fonts/default.pf2}`. `holo-bootconf` ships on-device as `/usr/bin/steamos-bootconf`. |
 | `grub.pin` | Pinned source for stage 2: the **GNU GRUB 2.14 release tarball** from ftp.gnu.org. |
-| `patches/grub/` | Our delta on it: framebuffer rotation, the `qforge` boot-attempts module, and the `Makefile.core.def` stanza that builds it. Applied lexically, like `kernel/patches/`. |
+| `patches/grub/` | Our delta on it: framebuffer rotation, the `retroforge` boot-attempts module, and the `Makefile.core.def` stanza that builds it. Applied lexically, like `kernel/patches/`. |
 | `grub.sh` | Cross-build stage 2 → `out/boot/grubaa64.efi` + `fonts/dejavu-mono.pf2`, then generate both configs. |
 | `gen-grub-cfg.sh <A\|B> <out>` | Generate one slot's `grub.cfg`. No toolchain — `tests/test-stage2-grub.sh` runs it directly. |
 | `boards.map` | Build-time board catalog: `id⇥name⇥dtb⇥bootargs`. Cross-checked against the runtime device profiles by that test. |
@@ -35,27 +35,27 @@ which is why the board args moved out of the DTS `/chosen/bootargs` too. They co
 |---|---|
 | common args | `BOOT_CMDLINE` in `gen-grub-cfg.sh` |
 | board args | the fourth column of `boards.map` |
-| `root=` `qforge.var=` `qforge.efi=` | per slot, as `PARTUUID=` read out of the GPT at boot with `probe --part-uuid`; `PARTLABEL=` from `image/partition-table.txt` is the announced fallback |
-| `qforge.slot=` | per slot, stated outright — a PARTUUID carries no slot letter for the initramfs to match |
+| `root=` `retroforge.var=` `retroforge.efi=` | per slot, as `PARTUUID=` read out of the GPT at boot with `probe --part-uuid`; `PARTLABEL=` from `image/partition-table.txt` is the announced fallback |
+| `retroforge.slot=` | per slot, stated outright — a PARTUUID carries no slot letter for the initramfs to match |
 
-The specs are `PARTUUID=` because every qforge medium carries the same eight GPT names: with a
+The specs are `PARTUUID=` because every retroforge medium carries the same eight GPT names: with a
 card inserted on a device installed to internal storage, `PARTLABEL=` resolves to whichever disk
 enumerates first. The UUIDs are derived from the disk stage 2 was chainloaded off, at boot, so
 they name that disk by construction and no update has to rewrite them. This needs `probe` in the
 embedded `MODULES` — an unembedded module is an "unknown command" that leaves the variable unset
 and takes the fallback on every boot, so `tests/test-stage2-grub.sh` asserts the module list.
 
-## The qforge module
+## The retroforge module
 
 `grubaa64.efi` embeds one module of ours, providing one command:
 
 ```
-qforge_bootattempts <image-name>       # e.g. qforge_bootattempts A
+retroforge_bootattempts <image-name>       # e.g. retroforge_bootattempts A
 ```
 
 It opens `\SteamOS\conf\<image-name>.conf` on the ESP through the firmware's `EFI_FILE_PROTOCOL`,
-increments `boot-attempts:` and writes it back. `qforge-boot-good` clears the counter once the
-session proves healthy; `qforge-bootctl` and RAUC read it to decide a slot is bad. That is the
+increments `boot-attempts:` and writes it back. `retroforge-boot-good` clears the counter once the
+session proves healthy; `retroforge-bootctl` and RAUC read it to decide a slot is bad. That is the
 whole module — it touches no GRUB variable, no video mode and no kernel command line.
 
 **It needs to be a module because GRUB's own `fat` driver is read-only.** The EFI file protocol is
@@ -86,5 +86,5 @@ make grub         # stage 2 + both grub.cfg files
 ```
 
 The stage-1/2 binaries reach a card through `image/make-sdcard.sh`, and reach an updated slot
-through the RAUC post-install hook, which takes them from `/usr/lib/qforge/boot/` inside the root
+through the RAUC post-install hook, which takes them from `/usr/lib/retroforge/boot/` inside the root
 it just installed — so a root and the software that boots it always come from one build.

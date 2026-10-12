@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Offline verification of a BUILT installer medium — out/images/installer.img.
 #
-#   docker run --rm -v "$PWD":/src -w /src qforge-build installer/verify-image.sh
+#   docker run --rm -v "$PWD":/src -w /src retroforge-build installer/verify-image.sh
 #   make verify-image
 #
 # Same doctrine as image/verify-card.sh: assert the ARTIFACT, not the source diff. The suites that
@@ -32,11 +32,11 @@ GENCFG="$ROOT/installer/gen-grub-cfg.sh"
 # builder's own hardware and must never be published, so it FAILS here unless the caller says it is
 # what they asked for — the same shape as ota/publish-bundle.sh's mode gate, which exists because a
 # dev image signed with the real key is indistinguishable from a release one to every other check.
-ALLOW_DEV="${QFORGE_INSTALLER_ALLOW_DEV:-0}"
+ALLOW_DEV="${RETROFORGE_INSTALLER_ALLOW_DEV:-0}"
 
 [ -f "$IMG" ] || { echo "no installer image: $IMG (run make installer)" >&2; exit 1; }
 for t in sgdisk mdir mtype minfo unsquashfs; do
-  command -v "$t" >/dev/null 2>&1 || { echo "$t not found — run inside qforge-build" >&2; exit 1; }
+  command -v "$t" >/dev/null 2>&1 || { echo "$t not found — run inside retroforge-build" >&2; exit 1; }
 done
 
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
@@ -51,7 +51,7 @@ part_uuid() { field "$1" 'Partition unique GUID' | tr '[:upper:]' '[:lower:]'; }
 part_name() { field "$1" 'Partition name' | tr -d "'"; }
 part_type() { field "$1" 'Partition GUID code' | sed 's/ .*//'; }
 
-echo "[qforge] verifying ${IMG#"$ROOT"/}"
+echo "[retroforge] verifying ${IMG#"$ROOT"/}"
 
 # ----------------------------------------------------------------------------------------------
 echo "  1. the partition table"
@@ -118,7 +118,7 @@ grep -q 'FAT32' "$T/minfo" && ok "FAT32 (forced, not negotiated from the geometr
   || bad "p1 is not FAT32: $(grep -i 'fat' "$T/minfo" | head -1)"
 label=$(mlabel -i "$IMG@@$ESP_OFF" -s :: 2>/dev/null | sed 's/^ *Volume label is *//')
 case "$label" in
-  *NDINSTALLER*) ok "labelled NDINSTALLER — deliberately not a qforge-* name, so /esp cannot collide with the TARGET's ESP" ;;
+  *NDINSTALLER*) ok "labelled NDINSTALLER — deliberately not a retroforge-* name, so /esp cannot collide with the TARGET's ESP" ;;
   *) bad "p1's label is '$label', not NDINSTALLER — installer/units mounts it by LABEL" ;;
 esac
 
@@ -139,8 +139,8 @@ mtype -i "$IMG@@$ESP_OFF" ::/EFI/steamos/grubenv >/dev/null 2>&1 \
   || ok "no grubenv (this medium remembers nothing)"
 # The file the no-Wi-Fi screen tells the operator to copy. It told them to for weeks while no such
 # file existed anywhere (HW 2026-08-24), which reads as a fault in the person following it.
-mtype -i "$IMG@@$ESP_OFF" ::/qforge/wifi.conf.example >"$T/wifi.example" 2>/dev/null \
-  && ok "/qforge/wifi.conf.example present, where the screen says to look" \
+mtype -i "$IMG@@$ESP_OFF" ::/retroforge/wifi.conf.example >"$T/wifi.example" 2>/dev/null \
+  && ok "/retroforge/wifi.conf.example present, where the screen says to look" \
   || bad "the template the no-Wi-Fi screen names is not on the medium"
 grep -q '^#*[[:space:]]*SSID=' "$T/wifi.example" 2>/dev/null && grep -q 'PSK=' "$T/wifi.example" \
   && ok "and it shows both keys installer/netcfg parses" \
@@ -182,19 +182,19 @@ grep -q 'zstd' "$T/sqfs" && ok "compressed with zstd (the kernel has CONFIG_SQUA
   || bad "the root is not zstd-compressed: $(grep -i compression "$T/sqfs" | head -1)"
 
 sqfs etc/os-release >"$T/os-release"
-grep -qx 'ID=qforge-installer' "$T/os-release" \
-  && ok "the root identifies as qforge-installer, not as an install of the thing it installs" \
-  || bad "etc/os-release does not say ID=qforge-installer"
+grep -qx 'ID=retroforge-installer' "$T/os-release" \
+  && ok "the root identifies as retroforge-installer, not as an install of the thing it installs" \
+  || bad "etc/os-release does not say ID=retroforge-installer"
 
 # ----------------------------------------------------------------------------------------------
 echo "  5. identity"
 # Until installer/mkimage.sh started stamping one, every medium ever built answered "which image is
 # this" identically — and that is the first question asked at the fallback console, which exists for
 # the moment something has already gone wrong.
-sqfs etc/qforge-release >"$T/release"
-for f in QFORGE_VARIANT QFORGE_BUILD QFORGE_VERSION QFORGE_GIT QFORGE_MODE; do
+sqfs etc/retroforge-release >"$T/release"
+for f in RETROFORGE_VARIANT RETROFORGE_BUILD RETROFORGE_VERSION RETROFORGE_GIT RETROFORGE_MODE; do
   grep -q "^$f=" "$T/release" && ok "$f=$(sed -n "s/^$f=//p" "$T/release")" \
-    || bad "/etc/qforge-release carries no $f"
+    || bad "/etc/retroforge-release carries no $f"
 done
 # The same fields under the names other software reads. os-release(5) is where anything that is not
 # ours looks, and shipping it blank is how the main image's Settings screen once rendered empty.
@@ -204,44 +204,44 @@ for f in VERSION_ID BUILD_ID VARIANT_ID; do
 done
 # The two must agree, because they are written from the same values in one place and a divergence
 # means something re-derived one of them.
-r_ver=$(sed -n 's/^QFORGE_VERSION=//p' "$T/release")
+r_ver=$(sed -n 's/^RETROFORGE_VERSION=//p' "$T/release")
 o_ver=$(sed -n 's/^VERSION_ID=//p' "$T/os-release")
 [ -n "$r_ver" ] && [ "$r_ver" = "$o_ver" ] \
-  && ok "qforge-release and os-release name the same version ($r_ver)" \
-  || bad "version mismatch: qforge-release says '$r_ver', os-release says '$o_ver'"
+  && ok "retroforge-release and os-release name the same version ($r_ver)" \
+  || bad "version mismatch: retroforge-release says '$r_ver', os-release says '$o_ver'"
 # The sidecar a publisher reads instead of opening a squashfs out of the middle of a GPT.
 side="$(dirname "$IMG")/installer.release"
 if [ -f "$side" ]; then
   cmp -s "$side" "$T/release" \
     && ok "installer.release beside the image is byte-identical to the one inside it" \
-    || bad "installer.release does not match the image's own /etc/qforge-release"
+    || bad "installer.release does not match the image's own /etc/retroforge-release"
 else
   bad "no installer.release sidecar beside the image"
 fi
 
-mode=$(sed -n 's/^QFORGE_MODE=//p' "$T/release")
+mode=$(sed -n 's/^RETROFORGE_MODE=//p' "$T/release")
 if [ "$mode" = release ]; then
   ok "mode: release"
 elif [ "$ALLOW_DEV" = 1 ]; then
-  ok "mode: dev (QFORGE_INSTALLER_ALLOW_DEV=1 — sshd and a baked Wi-Fi PSK are on this medium)"
+  ok "mode: dev (RETROFORGE_INSTALLER_ALLOW_DEV=1 — sshd and a baked Wi-Fi PSK are on this medium)"
 else
   bad "mode: dev — this medium carries an authorized_keys and a Wi-Fi PSK. Rebuild without
-        QFORGE_DEV, or pass QFORGE_INSTALLER_ALLOW_DEV=1 if a dev medium is what you asked for."
+        RETROFORGE_DEV, or pass RETROFORGE_INSTALLER_ALLOW_DEV=1 if a dev medium is what you asked for."
 fi
 
 # A RELEASE MEDIUM INSTALLS THE LATEST STABLE RELEASE, and that is asserted here rather than
 # assumed. The medium is not pinned to a bundle — it resolves <channel>/latest.json at install time
 # — so "which channel" is the whole of "which OS does this install". release-info resolves it the
-# way qforge-update does (environment, then /etc/qforge/ota.conf, then a built-in `stable`), so
+# way retroforge-update does (environment, then /etc/retroforge/ota.conf, then a built-in `stable`), so
 # the default is correct but it is a DEFAULT, not a constant: mkroot.sh writes that ota.conf when
-# built with QFORGE_OTA_CHANNEL, and a medium carrying one installs from somewhere else with no
+# built with RETROFORGE_OTA_CHANNEL, and a medium carrying one installs from somewhere else with no
 # outward sign. Nothing in CI sets it, which is exactly the kind of thing that stays true until it
 # quietly does not.
 #
 # Same shape as the mode check above, and gated on the same distinction: a dev medium may point
 # wherever it likes (that is what the pin is for), a release medium may not.
 pin=""
-if sqfs etc/qforge/ota.conf >"$T/ota.conf" 2>/dev/null && [ -s "$T/ota.conf" ]; then
+if sqfs etc/retroforge/ota.conf >"$T/ota.conf" 2>/dev/null && [ -s "$T/ota.conf" ]; then
   pin=$(sed -n 's/^OTA_CHANNEL=//p' "$T/ota.conf" | tail -1)
 fi
 if [ -z "$pin" ]; then
@@ -250,7 +250,7 @@ elif [ "$mode" != release ] || [ "$ALLOW_DEV" = 1 ]; then
   ok "channel pinned to '$pin' (dev medium — it will not see 'stable')"
 else
   bad "a RELEASE medium is pinned to the '$pin' channel and will not install the latest stable
-        release. That pin comes from QFORGE_OTA_CHANNEL at mkroot.sh time; rebuild without it."
+        release. That pin comes from RETROFORGE_OTA_CHANNEL at mkroot.sh time; rebuild without it."
 fi
 
 # ----------------------------------------------------------------------------------------------
@@ -269,18 +269,18 @@ echo "  6. it can actually install"
 # expectations from the builder can only ever agree with it. tests/test-mkimage.sh asserts the
 # other direction — that everything mkroot ships is named here — so a new file on the medium cannot
 # quietly go unchecked.
-for f in qforge-install carve.sh select-target.sh rauc-session.sh post-install-fresh.sh \
+for f in retroforge-install carve.sh select-target.sh rauc-session.sh post-install-fresh.sh \
          verify-install.sh netcfg release-info \
          ui uiflow.py uipad.py uiview.py confirm-ui confirm-tty installer-session save-log.sh \
          lib-slotwrite.sh genpart.sh partition-table.txt lib-gpt.sh lib-homestage.sh; do
-  sqfs "usr/lib/qforge/install/$f" >/dev/null 2>&1 \
-    && ok "installer/$f" || bad "usr/lib/qforge/install/$f is MISSING"
+  sqfs "usr/lib/retroforge/install/$f" >/dev/null 2>&1 \
+    && ok "installer/$f" || bad "usr/lib/retroforge/install/$f is MISSING"
 done
 # The consent gate's fixed path. $CONFIRM names WHO renders, and the spine dies rather than
 # installing if it cannot run one.
-sqfs usr/lib/qforge/install/confirm >/dev/null 2>&1 \
+sqfs usr/lib/retroforge/install/confirm >/dev/null 2>&1 \
   && ok "the confirm symlink the gate's fixed path names" \
-  || bad "no usr/lib/qforge/install/confirm — the spine cannot take consent"
+  || bad "no usr/lib/retroforge/install/confirm — the spine cannot take consent"
 # The session unit has to be ENABLED, and the console unit must NOT be: the second is started by
 # OnFailure= and enabling it would put a getty on the panel beside the installer.
 #
@@ -295,23 +295,23 @@ sqfs usr/lib/qforge/install/confirm >/dev/null 2>&1 \
 # have the symlink; installer/netcfg carries the same warning for the same reason.
 unsquashfs -o "$ROOT_OFF" -l "$IMG" >"$T/list" 2>/dev/null || true
 enabled() { grep -qx "squashfs-root/etc/systemd/system/multi-user.target.wants/$1" "$T/list"; }
-enabled qforge-installer.service \
-  && ok "qforge-installer.service is enabled" \
-  || bad "qforge-installer.service is not enabled — the medium boots to nothing"
-enabled qforge-installer-console.service \
+enabled retroforge-installer.service \
+  && ok "retroforge-installer.service is enabled" \
+  || bad "retroforge-installer.service is not enabled — the medium boots to nothing"
+enabled retroforge-installer-console.service \
   && bad "the console unit is enabled — it is the OnFailure= fallback, not a second session" \
   || ok "the console fallback is not enabled (it is activated by failure)"
 # The device registry both the pre-flight screen and the session derive from. Both fall back if it
 # is absent, and the fallback is a generic 1920x1080 panel calling itself "this device" — the kind
 # of degradation nobody notices until a user reports it.
-sqfs usr/lib/qforge/device-env >/dev/null 2>&1 \
+sqfs usr/lib/retroforge/device-env >/dev/null 2>&1 \
   && ok "device-env (the board registry the screen and the session read)" \
-  || bad "no usr/lib/qforge/device-env — every board would draw a generic output"
+  || bad "no usr/lib/retroforge/device-env — every board would draw a generic output"
 
 echo
 if [ "$FAIL" = 0 ]; then
-  echo "[qforge] installer image OK: ${IMG#"$ROOT"/}"
+  echo "[retroforge] installer image OK: ${IMG#"$ROOT"/}"
 else
-  echo "[qforge] installer image FAILED verification: ${IMG#"$ROOT"/}" >&2
+  echo "[retroforge] installer image FAILED verification: ${IMG#"$ROOT"/}" >&2
 fi
 exit "$FAIL"

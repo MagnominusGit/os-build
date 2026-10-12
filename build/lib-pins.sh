@@ -1,11 +1,11 @@
 # shellcheck shell=bash
-# qforge base pins — the package-repo snapshot and the arm64 builder image cut from it.
+# retroforge base pins — the package-repo snapshot and the arm64 builder image cut from it.
 #
 # SOURCED, never executed (hence mode 0644, like the other lib-*.sh). Callers set ROOT first.
 #
 # WHY THIS FILE EXISTS — the same two guards used to be copied into six scripts
 # (rootfs/customize-base.sh, installer/mkroot.sh, installer/genlock.sh, rootfs/genmanifest.sh,
-# packages/build-overlay.sh, build/steam-seed/fetch-steam-seed.sh), and a copy that falls behind
+# packages/build-overlay.sh and the since-removed Steam seed fetcher), and a copy that falls behind
 # does not fail: it accepts a pin the others would refuse, or refuses one they accept, on whichever
 # stage happens to run it. One definition, sourced everywhere.
 #
@@ -62,7 +62,7 @@ pins_builder_sha() {
 # The local tag the builder is imported under. Keyed on the TARBALL's sha256, because that is the
 # only stable identity it has: `docker import` stamps a creation time into the image config, so the
 # image ID differs on every import of the same bytes and cannot be pinned by digest.
-pins_builder_ref() { printf 'qforge/builder:%s\n' "$(pins_builder_sha)"; }
+pins_builder_ref() { printf 'retroforge/builder:%s\n' "$(pins_builder_sha)"; }
 
 # One line for lock headers: where the builder came from.
 pins_builder_desc() { printf '%s/system.rootfs.zst sha256:%s\n' "$(pins_snapshot)" "$(pins_builder_sha)"; }
@@ -95,10 +95,10 @@ pins_builder_ensure() {
     die "builder rootfs sha256 mismatch for $snap/system.rootfs.zst (republished? bump build/builder.pin)"
   fi
 
-  tmp="qforge/builder-import:$sha"
+  tmp="retroforge/builder-import:$sha"
   echo "[lib-pins] importing builder: $ref" >&2
   zstd -dc "$tarball" | ctr import --platform linux/arm64 - "$tmp" >/dev/null \
-    || die "$QFORGE_CONTAINER import of the builder rootfs failed"
+    || die "$RETROFORGE_CONTAINER import of the builder rootfs failed"
 
   # arm64 binfmt so the imported image can execute at all under qemu.
   if ! ctr run --rm --platform linux/arm64 "$tmp" /usr/bin/true >/dev/null 2>&1; then
@@ -106,7 +106,7 @@ pins_builder_ensure() {
     ctr run --privileged --rm docker.io/tonistiigi/binfmt --install arm64 >&2
   fi
 
-  cname="qforge-builder-import-${sha:0:12}"
+  cname="retroforge-builder-import-${sha:0:12}"
   ctr rm -f "$cname" >/dev/null 2>&1 || true
   if ! ctr run --name "$cname" --platform linux/arm64 -e SNAPSHOT="$snap" "$tmp" \
       bash -euo pipefail -c '

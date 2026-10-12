@@ -4,7 +4,7 @@
 #
 #   tests/test-device-env.sh
 #
-# Focus: the second-panel block (QFORGE_SECONDARY_*) of dual-screen boards. gamescope drives that
+# Focus: the second-panel block (RETROFORGE_SECONDARY_*) of dual-screen boards. gamescope drives that
 # connector as its second output (--secondary-output) and routes its digitizer there
 # (--secondary-touch-device, matched on the input device name). A wrong value here is a dark
 # bottom panel or touches landing on the wrong screen, and nothing on the device would say why.
@@ -12,30 +12,30 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEVENV="$ROOT/rootfs/overlay/usr/lib/qforge/device-env"
-DEVICES="$ROOT/rootfs/overlay/usr/lib/qforge/devices"
+DEVENV="$ROOT/rootfs/overlay/usr/lib/retroforge/device-env"
+DEVICES="$ROOT/rootfs/overlay/usr/lib/retroforge/devices"
 DTS="$ROOT/kernel/dts/qcom"
 
 PASS=0; FAIL=0; CASE=""
 ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
 
-SECONDARY=(QFORGE_SECONDARY_CONNECTOR QFORGE_SECONDARY_TOUCHSCREEN)
+SECONDARY=(RETROFORGE_SECONDARY_CONNECTOR RETROFORGE_SECONDARY_TOUCHSCREEN)
 
 # What device-env reports for one model string, evaluated the way consumers do.
-report() { (QFORGE_MODEL="$1" QFORGE_DEVICE_DIR="$DEVICES" bash "$DEVENV"); }
+report() { (RETROFORGE_MODEL="$1" RETROFORGE_DEVICE_DIR="$DEVICES" bash "$DEVENV"); }
 value()  { (eval "$(report "$1")"; eval "printf '%s' \"\${$2-<unset>}\""); }
 
 # =================================================================================================
 CASE="AYN Thor Lite"
 m="AYN Thor Lite"
-[ "$(value "$m" QFORGE_PRIMARY_CONNECTOR)" = DSI-1 ] && ok "primary stays DSI-1 (the 1080x1920 panel)" \
-  || bad "primary is '$(value "$m" QFORGE_PRIMARY_CONNECTOR)', not DSI-1"
-[ "$(value "$m" QFORGE_SECONDARY_CONNECTOR)" = DSI-2 ] && ok "second panel is DSI-2" \
-  || bad "QFORGE_SECONDARY_CONNECTOR is '$(value "$m" QFORGE_SECONDARY_CONNECTOR)', not DSI-2"
-[ "$(value "$m" QFORGE_SECONDARY_TOUCHSCREEN)" = bottom_touchscreen ] \
+[ "$(value "$m" RETROFORGE_PRIMARY_CONNECTOR)" = DSI-1 ] && ok "primary stays DSI-1 (the 1080x1920 panel)" \
+  || bad "primary is '$(value "$m" RETROFORGE_PRIMARY_CONNECTOR)', not DSI-1"
+[ "$(value "$m" RETROFORGE_SECONDARY_CONNECTOR)" = DSI-2 ] && ok "second panel is DSI-2" \
+  || bad "RETROFORGE_SECONDARY_CONNECTOR is '$(value "$m" RETROFORGE_SECONDARY_CONNECTOR)', not DSI-2"
+[ "$(value "$m" RETROFORGE_SECONDARY_TOUCHSCREEN)" = bottom_touchscreen ] \
   && ok "bottom digitizer is the input device bottom_touchscreen" \
-  || bad "QFORGE_SECONDARY_TOUCHSCREEN is '$(value "$m" QFORGE_SECONDARY_TOUCHSCREEN)'"
+  || bad "RETROFORGE_SECONDARY_TOUCHSCREEN is '$(value "$m" RETROFORGE_SECONDARY_TOUCHSCREEN)'"
 
 # =================================================================================================
 CASE="single-panel boards"
@@ -55,18 +55,18 @@ CASE="second-panel profiles"
 n=0
 for conf in "$DEVICES"/*.conf; do
   [ "$(basename "$conf")" = defaults.conf ] && continue
-  name="$(sed -n "s/^QFORGE_DEVICE_NAME=//p" "$conf" | tr -d "'\"")"
+  name="$(sed -n "s/^RETROFORGE_DEVICE_NAME=//p" "$conf" | tr -d "'\"")"
   out="$(report "$name")"
   get() { sed -n "s/^$1=//p" <<<"$out" | tr -d "'"; }
-  [ -n "$(get QFORGE_SECONDARY_CONNECTOR)" ] || continue
+  [ -n "$(get RETROFORGE_SECONDARY_CONNECTOR)" ] || continue
   n=$((n+1)); id="$(basename "$conf" .conf)"
   missing=""
   for v in "${SECONDARY[@]}"; do [ -n "$(get "$v")" ] || missing="$missing $v"; done
   [ -z "$missing" ] && ok "$id declares the whole second-panel block" || bad "$id is missing:$missing"
-  [ "$(get QFORGE_SECONDARY_CONNECTOR)" != "$(get QFORGE_PRIMARY_CONNECTOR)" ] \
+  [ "$(get RETROFORGE_SECONDARY_CONNECTOR)" != "$(get RETROFORGE_PRIMARY_CONNECTOR)" ] \
     && ok "$id: second panel is not the primary connector" \
-    || bad "$id: QFORGE_SECONDARY_CONNECTOR equals the primary ($(get QFORGE_PRIMARY_CONNECTOR))"
-  ts="$(get QFORGE_SECONDARY_TOUCHSCREEN)"
+    || bad "$id: RETROFORGE_SECONDARY_CONNECTOR equals the primary ($(get RETROFORGE_PRIMARY_CONNECTOR))"
+  ts="$(get RETROFORGE_SECONDARY_TOUCHSCREEN)"
   dts="$(grep -l "model = \"$name\";" "$DTS"/*.dts 2>/dev/null | head -1)"
   if [ -z "$dts" ]; then
     bad "$id: no DTS declares model \"$name\""

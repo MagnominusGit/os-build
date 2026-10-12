@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# qforge INSTALLER medium image builder. Phase 6 of .claude/plans/internal-install.plan.md.
+# retroforge INSTALLER medium image builder. Phase 6 of .claude/plans/internal-install.plan.md.
 #
 #   installer/mkimage.sh [installer-rootfs-dir]     (default: work/installer-base)
 #
 # Writes out/images/installer.img — a flashable two-partition medium that boots on the handheld,
-# draws the consent screen on the panel, and installs QForge to the device's internal disk.
+# draws the consent screen on the panel, and installs RetroForge to the device's internal disk.
 #
 # RUN INSIDE THE BUILD IMAGE. It needs mksquashfs, sgdisk, mkfs.vfat, mtools and grub-editenv, and
 # it must run as root to preserve the ownership pacman gave work/installer-base — a squashfs built
@@ -44,7 +44,7 @@ GRUB_FONT="$BOOT/fonts/dejavu-mono.pf2"
 WIFI_EXAMPLE="$ROOT/installer/wifi.conf.example"
 WORK="$ROOT/work/installer-image"
 
-log() { echo "[qforge] $*" >&2; }
+log() { echo "[retroforge] $*" >&2; }
 die() { echo "$*" >&2; exit 1; }
 
 for t in mksquashfs sgdisk mkfs.vfat mcopy mmd; do
@@ -54,7 +54,7 @@ for f in "$TABLE" "$GENPART" "$GENCFG" "$KERNEL" "$GRUB_EFI" "$GRUB_FONT"; do
   [ -e "$f" ] || die "missing input: ${f#"$ROOT"/}"
 done
 [ -d "$DTBDIR" ] || die "missing input: ${DTBDIR#"$ROOT"/}"
-[ -f "$BASE/usr/lib/qforge/pkgs" ] \
+[ -f "$BASE/usr/lib/retroforge/pkgs" ] \
   || die "${BASE#"$ROOT"/} is not a finished installer root — run installer/mkroot.sh first"
 # The marker installer/mkroot.sh writes LAST. Its absence means a bootstrap died partway, and a
 # squashfs of a half-populated tree is an image that boots to a panel and then cannot install.
@@ -62,8 +62,8 @@ done
 # Refuse to build a medium out of the SHIPPED root. Both are directories full of a Linux system and
 # the argument is positional, so the mistake is one word wide — and the result would be an
 # "installer" with no install code on it, discovered on hardware.
-grep -q '^ID=qforge-installer$' "$BASE/etc/os-release" 2>/dev/null \
-  || die "${BASE#"$ROOT"/} does not identify as qforge-installer — wrong tree?"
+grep -q '^ID=retroforge-installer$' "$BASE/etc/os-release" 2>/dev/null \
+  || die "${BASE#"$ROOT"/} does not identify as retroforge-installer — wrong tree?"
 
 rm -rf "$WORK"; mkdir -p "$WORK" "$OUT"
 
@@ -87,29 +87,29 @@ rm -rf "$WORK"; mkdir -p "$WORK" "$OUT"
 # winning by accident.
 #
 # THE MODE IS READ OUT OF THE TREE, NOT OUT OF THE ENVIRONMENT. installer/mkroot.sh folds `dev:0|1`
-# into the reuse marker it installs at /usr/lib/qforge/pkgs, so the tree states what was baked
-# into it. Deriving it from $QFORGE_DEV here would let `QFORGE_DEV=1 make installer-root`
+# into the reuse marker it installs at /usr/lib/retroforge/pkgs, so the tree states what was baked
+# into it. Deriving it from $RETROFORGE_DEV here would let `RETROFORGE_DEV=1 make installer-root`
 # followed by a plain `make installer` stamp `release` on a medium carrying an authorized_keys and
 # a Wi-Fi PSK — the exact drift assemble-rootfs.sh's "both read the one flag" note is about, except
 # that here the two halves are separate processes and cannot share a variable.
 OSRELEASE_SRC="$ROOT/installer/os-release"
 [ -f "$OSRELEASE_SRC" ] || die "missing input: ${OSRELEASE_SRC#"$ROOT"/}"
-if grep -qx 'dev:1' "$BASE/usr/lib/qforge/pkgs" 2>/dev/null; then
+if grep -qx 'dev:1' "$BASE/usr/lib/retroforge/pkgs" 2>/dev/null; then
   IMG_MODE=dev
 else
   IMG_MODE=release
 fi
-IMG_VERSION="${QFORGE_VERSION:-dev}"
-IMG_GIT="${QFORGE_GIT:-unknown}"
+IMG_VERSION="${RETROFORGE_VERSION:-dev}"
+IMG_GIT="${RETROFORGE_GIT:-unknown}"
 IMG_BUILD="$(date -u +%Y%m%dT%H%M%SZ)"
 {
-  echo "QFORGE_VARIANT=installer"
-  echo "QFORGE_BUILD=$IMG_BUILD"
-  echo "QFORGE_VERSION=$IMG_VERSION"
-  echo "QFORGE_GIT=$IMG_GIT"
-  echo "QFORGE_MODE=$IMG_MODE"
-} >"$BASE/etc/qforge-release"
-chmod 0644 "$BASE/etc/qforge-release"
+  echo "RETROFORGE_VARIANT=installer"
+  echo "RETROFORGE_BUILD=$IMG_BUILD"
+  echo "RETROFORGE_VERSION=$IMG_VERSION"
+  echo "RETROFORGE_GIT=$IMG_GIT"
+  echo "RETROFORGE_MODE=$IMG_MODE"
+} >"$BASE/etc/retroforge-release"
+chmod 0644 "$BASE/etc/retroforge-release"
 {
   cat "$OSRELEASE_SRC"
   echo "VARIANT=\"installer\""
@@ -122,7 +122,7 @@ chmod 0644 "$BASE/etc/os-release"
 # The same fields OUTSIDE the image, as a sidecar beside it. A publisher must be able to name the
 # artifact without mounting a squashfs out of the middle of a GPT — ota/genbundle.sh reads
 # rootfs.release for exactly that reason, and a release workflow for this medium will want the same.
-cp "$BASE/etc/qforge-release" "$OUT/installer.release"
+cp "$BASE/etc/retroforge-release" "$OUT/installer.release"
 log "identity: $IMG_VERSION ($IMG_GIT) build $IMG_BUILD, mode $IMG_MODE"
 [ "$IMG_MODE" = release ] || log "NOTE: this medium was built from a DEV root (sshd + baked Wi-Fi)"
 
@@ -149,7 +149,7 @@ total_mib=$(( 1 + esp_mib + squash_mib + 64 + 1 ))
 truncate -s "${total_mib}M" "$IMG"
 # The env var is image/genpart.sh's own override for which table it reads; it defaults to the
 # eight-partition shipped one sitting beside it, which is precisely what must NOT be used here.
-QFORGE_PARTITION_TABLE="$TABLE" "$GENPART" "$IMG" >/dev/null
+RETROFORGE_PARTITION_TABLE="$TABLE" "$GENPART" "$IMG" >/dev/null
 sgdisk -p "$IMG" >&2
 
 part_uuid() { sgdisk -i "$1" "$IMG" | sed -n 's/^Partition unique GUID: \(.*\)/\1/p' | tr '[:upper:]' '[:lower:]'; }
@@ -174,15 +174,15 @@ fatdir() {  # <img> <msdos path, no leading '::'>
 fatdir "$esp" EFI/BOOT
 fatdir "$esp" EFI/steamos/fonts
 fatdir "$esp" dtbs
-fatdir "$esp" qforge
+fatdir "$esp" retroforge
 
 # The Wi-Fi template, at the path installer/netcfg reads its real counterpart from
-# (/esp/qforge/wifi.conf). HW-FOUND 2026-08-24: the no-Wi-Fi screen has always told the operator
+# (/esp/retroforge/wifi.conf). HW-FOUND 2026-08-24: the no-Wi-Fi screen has always told the operator
 # to "copy wifi.conf.example next to it", and THE FILE HAD NEVER EXISTED -- nothing in this tree
 # wrote one and nothing put it on a medium. Instructions naming a file that is not there are worse
 # than no instructions: they read as a fault in the person following them.
 [ -f "$WIFI_EXAMPLE" ] || die "missing ${WIFI_EXAMPLE#"$ROOT"/} — the no-Wi-Fi screen tells the user to copy it"
-mcopy -i "$esp" "$WIFI_EXAMPLE" ::/qforge/wifi.conf.example
+mcopy -i "$esp" "$WIFI_EXAMPLE" ::/retroforge/wifi.conf.example
 
 # GRUB itself, at the removable-media path ABL loads. No steamcl: see the header.
 mcopy -i "$esp" "$GRUB_EFI" ::/EFI/BOOT/bootaa64.efi

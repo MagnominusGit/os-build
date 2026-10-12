@@ -1,7 +1,7 @@
-# qforge INSTALLER MEDIUM partition table. Phase 6 of .claude/plans/internal-install.plan.md.
+# retroforge INSTALLER MEDIUM partition table. Phase 6 of .claude/plans/internal-install.plan.md.
 #
 # TWO partitions, and that is the whole difference from the shipped card: there are no slots here.
-# The installer boots once, writes QForge to the device's internal disk, and is thrown away — so
+# The installer boots once, writes RetroForge to the device's internal disk, and is thrown away — so
 # there is nothing to update atomically, nothing to roll back to, and no /home to preserve. A/B on
 # a recovery medium would be machinery guarding a property nobody wants.
 #
@@ -31,7 +31,7 @@
 #             declared here: the size is an output of what got built, and a fixed number would
 #             either waste medium or fail the fits() check on a package addition.
 #
-# THE FAT LABEL IS NOT A `qforge-*` ONE, deliberately. A dev card and an internal install already
+# THE FAT LABEL IS NOT A `retroforge-*` ONE, deliberately. A dev card and an internal install already
 # share those labels, which is exactly why REPLACES_OURS=1 cannot be judged from a dev card — and an
 # installer whose /esp matched the TARGET's ESP would mount the disk it is about to overwrite and
 # write its failure log there. NDINSTALLER is 11 characters, all a FAT label has room for.
@@ -63,4 +63,4 @@
 #
 # name      size  typecode  fs         label            attrs
 esp         256M  0700      vfat       NDINSTALLER      -
-root        rest  8300      squashfs   qforge-instrt  -
+root        rest  8300      squashfs   retroforge-instrt  -

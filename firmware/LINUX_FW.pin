@@ -1,4 +1,4 @@
-# qforge linux-firmware pin — OPEN firmware blobs from the official linux-firmware
+# retroforge linux-firmware pin — OPEN firmware blobs from the official linux-firmware
 # repository, pinned by commit + per-file sha256 (the sha verifies the DOWNLOADED source).
 #
 # The upstream Holo aarch64 base ships NO /lib/firmware, so these `linux-fw`-class blobs

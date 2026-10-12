@@ -22,16 +22,16 @@ The blank Steam overlay layer that keeps an overlay plane on is only
 painted where turning a plane on is slow, with AMD color management.
 Elsewhere it takes a plane the game could use.
 
-qforge: re-rolled on top of 0014/0018 (DPU CTM and output-LUT colour
+retroforge: re-rolled on top of 0014/0018 (DPU CTM and output-LUT colour
 management), which had moved the four Present() hunks the fork's patch
-expected. Merged by hand, keeping qforge's additions in place:
+expected. Merged by hand, keeping retroforge's additions in place:
   - the scanout decision keeps `!drm_scanout_is_color_managed()` after
     the (now pre-rotation-aware) rotation test;
   - the direct-scanout and partial-composite attempts go through
     PrepareScanout() after the existing drm_update_crtc_ctm() calls;
   - the partial path keeps drm_scanout_ctm_is_active()'s promotion to a
     full composite ahead of FillPartialFrame;
-  - NeedsBlankOverlayPlane() sits after qforge's SupportsColorManagement().
+  - NeedsBlankOverlayPlane() sits after retroforge's SupportsColorManagement().
 Source: ROCKNIX fork, next:projects/ROCKNIX/packages/apps/gamescope/patches
 ---
 diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp

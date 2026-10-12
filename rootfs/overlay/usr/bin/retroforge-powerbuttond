@@ -1,0 +1,52 @@
+#!/bin/sh
+# retroforge-powerbuttond — power-key dispatcher. logind is told to ignore the key (logind.conf.d
+# 10-retroforge-powerkey.conf) so it neither suspends nor powers off, leaving this daemon the ONLY
+# handler while awake. Short press -> RETROFORGE_POWER_SHORT_CMD (default: a logind suspend, which
+# lands in retroforge-suspend's fake-suspend); long hold -> RETROFORGE_POWER_LONG_CMD (default: power
+# off). The shell can replace either through /etc/retroforge/rest.conf once it draws its own power menu.
+#
+# Runs as a ROOT system service: it reads the power-key evdev directly (no session-ACL dependency).
+# While asleep retroforge-suspend holds an EXCLUSIVE grab on the power key, so this daemon sees no
+# events then and cannot bounce the device back into suspend on resume.
+set -u
+
+CONF=/etc/retroforge/rest.conf
+[ -r "$CONF" ] && . "$CONF"
+: "${RETROFORGE_WAKE_KEY:=KEY_POWER}"
+: "${RETROFORGE_WAKE_LONGPRESS_MS:=1000}"  # hold >= this -> long action; shorter -> short action. 0 = always short.
+: "${RETROFORGE_WAKE_DEBOUNCE:=2}"         # seconds to ignore repeat presses after one fires
+: "${RETROFORGE_POWER_SHORT_CMD:=systemctl suspend}"
+: "${RETROFORGE_POWER_LONG_CMD:=systemctl poweroff}"
+
+command -v libinput >/dev/null 2>&1 || { echo "retroforge-powerbuttond: libinput missing" >&2; exit 1; }
+
+now_ms() { date +%s%3N; }
+
+# Word-split on purpose: the commands are "program arg..." strings from the config.
+# shellcheck disable=SC2086
+run_action() { $1 >/dev/null 2>&1 || echo "retroforge-powerbuttond: '$1' failed" >&2; }
+
+echo "retroforge-powerbuttond: $RETROFORGE_WAKE_KEY short -> '$RETROFORGE_POWER_SHORT_CMD', long (${RETROFORGE_WAKE_LONGPRESS_MS}ms) -> '$RETROFORGE_POWER_LONG_CMD'" >&2
+last=0; have_press=0; press_ms=0
+# Watch all seat0 devices (the power key is not on a fixed node) and time it pressed->released, deciding
+# short-vs-long on release; the action is dispatched in the BACKGROUND so a slow command never stalls
+# the read loop (and the hold timing). stdbuf -oL forces line-buffering (piped libinput block-buffers).
+stdbuf -oL libinput debug-events 2>/dev/null | while IFS= read -r line; do
+  case "$line" in
+    *"$RETROFORGE_WAKE_KEY"*pressed*)  press_ms=$(now_ms); have_press=1 ;;
+    *"$RETROFORGE_WAKE_KEY"*released*)
+      [ "$have_press" = 1 ] || continue
+      held=$(( $(now_ms) - press_ms )); have_press=0
+      now=$(date +%s)
+      [ $((now - last)) -lt "$RETROFORGE_WAKE_DEBOUNCE" ] && continue
+      last=$now
+      if [ "$RETROFORGE_WAKE_LONGPRESS_MS" -gt 0 ] && [ "$held" -ge "$RETROFORGE_WAKE_LONGPRESS_MS" ]; then
+        echo "retroforge-powerbuttond: held ${held}ms -> long action" >&2
+        ( run_action "$RETROFORGE_POWER_LONG_CMD" ) &
+      else
+        echo "retroforge-powerbuttond: tap ${held}ms -> short action" >&2
+        ( run_action "$RETROFORGE_POWER_SHORT_CMD" ) &
+      fi
+      ;;
+  esac
+done

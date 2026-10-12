@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qforge Phase 1 image flow — base rootfs + device firmware + kernel -> rootfs.img.
+# retroforge Phase 1 image flow — base rootfs + device firmware + kernel -> rootfs.img.
 #
 # Chains the pieces into one bootable read-only Btrfs root:
 #   1. bootstrap the root from packages               (rootfs/customize-base.sh)
@@ -10,7 +10,7 @@
 # plus the initramfs (image/mkinitramfs.sh) and the stage-1/2 boot artifacts (boot/steamcl.sh +
 # boot/grub.sh) — the assembler now bakes all three into the root (Phase 5).
 # Device firmware is fetched from the pinned Nova-Deck/qcom-firmwares repo — no proprietary
-# blobs ship in-repo. Steps 3-4 run in the qforge-build image.
+# blobs ship in-repo. Steps 3-4 run in the retroforge-build image.
 #
 #   rootfs/build-image.sh
 set -euo pipefail
@@ -19,7 +19,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/build/lib-container.sh"
 OUT="$ROOT/out"
 FW="$ROOT/firmware/qcom-fw"
-DK=(ctr run --rm -v "$ROOT":/src -w /src qforge-build)
+DK=(ctr run --rm -v "$ROOT":/src -w /src retroforge-build)
 
 [ -f "$OUT/Image" ] \
   || { echo "no kernel: out/Image — run kernel/build.sh first" >&2; exit 1; }
@@ -41,18 +41,18 @@ if [ ! -d "$FW" ]; then
 fi
 
 # 3. assemble the read-only Btrfs root. Forward the TEST-ONLY credential env (a no-op
-# unless QFORGE_DEV=1) so a dev card can carry Wi-Fi + SSH creds; see assemble-rootfs.sh.
+# unless RETROFORGE_DEV=1) so a dev card can carry Wi-Fi + SSH creds; see assemble-rootfs.sh.
 # Env flags must precede the image name, so spell this docker run out rather than reuse DK.
 ctr run --rm -v "$ROOT":/src -w /src \
-  -e QFORGE_DEV -e QFORGE_WIFI -e QFORGE_WIFI_SSID -e QFORGE_WIFI_PSK -e QFORGE_SSH_PUBKEY \
-  -e QFORGE_DEBUG \
-  qforge-build rootfs/assemble-rootfs.sh "$BASE_CTR"
+  -e RETROFORGE_DEV -e RETROFORGE_WIFI -e RETROFORGE_WIFI_SSID -e RETROFORGE_WIFI_PSK -e RETROFORGE_SSH_PUBKEY \
+  -e RETROFORGE_DEBUG \
+  retroforge-build rootfs/assemble-rootfs.sh "$BASE_CTR"
 
 cat <<EOF
 
 Image flow done. Read-only root at out/images/rootfs.img.
-The root carries its own boot half (Phase 5): /boot/{Image, initramfs-qforge.img, dtbs} and the
-/usr/lib/qforge/boot stage-1/2 mirror (run boot/steamcl.sh + boot/grub.sh for out/boot/* first).
+The root carries its own boot half (Phase 5): /boot/{Image, initramfs-retroforge.img, dtbs} and the
+/usr/lib/retroforge/boot stage-1/2 mirror (run boot/steamcl.sh + boot/grub.sh for out/boot/* first).
 Next — the flashable card:
   image/make-sdcard.sh             # -> out/images/sdcard.img (or `make sdcard`)
 EOF
