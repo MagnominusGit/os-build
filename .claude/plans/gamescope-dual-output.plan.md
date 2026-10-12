@@ -2,11 +2,12 @@
 
 **Complexity**: Large
 **Branch**: `feat/gamescope-dual-output` (off `main` at 479d84d)
-**Status** (2026-10-12): steps 0-5 done and HW-verified on the Thor Lite dev card, plus kernel
-patch 0397 (DPU SSPP handover between CRTCs) and patch 0044 (bottom panel direct scanout rotated on
-the plane: both panels now scan out melonDS's own buffers, no composite). melonDS second-window menu
-hidden by apps/qforge-hidemenu. Next: step 6 rest (per-window seeds on dual-screen boards, Azahar,
-double-Exit), touch landing confirmation, step 7 (bottom panel off when unused).
+**Status** (2026-10-12): steps 0-6 done and HW-verified on the Thor Lite dev card: two outputs,
+window routing, both panels on direct scanout (kernel 0397 + gamescope 0044), bottom touchscreen
+routed, melonDS seeded for two screens on dual-screen boards with its second-window menu hidden,
+one OGUI Exit ends it (exit_resend: SIGTERM, then SIGKILL of the emulator alone). Open: touch
+landing not yet confirmed, Azahar re-check with the dual seed, step 7 (bottom panel off when unused),
+Thor / Pocket DS device values.
 **Targets**: AYN Thor Lite (top DSI-1, bottom DSI-2 1080x1240, `bottom_touchscreen`), AYN Thor
 (SM8550, panels the other way round: top DSI-2, bottom DSI-1 per ROCKNIX/Armada), AYANEO Pocket DS.
 Every single-panel board must behave exactly as today.
@@ -252,6 +253,14 @@ Line numbers below are in the patched 3.16.31 tree (`work/overlay-build/aarch64/
   behind); fix in qforge-launch's release step if the double Exit causes it.
 - HW: one NDS and one 3DS game on Thor Lite, every exit path (OGUI Exit, emulator menu), state
   saves.
+- **Done 2026-10-12.** Seeds: emulator.json seed entries take an optional `dual_screen_file`, used
+  when device-env declares QFORGE_SECONDARY_CONNECTOR (melonDS: Window0 top only, Window1 enabled
+  bottom only; Azahar: layout_option=4). Exit: melonDS with two windows never exits on SIGTERM (its
+  handler calls qApp->quit() inside the signal; deferring it to the GLib loop with qforge-sigdefer
+  did not help, the queued handler was never dispatched). New emulator.json `exit_resend: N`: one
+  more SIGTERM N s after the stop, then SIGKILL to the emulator alone N s later; the launcher
+  survives and releases the mount (OGUI's second Exit would SIGKILL the launcher too and leave a
+  dead dwarfs mount). HW: one Exit press ends melonDS in ~4 s, 0 mounts left.
 
 ### 7. Bottom panel off when unused (patch 0044)
 

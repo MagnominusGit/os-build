@@ -90,7 +90,12 @@
 #     SIGTERM through `-<our pid>`, which DuckStation takes as "Ctrl+C again: force quit" and
 #     abort()s — a core dump and a 14 s exit.
 #   - We never forward a signal to the emulator, for the same reason: it already has OGUI's. We
-#     only survive ours (TERM, INT, HUP) and wait for it.
+#     only survive ours (TERM, INT, HUP) and wait for it. The one exception is opt-in per
+#     definition: "exit_resend": N sends ONE more SIGTERM when the emulator is still running N s
+#     after a stop signal reached us, and SIGKILL to the emulator alone N s after that. melonDS
+#     and Azahar need it on dual-screen boards: with their second window open SIGTERM does not end
+#     them, and OGUI's second Exit would SIGKILL the whole tree, us included, leaving a dead mount
+#     (HW 2026-10-12, Thor Lite). Killing only the emulator, we still release the mount.
 #   - The mount runtime is in the tree too. It starts with SIGTERM ignored, or OGUI's Exit pulls the
 #     files out from under an emulator that is still shutting down. After the emulator exits it is
 #     released with SIGHUP (the runtime holds the mount busy until it exits) and fusermount3 -u.
@@ -133,6 +138,7 @@ PLAYER_CONF_DIR = ENV.get("QFORGE_PLAYER_CONF_DIR",
 STATUS = ENV.get("QFORGE_LAUNCH_STATUS",
                  os.path.join(ENV.get("XDG_RUNTIME_DIR") or "/tmp", "qforge-launch.status"))
 TMP_LINK_DIR = ENV.get("QFORGE_TMP_LINK_DIR", "/tmp")
+DEVICE_ENV = ENV.get("QFORGE_DEVICE_ENV", "/usr/lib/qforge/device-env")
 PM_MOUNTS = ENV.get("QFORGE_PM_MOUNTS",
                     os.path.join(ENV.get("XDG_RUNTIME_DIR") or "/tmp", "qforge-portmaster-mounts"))
 SYSTEM_VULKAN_ICD = "/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json"
@@ -144,7 +150,8 @@ USAGE = "usage: qforge-launch [--cpus big|all] <system> <rom> | [--cpus big|all]
 SYSTEM_ID = re.compile(r"[a-z0-9_]+")
 EMU_ID = re.compile(r"[a-z0-9_-]+")
 DEFINITION_KEYS = {"format", "root", "binary", "args", "gui_args", "system_args", "env", "seed",
-                   "sync", "install", "core_dumps", "notes"}
+                   "sync", "install", "core_dumps", "exit_resend", "notes"}
+EXIT_RESEND_MAX = 30  # s: an exit_resend longer than this is a typo, not a plan
 SCRIPT_SHELL = "/bin/bash"  # what a scripts-format game card's script runs with
 ROM = "{rom}"
 FILE = "{file}"
@@ -270,11 +277,15 @@ def load_definition(emulator):
         raise bad("env must map variable names to strings")
     seed, sync = d.get("seed", []), d.get("sync", [])
     for key, entries in (("seed", seed), ("sync", sync)):
+        # A seed may name another file for dual-screen boards (device-env declares a second panel).
+        allowed = ({"file", "to"}, {"file", "to", "dual_screen_file"}) if key == "seed" else ({"file", "to"},)
         if not (isinstance(entries, list)
-                and all(isinstance(s, dict) and set(s) == {"file", "to"}
-                        and safe_relative(s["file"]) and safe_relative(s["to"]) for s in entries)):
-            raise bad(f'{key} entries must be {{"file": <in the image>, "to": <path under $HOME>}}, '
-                      "both relative without '..'")
+                and all(isinstance(s, dict) and set(s) in allowed
+                        and safe_relative(s["file"]) and safe_relative(s["to"])
+                        and safe_relative(s.get("dual_screen_file", "x")) for s in entries)):
+            raise bad(f'{key} entries must be {{"file": <in the image>, "to": <path under $HOME>}}'
+                      + (', optionally "dual_screen_file": <in the image>' if key == "seed" else "")
+                      + ", all relative without '..'")
     install = d.get("install", [])
     if not (isinstance(install, list)
             and all(isinstance(i, dict) and set(i) == {"from", "unless", "args"}
@@ -290,16 +301,33 @@ def load_definition(emulator):
     core_dumps = d.get("core_dumps", True)
     if not isinstance(core_dumps, bool):
         raise bad("core_dumps must be true or false")
+    exit_resend = d.get("exit_resend")
+    if exit_resend is not None and not (isinstance(exit_resend, (int, float)) and not isinstance(exit_resend, bool)
+                                        and 0 < exit_resend <= EXIT_RESEND_MAX):
+        raise bad(f"exit_resend must be a number of seconds, more than 0 and at most {EXIT_RESEND_MAX}")
     return {"format": d["format"], "root": d.get("root"), "binary": d["binary"], "args": args, "gui_args": gui_args,
-            "system_args": system_args, "env": env, "seed": seed, "sync": sync, "install": install, "core_dumps": core_dumps}
+            "system_args": system_args, "env": env, "seed": seed, "sync": sync, "install": install, "core_dumps": core_dumps,
+            "exit_resend": exit_resend}
+
+
+def dual_screen():
+    """Whether the board has a second panel: device-env's QFORGE_SECONDARY_CONNECTOR is set."""
+    try:
+        out = subprocess.run([DEVICE_ENV], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    m = re.search(r"^QFORGE_SECONDARY_CONNECTOR=(.*)$", out, re.M)
+    return bool(m and m.group(1).strip("'\""))
 
 
 def seed_first_run(emulator, seed):
+    # Ask device-env only when a seed has a dual-screen variant.
+    dual = any("dual_screen_file" in s for s in seed) and dual_screen()
     for s in seed:
         dst = os.path.join(HOME, s["to"])
         if os.path.lexists(dst):
             continue
-        src = os.path.join(EMU_DATA_DIR, emulator, s["file"])
+        src = os.path.join(EMU_DATA_DIR, emulator, s["dual_screen_file"] if dual and "dual_screen_file" in s else s["file"])
         if not os.path.isfile(src):
             raise Exit(2, f"{emulator}'s emulator.json seeds {src}, which the image does not have")
         try:
@@ -307,7 +335,7 @@ def seed_first_run(emulator, seed):
             shutil.copyfile(src, dst)
         except OSError as err:
             raise Exit(2, f"could not seed {dst}: {err}") from None
-        log(f"first run of {emulator}: seeded {dst}")
+        log(f"first run of {emulator}: seeded {dst}{' (dual-screen board)' if dual and 'dual_screen_file' in s else ''}")
 
 
 def sync_files(emulator, sync):
@@ -742,10 +770,36 @@ def run(argv):
                                    preexec_fn=None if definition["core_dumps"] else no_core_dumps)
         except (OSError, ValueError) as err:
             fail("mount-failed", emulator, f"could not start {binary}: {err}")
-        rc = emu.wait()
+        rc = wait_emulator(emu, definition["exit_resend"], interrupted)
         return 128 - rc if rc < 0 else rc
     finally:
         package.release()
+
+
+def wait_emulator(emu, resend_after, interrupted):
+    """The emulator's exit status. With exit_resend: once a stop signal reached us (OGUI's Exit
+    signals the whole tree) and the emulator still runs resend_after seconds later, it gets ONE
+    more SIGTERM, and SIGKILL resend_after seconds after that; we stay to release the mount."""
+    if not resend_after:
+        return emu.wait()
+    seen, since, escalation = len(interrupted), None, [(signal.SIGTERM, "one more SIGTERM"),
+                                                       (signal.SIGKILL, "SIGKILL")]
+    while True:
+        try:
+            return emu.wait(timeout=0.1)
+        except subprocess.TimeoutExpired:
+            pass
+        if since is None:
+            if len(interrupted) > seen:
+                since = time.monotonic()
+        elif escalation and time.monotonic() - since >= resend_after:
+            sig, what = escalation.pop(0)
+            log(f"the emulator still runs {resend_after} s after the stop: {what} (exit_resend)")
+            try:
+                emu.send_signal(sig)
+            except ProcessLookupError:
+                pass
+            since = time.monotonic()
 
 
 def main():

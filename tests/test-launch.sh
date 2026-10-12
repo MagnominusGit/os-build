@@ -84,6 +84,9 @@ if [ "\${1-}" = --fake-install ]; then  # an install step (emulator.json "instal
 fi
 on_term() {
   echo term >> "\$log"
+  # An emulator the first SIGTERM does not end, or (deaf) none does: melonDS / Azahar with their
+  # second window open.
+  if [ -f "$T/deaf" ] || { [ -f "$T/two-terms" ] && [ ! -f "$T/one-term-seen" ]; }; then : > "$T/one-term-seen"; echo term-ignored >> "\$log"; return; fi
   sleep 0.3
   [ -e "\$0" ] && echo mount-alive >> "\$log" || echo mount-gone >> "\$log"
   exit 0
@@ -131,7 +134,7 @@ unset XDG_CONFIG_HOME  # the player conf must be found under $HOME/.config
 export QFORGE_LAUNCH_STATUS="$T/launch.status.default"
 mkdir -p "$HOME"
 
-reset_logs() { rm -f "$T"/{emu,appimage,fusermount}.log "$T/stop-emu"; }
+reset_logs() { rm -f "$T"/{emu,appimage,fusermount}.log "$T/stop-emu" "$T/one-term-seen"; }
 field() { sed -n "s/^$1=//p" "$T/emu.log" | head -1; }
 wait_for() { for _ in $(seq 100); do eval "$1" && return 0; sleep 0.05; done; return 1; }
 emu_up() { grep -qx up "$T/emu.log" 2>/dev/null; }
@@ -343,6 +346,18 @@ sys.exit(not (e.get("LD_PRELOAD") == "/usr/lib/qforge/libqforge-sigdefer.so" and
 python3 -c 'import json,sys; e=json.load(open(sys.argv[1]))["env"]
 sys.exit(not (e.get("LD_PRELOAD") == "/usr/lib/qforge/libqforge-hidemenu.so" and e.get("SHARUN_ALLOW_LD_PRELOAD") == "1"))' \
   "$SEED_DIR/melonds/emulator.json" && ok "melonds: the hidemenu shim is preloaded, through sharun" || bad "melonds: hidemenu shim not preloaded (LD_PRELOAD + SHARUN_ALLOW_LD_PRELOAD)"
+# Dual-screen boards: melonDS's second window and Azahar's separate windows go to the second panel
+# (gamescope 0041), and both need one more SIGTERM to exit with that window open.
+has melonds/melonDS-dual-screen.toml '[Instance0.Window1]' "dual-screen seed: the second window section"
+has melonds/melonDS-dual-screen.toml 'Enabled = true' "dual-screen seed: the second window enabled"
+has melonds/melonDS-dual-screen.toml 'ScreenSizing = 5' "dual-screen seed: bottom screen alone in the second window"
+has melonds/melonDS-dual-screen.toml 'ScreenSizing = 4' "dual-screen seed: top screen alone in the first window"
+has azahar/qt-config-dual-screen.ini 'layout_option=4' "dual-screen seed: separate windows"
+for emu in melonds azahar; do
+  python3 -c 'import json,sys; d=json.load(open(sys.argv[1]));
+sys.exit(not (d.get("exit_resend") == 2 and all("dual_screen_file" in s for s in d["seed"])))' "$SEED_DIR/$emu/emulator.json" \
+    && ok "$emu: dual-screen seed and exit_resend 2" || bad "$emu: no dual-screen seed or exit_resend"
+done
 # ClownMDEmu (md, segacd): fixed SDL gamepad layout, nothing to bind; one user folder per system.
 has clownmdemu/configuration.ini '[Miscellaneous]' "the Miscellaneous section"
 has clownmdemu/configuration.ini 'rewinding = off' "rewinding off (a rewind buffer every frame otherwise)"
@@ -464,6 +479,12 @@ bad_def "a root on an AppImage format (only a folder of scripts has one)" 'd["ro
 bad_def "a scripts format with no root" 'd["format"] = "scripts"'
 bad_def "a scripts root outside \$HOME (..)" 'd["format"] = "scripts"; d["root"] = "../../usr"'
 bad_def "a scripts root that is absolute" 'd["format"] = "scripts"; d["root"] = "/usr"'
+bad_def "a dual-screen seed out of the image (..)" 'd["seed"] = [{"file": "settings.ini", "to": ".config/x.ini", "dual_screen_file": "../../etc/passwd"}]'
+bad_def "a dual-screen file on a sync entry (seeds only)" 'd["sync"] = [{"file": "settings.ini", "to": ".config/x.ini", "dual_screen_file": "settings.ini"}]'
+bad_def "an exit_resend of 0" 'd["exit_resend"] = 0'
+bad_def "an exit_resend that is not a number" 'd["exit_resend"] = "2"'
+bad_def "an exit_resend that is a boolean" 'd["exit_resend"] = True'
+bad_def "an exit_resend over the cap" 'd["exit_resend"] = 600'
 printf '{not json' > "$BAD/duckstation/emulator.json"
 [ "$(QFORGE_EMU_DATA_DIR="$BAD" code psx "$ROM")" = 2 ] && ok "a definition that is not JSON is refused (exit 2)" || bad "broken JSON was accepted"
 
@@ -681,6 +702,71 @@ for broken in '[{"from": "a", "unless": "b", "args": ["x"]}]' '[{"from": "../a",
     "$DS_DEF" "$INST/duckstation/emulator.json" "$broken"
   [ "$(QFORGE_EMU_DATA_DIR="$INST" code psx "$ROM")" = 2 ] && ok "install refused (exit 2): $broken" || bad "install accepted: $broken"
 done
+
+# =================================================================================================
+CASE="first-run settings on a dual-screen board"
+# A dual-screen board (device-env declares a second panel) gets the seed's dual_screen_file instead.
+DUAL="$T/data-dual"; mkdir -p "$DUAL/duckstation"; cp "$DS_SEED" "$DUAL/duckstation/"
+echo "dual-screen settings" > "$DUAL/duckstation/settings-dual.ini"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1]));
+d["seed"] = [dict(s, dual_screen_file="settings-dual.ini") for s in d["seed"]]; json.dump(d, open(sys.argv[2], "w"))' \
+  "$DS_DEF" "$DUAL/duckstation/emulator.json"
+fake_device_env() { printf '#!/bin/sh\necho "QFORGE_SECONDARY_CONNECTOR=%s"\n' "$1" > "$T/device-env"; chmod +x "$T/device-env"; }
+for board in dual single; do
+  [ "$board" = dual ] && fake_device_env "'DSI-2'" || fake_device_env "''"
+  rm -rf "$HOME"; mkdir -p "$HOME"; reset_logs
+  QFORGE_EMU_DATA_DIR="$DUAL" QFORGE_DEVICE_ENV="$T/device-env" start_launcher
+  wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+  touch "$T/stop-emu"; reap_launcher "$lpid"
+  want="$DS_SEED"; [ "$board" = dual ] && want="$DUAL/duckstation/settings-dual.ini"
+  cmp -s "$want" "$seeded" && ok "a $board-screen board is seeded with $(basename "$want")" \
+    || bad "a $board-screen board did not get $(basename "$want")"
+done
+
+# =================================================================================================
+CASE="exit_resend (a second window keeps the emulator up)"
+RESEND="$T/data-resend"; mkdir -p "$RESEND/duckstation"; cp "$DS_SEED" "$RESEND/duckstation/"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["exit_resend"] = 0.5; json.dump(d, open(sys.argv[2], "w"))' \
+  "$DS_DEF" "$RESEND/duckstation/emulator.json"
+: > "$T/two-terms"
+reset_logs
+QFORGE_EMU_DATA_DIR="$RESEND" start_launcher
+wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+epid="$(field pid)"
+kill -TERM "$epid"; kill -TERM "$lpid"  # OGUI's Exit: the emulator and the launcher both get SIGTERM
+sleep 0.2
+grep -qx term-ignored "$T/emu.log" && kill -0 "$epid" 2>/dev/null \
+  && ok "the first SIGTERM leaves the emulator running (its second window)" || bad "the fake emulator did not ignore its first SIGTERM"
+reap_launcher "$lpid"
+[ "$(grep -cx term "$T/emu.log")" = 2 ] && grep -qx mount-alive "$T/emu.log" \
+  && ok "exit_resend: one more SIGTERM after 0.5 s ended it, the mount still up" \
+  || bad "exit_resend: emulator got $(grep -cx term "$T/emu.log") SIGTERMs (want 2)"
+grep -q "one more SIGTERM (exit_resend)" "$T/launch.err" && ok "the resend is logged" || bad "the resend is not logged"
+# Without exit_resend the launcher never adds a SIGTERM of its own (DuckStation's force-quit).
+reset_logs
+start_launcher
+wait_for emu_up || bad "the emulator never started"
+epid="$(field pid)"
+kill -TERM "$epid"; kill -TERM "$lpid"; sleep 1
+[ "$(grep -cx term "$T/emu.log")" = 1 ] && kill -0 "$epid" 2>/dev/null \
+  && ok "without exit_resend, no second SIGTERM comes from the launcher" || bad "a SIGTERM was resent without exit_resend"
+kill -TERM "$epid"; reap_launcher "$lpid"
+rm -f "$T/two-terms" "$T/one-term-seen"
+# One that never exits on SIGTERM (melonDS with two windows): SIGKILL for the emulator alone, after
+# the resend, and the launcher is still there to release the mount.
+: > "$T/deaf"
+reset_logs
+QFORGE_EMU_DATA_DIR="$RESEND" start_launcher
+wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+epid="$(field pid)"
+kill -TERM "$epid"; kill -TERM "$lpid"
+reap_launcher "$lpid"
+kill -0 "$epid" 2>/dev/null && bad "exit_resend: the deaf emulator is still running" \
+  || ok "exit_resend: an emulator deaf to SIGTERM is SIGKILLed after the resend"
+grep -q "SIGKILL (exit_resend)" "$T/launch.err" && ok "the SIGKILL is logged" || bad "the SIGKILL is not logged"
+wait_for 'grep -qx hup "$T/appimage.log"' && ok "the launcher still released the mount (SIGHUP)" \
+  || bad "the mount was not released after the SIGKILL"
+rm -f "$T/deaf" "$T/one-term-seen"
 
 # =================================================================================================
 CASE="OGUI Exit (Reaper.reap replayed)"
