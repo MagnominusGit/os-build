@@ -32,6 +32,7 @@ are invoked directly there rather than through `make test-disk` — a failure na
 - **The installer medium** — `test-install.sh`, `test-ui.sh`.
 - **Device behaviour** — `test-pairingd.sh`,
   `test-fan-curve.sh`, `test-cpu-scheduler.sh`, `test-power-led.sh`, `test-suspend.sh`,
+  `test-gamescope-display.sh` (which /run/user/<uid>/ holds the live gamescope socket),
   `test-storage.sh`, `test-device-env.sh` (the per-board facts, incl. a dual-screen board's
   second panel), `test-session.sh` (the shell gamescope hosts), `test-launch.sh` (how a ROM
   card starts and stops an emulator AppImage), `test-shares.sh` (the player's network

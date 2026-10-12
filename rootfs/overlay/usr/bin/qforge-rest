@@ -35,8 +35,8 @@ CONF=/etc/qforge/rest.conf
 : "${QFORGE_REST_GPU_GOVERNOR:=powersave}"   # GPU devfreq governor on enter (restored on leave)
 : "${QFORGE_REST_SCREEN:=internal}"   # gamescope target: drm_sleep_<internal|external>_screen
 : "${QFORGE_REST_SKIP:=}"             # space-separated ops to skip: panel cpu rfkill governor gpugov led
-: "${XDG_RUNTIME_DIR:=/run/user/0}"     # where gamescope's wayland socket lives (session runs as root)
-export XDG_RUNTIME_DIR
+# No XDG_RUNTIME_DIR default: gamescope runs as `player`, not root, and gs_resolve_display exports the
+# /run/user/<uid> it finds the live socket in.
 
 STATE_DIR=/run/qforge/rest.d
 
