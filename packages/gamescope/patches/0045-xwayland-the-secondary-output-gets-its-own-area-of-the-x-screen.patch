@@ -1,0 +1,233 @@
+From: qforge
+Subject: [PATCH] xwayland: the secondary output gets its own area of the X screen
+
+Windows on the secondary output (0041) stayed at 0,0 of their X screen,
+under the main window: the emulator's main window is fullscreen at the
+main output's size and X stacks it on top. Xwayland routes pointer and
+touch input by X geometry and stacking, so every tap on the second panel
+went to the main window (HW 2026-10-12, Thor Lite: neither melonDS nor
+Azahar saw a touch; XQueryPointer over the second window's area
+returned the main window).
+
+The game's Xwayland (every server but the shell's when there are
+several) now gets a second wl_output for the secondary output, sized to
+its logical area and announced to the right of the main output (wlroots
+sends 0,0 on bind; a bind listener resends the real position, and a
+main mode change moves it). Xwayland lays the X screen out as
+[main][secondary], like sway's output layout on ROCKNIX, and windows on
+the secondary output are placed in that area. The X screen's
+root_width/height in steamcompmgr keep meaning the main output's area,
+which every fullscreen and placement rule sizes windows to, and focus
+windows are composited regardless of their X origin.
+
+(qforge: dual-screen boards, 2026-10-12.)
+---
+diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
+index af0f7e7..e8565de 100644
+--- a/src/steamcompmgr.cpp
++++ b/src/steamcompmgr.cpp
+@@ -1104,6 +1104,25 @@ static std::optional<std::regex> g_SecondaryWindowTitle;
+ static global_focus_t g_SecondaryFocus;
+ // melonDS prefixes "[w2] " to its second window's title, Azahar ends its with "| Secondary Window".
+ static constexpr const char *k_pszDefaultSecondaryWindowTitle = R"(^\[w2\] |\| Secondary Window$)";
++
++// With a secondary output, the game's X screen spans [main][secondary] (wlserver gives that
++// Xwayland a second wl_output to the right). root_width/height keep meaning the main output's area,
++// which is what every fullscreen and placement rule sizes windows to.
++static void clamp_root_to_main_output( xwayland_ctx_t *ctx )
++{
++	gamescope_xwayland_server_t *server = ctx->xwayland_server;
++	if ( !server || server->get_secondary_x() < 0 )
++		return;
++	ctx->root_width = std::min( ctx->root_width, server->get_main_width() );
++	ctx->root_height = std::min( ctx->root_height, server->get_main_height() );
++}
++
++// Where windows on the secondary output go in their X screen: its area, else the origin.
++static int secondary_window_x( steamcompmgr_win_t *w )
++{
++	gamescope_xwayland_server_t *server = w->xwayland().ctx ? w->xwayland().ctx->xwayland_server : nullptr;
++	return server && server->get_secondary_x() >= 0 ? server->get_secondary_x() : 0;
++}
+ global_focus_t *GetCurrentFocus()
+ {
+ 	uint64_t ulKey = GetBackend()->GetCurrentConnector() ? GetBackend()->GetCurrentConnector()->GetVirtualConnectorKey() : 0;
+@@ -5823,10 +5842,13 @@ static void determine_and_apply_secondary_focus()
+ 	g_SecondaryFocus.focusWindow = pFocusWindow;
+ 
+ 	if ( pFocusWindow && ( (uint32_t)pFocusWindow->GetGeometry().nWidth != g_uSecondaryOutputWidth ||
+-	                       (uint32_t)pFocusWindow->GetGeometry().nHeight != g_uSecondaryOutputHeight ) )
++	                       (uint32_t)pFocusWindow->GetGeometry().nHeight != g_uSecondaryOutputHeight ||
++	                       pFocusWindow->GetGeometry().nX != secondary_window_x( pFocusWindow ) || pFocusWindow->GetGeometry().nY != 0 ) )
+ 	{
++		// In the secondary output's own area of the X screen: overlapping the main window, every
++		// click on it went to the main window, which X stacks on top (HW 2026-10-12, Thor Lite).
+ 		xwayland_ctx_t *ctx = pFocusWindow->xwayland().ctx;
+-		XMoveResizeWindow( ctx->dpy, pFocusWindow->xwayland().id, 0, 0, g_uSecondaryOutputWidth, g_uSecondaryOutputHeight );
++		XMoveResizeWindow( ctx->dpy, pFocusWindow->xwayland().id, secondary_window_x( pFocusWindow ), 0, g_uSecondaryOutputWidth, g_uSecondaryOutputHeight );
+ 	}
+ 
+ 	g_SecondaryFocus.ulCurrentFocusSerial = GetFocusSerial();
+@@ -6449,6 +6471,7 @@ configure_win(xwayland_ctx_t *ctx, XConfigureEvent *ce)
+ 		{
+ 			ctx->root_width = ce->width;
+ 			ctx->root_height = ce->height;
++			clamp_root_to_main_output( ctx );
+ 			MakeFocusDirty();
+ 
+ 			// Screen-sized is relative to the screen, re-arm every placement.
+@@ -6517,10 +6540,10 @@ static void configure_request(xwayland_ctx_t *ctx, XConfigureRequestEvent *confi
+ 	// Take a client's own drag out of the pointer position so it does not chase itself.
+ 	steamcompmgr_win_t *w = find_win( ctx, configureRequest->window, false );
+ 
+-	// A window on the secondary output keeps the panel's size.
++	// A window on the secondary output keeps the panel's size, in that output's area.
+ 	if ( w && w->bOnSecondaryOutput )
+ 	{
+-		changes.x = 0;
++		changes.x = secondary_window_x( w );
+ 		changes.y = 0;
+ 		changes.width = g_uSecondaryOutputWidth;
+ 		changes.height = g_uSecondaryOutputHeight;
+@@ -9486,6 +9509,7 @@ void init_xwayland_ctx(uint32_t serverId, gamescope_xwayland_server_t *xwayland_
+ 
+ 	ctx->root_width = DisplayWidth(ctx->dpy, ctx->scr);
+ 	ctx->root_height = DisplayHeight(ctx->dpy, ctx->scr);
++	clamp_root_to_main_output( ctx );
+ 
+ 	ctx->allDamage = None;
+ 	ctx->clipChanged = true;
+diff --git a/src/wlserver.cpp b/src/wlserver.cpp
+index cb9cfca..4b5a34b 100644
+--- a/src/wlserver.cpp
++++ b/src/wlserver.cpp
+@@ -1854,7 +1854,7 @@ static bool filter_global(const struct wl_client *client, const struct wl_global
+ 	for (size_t i = 0; i < wlserver.wlr.xwayland_servers.size(); i++) {
+ 		gamescope_xwayland_server_t *server = wlserver.wlr.xwayland_servers[i].get();
+ 		if (server && server->get_client() == client)
+-			return server->get_output() == output;
++			return server->get_output() == output || server->get_secondary_output() == output;
+ 	}
+ 
+ 	if (wlserver.wlr.xwayland_servers.empty())
+@@ -2007,6 +2007,61 @@ gamescope_xwayland_server_t::gamescope_xwayland_server_t(wl_display *display, in
+ 	update_output_info();
+ 
+ 	wlr_output_create_global(output, wlserver.display);
++
++	main_width = width;
++	main_height = height;
++
++	// The game's X screen gets the secondary output too (the shell's, server 0 when there are
++	// several, keeps a screen of its own size).
++	uint32_t uSecondaryWidth = 0, uSecondaryHeight = 0;
++	if ( ( g_nXWaylandCount == 1 || nIndex > 0 ) && GetBackend()->GetSecondaryOutputSize( &uSecondaryWidth, &uSecondaryHeight ) )
++	{
++		secondary_output = wlr_headless_add_output( wlserver.wlr.headless_backend, uSecondaryWidth, uSecondaryHeight );
++		secondary_output_state = new wlr_output_state;
++		wlr_output_state_init( secondary_output_state );
++		secondary_output->make = strdup( "gamescope" );  // freed by wlroots
++		secondary_output->model = strdup( "gamescope" ); // freed by wlroots
++		wlr_output_set_name( secondary_output, "gamescope-secondary" );
++		wlr_output_state_set_enabled( secondary_output_state, true );
++		wlr_output_state_set_custom_mode( secondary_output_state, uSecondaryWidth, uSecondaryHeight, refresh );
++		if ( !wlr_output_commit_state( secondary_output, secondary_output_state ) )
++		{
++			wl_log.errorf( "Failed to commit the secondary headless output" );
++			abort();
++		}
++		// wlroots announces every output at 0,0; ours sits right of the main one.
++		wl_signal_add( &secondary_output->events.bind, &secondary_bind_listener );
++		wlr_output_create_global( secondary_output, wlserver.display );
++		wl_log.infof( "xwayland server #%d: secondary output %ux%u at %d,0", nIndex, uSecondaryWidth, uSecondaryHeight, main_width );
++	}
++}
++
++void gamescope_xwayland_server_t::send_secondary_geometry( struct wl_resource *resource )
++{
++	wl_output_send_geometry( resource, main_width, 0,
++		secondary_output->phys_width, secondary_output->phys_height, secondary_output->subpixel,
++		secondary_output->make, secondary_output->model, secondary_output->transform );
++	if ( wl_resource_get_version( resource ) >= WL_OUTPUT_DONE_SINCE_VERSION )
++		wl_output_send_done( resource );
++}
++
++void gamescope_xwayland_server_t::secondary_bind_callback( struct wl_listener *listener, void *data )
++{
++	gamescope_xwayland_server_t *server = wl_container_of( listener, server, secondary_bind_listener );
++	struct wlr_output_event_bind *event = (struct wlr_output_event_bind *) data;
++	server->send_secondary_geometry( event->resource );
++}
++
++void gamescope_xwayland_server_t::set_main_size( int width, int height )
++{
++	main_width = width;
++	main_height = height;
++	if ( !secondary_output )
++		return;
++
++	struct wl_resource *resource;
++	wl_resource_for_each( resource, &secondary_output->resources )
++		send_secondary_geometry( resource );
+ }
+ 
+ gamescope_xwayland_server_t::~gamescope_xwayland_server_t()
+@@ -2024,6 +2079,13 @@ gamescope_xwayland_server_t::~gamescope_xwayland_server_t()
+ 	wlr_xwayland_server_destroy(xwayland_server);
+ 	xwayland_server = nullptr;
+ 
++	if ( secondary_output )
++	{
++		wl_list_remove( &secondary_bind_listener.link );
++		wlr_output_destroy( secondary_output );
++		delete secondary_output_state;
++	}
++
+ 	wlr_output_destroy(output);
+ 	delete output_state;	
+ }
+@@ -3682,6 +3744,8 @@ void wlserver_set_xwayland_server_mode( size_t idx, int w, int h, int nRefreshmH
+ 		abort();
+ 	}
+ 
++	server->set_main_size( w, h );
++
+ 	wl_log.infof("Updating mode for xwayland server #%zu: %dx%d@%d", idx, w, h, gamescope::ConvertmHzToHz( nRefreshmHz ) );
+ }
+ 
+diff --git a/src/wlserver.hpp b/src/wlserver.hpp
+index bc39744..a652c2d 100644
+--- a/src/wlserver.hpp
++++ b/src/wlserver.hpp
+@@ -91,6 +91,16 @@ public:
+ 
+ 	void update_output_info();
+ 
++	// Dual-screen boards: this server's second wl_output, the secondary output's area placed to the
++	// right of the main one, so Xwayland lays its X screen out as [main][secondary] and windows on
++	// the second panel get X coordinates of their own (input reaches them, not the main window).
++	struct wlr_output *get_secondary_output() { return secondary_output; }
++	// Where that area starts in the X screen (the main output's width), -1 without one.
++	int get_secondary_x() const { return secondary_output ? main_width : -1; }
++	int get_main_width() const { return main_width; }
++	int get_main_height() const { return main_height; }
++	void set_main_size( int width, int height );
++
+ 	int get_index() const { return m_nIndex; }
+ 
+ private:
+@@ -100,6 +110,14 @@ private:
+ 	struct wlr_output *output = nullptr;
+ 	struct wlr_output_state *output_state = nullptr;
+ 
++	struct wlr_output *secondary_output = nullptr;
++	struct wlr_output_state *secondary_output_state = nullptr;
++	struct wl_listener secondary_bind_listener = { .notify = secondary_bind_callback };
++	int main_width = 0;
++	int main_height = 0;
++	void send_secondary_geometry( struct wl_resource *resource );
++	static void secondary_bind_callback( struct wl_listener *listener, void *data );
++
+ 	std::unordered_map<uint32_t, wlserver_content_override *> content_overrides;
+ 
+ 	bool xwayland_ready = false;

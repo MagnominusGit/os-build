@@ -530,6 +530,17 @@ main output also uses: HW-clean on the Thor Lite with kernel 0397 (Mario Kart DS
 scanning out melonDS's own buffers, no composite, no DPU/rotator messages). ConVar
 `drm_secondary_plane_rotation` (default on) turns it off at runtime.
 
+`0045` — **the secondary output gets its own area of the X screen** (ours, 2026-10-12). Windows
+routed by 0041 stayed at 0,0 under the fullscreen main window, and Xwayland routes pointer and
+touch by X geometry and stacking, so 0043's touches on the second panel reached the main window.
+The game's Xwayland (every server but the shell's when there are several) now gets a second
+wl_output for the secondary output, announced to the right of the main one (a bind listener
+resends the position wlroots zeroes on bind): the X screen becomes [main][secondary], like sway's
+output layout on ROCKNIX, and routed windows are placed and kept in that area. steamcompmgr's
+root_width/height keep meaning the main output's area; focus windows are composited regardless
+of their X origin, so both panels stay on direct scanout. HW 2026-10-12, Thor Lite: bottom-panel
+touch works in melonDS and Azahar, gamescope does no GPU work during play.
+
 Drop the patch files here with those exact names (or rename and update `source.pin`'s
 `patches:` line). **Until a declared patch is present, `make overlay` / `make base` fail fast**
 with a clear "missing patch" message from `build-overlay.sh`.

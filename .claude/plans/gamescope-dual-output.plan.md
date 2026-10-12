@@ -236,6 +236,12 @@ Line numbers below are in the patched 3.16.31 tree (`work/overlay-build/aarch64/
   (`wlr_seat` keeps them separate).
 - HW: DS touch works on the bottom panel while the pad drives the game; touching the top panel in
   OGUI still works; OGUI's input focus never jumps to the bottom window.
+- **Done 2026-10-12 (0043 + 0045).** 0043 alone delivered no touch: the routed window sat at 0,0
+  of the X screen under the fullscreen main window, and Xwayland routes touch by X geometry and
+  stacking. Patch 0045 gives the game's Xwayland a second wl_output to the right of the main one
+  (X screen [main][secondary], as ROCKNIX does with sway) and places routed windows there. HW: DS
+  and 3DS touch on the bottom panel, both panels still on direct scanout, no gamescope GPU work.
+  A touch-click-mode variant for the bottom panel was tried and dropped: raw touch points work.
 
 ### 6. Emulator seeds for dual-screen boards (repo, not gamescope)
 
@@ -262,7 +268,7 @@ Line numbers below are in the patched 3.16.31 tree (`work/overlay-build/aarch64/
   survives and releases the mount (OGUI's second Exit would SIGKILL the launcher too and leave a
   dead dwarfs mount). HW: one Exit press ends melonDS in ~4 s, 0 mounts left.
 
-### 7. Bottom panel off when unused (patch 0044)
+### 7. Bottom panel off when unused (patch 0046)
 
 - No tagged window: secondary CRTC `ACTIVE=0` through its own modeset commit (the lease series'
   0034 blanked the connector the same way) and backlight off; back on when a tagged window maps.
