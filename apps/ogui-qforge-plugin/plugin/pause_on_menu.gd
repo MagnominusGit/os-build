@@ -9,8 +9,15 @@ extends RefCounted
 ## the app is continued synchronously (OS.execute) on app_stopped, which RunningApp.kill emits
 ## before it sends the signal. Steam apps are left alone: their tree holds the Steam client.
 ## Stored in OGUI's settings, section "qforge", key "pause_in_menus" (default on).
+##
+## The freeze is OGUI's own pause (RunningApp.suspend, is_suspended), so the running game card's
+## Pause/Unpause entry, which toggles on is_suspended, sees it: the card only relabels itself on
+## its own presses, so its label is set here ("Unpause" while frozen), or its first press looked
+## like it did nothing. Unpause in the menu lets the game run behind it; closing the menu always
+## goes back to a running game.
 
 const SECTION := "qforge"
+const RUNNING_GAME_CARD := "res://core/ui/card_ui/navigation/running_game_card.gd"
 const KEY := "pause_in_menus"
 
 var settings := load("res://core/global/settings_manager.tres") as SettingsManager
@@ -69,7 +76,9 @@ func _on_in_game_exited(_to: State) -> void:
 	_paused = app
 	if not app.app_stopped.is_connected(_on_app_stopped):
 		app.app_stopped.connect(_on_app_stopped.bind(app))
-	app.suspend(true)
+	if not app.is_suspended:
+		app.suspend(true)
+	_sync_pause_label(app)
 	logger.info("paused " + app.launch_item.name)
 
 
@@ -91,9 +100,24 @@ func resume() -> void:
 		args.append("-" + str(p))  # its process group, as suspend() stopped it
 	OS.execute("kill", args)
 	app.is_suspended = false
+	_sync_pause_label(app)
 	logger.info("resumed " + app.launch_item.name)
 
 
+## Exit game: continue it first, also when it was paused from the menu's Pause entry outside a
+## freeze of ours, so it can act on SIGTERM.
 func _on_app_stopped(app: RunningApp) -> void:
-	if app == _paused:
+	if app == _paused or app.is_suspended:
+		_paused = app
 		resume()
+
+
+## The running game card of `app` labels its Pause entry by is_suspended, as its own press does.
+func _sync_pause_label(app: RunningApp) -> void:
+	for card in tree.root.find_children("*", "Container", true, false):
+		var script := card.get_script() as Script
+		if not script or script.resource_path != RUNNING_GAME_CARD or card.get("running_app") != app:
+			continue
+		var button = card.get("pause_button")
+		if button:
+			button.text = "Unpause" if app.is_suspended else "Pause"
