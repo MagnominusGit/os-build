@@ -287,6 +287,10 @@ SIGDEFER_SRC := apps/qforge-sigdefer/Makefile apps/qforge-sigdefer/src/qforge-si
 # pad grab under sdl2-compat). aarch64, built in the container like sigdefer.
 GPTK_LIB     := apps/qforge-gptk-interpose/build/libqforge-gptk-interpose.so
 GPTK_SRC     := apps/qforge-gptk-interpose/Makefile apps/qforge-gptk-interpose/src/qforge-gptk-interpose.c
+# The LD_PRELOAD shim that hides the menu bar of every QMainWindow after the first
+# (apps/qforge-hidemenu; melonDS's second window on dual-screen boards). aarch64, in the container.
+HIDEMENU_LIB := apps/qforge-hidemenu/build/libqforge-hidemenu.so
+HIDEMENU_SRC := apps/qforge-hidemenu/Makefile apps/qforge-hidemenu/src/qforge-hidemenu.c
 # The QForge OpenGamepadUI plugin (apps/ogui-qforge-plugin): a reproducible zip of plugin/, shipped
 # read-only in the root and copied into the player's plugins folder by qforge-session.
 PLUGIN_ZIP   := $(OUT)/plugins/qforge.zip
@@ -360,7 +364,7 @@ QFORGE_CCACHE ?= $(if $(CI),0,1)
 # ==============================================================================
 .PHONY: help all image toolchain kernel fw-linux fw-qcom base overlay verify-lock \
         rootfs relock installer installer-root relock-installer verify-image \
-        initramfs splash plugin sigdefer gptk-interpose steamcl grub sdcard verify-card test test-disk bundle sign-bundle publish-bundle \
+        initramfs splash plugin sigdefer gptk-interpose hidemenu steamcl grub sdcard verify-card test test-disk bundle sign-bundle publish-bundle \
         deploy clean clean-base clean-overlay clean-ccache distclean
 
 # An always-out-of-date prerequisite, for rules that must re-evaluate their own inputs every run
@@ -392,6 +396,7 @@ initramfs: $(INITRAMFS)    ## Build the initramfs that mounts ro-root + /etc ove
 splash:    $(SPLASH_BIN) $(SPLASH_ASSET) ## Build the boot-splash drawer + flattened logo (in container)
 plugin:    $(PLUGIN_ZIP) ## Build the QForge OpenGamepadUI plugin zip (host, python3)
 sigdefer:  $(SIGDEFER_LIB) ## Build the Snes9x SIGTERM shim, libqforge-sigdefer.so (in container)
+hidemenu:  $(HIDEMENU_LIB) ## Build the melonDS second-window menu shim, libqforge-hidemenu.so (in container)
 gptk-interpose: $(GPTK_LIB) ## Build PortMaster gptokeyb2's pad interposer (in container)
 steamcl:   $(STEAMCL)      ## Build the stage-1 steamcl + steamos-bootconf (in container)
 grub:      $(GRUB)         ## Build the stage-2 GRUB + per-slot grub.cfg (in container)
@@ -442,6 +447,7 @@ test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-session.sh
 	bash $(TESTS_DIR)/test-launch.sh
 	bash $(TESTS_DIR)/test-sigdefer.sh
+	bash $(TESTS_DIR)/test-hidemenu.sh
 	bash $(TESTS_DIR)/test-catalog.sh
 	bash $(TESTS_DIR)/test-plugin.sh
 	bash $(TESTS_DIR)/test-plugin-install.sh
@@ -767,7 +773,7 @@ $(VERSION_STAMP):
 # /usr/lib/qforge/boot mirror the RAUC hook refreshes the ESP and the slot's efi partition FROM.
 # That is what makes "this root and the software that boots it came from one build" true by
 # construction. No cycle: the initramfs is built from work/base, never from the assembled root.
-$(ROOTFS): $(KERNEL) $(INITRAMFS) $(STEAMCL) $(GRUB) $(BASE_STAMP) $(FW_LINUX) $(FW_QCOM) $(FW_EXTRA) $(PLUGIN_ZIP) $(SIGDEFER_LIB) $(GPTK_LIB) $(ASSEMBLE_SRC) $(MODE_STAMP) $(VERSION_STAMP) | $(BUILD_STAMP)
+$(ROOTFS): $(KERNEL) $(INITRAMFS) $(STEAMCL) $(GRUB) $(BASE_STAMP) $(FW_LINUX) $(FW_QCOM) $(FW_EXTRA) $(PLUGIN_ZIP) $(SIGDEFER_LIB) $(GPTK_LIB) $(HIDEMENU_LIB) $(ASSEMBLE_SRC) $(MODE_STAMP) $(VERSION_STAMP) | $(BUILD_STAMP)
 	$(DOCKER) $(DEV_ENV) $(ID_ENV) -e QFORGE_DEBUG $(BUILD_IMG) \
 	  $(ROOTFS_DIR)/assemble-rootfs.sh /src/work/base
 
@@ -793,6 +799,9 @@ $(SIGDEFER_LIB): $(SIGDEFER_SRC) | $(BUILD_STAMP)
 
 $(GPTK_LIB): $(GPTK_SRC) | $(BUILD_STAMP)
 	$(INBUILD) -c 'make -C apps/qforge-gptk-interpose'
+
+$(HIDEMENU_LIB): $(HIDEMENU_SRC) | $(BUILD_STAMP)
+	$(INBUILD) -c 'make -C apps/qforge-hidemenu'
 
 $(SPLASH_ASSET): $(IMAGE_DIR)/mksplash.sh $(IMAGE_DIR)/png2nds1.py $(IMAGE_DIR)/splash/logo.svg $(SPLASH_GEOM) | $(BUILD_STAMP)
 	$(INBUILD) $(IMAGE_DIR)/mksplash.sh

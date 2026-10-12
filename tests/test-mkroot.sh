@@ -524,6 +524,7 @@ declare -A STAGE_EXPECTED=(
   [ogui-plugin]="the QForge OGUI plugin zip, copied to the player's home by the session (not on the installer medium: it runs no OGUI)"
   [sigdefer-shim]="the LD_PRELOAD shim Snes9x's definition names (not on the installer medium: it runs no emulator)"
   [gptk-interpose]="the LD_PRELOAD library PortMaster's gptokeyb2 gets from mod_QForge.txt (not on the installer medium: it runs no port)"
+  [hidemenu-shim]="the LD_PRELOAD shim melonDS's definition names (not on the installer medium: it runs no emulator)"
   [debug-capture]="DEBUG-ONLY journald log capture"
   [seal]="strip the package manager from the RELEASE root"
   [trim]="delete build and documentation artefacts"

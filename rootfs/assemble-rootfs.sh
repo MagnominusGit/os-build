@@ -258,6 +258,9 @@ fi
 # gptk-interpose runs on EVERY build.
 . "$ROOT/rootfs/lib-assemble-gptk-interpose.sh"
 
+# hidemenu-shim runs on EVERY build.
+. "$ROOT/rootfs/lib-assemble-hidemenu.sh"
+
 # debug-capture is DEBUG-ONLY, same construction -- and independent of QFORGE_DEV.
 if [ "${QFORGE_DEBUG:-}" = "1" ]; then
   . "$ROOT/rootfs/lib-assemble-debug.sh"

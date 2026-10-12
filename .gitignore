@@ -46,6 +46,7 @@ pkg/
 !/apps/qforge-splash/src/
 !/apps/qforge-sigdefer/src/
 !/apps/qforge-gptk-interpose/src/
+!/apps/qforge-hidemenu/src/
 
 # The splash drawer's compiled output. Unlike build/ at the repo root, THIS build/ is an
 # artifact directory: `make splash` writes an aarch64 binary and the test suite writes a host
@@ -55,6 +56,8 @@ pkg/
 /apps/qforge-sigdefer/build/
 # The PortMaster gptokeyb2 interposer's compiled output (apps/qforge-gptk-interpose).
 /apps/qforge-gptk-interpose/build/
+# The melonDS second-window menu shim's compiled output (apps/qforge-hidemenu).
+/apps/qforge-hidemenu/build/
 
 # Device-proprietary firmware, fetched on demand from the pinned Nova-Deck/qcom-firmwares
 # repo + verified against its sha256sums.txt (never committed here — only in that repo).

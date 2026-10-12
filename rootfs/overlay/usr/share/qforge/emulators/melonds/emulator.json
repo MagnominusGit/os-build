@@ -3,7 +3,8 @@
     "melonDS (Nintendo DS): pkgforge-dev's sharun repackaging of melonDS 1.1.",
     "-f: fullscreen; the ROM boots at once (--boot defaults to auto). melonDS's -b is --boot <auto|always|never>, not a batch mode.",
     "melonDS never quits when a game stops and has no quit hotkey nor button combinations, so Select + Start cannot reach an exit: OpenGamepadUI's Exit (SIGTERM) is the way out. SIGTERM ends it at once, no dialog; the .sav is written ~2 s after the game saves.",
-    "gui_args: melonDS's own window (touch screen; no pad-driven UI)."
+    "gui_args: melonDS's own window (touch screen; no pad-driven UI).",
+    "LD_PRELOAD qforge-hidemenu (apps/qforge-hidemenu): on a dual-screen board melonDS's second window (Instance0.Window1, the DS bottom screen) goes to the second panel, but melonDS hides a window's menu bar only when that window is fullscreen and -f fullscreens the first window alone, so File / System / ... showed above the bottom screen (HW 2026-10-12, Thor Lite). The shim zeroes the height of every menu bar after the first window's; with one window (single-screen boards, --gui) nothing changes. sharun drops LD_PRELOAD unless SHARUN_ALLOW_LD_PRELOAD is set."
   ],
   "format": "appimage-sharun",
   "binary": "bin/melonDS",
@@ -12,7 +13,10 @@
     "{rom}"
   ],
   "gui_args": [],
-  "env": {},
+  "env": {
+    "LD_PRELOAD": "/usr/lib/qforge/libqforge-hidemenu.so",
+    "SHARUN_ALLOW_LD_PRELOAD": "1"
+  },
   "seed": [
     {
       "file": "melonDS.toml",

@@ -340,6 +340,9 @@ lacks snes9x/snes9x.conf 'Button 8$' "binding on Guide (b8)"
 python3 -c 'import json,sys; e=json.load(open(sys.argv[1]))["env"]
 sys.exit(not (e.get("LD_PRELOAD") == "/usr/lib/qforge/libqforge-sigdefer.so" and e.get("SHARUN_ALLOW_LD_PRELOAD") == "1"))' \
   "$SEED_DIR/snes9x/emulator.json" && ok "snes9x: the sigdefer shim is preloaded, through sharun" || bad "snes9x: sigdefer shim not preloaded (LD_PRELOAD + SHARUN_ALLOW_LD_PRELOAD)"
+python3 -c 'import json,sys; e=json.load(open(sys.argv[1]))["env"]
+sys.exit(not (e.get("LD_PRELOAD") == "/usr/lib/qforge/libqforge-hidemenu.so" and e.get("SHARUN_ALLOW_LD_PRELOAD") == "1"))' \
+  "$SEED_DIR/melonds/emulator.json" && ok "melonds: the hidemenu shim is preloaded, through sharun" || bad "melonds: hidemenu shim not preloaded (LD_PRELOAD + SHARUN_ALLOW_LD_PRELOAD)"
 # ClownMDEmu (md, segacd): fixed SDL gamepad layout, nothing to bind; one user folder per system.
 has clownmdemu/configuration.ini '[Miscellaneous]' "the Miscellaneous section"
 has clownmdemu/configuration.ini 'rewinding = off' "rewinding off (a rewind buffer every frame otherwise)"
