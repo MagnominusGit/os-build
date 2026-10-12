@@ -89,12 +89,20 @@ Line numbers below are in the patched 3.16.31 tree (`work/overlay-build/aarch64/
   window**, so today gamescope shows the bottom-screen window on the top panel. Step 3 must
   (a) leave tagged windows out of `GAMESCOPE_FOCUSABLE_WINDOWS` (what OGUI picks from) and
   (b) ignore a `BASELAYER_WINDOW` that names a tagged window, falling back to the app-id match.
-- **Exit needs two presses with two windows**: OGUI's Exit (SIGTERM) did not end melonDS the
-  first time; the second did (clean, mount released). Without a game a SIGTERM never ended it
-  (SIGKILL needed). Single-window melonDS quits on the first SIGTERM. Handled in step 6.
-- Azahar not checked (no 3DS title on the card). Source: the secondary `GRenderWindow` is
-  `setParent(nullptr)` and only shown while a game runs (`citra_qt.cpp:559-562, 2809-2826`);
-  confirm with `xprop` once a 3DS game is available.
+- **Exit needs two presses with two windows, for both emulators**: OGUI's Exit (SIGTERM) did not
+  end melonDS (Mario Kart DS) nor Azahar (New Super Mario Bros. 2) the first time; the second
+  did. melonDS without a game never ended on SIGTERM (SIGKILL needed). Single-window melonDS
+  quits on the first SIGTERM (emulator notes). Afterwards **both AppImage dwarfs mounts were
+  left in /proc/mounts with no process serving them** (cleaned by hand with fusermount3 -u);
+  not yet known whether the double Exit or the earlier SIGKILL caused it. Handled in step 6.
+- Azahar 2126.1.2 with `layout_option=4`, launched from OGUI (New Super Mario Bros. 2): the
+  secondary window appears only while a game runs, title
+  `Azahar 9e6f523 | New Super Mario Bros. 2 | Secondary Window`; the main window has **no**
+  `| Primary Window` suffix (only the game name). Both `WM_CLASS azahar`, type NORMAL, no
+  `WM_TRANSIENT_FOR`, `STEAM_GAME` on both, user-specified position (not `PPosition`: no
+  dropdown). Gamescope focused the secondary window (newest map; OGUI set no `BASELAYER_WINDOW`
+  this time): the top panel showed the 3DS bottom screen. The title rule `\| Secondary Window$`
+  holds.
 - 0.3 Thor Lite: top `top_touchscreen` / DSI-1, bottom `bottom_touchscreen` / DSI-2. Thor and
   Pocket DS still owed.
 
@@ -212,10 +220,12 @@ Line numbers below are in the patched 3.16.31 tree (`work/overlay-build/aarch64/
 - Launcher: nothing new if the default title regex matches. Only if some emulator needs its own
   rule: gamescope reads a root property `GAMESCOPE_SECONDARY_WINDOW_TITLE` that qforge-launch sets
   from the emulator def and clears on exit.
-- melonDS with two windows needs two SIGTERMs (spike 0.2). Find why in melonDS's SIGTERM path
-  (each signal closing one window?) and fix it in the launcher (forward a second TERM after a
-  short grace when windows remain) or with a small melonDS patch / LD_PRELOAD shim like
-  `apps/qforge-sigdefer`.
+- melonDS and Azahar with two windows both need two SIGTERMs (spike 0.2). Find why in each
+  SIGTERM path (each signal closing one window?) and fix it once in the launcher (forward a second
+  TERM after a short grace while the emulator lives) rather than per emulator, or per emulator
+  with a small patch / LD_PRELOAD shim like `apps/qforge-sigdefer`.
+- Check that every exit path releases the AppImage mount (spike 0.2 left both dwarfs mounts
+  behind); fix in qforge-launch's release step if the double Exit causes it.
 - HW: one NDS and one 3DS game on Thor Lite, every exit path (OGUI Exit, emulator menu), state
   saves.
 
