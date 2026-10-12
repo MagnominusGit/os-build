@@ -5,7 +5,8 @@
     "Azahar never quits when a game stops: Select + Start is its own 'Exit Azahar' shortcut (qt-config.ini), which quits cleanly with confirmClose off, so OpenGamepadUI gets the panel back. SIGTERM ends it at once, no dialog.",
     "Only decrypted .3ds/.cci/.cxi/.3dsx (and Azahar's compressed z* forms) are listed: a .cia must be installed first (Azahar asks in a dialog).",
     "gui_args: Azahar's own window and game list (touch screen; no pad-driven UI). Select + Start quits it too.",
-    "Dual-screen boards (device-env QFORGE_SECONDARY_CONNECTOR set): qt-config-dual-screen.ini is seeded instead, with layout_option=4 (separate windows): the 'Secondary Window' goes to the second panel by its title (gamescope patch 0041). exit_resend 2: with the secondary window open the first SIGTERM does not end Azahar (OGUI's Exit had to be pressed twice, HW 2026-10-12, Thor Lite); the launcher sends one more SIGTERM after 2 s and SIGKILLs Azahar alone 2 s later (then releases the mount as usual)."
+    "Dual-screen boards (device-env QFORGE_SECONDARY_CONNECTOR set): qt-config-dual-screen.ini is seeded instead, with layout_option=4 (separate windows): the 'Secondary Window' goes to the second panel by its title (gamescope patch 0041).",
+    "SDL_NO_SIGNAL_HANDLERS=1: Azahar's SDL (pads, audio) otherwise catches SIGTERM and turns it into an SDL quit event Azahar never reads (its loop is Qt's), so OpenGamepadUI's Exit did nothing and a second Exit SIGKILLed the whole tree, launcher and mount included (HW 2026-10-12, Thor Lite: SigCgt had SIGTERM). With the hint SIGTERM keeps its default action and ends Azahar at once, as RPCS3's same fix."
   ],
   "format": "appimage-sharun",
   "binary": "bin/azahar",
@@ -14,13 +15,14 @@
     "{rom}"
   ],
   "gui_args": [],
-  "env": {},
+  "env": {
+    "SDL_NO_SIGNAL_HANDLERS": "1"
+  },
   "seed": [
     {
       "file": "qt-config.ini",
       "to": ".config/azahar-emu/qt-config.ini",
       "dual_screen_file": "qt-config-dual-screen.ini"
     }
-  ],
-  "exit_resend": 2
+  ]
 }

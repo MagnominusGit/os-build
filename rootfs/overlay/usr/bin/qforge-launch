@@ -92,10 +92,10 @@
 #   - We never forward a signal to the emulator, for the same reason: it already has OGUI's. We
 #     only survive ours (TERM, INT, HUP) and wait for it. The one exception is opt-in per
 #     definition: "exit_resend": N sends ONE more SIGTERM when the emulator is still running N s
-#     after a stop signal reached us, and SIGKILL to the emulator alone N s after that. melonDS
-#     and Azahar need it on dual-screen boards: with their second window open SIGTERM does not end
-#     them, and OGUI's second Exit would SIGKILL the whole tree, us included, leaving a dead mount
-#     (HW 2026-10-12, Thor Lite). Killing only the emulator, we still release the mount.
+#     after a stop signal reached us, and SIGKILL to the emulator alone N s after that. It is for
+#     an emulator that SIGTERM does not end: OGUI's second Exit would SIGKILL the whole tree, us
+#     included, leaving a dead mount. (melonDS and Azahar used it first; their real cause was SDL
+#     catching SIGTERM, fixed with SDL_NO_SIGNAL_HANDLERS in their definitions.) Killing only the emulator, we still release the mount.
 #   - The mount runtime is in the tree too. It starts with SIGTERM ignored, or OGUI's Exit pulls the
 #     files out from under an emulator that is still shutting down. After the emulator exits it is
 #     released with SIGHUP (the runtime holds the mount busy until it exits) and fusermount3 -u.

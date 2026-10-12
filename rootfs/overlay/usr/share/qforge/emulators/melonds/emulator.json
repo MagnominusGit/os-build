@@ -2,10 +2,11 @@
   "notes": [
     "melonDS (Nintendo DS): pkgforge-dev's sharun repackaging of melonDS 1.1.",
     "-f: fullscreen; the ROM boots at once (--boot defaults to auto). melonDS's -b is --boot <auto|always|never>, not a batch mode.",
-    "melonDS never quits when a game stops and has no quit hotkey nor button combinations, so Select + Start cannot reach an exit: OpenGamepadUI's Exit (SIGTERM) is the way out. SIGTERM ends it at once, no dialog; the .sav is written ~2 s after the game saves.",
+    "melonDS never quits when a game stops and has no quit hotkey nor button combinations, so Select + Start cannot reach an exit: OpenGamepadUI's Exit (SIGTERM) is the way out: it ends melonDS at once, no dialog (SDL_NO_SIGNAL_HANDLERS below).",
     "gui_args: melonDS's own window (touch screen; no pad-driven UI).",
     "LD_PRELOAD qforge-hidemenu (apps/qforge-hidemenu): on a dual-screen board melonDS's second window (Instance0.Window1, the DS bottom screen) goes to the second panel, but melonDS hides a window's menu bar only when that window is fullscreen and -f fullscreens the first window alone, so File / System / ... showed above the bottom screen (HW 2026-10-12, Thor Lite). The shim zeroes the height of every menu bar after the first window's; with one window (single-screen boards, --gui) nothing changes. sharun drops LD_PRELOAD unless SHARUN_ALLOW_LD_PRELOAD is set.",
-    "Dual-screen boards (device-env QFORGE_SECONDARY_CONNECTOR set): melonDS-dual-screen.toml is seeded instead. It enables the second window (Instance0.Window1), which gamescope sends to the second panel by its '[w2] ' title (gamescope patch 0041), with the top screen alone in the first window (ScreenSizing 4) and the bottom screen alone in the second (5). exit_resend 2: with the second window open melonDS does not exit on SIGTERM at all (its handler calls qApp->quit() inside the signal and never gets through; deferring it to the GLib loop with qforge-sigdefer did not help either), so OGUI's Exit had to be pressed twice, i.e. SIGKILL the whole tree and leave a dead mount (HW 2026-10-12, Thor Lite). The launcher sends one more SIGTERM after 2 s and SIGKILLs melonDS alone 2 s later, then releases the mount as usual. Nothing is lost: the .sav is written ~2 s after the game saves."
+    "Dual-screen boards (device-env QFORGE_SECONDARY_CONNECTOR set): melonDS-dual-screen.toml is seeded instead. It enables the second window (Instance0.Window1), which gamescope sends to the second panel by its '[w2] ' title (gamescope patch 0041), with the top screen alone in the first window (ScreenSizing 4) and the bottom screen alone in the second (5).",
+    "SDL_NO_SIGNAL_HANDLERS=1: melonDS calls SDL_Init (pads, audio), and SDL then catches SIGTERM and turns it into an SDL quit event melonDS never reads (its loop is Qt's), so OpenGamepadUI's Exit did nothing and a second Exit SIGKILLed the whole tree, launcher and mount included (HW 2026-10-12, Thor Lite: SigCgt had SIGTERM, one window or two, with or without the second panel). With the hint SIGTERM keeps its default action and ends melonDS at once, as RPCS3's same fix. Nothing is lost: the .sav is written ~2 s after the game saves."
   ],
   "format": "appimage-sharun",
   "binary": "bin/melonDS",
@@ -16,7 +17,8 @@
   "gui_args": [],
   "env": {
     "LD_PRELOAD": "/usr/lib/qforge/libqforge-hidemenu.so",
-    "SHARUN_ALLOW_LD_PRELOAD": "1"
+    "SHARUN_ALLOW_LD_PRELOAD": "1",
+    "SDL_NO_SIGNAL_HANDLERS": "1"
   },
   "seed": [
     {
@@ -24,6 +26,5 @@
       "to": ".config/melonDS/melonDS.toml",
       "dual_screen_file": "melonDS-dual-screen.toml"
     }
-  ],
-  "exit_resend": 2
+  ]
 }

@@ -355,8 +355,8 @@ has melonds/melonDS-dual-screen.toml 'ScreenSizing = 4' "dual-screen seed: top s
 has azahar/qt-config-dual-screen.ini 'layout_option=4' "dual-screen seed: separate windows"
 for emu in melonds azahar; do
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1]));
-sys.exit(not (d.get("exit_resend") == 2 and all("dual_screen_file" in s for s in d["seed"])))' "$SEED_DIR/$emu/emulator.json" \
-    && ok "$emu: dual-screen seed and exit_resend 2" || bad "$emu: no dual-screen seed or exit_resend"
+sys.exit(not (d["env"].get("SDL_NO_SIGNAL_HANDLERS") == "1" and all("dual_screen_file" in s for s in d["seed"])))' "$SEED_DIR/$emu/emulator.json" \
+    && ok "$emu: dual-screen seed, SIGTERM not caught by SDL" || bad "$emu: no dual-screen seed or SDL_NO_SIGNAL_HANDLERS"
 done
 # ClownMDEmu (md, segacd): fixed SDL gamepad layout, nothing to bind; one user folder per system.
 has clownmdemu/configuration.ini '[Miscellaneous]' "the Miscellaneous section"

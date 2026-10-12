@@ -267,6 +267,11 @@ Line numbers below are in the patched 3.16.31 tree (`work/overlay-build/aarch64/
   more SIGTERM N s after the stop, then SIGKILL to the emulator alone N s later; the launcher
   survives and releases the mount (OGUI's second Exit would SIGKILL the launcher too and leave a
   dead dwarfs mount). HW: one Exit press ends melonDS in ~4 s, 0 mounts left.
+  **Corrected later 2026-10-12:** the second window was never the cause. melonDS and Azahar both
+  init SDL, which catches SIGTERM for an SDL quit event their Qt loop never reads (melonDS has no
+  signal handler of its own); one window, or the second panel off, behaves the same. Fixed as for
+  RPCS3: SDL_NO_SIGNAL_HANDLERS=1 in both definitions, SIGTERM ends each within 0.5 s, and their
+  exit_resend is dropped (the launcher keeps the option).
 
 ### 7. Bottom panel off when unused (patch 0046)
 
