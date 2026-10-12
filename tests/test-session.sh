@@ -78,6 +78,22 @@ else
 fi
 
 # =================================================================================================
+CASE="dual-screen boards"
+# The second panel (device-env QFORGE_SECONDARY_CONNECTOR) becomes gamescope's second output
+# (patches/0040). Without the guard a single-panel board would pass a bare --secondary-output and
+# gamescope would take the next argument as the connector name.
+if grep -Fq 'if [ -n "${QFORGE_SECONDARY_CONNECTOR:-}" ]; then' "$SESSION" &&
+   grep -Fq 'GS_ARGS="$GS_ARGS --secondary-output $QFORGE_SECONDARY_CONNECTOR"' "$SESSION"; then
+  ok "--secondary-output is passed only when the board declares a second panel"
+else
+  bad "qforge-session does not pass --secondary-output under a QFORGE_SECONDARY_CONNECTOR guard"
+fi
+grep -Fq 'secondary-output' "$ROOT/packages/gamescope/patches/0040-drm-drive-a-secondary-output.patch" &&
+  grep -q '0040-drm-drive-a-secondary-output.patch' "$ROOT/packages/gamescope/source.pin" \
+  && ok "the gamescope build carries the flag (patch 0040 in source.pin)" \
+  || bad "--secondary-output is passed but patch 0040 is not in packages/gamescope/source.pin"
+
+# =================================================================================================
 CASE="environment for what gamescope hosts"
 for kv in QT_QPA_PLATFORM=xcb SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS=0 vk_xwayland_wait_ready=false; do
   k=${kv%%=*}; v=${kv#*=}

@@ -2,8 +2,9 @@
 
 **Complexity**: Large
 **Branch**: `feat/gamescope-dual-output` (off `main` at 479d84d)
-**Status** (2026-10-12): step 0 spikes done on the Thor Lite (results under step 0), no gamescope
-code yet. Supersedes the DRM-lease approach of the unmerged
+**Status** (2026-10-12): steps 0-2 done. Step 2 (patch 0040) HW-verified on the Thor Lite: bottom
+panel modeset on the boot console's CRTC 95 / plane 52, debug pattern 60.00 flips/s for 20 s
+(longest interval 16.68 ms), main output unaffected. Next: step 3. Supersedes the DRM-lease approach of the unmerged
 branch `feat/gamescope-ogc-lease` (1be3865, 103c24c, 4998658).
 **Targets**: AYN Thor Lite (top DSI-1, bottom DSI-2 1080x1240, `bottom_touchscreen`), AYN Thor
 (SM8550, panels the other way round: top DSI-2, bottom DSI-1 per ROCKNIX/Armada), AYANEO Pocket DS.
@@ -155,6 +156,12 @@ Line numbers below are in the patched 3.16.31 tree (`work/overlay-build/aarch64/
   `Present` composites into its own output image (step 4) and commits the secondary path.
   `GetCurrentConnector()` keeps meaning the main panel.
 - Debug hook: a convar that fills the secondary with a solid colour.
+- **Done 2026-10-12 (patch 0040).** First HW run: both panels black. The boot console leaves
+  DSI-2 lit on CRTC 95; taking CRTC 96 left 95 active with no connector (EINVAL on the secondary
+  modeset) and the main modeset then turned 95 off under DSI-2 (EINVAL on every main frame). Fix:
+  keep the CRTC/plane already driving the connector, else the last free ones, and refuse when the
+  main output would be left without one. Review fixes: re-modeset after a pause/forced modeset
+  (DirtyState -> drm_poll_state), finish_drm drops the objects before freeing them.
 - HW: Thor Lite bottom panel shows the colour while OGUI runs on the top; top frame pacing
   unchanged (mangoapp frametime graph); ACE/FIT/Max unchanged without the flag.
 

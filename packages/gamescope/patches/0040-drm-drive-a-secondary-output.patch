@@ -1,0 +1,603 @@
+From: qforge
+Subject: [PATCH] drm: drive a secondary output next to the main one
+
+Dual-screen boards (AYN Thor / Thor Lite, AYANEO Pocket DS) have a
+second internal panel. --secondary-output <connector> makes gamescope
+drive it as well, instead of leaving it dark.
+
+The secondary output owns its connector, a CRTC, a primary plane and
+its preferred mode. It keeps the CRTC and plane already driving the
+connector (the boot console leaves every panel lit; moving it would
+leave that CRTC active with no connector, which the kernel rejects),
+else takes the last free ones, and it is refused when the main output
+would be left without a CRTC or primary plane. The main output never
+touches them: its connector/CRTC/plane selection skips them, its
+modesets leave them alone, foreign-plane cleanup treats that CRTC as
+ours, and the plane is not registered with libliftoff (liftoff zeroes
+every plane it knows and does not use, on every apply).
+
+It is committed with its own non-blocking atomic requests, never
+together with the main output: the panels are not genlocked, and a
+joint commit would hold the main flip until the other panel's vblank.
+Its properties are written raw, not through CDRMAtomicProperty, whose
+pending/current state the main path commits and rolls back for every
+object at once. Its flip events carry their own user data, so the flip
+handler routes them before touching the main output's present context.
+A commit never waits: while a flip is pending the next one is refused.
+A pause (VT switch) or a forced modeset makes its next commit a modeset
+again, re-issued from the main output's state poll; finish_drm drops
+its objects before freeing them.
+
+Nothing paints it yet: it shows black. ConVar
+drm_debug_secondary_pattern flips it between two greys every vblank and
+logs the achieved flip rate, to exercise the commit path. Without
+--secondary-output nothing changes.
+
+(qforge: dual-screen boards, step 2 of the dual-output plan, 2026-10-12.
+HW spike: separate commits on the two CRTCs of the msm DPU flip
+independently, DSI-1 at 120 Hz and DSI-2 at 60 Hz, no EBUSY.)
+---
+diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
+index 4bd74fd..116d2ab 100644
+--- a/src/Backends/DRMBackend.cpp
++++ b/src/Backends/DRMBackend.cpp
+@@ -4,12 +4,14 @@
+ 
+ #include <sys/types.h>
+ #include <sys/stat.h>
++#include <sys/mman.h>
+ #include <fcntl.h>
+ #include <unistd.h>
+ #include <errno.h>
+ #include <stdlib.h>
+ #include <poll.h>
+ 
++#include <algorithm>
+ #include <atomic>
+ #include <cassert>
+ #include <cinttypes>
+@@ -182,6 +184,40 @@ using namespace std::literals;
+ 
+ struct drm_t g_DRM = {};
+ 
++// --secondary-output: a second panel driven next to the main output (dual-screen boards).
++// It owns its connector, CRTC and primary plane outright: the main output's connector and
++// plane selection, modesets, foreign-plane cleanup and libliftoff never touch them, and it is
++// committed with its own non-blocking atomic requests. Separate commits per CRTC, because the
++// two panels are not genlocked and a joint commit would hold the main flip until the other
++// panel's vblank. Its properties are written raw rather than through CDRMAtomicProperty, whose
++// pending/current tracking the main path commits and rolls back for every object at once.
++struct drm_secondary_t
++{
++	gamescope::CDRMConnector *pConnector = nullptr;
++	gamescope::CDRMCRTC *pCRTC = nullptr;
++	gamescope::CDRMPlane *pPlane = nullptr;
++	drmModeModeInfo mode = {};
++	uint32_t uModeBlobId = 0;
++
++	// Commits come from more than one thread (the debug pattern flips from the
++	// flip handler thread), so everything below is guarded by this.
++	std::mutex mutCommit;
++	bool bModeSet = false;
++	bool bFlipPending = false;
++	uint32_t uFailedCommits = 0;
++
++	// Until the compositor paints this output: [0] black, and two greys one step
++	// apart that drm_debug_secondary_pattern flips between every vblank.
++	uint32_t uDebugFbIds[3] = {};
++	uint32_t uDebugFb = 0;
++
++	uint64_t ulPatternFlips = 0;
++	uint64_t ulPatternStart = 0;
++	uint64_t ulLastVBlank = 0;
++	uint64_t ulMaxInterval = 0;
++};
++static drm_secondary_t g_DRMSecondary;
++
+ // Flip handler thread control. Keep the thread object global so we
+ // can join it during shutdown instead of detaching and risking the
+ // thread still using the DRM fd while we clean up.
+@@ -670,6 +706,9 @@ static gamescope::CDRMCRTC *find_crtc_for_connector( struct drm_t *drm, gamescop
+ {
+ 	for ( std::unique_ptr< gamescope::CDRMCRTC > &pCRTC : drm->crtcs )
+ 	{
++		if ( pCRTC.get() == g_DRMSecondary.pCRTC )
++			continue;
++
+ 		if ( pConnector->GetPossibleCRTCMask() & pCRTC->GetCRTCMask() )
+ 			return pCRTC.get();
+ 	}
+@@ -744,6 +783,9 @@ static gamescope::CDRMPlane *find_primary_plane(struct drm_t *drm)
+ 
+ 	for ( std::unique_ptr< gamescope::CDRMPlane > &pPlane : drm->planes )
+ 	{
++		if ( pPlane.get() == g_DRMSecondary.pPlane )
++			continue;
++
+ 		if ( pPlane->GetModePlane()->possible_crtcs & drm->pCRTC->GetCRTCMask() )
+ 		{
+ 			if ( pPlane->GetProperties().type->GetCurrentValue() == DRM_PLANE_TYPE_PRIMARY )
+@@ -759,6 +801,9 @@ static gamescope::CDRMPlane *find_any_primary_plane(struct drm_t *drm)
+ {
+ 	for ( std::unique_ptr< gamescope::CDRMPlane > &pPlane : drm->planes )
+ 	{
++		if ( pPlane.get() == g_DRMSecondary.pPlane )
++			continue;
++
+ 		if ( pPlane->GetProperties().type->GetCurrentValue() == DRM_PLANE_TYPE_PRIMARY )
+ 			return pPlane.get();
+ 	}
+@@ -783,9 +828,300 @@ static bool have_overlay_planes(struct drm_t *drm)
+ 	return false;
+ }
+ 
++static void OnSecondaryPatternChanged( gamescope::ConVar<bool> & );
++gamescope::ConVar<bool> cv_drm_debug_secondary_pattern( "drm_debug_secondary_pattern", false, "Flip the secondary output between two greys every vblank and log its flip rate.", OnSecondaryPatternChanged );
++
++// Puts uFbId on the secondary output with a non-blocking flip; the first one also modesets
++// it. Fails while the previous flip is pending: never waits, so a slow panel cannot hold up
++// the main output. Caller holds g_DRMSecondary.mutCommit.
++static bool drm_secondary_commit_locked( struct drm_t *drm, uint32_t uFbId )
++{
++	drm_secondary_t &sec = g_DRMSecondary;
++	if ( !sec.pConnector || sec.bFlipPending || drm->paused )
++		return false;
++
++	drmModeAtomicReq *req = drmModeAtomicAlloc();
++	defer( drmModeAtomicFree( req ) );
++
++	auto add = [ req ]( uint32_t uObjectId, const std::optional<gamescope::CDRMAtomicProperty> &oProperty, uint64_t ulValue )
++	{
++		if ( oProperty )
++			drmModeAtomicAddProperty( req, uObjectId, oProperty->GetPropertyId(), ulValue );
++	};
++
++	uint32_t uFlags = DRM_MODE_ATOMIC_NONBLOCK | DRM_MODE_PAGE_FLIP_EVENT;
++	const uint32_t uCRTCId = sec.pCRTC->GetObjectId();
++	const auto &crtcProps = sec.pCRTC->GetProperties();
++	if ( !sec.bModeSet )
++	{
++		uFlags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
++		add( sec.pConnector->GetObjectId(), sec.pConnector->GetProperties().CRTC_ID, uCRTCId );
++		add( uCRTCId, crtcProps.ACTIVE, 1 );
++		add( uCRTCId, crtcProps.MODE_ID, sec.uModeBlobId );
++		// No colour management on this output yet: drop whatever a previous DRM master left.
++		add( uCRTCId, crtcProps.GAMMA_LUT, 0 );
++		add( uCRTCId, crtcProps.DEGAMMA_LUT, 0 );
++		add( uCRTCId, crtcProps.DPU_3D_LUT, 0 );
++		add( uCRTCId, crtcProps.CTM, 0 );
++		add( uCRTCId, crtcProps.VRR_ENABLED, 0 );
++	}
++
++	const uint32_t uPlaneId = sec.pPlane->GetObjectId();
++	const auto &planeProps = sec.pPlane->GetProperties();
++	add( uPlaneId, planeProps.FB_ID, uFbId );
++	add( uPlaneId, planeProps.CRTC_ID, uCRTCId );
++	add( uPlaneId, planeProps.SRC_X, 0 );
++	add( uPlaneId, planeProps.SRC_Y, 0 );
++	add( uPlaneId, planeProps.SRC_W, uint64_t( sec.mode.hdisplay ) << 16 );
++	add( uPlaneId, planeProps.SRC_H, uint64_t( sec.mode.vdisplay ) << 16 );
++	add( uPlaneId, planeProps.CRTC_X, 0 );
++	add( uPlaneId, planeProps.CRTC_Y, 0 );
++	add( uPlaneId, planeProps.CRTC_W, sec.mode.hdisplay );
++	add( uPlaneId, planeProps.CRTC_H, sec.mode.vdisplay );
++	add( uPlaneId, planeProps.rotation, DRM_MODE_ROTATE_0 );
++	add( uPlaneId, planeProps.alpha, 0xFFFF );
++
++	int ret = drmModeAtomicCommit( drm->fd, req, uFlags, &g_DRMSecondary );
++	if ( ret != 0 )
++	{
++		// -EACCES: VT-switched away. Log the first failure and then every 600th, a
++		// rejected flip would otherwise repeat every frame.
++		if ( ret != -EACCES && sec.uFailedCommits++ % 600 == 0 )
++			drm_log.errorf( "secondary output %s: commit failed: %s (%u so far)", sec.pConnector->GetName(), strerror( -ret ), sec.uFailedCommits );
++		return false;
++	}
++
++	if ( !sec.bModeSet )
++		drm_log.infof( "secondary output %s: modeset %ux%u@%u on CRTC %u, plane %u", sec.pConnector->GetName(),
++			sec.mode.hdisplay, sec.mode.vdisplay, sec.mode.vrefresh, uCRTCId, uPlaneId );
++
++	sec.bModeSet = true;
++	sec.bFlipPending = true;
++	return true;
++}
++
++// Until the compositor paints this output it shows black, or the debug pattern.
++static void drm_secondary_show_debug_fb_locked( struct drm_t *drm )
++{
++	drm_secondary_t &sec = g_DRMSecondary;
++	uint32_t uNext = cv_drm_debug_secondary_pattern ? ( sec.uDebugFb == 1 ? 2 : 1 ) : 0;
++	if ( sec.bModeSet && uNext == sec.uDebugFb )
++		return;
++
++	if ( drm_secondary_commit_locked( drm, sec.uDebugFbIds[ uNext ] ) )
++		sec.uDebugFb = uNext;
++}
++
++// After a VT switch (another DRM master may have changed everything) or a forced modeset, the
++// next commit modesets again. A flip pending across the pause may never report back.
++static void drm_secondary_needs_modeset()
++{
++	std::scoped_lock lock{ g_DRMSecondary.mutCommit };
++	g_DRMSecondary.bModeSet = false;
++	g_DRMSecondary.bFlipPending = false;
++}
++
++// Called with the main output's state polls: (re)shows the output after a modeset request or a
++// failed commit, once the session is active.
++static void drm_secondary_refresh( struct drm_t *drm )
++{
++	std::scoped_lock lock{ g_DRMSecondary.mutCommit };
++	drm_secondary_show_debug_fb_locked( drm );
++}
++
++static void OnSecondaryPatternChanged( gamescope::ConVar<bool> & )
++{
++	std::scoped_lock lock{ g_DRMSecondary.mutCommit };
++	g_DRMSecondary.ulPatternFlips = 0;
++	g_DRMSecondary.ulMaxInterval = 0;
++	drm_secondary_show_debug_fb_locked( &g_DRM );
++}
++
++static void drm_secondary_page_flip( uint64_t ulVBlankTime )
++{
++	drm_secondary_t &sec = g_DRMSecondary;
++	std::scoped_lock lock{ sec.mutCommit };
++	sec.bFlipPending = false;
++
++	if ( cv_drm_debug_secondary_pattern )
++	{
++		if ( sec.ulPatternFlips++ == 0 )
++			sec.ulPatternStart = ulVBlankTime;
++		else
++			sec.ulMaxInterval = std::max( sec.ulMaxInterval, ulVBlankTime - sec.ulLastVBlank );
++
++		if ( sec.ulPatternFlips % 600 == 0 )
++		{
++			const double flSeconds = double( ulVBlankTime - sec.ulPatternStart ) / 1'000'000'000.0;
++			drm_log.infof( "secondary output pattern: %" PRIu64 " flips in %.1f s (%.2f/s), longest interval %.2f ms",
++				sec.ulPatternFlips, flSeconds, double( sec.ulPatternFlips - 1 ) / flSeconds, double( sec.ulMaxInterval ) / 1'000'000.0 );
++		}
++	}
++	sec.ulLastVBlank = ulVBlankTime;
++
++	drm_secondary_show_debug_fb_locked( &g_DRM );
++}
++
++static bool drm_secondary_create_debug_fb( struct drm_t *drm, uint32_t uColor, uint32_t *pFbId )
++{
++	const drmModeModeInfo &mode = g_DRMSecondary.mode;
++	uint32_t uHandle = 0, uPitch = 0;
++	uint64_t ulSize = 0, ulOffset = 0;
++	if ( drmModeCreateDumbBuffer( drm->fd, mode.hdisplay, mode.vdisplay, 32, 0, &uHandle, &uPitch, &ulSize ) != 0 )
++		return false;
++
++	bool bOk = drmModeMapDumbBuffer( drm->fd, uHandle, &ulOffset ) == 0;
++	void *pData = bOk ? mmap( nullptr, ulSize, PROT_WRITE, MAP_SHARED, drm->fd, ulOffset ) : MAP_FAILED;
++	bOk = pData != MAP_FAILED;
++	if ( bOk )
++	{
++		for ( uint32_t y = 0; y < mode.vdisplay; y++ )
++			std::fill_n( reinterpret_cast<uint32_t *>( static_cast<uint8_t *>( pData ) + y * uPitch ), mode.hdisplay, uColor );
++		munmap( pData, ulSize );
++
++		uint32_t uHandles[4] = { uHandle }, uPitches[4] = { uPitch }, uOffsets[4] = {};
++		bOk = drmModeAddFB2( drm->fd, mode.hdisplay, mode.vdisplay, DRM_FORMAT_XRGB8888, uHandles, uPitches, uOffsets, pFbId, 0 ) == 0;
++	}
++
++	// The FB keeps the buffer alive.
++	drmModeDestroyDumbBuffer( drm->fd, uHandle );
++	return bOk;
++}
++
++// Claims the --secondary-output connector, a CRTC and primary plane for it, and its preferred
++// mode. Runs before libliftoff learns the planes, so liftoff never gets this one. Any failure
++// leaves the session on one output.
++static void setup_secondary_output( struct drm_t *drm )
++{
++	drm_secondary_t &sec = g_DRMSecondary;
++	if ( !g_sSecondaryOutputName || !*g_sSecondaryOutputName )
++		return;
++
++	auto fail = [ &sec ]( const char *pszWhy )
++	{
++		drm_log.errorf( "secondary output %s: %s, running with one output", g_sSecondaryOutputName, pszWhy );
++		sec.pConnector = nullptr;
++		sec.pCRTC = nullptr;
++		sec.pPlane = nullptr;
++	};
++
++	for ( auto &iter : drm->connectors )
++	{
++		if ( strcmp( iter.second.GetName(), g_sSecondaryOutputName ) == 0 )
++			sec.pConnector = &iter.second;
++	}
++	if ( !sec.pConnector || sec.pConnector->GetModeConnector()->connection != DRM_MODE_CONNECTED )
++		return fail( "no such connected connector" );
++
++	// Keep the CRTC already driving this connector (the boot console leaves every panel lit).
++	// Moving the connector to another CRTC leaves that one active with no connector, which the
++	// kernel rejects, and the main output's first modeset would turn it off under the connector.
++	// Otherwise take the last CRTC no other connector uses, so the main output keeps the first.
++	const uint64_t ulCurrentCRTCId = sec.pConnector->GetProperties().CRTC_ID->GetCurrentValue();
++	auto crtcUsedByOther = [ & ]( const gamescope::CDRMCRTC *pCRTC )
++	{
++		for ( auto &iter : drm->connectors )
++		{
++			if ( &iter.second != sec.pConnector && iter.second.GetProperties().CRTC_ID->GetCurrentValue() == pCRTC->GetObjectId() )
++				return true;
++		}
++		return false;
++	};
++	for ( std::unique_ptr< gamescope::CDRMCRTC > &pCRTC : drm->crtcs )
++	{
++		if ( pCRTC->GetObjectId() == ulCurrentCRTCId && ( sec.pConnector->GetPossibleCRTCMask() & pCRTC->GetCRTCMask() ) )
++			sec.pCRTC = pCRTC.get();
++	}
++	for ( auto iter = drm->crtcs.rbegin(); iter != drm->crtcs.rend() && !sec.pCRTC; iter++ )
++	{
++		if ( ( sec.pConnector->GetPossibleCRTCMask() & (*iter)->GetCRTCMask() ) && !crtcUsedByOther( iter->get() ) )
++			sec.pCRTC = iter->get();
++	}
++	if ( !sec.pCRTC )
++		return fail( "no free CRTC" );
++
++	// Same for the plane: the primary plane already on that CRTC, else the last free one.
++	auto isPrimaryFor = [ & ]( const gamescope::CDRMPlane *pPlane )
++	{
++		return ( pPlane->GetModePlane()->possible_crtcs & sec.pCRTC->GetCRTCMask() ) &&
++			pPlane->GetProperties().type->GetCurrentValue() == DRM_PLANE_TYPE_PRIMARY;
++	};
++	for ( std::unique_ptr< gamescope::CDRMPlane > &pPlane : drm->planes )
++	{
++		if ( isPrimaryFor( pPlane.get() ) && pPlane->GetModePlane()->crtc_id == sec.pCRTC->GetObjectId() )
++			sec.pPlane = pPlane.get();
++	}
++	for ( auto iter = drm->planes.rbegin(); iter != drm->planes.rend() && !sec.pPlane; iter++ )
++	{
++		const uint32_t uPlaneCRTCId = (*iter)->GetModePlane()->crtc_id;
++		if ( isPrimaryFor( iter->get() ) && ( uPlaneCRTCId == 0 || uPlaneCRTCId == sec.pCRTC->GetObjectId() ) )
++			sec.pPlane = iter->get();
++	}
++	if ( !sec.pPlane )
++		return fail( "no free primary plane" );
++
++	// Never at the main output's expense: some other connected connector must keep a CRTC and a
++	// primary plane, or gamescope would not start at all.
++	bool bMainKeepsAnOutput = false;
++	for ( auto &iter : drm->connectors )
++	{
++		gamescope::CDRMConnector *pOther = &iter.second;
++		if ( pOther == sec.pConnector || pOther->GetModeConnector()->connection != DRM_MODE_CONNECTED )
++			continue;
++
++		for ( std::unique_ptr< gamescope::CDRMCRTC > &pCRTC : drm->crtcs )
++		{
++			if ( pCRTC.get() == sec.pCRTC || !( pOther->GetPossibleCRTCMask() & pCRTC->GetCRTCMask() ) )
++				continue;
++
++			for ( std::unique_ptr< gamescope::CDRMPlane > &pPlane : drm->planes )
++			{
++				if ( pPlane.get() != sec.pPlane && ( pPlane->GetModePlane()->possible_crtcs & pCRTC->GetCRTCMask() ) &&
++					 pPlane->GetProperties().type->GetCurrentValue() == DRM_PLANE_TYPE_PRIMARY )
++					bMainKeepsAnOutput = true;
++			}
++		}
++	}
++	if ( !bMainKeepsAnOutput )
++		return fail( "the main output would have no CRTC or primary plane left" );
++
++	const drmModeConnector *pModeConnector = sec.pConnector->GetModeConnector();
++	const drmModeModeInfo *pMode = nullptr;
++	for ( int i = 0; i < pModeConnector->count_modes && !pMode; i++ )
++	{
++		if ( pModeConnector->modes[i].type & DRM_MODE_TYPE_PREFERRED )
++			pMode = &pModeConnector->modes[i];
++	}
++	if ( !pMode && pModeConnector->count_modes > 0 )
++		pMode = &pModeConnector->modes[0];
++	if ( !pMode )
++		return fail( "no mode" );
++	sec.mode = *pMode;
++
++	if ( drmModeCreatePropertyBlob( drm->fd, &sec.mode, sizeof( sec.mode ), &sec.uModeBlobId ) != 0 )
++		return fail( "cannot create its mode blob" );
++
++	const uint32_t uDebugColors[3] = { 0x00000000, 0x00303030, 0x00323232 };
++	for ( int i = 0; i < 3; i++ )
++	{
++		if ( !drm_secondary_create_debug_fb( drm, uDebugColors[i], &sec.uDebugFbIds[i] ) )
++			return fail( "cannot create its framebuffers" );
++	}
++
++	drm_log.infof( "secondary output %s: CRTC %u, plane %u, %ux%u@%u", sec.pConnector->GetName(),
++		sec.pCRTC->GetObjectId(), sec.pPlane->GetObjectId(), sec.mode.hdisplay, sec.mode.vdisplay, sec.mode.vrefresh );
++}
++
+ extern void mangoapp_output_update( uint64_t vblanktime );
+ static void page_flip_handler(int fd, unsigned int frame, unsigned int sec, unsigned int usec, unsigned int crtc_id, void *data)
+ {
++	// The secondary output's flips carry its own state, not a DRMPresentCtx.
++	if ( data == &g_DRMSecondary )
++	{
++		drm_secondary_page_flip( sec * 1'000'000'000lu + usec * 1'000lu );
++		return;
++	}
++
+ 	DRMPresentCtx *pCtx = reinterpret_cast<DRMPresentCtx *>( data );
+ 
+ 	// Make this const when we move into CDRMBackend.
+@@ -930,6 +1266,13 @@ static bool refresh_state( drm_t *drm )
+ 				drm->pConnector = nullptr;
+ 			}
+ 
++			if ( g_DRMSecondary.pConnector == pConnector )
++			{
++				drm_log.infof( "Secondary output '%s' disappeared.", pConnector->GetName() );
++				std::scoped_lock lock{ g_DRMSecondary.mutCommit };
++				g_DRMSecondary.pConnector = nullptr;
++			}
++
+ 			iter = drm->connectors.erase( iter );
+ 		}
+ 		else
+@@ -1334,6 +1677,9 @@ static bool setup_best_connector(struct drm_t *drm, bool force, bool initial)
+ 		if ( pConnector->GetModeConnector()->connection != DRM_MODE_CONNECTED )
+ 			continue;
+ 
++		if ( pConnector == g_DRMSecondary.pConnector )
++			continue;
++
+ 		if ( g_bForceInternal && pConnector->GetScreenType() == gamescope::GAMESCOPE_SCREEN_TYPE_EXTERNAL )
+ 			continue;
+ 
+@@ -1603,11 +1949,21 @@ bool init_drm(struct drm_t *drm, int width, int height, int refresh)
+ 		return false;
+ 	}
+ 
++	setup_secondary_output( drm );
++
+ 	drm->lo_device = liftoff_device_create( drm->fd );
+ 	if ( drm->lo_device == nullptr )
+ 		return false;
+-	if ( liftoff_device_register_all_planes( drm->lo_device ) < 0 )
+-		return false;
++	// Every plane but the secondary output's: liftoff zeroes FB_ID/CRTC_ID of each plane it
++	// knows and does not use, on every apply.
++	for ( std::unique_ptr< gamescope::CDRMPlane > &pPlane : drm->planes )
++	{
++		if ( pPlane.get() == g_DRMSecondary.pPlane )
++			continue;
++
++		if ( !liftoff_plane_create( drm->lo_device, pPlane->GetObjectId() ) )
++			return false;
++	}
+ 	
+ 	drm_log.infof("Connectors:");
+ 	for ( auto &iter : drm->connectors )
+@@ -1882,6 +2238,14 @@ void finish_drm(struct drm_t *drm)
+ 	drm->sdr_static_metadata = nullptr;
+ 	drm->current = drm_t::drm_state_t{};
+ 	drm->pending = drm_t::drm_state_t{};
++	{
++		// The flip handler thread still runs: it must not commit on objects freed below.
++		std::scoped_lock lock{ g_DRMSecondary.mutCommit };
++		g_DRMSecondary.pConnector = nullptr;
++		g_DRMSecondary.pCRTC = nullptr;
++		g_DRMSecondary.pPlane = nullptr;
++	}
++
+ 	drm->planes.clear();
+ 	drm->crtcs.clear();
+ 	drm->connectors.clear();
+@@ -3276,6 +3640,9 @@ static void drm_unlink_foreign_planes( struct drm_t *drm )
+ 		if ( uCRTCId == 0 || uCRTCId == uOurCRTCId )
+ 			continue;
+ 
++		if ( g_DRMSecondary.pCRTC && uCRTCId == g_DRMSecondary.pCRTC->GetObjectId() )
++			continue;
++
+ 		// A CRTC that still has a mode is either disabled by the modeset below, or
+ 		// would have amdgpu reject us for taking its primary plane away.
+ 		drmModeCrtc *pKernelCRTC = drmModeGetCrtc( drm->fd, uCRTCId );
+@@ -3436,6 +3803,10 @@ int drm_prepare( struct drm_t *drm, bool async, const struct FrameInfo_t *frameI
+ 			if ( pConnector->GetProperties().CRTC_ID->GetCurrentValue() == 0 )
+ 				continue;
+ 
++			// Committed on its own, see drm_secondary_t.
++			if ( pConnector == g_DRMSecondary.pConnector )
++				continue;
++
+ 			pConnector->GetProperties().CRTC_ID->SetPendingValue( drm->req, 0, bForceInRequest );
+ 
+ 			if ( pConnector->GetProperties().Colorspace )
+@@ -3458,6 +3829,9 @@ int drm_prepare( struct drm_t *drm, bool async, const struct FrameInfo_t *frameI
+ 			if ( pCRTC->GetProperties().ACTIVE->GetCurrentValue() == 0 )
+ 				continue;
+ 
++			if ( pCRTC.get() == g_DRMSecondary.pCRTC )
++				continue;
++
+ 			pCRTC->GetProperties().ACTIVE->SetPendingValue( drm->req, 0, bForceInRequest );
+ 			pCRTC->GetProperties().MODE_ID->SetPendingValue( drm->req, 0, bForceInRequest );
+ 
+@@ -3596,6 +3970,8 @@ bool drm_poll_state( struct drm_t *drm )
+ 
+ 	setup_best_connector(drm, out_of_date >= 2, false);
+ 
++	drm_secondary_refresh( drm );
++
+ 	return true;
+ }
+ 
+@@ -4224,6 +4600,11 @@ namespace gamescope
+ 				WritePatchedEdid( g_DRM.pConnector->GetRawEDID(), g_DRM.pConnector->GetHDRInfo(), g_bRotated );
+ 				WriteModeListFile( g_DRM.pConnector->GetModes() );
+ 			}
++
++			{
++				std::scoped_lock lock{ g_DRMSecondary.mutCommit };
++				drm_secondary_show_debug_fb_locked( &g_DRM );
++			}
+ 			return true;
+ 		}
+ 
+@@ -4701,6 +5082,8 @@ namespace gamescope
+ 				g_DRM.needs_modeset = true;
+ 			g_DRM.out_of_date = std::max<int>( g_DRM.out_of_date, bForce ? 2 : 1 );
+ 			g_DRM.paused = !wlsession_active();
++			if ( bForceModeset || g_DRM.paused )
++				drm_secondary_needs_modeset();
+ 		}
+ 
+ 		virtual bool PollState() override
+diff --git a/src/main.cpp b/src/main.cpp
+index 861523d..f4c4251 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -91,6 +91,7 @@ const struct option *gamescope_options = (struct option[]){
+ 	{ "disable-layers", no_argument, nullptr, 0 },
+ 	{ "debug-layers", no_argument, nullptr, 0 },
+ 	{ "prefer-output", required_argument, nullptr, 'O' },
++	{ "secondary-output", required_argument, nullptr, 0 },
+ 	{ "default-touch-mode", required_argument, nullptr, 0 },
+ 	{ "generate-drm-mode", required_argument, nullptr, 0 },
+ 	{ "immediate-flips", no_argument, nullptr, 0 },
+@@ -240,6 +241,7 @@ const char usage[] =
+ 	"\n"
+ 	"Embedded mode options:\n"
+ 	"  -O, --prefer-output            list of connectors in order of preference (ex: DP-1,DP-2,DP-3,HDMI-A-1)\n"
++	"  --secondary-output             drive this connector as a second output next to the main one (ex: DSI-2)\n"
+ 	"  --default-touch-mode           0: hover, 1: left, 2: right, 3: middle, 4: passthrough\n"
+ 	"  --generate-drm-mode            DRM mode generation algorithm (cvt, fixed)\n"
+ 	"  --immediate-flips              Enable immediate flips, may result in tearing\n"
+@@ -715,6 +717,7 @@ int g_nPreferredOutputWidth = 0;
+ int g_nPreferredOutputHeight = 0;
+ bool g_bExposeWayland = false;
+ const char *g_sOutputName = nullptr;
++const char *g_sSecondaryOutputName = nullptr;
+ bool g_bDebugLayers = false;
+ bool g_bForceDisableColorMgmt = false;
+ bool g_bRt = false;
+@@ -831,6 +834,8 @@ int main(int argc, char **argv)
+ 					g_bForceCompositionRotation = true;
+ 				} else if (strcmp(opt_name, "composite-graphics") == 0) {
+ 					g_bCompositeGraphics = true;
++				} else if (strcmp(opt_name, "secondary-output") == 0) {
++					g_sSecondaryOutputName = optarg;
+ 				} else if (strcmp(opt_name, "composite-blit") == 0) {
+ 					g_bCompositeBlit = true;
+ 				} else if (strcmp(opt_name, "force-orientation") == 0) {
+diff --git a/src/main.hpp b/src/main.hpp
+index a29f52f..2de1d36 100644
+--- a/src/main.hpp
++++ b/src/main.hpp
+@@ -40,6 +40,7 @@ extern bool g_bGrabbed;
+ 
+ extern float g_mouseSensitivity;
+ extern const char *g_sOutputName;
++extern const char *g_sSecondaryOutputName;
+ 
+ enum class GamescopeUpscaleFilter : uint32_t
+ {

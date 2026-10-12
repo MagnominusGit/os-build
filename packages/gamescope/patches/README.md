@@ -478,6 +478,20 @@ X: gamescope GPU submits zero in menu and game, total GPU time and fps unchanged
 on passed-through touches. Touch-driven warps are now synthetic and hide the cursor; a real mouse
 or trackpad shows it again. Air Y: taps still select cards, GAMESCOPE_CURSOR_VISIBLE_FEEDBACK stays 0.
 
+`0040` — **`--secondary-output <connector>`: a second panel next to the main one** (ours,
+2026-10-12; dual-screen boards, plan `.claude/plans/gamescope-dual-output.plan.md` step 2). The
+secondary output claims its connector, the CRTC and primary plane already driving it (else the
+last free ones; never the main output's last ones) and its preferred mode. Taking another CRTC
+than the boot console's was the first HW bug: that CRTC stayed active with no connector, so both
+the secondary modeset and every main-output modeset failed with EINVAL (both panels black, Thor
+Lite 2026-10-12). The main output's selection, modesets and foreign-plane cleanup skip these
+objects, and the plane is not registered with libliftoff (liftoff zeroes every plane it knows and
+does not use). It is committed with its own raw, non-blocking atomic requests (never jointly with
+the main output: the panels are not genlocked), re-modesets after a VT switch or forced modeset,
+and its flip events carry their own user data. It shows
+black until the compositor paints it (later patches); ConVar `drm_debug_secondary_pattern` flips
+it between two greys every vblank and logs the flip rate. No flag, no change.
+
 Drop the patch files here with those exact names (or rename and update `source.pin`'s
 `patches:` line). **Until a declared patch is present, `make overlay` / `make base` fail fast**
 with a clear "missing patch" message from `build-overlay.sh`.
