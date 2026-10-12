@@ -362,7 +362,7 @@ QFORGE_CCACHE ?= $(if $(CI),0,1)
 # ==============================================================================
 # Phony orchestration targets
 # ==============================================================================
-.PHONY: help all image toolchain kernel fw-linux fw-qcom base overlay verify-lock \
+.PHONY: help all image toolchain kernel fw-linux fw-qcom base overlay verify-lock check-hw-paths \
         rootfs relock installer installer-root relock-installer verify-image \
         initramfs splash plugin sigdefer gptk-interpose hidemenu steamcl grub sdcard verify-card test test-disk bundle sign-bundle publish-bundle \
         deploy clean clean-base clean-overlay clean-ccache distclean
@@ -433,6 +433,12 @@ verify-card: $(SDCARD) | $(BUILD_STAMP) ## Verify the built A/B card image (in c
 verify-lock: ## Check both locks' qforge rows against packages/ (host, seconds, no build)
 	bash packages/verify-lock-rows.sh
 
+# Every board profile's hardware-map pins (QFORGE_HW_*) against what its devicetree makes the
+# kernel register (tools/check-hw-paths.py). Reads the DTBs `make kernel` staged in out/dtbs; with
+# LINUX_SRC=<a Linux tree> it compiles kernel/dts/qcom against that tree instead, no build needed.
+check-hw-paths: ## Check every board's hardware-map pins against its DTB (out/dtbs, or LINUX_SRC=<tree>)
+	python3 tools/check-hw-paths.py $(if $(LINUX_SRC),--linux-src $(LINUX_SRC),--dtbs $(OUT)/dtbs)
+
 test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-bootctl.sh
 	bash $(TESTS_DIR)/test-post-install.sh
@@ -458,6 +464,7 @@ test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-coredump-limit.sh
 	bash $(TESTS_DIR)/test-fan-curve.sh
 	bash $(TESTS_DIR)/test-hw-map.sh
+	bash $(TESTS_DIR)/test-hw-dtb.sh
 	bash $(TESTS_DIR)/test-cpu-scheduler.sh
 	bash $(TESTS_DIR)/test-splash.sh
 	bash $(TESTS_DIR)/test-splash-status.sh

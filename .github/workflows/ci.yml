@@ -44,7 +44,9 @@ jobs:
       # without it: that our hand-rolled parts.env block is byte-identical to one GRUB's own tool
       # writes. The suites otherwise inherit the runner's PATH, which is exactly how a check ends up
       # asserting nothing on the only machine that runs it unattended. Install it so the case runs.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends grub-common
+      # device-tree-compiler for tests/test-hw-dtb.sh, which compiles fabricated devicetrees to
+      # check tools/check-hw-paths.py's naming rules; without dtc that half of the suite is skipped.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends grub-common device-tree-compiler
       # 354 checks over the update path: the initramfs READS the slot state, qforge-bootctl
       # WRITES it, and the post-install hook drives both while reformatting a partition. Pure
       # shell against temp-dir sandboxes — no build, no container, no root, no device.

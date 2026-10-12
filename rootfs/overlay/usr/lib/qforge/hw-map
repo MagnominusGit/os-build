@@ -8,7 +8,9 @@
 # bq256xx-battery decoy that only knows charge_full_design; a Pocket S2 names things differently
 # again). The board profile (/usr/lib/qforge/devices/<id>.conf, via device-env) may pin any of
 # them with QFORGE_HW_*; anything left empty is detected here by the rules below, which are the
-# ones that hold on every board we have seen. Either way the result is the same tree:
+# ones that hold on every board we have seen. A pinned name the board turns out not to have (a
+# driver that renamed its node, a DTS that changed) is logged and detected instead, so a stale pin
+# costs a warning, not the link. Either way the result is the same tree:
 #
 #   /run/qforge/hw/battery        -> /sys/class/power_supply/<battery>     (capacity, status, ...)
 #   /run/qforge/hw/charger        -> /sys/class/power_supply/<charger>     (online, status)
@@ -19,6 +21,8 @@
 #   /run/qforge/hw/fan            -> /sys/class/hwmon/hwmonN               (fan1_input rpm, pwm1)
 #   /run/qforge/hw/gpu            -> the GPU's devfreq directory            (cur_freq, min/max_freq)
 #   /run/qforge/hw/cpu            -> /sys/devices/system/cpu                (cpufreq/policy*/...)
+#   /run/qforge/hw/soc            -> /sys/devices/soc0                      (machine, family, soc_id,
+#                                                                            revision, serial_number)
 #   /run/qforge/hw/leds/<group>/NN -> /sys/class/leds/<led>, NN = 01.. in natural order
 #   /run/qforge/hw/hw.env         what was resolved, as KEY=value (sourceable; QFORGE_HW_*)
 #
@@ -61,13 +65,18 @@ link() { # link <name-under-tree> <target-dir>: only when the target exists
 }
 resolved=()
 note() { resolved+=("$1=$2"); }
+pin_missing() { # pin_missing <field> <value>: a pinned node that is not on this board
+    printf 'qforge hw-map: %s=%s is not on this board -- detecting instead\n' "$1" "$2" >&2
+}
 
 # --- battery: the profile's, else the first power_supply of type Battery that reports a capacity
 # (a charger's companion "battery" node that knows only charge_full_design is not a battery) ----
 bat=""
 if [ -n "$QFORGE_HW_BATTERY" ]; then
-    bat="$SYS/class/power_supply/$QFORGE_HW_BATTERY"
-else
+    if [ -d "$SYS/class/power_supply/$QFORGE_HW_BATTERY" ]; then bat="$SYS/class/power_supply/$QFORGE_HW_BATTERY"
+    else pin_missing QFORGE_HW_BATTERY "$QFORGE_HW_BATTERY"; fi
+fi
+if [ -z "$bat" ]; then
     for p in "$SYS"/class/power_supply/*/; do
         p=${p%/}; [ -d "$p" ] || continue
         [ "$(attr "$p" type)" = Battery ] || continue
@@ -81,8 +90,10 @@ fi
 # also reports a charging `status` (the charger IC over a bare Type-C source) ---------------------
 chg=""
 if [ -n "$QFORGE_HW_CHARGER" ]; then
-    chg="$SYS/class/power_supply/$QFORGE_HW_CHARGER"
-else
+    if [ -d "$SYS/class/power_supply/$QFORGE_HW_CHARGER" ]; then chg="$SYS/class/power_supply/$QFORGE_HW_CHARGER"
+    else pin_missing QFORGE_HW_CHARGER "$QFORGE_HW_CHARGER"; fi
+fi
+if [ -z "$chg" ]; then
     first=""
     for p in "$SYS"/class/power_supply/*/; do
         p=${p%/}; [ -d "$p" ] || continue
@@ -98,8 +109,10 @@ fi
 # --- backlight: the profile's, else the first one --------------------------------------------
 bl=""
 if [ -n "$QFORGE_HW_BACKLIGHT" ]; then
-    bl="$SYS/class/backlight/$QFORGE_HW_BACKLIGHT"
-else
+    if [ -d "$SYS/class/backlight/$QFORGE_HW_BACKLIGHT" ]; then bl="$SYS/class/backlight/$QFORGE_HW_BACKLIGHT"
+    else pin_missing QFORGE_HW_BACKLIGHT "$QFORGE_HW_BACKLIGHT"; fi
+fi
+if [ -z "$bl" ]; then
     for p in "$SYS"/class/backlight/*/; do p=${p%/}; [ -d "$p" ] && { bl=$p; break; }; done
 fi
 [ -n "$bl" ] && link backlight "$bl" && note QFORGE_HW_BACKLIGHT "$(basename "$bl")" || note QFORGE_HW_BACKLIGHT ""
@@ -117,13 +130,20 @@ for z in $zones; do
 done
 thermal_role() { # thermal_role <role> <profile type> <regex over the type name>
     local role=$1 want=$2 re=$3 z="" t ty
-    for t in $zones; do
-        [ -d "$t" ] || continue
-        ty=$(attr "$t" type)
-        if [ -n "$want" ]; then [ "$ty" = "$want" ] && { z=$t; break; }
-        elif [[ "$ty" =~ $re ]]; then z=$t; break; fi
-    done
     local key; key="QFORGE_HW_THERMAL_$(printf '%s' "$role" | tr '[:lower:]' '[:upper:]')"
+    if [ -n "$want" ]; then
+        for t in $zones; do
+            [ -d "$t" ] && [ "$(attr "$t" type)" = "$want" ] && { z=$t; break; }
+        done
+        [ -n "$z" ] || pin_missing "$key" "$want"
+    fi
+    if [ -z "$z" ]; then
+        for t in $zones; do
+            [ -d "$t" ] || continue
+            ty=$(attr "$t" type)
+            [[ "$ty" =~ $re ]] && { z=$t; break; }
+        done
+    fi
     if [ -n "$z" ] && link "thermal/$role" "$z"; then note "$key" "$(attr "$z" type)"
     else note "$key" ""; fi
 }
@@ -132,25 +152,38 @@ thermal_role gpu     "$QFORGE_HW_THERMAL_GPU"     '^gpu'
 thermal_role battery "$QFORGE_HW_THERMAL_BATTERY" '^batt'
 thermal_role skin    "$QFORGE_HW_THERMAL_SKIN"    '(skin|xo-therm|quiet|case)'
 # --- fan: the profile's hwmon name, else the first hwmon with a fan1_input or a pwm1 ---------
-# (a pwm-fan without a tachometer -- the Air X/Y -- has pwm1 and no fan1_input)
+# (a pwm-fan without a tachometer -- the SM8250 boards, the Air X/Y -- has pwm1 and no fan1_input)
 fan=""
-for h in "$SYS"/class/hwmon/hwmon*/; do
-    h=${h%/}; [ -d "$h" ] || continue
-    if [ -n "$QFORGE_HW_FAN" ]; then
+if [ -n "$QFORGE_HW_FAN" ]; then
+    for h in "$SYS"/class/hwmon/hwmon*/; do
+        h=${h%/}; [ -d "$h" ] || continue
         [ "$(attr "$h" name)" = "$QFORGE_HW_FAN" ] && { fan=$h; break; }
-    elif [ -r "$h/fan1_input" ] || [ -e "$h/pwm1" ]; then fan=$h; break; fi
-done
+    done
+    [ -n "$fan" ] || pin_missing QFORGE_HW_FAN "$QFORGE_HW_FAN"
+fi
+if [ -z "$fan" ]; then
+    for h in "$SYS"/class/hwmon/hwmon*/; do
+        h=${h%/}; [ -d "$h" ] || continue
+        if [ -r "$h/fan1_input" ] || [ -e "$h/pwm1" ]; then fan=$h; break; fi
+    done
+fi
 [ -n "$fan" ] && link fan "$fan" && note QFORGE_HW_FAN "$(attr "$fan" name)" || note QFORGE_HW_FAN ""
 
 # --- gpu devfreq + cpu ------------------------------------------------------------------------
 gpu=""
 if [ -n "$QFORGE_HW_GPU_DEVFREQ" ]; then
-    gpu="$SYS/class/devfreq/$QFORGE_HW_GPU_DEVFREQ"
-else
+    if [ -d "$SYS/class/devfreq/$QFORGE_HW_GPU_DEVFREQ" ]; then gpu="$SYS/class/devfreq/$QFORGE_HW_GPU_DEVFREQ"
+    else pin_missing QFORGE_HW_GPU_DEVFREQ "$QFORGE_HW_GPU_DEVFREQ"; fi
+fi
+if [ -z "$gpu" ]; then
     for d in "$SYS"/class/devfreq/*gpu*/; do d=${d%/}; [ -d "$d" ] && { gpu=$d; break; }; done
 fi
 [ -n "$gpu" ] && link gpu "$gpu" && note QFORGE_HW_GPU "$(basename "$gpu")" || note QFORGE_HW_GPU ""
 link cpu "$SYS/devices/system/cpu" || true
+
+# --- soc: the SoC's identity from Qualcomm socinfo (machine "SM8550", family, soc_id, revision,
+# serial_number -- the per-unit number ROCKNIX reads as the device serial) -----------------------
+link soc "$SYS/devices/soc0" && note QFORGE_HW_SOC "$(attr "$SYS/devices/soc0" machine)" || note QFORGE_HW_SOC ""
 
 # --- LEDs: "group=glob[,glob]..." from the profile; a lone power-led is the default group -----
 groups=$QFORGE_HW_LED_GROUPS
@@ -166,7 +199,8 @@ for spec in $groups; do
             i=$((i+1)); link "leds/$role/$(printf '%02d' "$i")" "$SYS/class/leds/$l"
         done
     done
-    [ "$i" -gt 0 ] && summary="$summary${summary:+ }$role=$i"
+    if [ "$i" -gt 0 ]; then summary="$summary${summary:+ }$role=$i"
+    else printf 'qforge hw-map: LED group %s matched nothing (%s)\n' "$role" "$globs" >&2; fi
 done
 note QFORGE_HW_LED_GROUPS "$summary"
 
