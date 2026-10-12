@@ -49,10 +49,6 @@ sha256sums=('4b6c398806a1046e2256a685d592833de0f37b7245b8adc4797e1791f0e117ee'
             'a3850c34e48f23b7bc360d70f1e91700de2f8c60af003eda93e14182f8cf6af1'
             'e2797c85a2b617b2b35024566105f4d8e998ef576f0f96f7923abf3717d12e86')
 
-# qrtr is installed into this staging prefix first, so rmtfs and tqftpserv can build against it
-# within the same makepkg run; PKG_CONFIG_SYSROOT_DIR makes qrtr.pc's /usr paths resolve there.
-_stage="${srcdir}/stage"
-
 prepare() {
   local i
   for i in "${!sha256sums[@]}"; do
@@ -62,6 +58,13 @@ prepare() {
 }
 
 build() {
+  # qrtr is installed into this staging prefix first, so rmtfs and tqftpserv can build against it
+  # within the same makepkg run; PKG_CONFIG_SYSROOT_DIR makes qrtr.pc's /usr paths resolve there.
+  # Set HERE, not at file scope: makepkg sources the PKGBUILD before srcdir exists, so a top-level
+  # "${srcdir}/stage" is "/stage" -- writable only because the local build runs as root, and a
+  # Permission denied on the unprivileged CI runner.
+  local _stage="${srcdir}/stage"
+
   # 1. qmic: the QMI IDL compiler rmtfs's Makefile runs (qmic -k) to generate qmi_rmtfs.c.
   make -C "qmic-${_qmic}"
   export PATH="${srcdir}/qmic-${_qmic}:${PATH}"
