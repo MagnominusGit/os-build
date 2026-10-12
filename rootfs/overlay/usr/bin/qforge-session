@@ -127,6 +127,11 @@ fi
 # panel as its second output (packages/gamescope/patches/0040). Single-panel boards: no flag.
 if [ -n "${QFORGE_SECONDARY_CONNECTOR:-}" ]; then
   GS_ARGS="$GS_ARGS --secondary-output $QFORGE_SECONDARY_CONNECTOR"
+  # Its digitizer (device-env QFORGE_SECONDARY_TOUCHSCREEN, an input device name) drives the
+  # window on that panel (patches/0043).
+  if [ -n "${QFORGE_SECONDARY_TOUCHSCREEN:-}" ]; then
+    GS_ARGS="$GS_ARGS --secondary-touch-device $QFORGE_SECONDARY_TOUCHSCREEN"
+  fi
 fi
 
 # Seat access: let libseat AUTO-PICK its backend — inside our logind session it selects the

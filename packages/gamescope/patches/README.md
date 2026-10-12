@@ -508,10 +508,19 @@ TEST_ONLY commit); otherwise the frame is composited into one of three panel-siz
 `vulkan_composite` applying the panel's rotation to that override target (one unscaled layer: the
 composite-blit rotated copy). **The plane is never asked to rotate**: on SM8250, 90/270 planes go
 through the single offline SDE rotator of kernel patch 0385, which the main output already uses and
-which times jobs against one CRTC. The first build scanned the Thor Lite's bottom buffers out
-rotated and stalled the top (command-mode) panel: DPU "frame done timeout", garbage until a
-session restart. The backend holds the queued/visible FBs (client buffers stay locked while on
+which times jobs against one CRTC. (The top-panel stall first seen with a rotated bottom plane --
+DPU "frame done timeout", garbage until a session restart -- was the DPU handing an SSPP from one
+CRTC to the other while it was still fetching, and happened without rotation too: kernel patch
+0397.) The backend holds the queued/visible FBs (client buffers stay locked while on
 screen). No colour management on that panel; the main output's repaint/pacing state is untouched.
+
+`0043` — **the secondary touchscreen drives the secondary output** (ours, 2026-10-12; plan step
+5). `--secondary-touch-device <input name>` (Thor family: the DTS label, `bottom_touchscreen`)
+takes that digitizer off the main panel: its touches are rotated by the secondary panel's
+orientation, scaled to its logical size and always passed through to the window shown there,
+whose surface the compositor hands to wlserver. They never move the pointer or keyboard focus,
+and their ids are offset so the two digitizers never collide. Needs kernel patch 0397 on SM8250
+(two outputs committed independently).
 
 Drop the patch files here with those exact names (or rename and update `source.pin`'s
 `patches:` line). **Until a declared patch is present, `make overlay` / `make base` fail fast**

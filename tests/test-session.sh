@@ -88,6 +88,15 @@ if grep -Fq 'if [ -n "${QFORGE_SECONDARY_CONNECTOR:-}" ]; then' "$SESSION" &&
 else
   bad "qforge-session does not pass --secondary-output under a QFORGE_SECONDARY_CONNECTOR guard"
 fi
+if grep -Fq 'if [ -n "${QFORGE_SECONDARY_TOUCHSCREEN:-}" ]; then' "$SESSION" &&
+   grep -Fq 'GS_ARGS="$GS_ARGS --secondary-touch-device $QFORGE_SECONDARY_TOUCHSCREEN"' "$SESSION"; then
+  ok "--secondary-touch-device is passed only when the board names its second digitizer"
+else
+  bad "qforge-session does not pass --secondary-touch-device under a QFORGE_SECONDARY_TOUCHSCREEN guard"
+fi
+grep -q '0043-wlserver-route-the-secondary-touchscreen-to-the-secondary-output.patch' "$ROOT/packages/gamescope/source.pin" \
+  && ok "the gamescope build carries --secondary-touch-device (patch 0043 in source.pin)" \
+  || bad "--secondary-touch-device is passed but patch 0043 is not in packages/gamescope/source.pin"
 grep -Fq 'secondary-output' "$ROOT/packages/gamescope/patches/0040-drm-drive-a-secondary-output.patch" &&
   grep -q '0040-drm-drive-a-secondary-output.patch' "$ROOT/packages/gamescope/source.pin" \
   && ok "the gamescope build carries the flag (patch 0040 in source.pin)" \

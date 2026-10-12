@@ -1,0 +1,270 @@
+From: qforge
+Subject: [PATCH] wlserver: route the secondary touchscreen to the secondary output
+
+Dual-screen boards have a digitizer on each panel. gamescope tied every
+touchscreen on an I2C/SPI bus to "the" internal panel, so the bottom
+panel's touches landed on the main output's window, scaled to its size.
+
+--secondary-touch-device <input name> marks one touchscreen as the
+secondary output's (matched on the libinput device name; on the AYN
+Thor family the DTS label, e.g. bottom_touchscreen). Its touches are
+rotated by that panel's orientation, scaled to the secondary output's
+logical size (0041 sizes the window shown there to it) and always passed
+through to that window's surface, which the compositor hands to wlserver
+whenever the secondary focus or its surface changes, and wlserver drops
+when the surface goes. They never move the pointer, warp the cursor or
+change keyboard focus, so the game on the main output keeps its input,
+and their ids are offset so the two digitizers never share one. Other
+touchscreens keep the existing path untouched.
+
+(qforge: dual-screen boards, step 5 of the dual-output plan, 2026-10-12.)
+---
+diff --git a/src/main.cpp b/src/main.cpp
+index cc42704..38b17ca 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -93,6 +93,7 @@ const struct option *gamescope_options = (struct option[]){
+ 	{ "prefer-output", required_argument, nullptr, 'O' },
+ 	{ "secondary-output", required_argument, nullptr, 0 },
+ 	{ "secondary-window-title", required_argument, nullptr, 0 },
++	{ "secondary-touch-device", required_argument, nullptr, 0 },
+ 	{ "default-touch-mode", required_argument, nullptr, 0 },
+ 	{ "generate-drm-mode", required_argument, nullptr, 0 },
+ 	{ "immediate-flips", no_argument, nullptr, 0 },
+@@ -245,6 +246,7 @@ const char usage[] =
+ 	"  --secondary-output             drive this connector as a second output next to the main one (ex: DSI-2)\n"
+ 	"  --secondary-window-title       windows whose title matches this regex go to the secondary output\n"
+ 	"                                 (default: melonDS '[w2] ' and Azahar '| Secondary Window' windows)\n"
++	"  --secondary-touch-device       the touchscreen of the secondary output, by input device name (ex: bottom_touchscreen)\n"
+ 	"  --default-touch-mode           0: hover, 1: left, 2: right, 3: middle, 4: passthrough\n"
+ 	"  --generate-drm-mode            DRM mode generation algorithm (cvt, fixed)\n"
+ 	"  --immediate-flips              Enable immediate flips, may result in tearing\n"
+@@ -722,6 +724,7 @@ bool g_bExposeWayland = false;
+ const char *g_sOutputName = nullptr;
+ const char *g_sSecondaryOutputName = nullptr;
+ const char *g_sSecondaryWindowTitle = nullptr;
++const char *g_sSecondaryTouchDevice = nullptr;
+ bool g_bDebugLayers = false;
+ bool g_bForceDisableColorMgmt = false;
+ bool g_bRt = false;
+@@ -842,6 +845,8 @@ int main(int argc, char **argv)
+ 					g_sSecondaryOutputName = optarg;
+ 				} else if (strcmp(opt_name, "secondary-window-title") == 0) {
+ 					g_sSecondaryWindowTitle = optarg;
++				} else if (strcmp(opt_name, "secondary-touch-device") == 0) {
++					g_sSecondaryTouchDevice = optarg;
+ 				} else if (strcmp(opt_name, "composite-blit") == 0) {
+ 					g_bCompositeBlit = true;
+ 				} else if (strcmp(opt_name, "force-orientation") == 0) {
+diff --git a/src/main.hpp b/src/main.hpp
+index c4837af..8d1beeb 100644
+--- a/src/main.hpp
++++ b/src/main.hpp
+@@ -42,6 +42,7 @@ extern float g_mouseSensitivity;
+ extern const char *g_sOutputName;
+ extern const char *g_sSecondaryOutputName;
+ extern const char *g_sSecondaryWindowTitle;
++extern const char *g_sSecondaryTouchDevice;
+ 
+ enum class GamescopeUpscaleFilter : uint32_t
+ {
+diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
+index 88007b4..2366281 100644
+--- a/src/steamcompmgr.cpp
++++ b/src/steamcompmgr.cpp
+@@ -10931,6 +10931,24 @@ steamcompmgr_main(int argc, char **argv)
+ 		if ( g_bSecondaryOutput && g_SecondaryFocus.IsDirty() )
+ 			determine_and_apply_secondary_focus();
+ 
++		// The secondary touchscreen drives the window shown there. Its surface can arrive after
++		// the window maps, so check every pass; the lock is only taken on a change.
++		if ( g_bSecondaryOutput )
++		{
++			static const steamcompmgr_win_t *s_pSecondaryTouchWindow = nullptr;
++			static struct wlr_surface *s_pSecondaryTouchSurface = nullptr;
++			struct wlr_surface *pSurface = g_SecondaryFocus.focusWindow ? g_SecondaryFocus.focusWindow->main_surface() : nullptr;
++			if ( pSurface != s_pSecondaryTouchSurface || g_SecondaryFocus.focusWindow != s_pSecondaryTouchWindow )
++			{
++				s_pSecondaryTouchWindow = g_SecondaryFocus.focusWindow;
++				static constexpr GamescopePanelOrientation k_eRotationToOrientation[4] =
++					{ GAMESCOPE_PANEL_ORIENTATION_0, GAMESCOPE_PANEL_ORIENTATION_90, GAMESCOPE_PANEL_ORIENTATION_180, GAMESCOPE_PANEL_ORIENTATION_270 };
++				wlserver_set_secondary_touch_target( pSurface, g_uSecondaryOutputWidth, g_uSecondaryOutputHeight,
++					k_eRotationToOrientation[ GetBackend()->GetSecondaryOutputRotation() & 3u ] );
++				s_pSecondaryTouchSurface = pSurface;
++			}
++		}
++
+ 		if ( g_bPendingFocusInfo.exchange( false ) )
+ 			DumpFocusInfo();
+ 
+diff --git a/src/wlserver.cpp b/src/wlserver.cpp
+index df0c7c5..cb9cfca 100644
+--- a/src/wlserver.cpp
++++ b/src/wlserver.cpp
+@@ -459,11 +459,74 @@ static void wlserver_touch_associate_connector(struct wlserver_touch *touch)
+ 	}
+ }
+ 
++static void apply_touchscreen_orientation( GamescopePanelOrientation orientation, double *x, double *y );
++
++// Secondary touch ids live above the main touchscreen's, so the two digitizers never share one.
++static constexpr int k_nSecondaryTouchIdBase = 0x10000;
++
++// A touch on the secondary touchscreen: rotated by its panel, in the secondary window's surface
++// coordinates (0041 sizes that window to the output), always passed through. It never moves the
++// pointer or the keyboard focus, so the game on the main output keeps its input.
++static bool wlserver_secondary_touch_coords( double x, double y, double *pSurfaceX, double *pSurfaceY )
++{
++	if ( !wlserver.secondary_touch.surface || !wlserver.secondary_touch.width || !wlserver.secondary_touch.height )
++		return false;
++
++	apply_touchscreen_orientation( wlserver.secondary_touch.orientation, &x, &y );
++	*pSurfaceX = std::clamp( x * wlserver.secondary_touch.width, 0.0, double( wlserver.secondary_touch.width ) - 0.1 );
++	*pSurfaceY = std::clamp( y * wlserver.secondary_touch.height, 0.0, double( wlserver.secondary_touch.height ) - 0.1 );
++	return true;
++}
++
++static void wlserver_secondary_touchdown( double x, double y, int touch_id, uint32_t time )
++{
++	double sx, sy;
++	if ( wlserver_secondary_touch_coords( x, y, &sx, &sy ) )
++	{
++		const int nId = k_nSecondaryTouchIdBase + touch_id;
++		wlr_seat_touch_notify_down( wlserver.wlr.seat, wlserver.secondary_touch.surface, time, nId, sx, sy );
++		wlserver.touch_down_ids.insert( nId );
++	}
++	bump_input_counter();
++}
++
++static void wlserver_secondary_touchmotion( double x, double y, int touch_id, uint32_t time )
++{
++	const int nId = k_nSecondaryTouchIdBase + touch_id;
++	double sx, sy;
++	if ( wlserver.touch_down_ids.count( nId ) && wlserver_secondary_touch_coords( x, y, &sx, &sy ) )
++		wlr_seat_touch_notify_motion( wlserver.wlr.seat, time, nId, sx, sy );
++	bump_input_counter();
++}
++
++static void wlserver_secondary_touchup( int touch_id, uint32_t time )
++{
++	const int nId = k_nSecondaryTouchIdBase + touch_id;
++	if ( wlserver.touch_down_ids.erase( nId ) )
++		wlr_seat_touch_notify_up( wlserver.wlr.seat, time, nId );
++	bump_input_counter();
++}
++
++void wlserver_set_secondary_touch_target( struct wlr_surface *surface, uint32_t width, uint32_t height, GamescopePanelOrientation orientation )
++{
++	wlserver_lock();
++	if ( surface != wlserver.secondary_touch.surface )
++		wl_log.infof( "secondary touchscreen drives surface %p (%ux%u)", (void *)surface, width, height );
++	wlserver.secondary_touch.surface = surface;
++	wlserver.secondary_touch.width = width;
++	wlserver.secondary_touch.height = height;
++	wlserver.secondary_touch.orientation = orientation;
++	wlserver_unlock();
++}
++
+ static void wlserver_handle_touch_down(struct wl_listener *listener, void *data)
+ {
+ 	struct wlserver_touch *touch = wl_container_of( listener, touch, down );
+ 	struct wlr_touch_down_event *event = (struct wlr_touch_down_event *) data;
+ 
++	if ( touch->bSecondary )
++		return wlserver_secondary_touchdown( event->x, event->y, event->touch_id, event->time_msec );
++
+ 	wlserver_touch_associate_connector( touch );
+ 	wlserver_touchdown( event->x, event->y, event->touch_id, event->time_msec, touch->connector );
+ }
+@@ -473,6 +536,9 @@ static void wlserver_handle_touch_up(struct wl_listener *listener, void *data)
+ 	struct wlserver_touch *touch = wl_container_of( listener, touch, up );
+ 	struct wlr_touch_up_event *event = (struct wlr_touch_up_event *) data;
+ 
++	if ( touch->bSecondary )
++		return wlserver_secondary_touchup( event->touch_id, event->time_msec );
++
+ 	wlserver_touchup( event->touch_id, event->time_msec );
+ }
+ 
+@@ -481,6 +547,9 @@ static void wlserver_handle_touch_motion(struct wl_listener *listener, void *dat
+ 	struct wlserver_touch *touch = wl_container_of( listener, touch, motion );
+ 	struct wlr_touch_motion_event *event = (struct wlr_touch_motion_event *) data;
+ 
++	if ( touch->bSecondary )
++		return wlserver_secondary_touchmotion( event->x, event->y, event->touch_id, event->time_msec );
++
+ 	wlserver_touch_associate_connector( touch );
+ 	wlserver_touchmotion( event->x, event->y, event->touch_id, event->time_msec, false, touch->connector );
+ }
+@@ -591,7 +660,12 @@ static void wlserver_new_input(struct wl_listener *listener, void *data)
+ 			touch->destroy.notify = wlserver_handle_touch_destroy;
+ 			wl_signal_add( &device->events.destroy, &touch->destroy);
+ 
+-			wlserver_touch_associate_connector( touch );
++			const char *pszName = libinput_device_get_name( wlr_libinput_get_device_handle( &touch->wlr->base ) );
++			touch->bSecondary = g_sSecondaryTouchDevice && pszName && strcmp( pszName, g_sSecondaryTouchDevice ) == 0;
++			if ( touch->bSecondary )
++				wl_log.infof( "touch input device %s drives the secondary output", pszName );
++			else
++				wlserver_touch_associate_connector( touch );
+ 		}
+ 		break;
+ 		default:
+@@ -659,6 +733,9 @@ static void handle_wl_surface_destroy( struct wl_listener *l, void *data )
+ 	if ( surf->wlr == wlserver.mouse_focus_surface )
+ 		wlserver.mouse_focus_surface = nullptr;
+ 
++	if ( surf->wlr == wlserver.secondary_touch.surface )
++		wlserver.secondary_touch.surface = nullptr;
++
+ 	wlserver_drag_anchor_forget( surf->wlr );
+ 
+ 	if ( surf->wlr == wlserver.kb_focus_surface )
+@@ -1995,6 +2072,8 @@ static void waylandy_surface_destroy(struct wl_listener *listener, void *data) {
+ 			wlserver.kb_focus_surface = nullptr;
+ 		if (wlserver.mouse_focus_surface == info->main_surface)
+ 			wlserver.mouse_focus_surface = nullptr;
++		if (wlserver.secondary_touch.surface == info->main_surface)
++			wlserver.secondary_touch.surface = nullptr;
+ 		wlserver_drag_anchor_forget( info->main_surface );
+ 		wlserver_surface = get_wl_surface_info(info->main_surface);
+ 	}
+diff --git a/src/wlserver.hpp b/src/wlserver.hpp
+index 64132f1..bc39744 100644
+--- a/src/wlserver.hpp
++++ b/src/wlserver.hpp
+@@ -136,6 +136,15 @@ struct wlserver_t {
+ 	} wlr;
+ 	
+ 	struct wlr_surface *mouse_focus_surface;
++
++	// --secondary-touch-device: its touches go to the window on the secondary output, set by the
++	// compositor with that output's logical size and orientation.
++	struct {
++		struct wlr_surface *surface;
++		uint32_t width;
++		uint32_t height;
++		GamescopePanelOrientation orientation;
++	} secondary_touch;
+ 	struct wlr_surface *kb_focus_surface;
+ 	std::unordered_map<struct wlr_surface *, std::pair<int, int>> current_dropdown_surfaces;
+ 	double mouse_surface_cursorx = 0.0f;
+@@ -247,6 +256,8 @@ struct wlserver_touch {
+ 	struct wl_listener destroy;
+ 
+     gamescope::IBackendConnector* connector;
++    // The --secondary-touch-device: routed to the secondary output, never to the main one.
++    bool bSecondary;
+ };
+ 
+ void xwayland_surface_commit(struct wlr_surface *wlr_surface);
+@@ -281,6 +292,9 @@ void wlserver_drag_anchor_move( struct wlr_surface *surface, int x, int y, int b
+ void wlserver_touchmotion( double x, double y, int touch_id, uint32_t time, bool bAlwaysWarpCursor = false, gamescope::IBackendConnector* connector = nullptr );
+ void wlserver_touchdown( double x, double y, int touch_id, uint32_t time, gamescope::IBackendConnector* connector = nullptr );
+ void wlserver_touchup( int touch_id, uint32_t time );
++// The surface the secondary touchscreen drives (nullptr: none), with the secondary output's
++// logical size and panel orientation. Takes the wlserver lock.
++void wlserver_set_secondary_touch_target( struct wlr_surface *surface, uint32_t width, uint32_t height, GamescopePanelOrientation orientation );
+ 
+ void wlserver_send_frame_done( struct wlr_surface *surf, const struct timespec *when );
+ 

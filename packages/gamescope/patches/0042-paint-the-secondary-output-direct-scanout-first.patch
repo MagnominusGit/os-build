@@ -16,12 +16,12 @@ serves such a panel-sized override). The backend holds the queued and
 visible FBs, which keeps a client's buffer locked while it is on
 screen, and nudges the compositor when a flip completes.
 
-The plane is never asked to rotate. A first version scanned a
-logical-sized buffer out with the plane rotated: on SM8250 that goes
-through the one offline SDE rotator (kernel patch 0385), which the main
-output already uses and which times its jobs against a single CRTC. The
-main panel stalled (DPU "frame done timeout", command-mode panel left
-showing garbage) on the Thor Lite.
+The plane is never asked to rotate: on SM8250, 90/270 planes go through
+the one offline SDE rotator (kernel patch 0385), which the main output
+already uses and which times its jobs against a single CRTC. (A first
+version did rotate there and the main panel stalled; the stall turned
+out to be the DPU handing an SSPP from one CRTC to the other, fixed in
+kernel patch 0397, but two CRTCs sharing the rotator stay avoided.)
 
 No colour management on that panel. The secondary paint never sets
 bPainted, so the main output's repaint state and pacing ignore it. The
