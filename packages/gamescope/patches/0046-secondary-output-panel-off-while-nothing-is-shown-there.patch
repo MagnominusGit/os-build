@@ -1,0 +1,203 @@
+From: qforge
+Subject: [PATCH] secondary output: the panel is off while nothing is shown there
+
+The secondary panel stayed lit (black) whenever no window was routed to
+it: in the shell, in single-screen games, at boot. It now turns off once
+nothing has been shown there for 2 s, and back on when a window maps.
+
+Off is a DPMS off on its own non-blocking commit: CRTC ACTIVE=0 and the
+plane detached, the mode and the connector's CRTC kept, so turning it
+back on is the usual first-commit modeset straight onto the window's
+frame. The commit carries an event and counts as the pending flip, so no
+present races it. The debug pattern keeps the panel on, and a VT switch
+redoes the off commit. ConVar secondary_output_off_when_unused (default
+on) keeps the panel on instead.
+
+(qforge: dual-screen boards, 2026-10-12.)
+---
+diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
+index 4ab8282..e87c080 100644
+--- a/src/Backends/DRMBackend.cpp
++++ b/src/Backends/DRMBackend.cpp
+@@ -207,6 +207,10 @@ struct drm_secondary_t
+ 	// Commits come from more than one thread (the debug pattern flips from the
+ 	// flip handler thread), so everything below is guarded by this.
+ 	std::mutex mutCommit;
++	// Whether the CRTC should scan out. Off (ACTIVE=0, plane detached; the mode and connector
++	// binding stay) while nothing is shown there: the compositor's SetSecondaryOutputActive.
++	bool bActive = true;
++	// The committed state matches bActive (and, when on, the mode and colour state below).
+ 	bool bModeSet = false;
+ 	bool bFlipPending = false;
+ 	uint32_t uFailedCommits = 0;
+@@ -857,7 +861,7 @@ gamescope::ConVar<bool> cv_drm_debug_secondary_pattern( "drm_debug_secondary_pat
+ static bool drm_secondary_commit_locked( struct drm_t *drm, uint32_t uFbId, uint32_t uSrcWidth, uint32_t uSrcHeight, uint64_t ulRotation, bool bTestOnly = false )
+ {
+ 	drm_secondary_t &sec = g_DRMSecondary;
+-	if ( !sec.pConnector || ( sec.bFlipPending && !bTestOnly ) || drm->paused )
++	if ( !sec.pConnector || !sec.bActive || ( sec.bFlipPending && !bTestOnly ) || drm->paused )
+ 		return false;
+ 
+ 	drmModeAtomicReq *req = drmModeAtomicAlloc();
+@@ -922,10 +926,54 @@ static bool drm_secondary_commit_locked( struct drm_t *drm, uint32_t uFbId, uint
+ 	return true;
+ }
+ 
++// Turns the secondary panel off: CRTC ACTIVE=0 and its plane detached, a DPMS off that keeps
++// the mode and the connector's CRTC so turning it back on is the usual first-commit modeset.
++// Non-blocking like every other commit here, with an event so that commit counts as the
++// pending flip. Caller holds g_DRMSecondary.mutCommit.
++static bool drm_secondary_power_off_locked( struct drm_t *drm )
++{
++	drm_secondary_t &sec = g_DRMSecondary;
++	if ( !sec.pConnector || sec.bFlipPending || drm->paused )
++		return false;
++
++	drmModeAtomicReq *req = drmModeAtomicAlloc();
++	defer( drmModeAtomicFree( req ) );
++
++	const uint32_t uCRTCId = sec.pCRTC->GetObjectId();
++	const uint32_t uPlaneId = sec.pPlane->GetObjectId();
++	const auto &planeProps = sec.pPlane->GetProperties();
++	drmModeAtomicAddProperty( req, uCRTCId, sec.pCRTC->GetProperties().ACTIVE->GetPropertyId(), 0 );
++	drmModeAtomicAddProperty( req, uPlaneId, planeProps.FB_ID->GetPropertyId(), 0 );
++	drmModeAtomicAddProperty( req, uPlaneId, planeProps.CRTC_ID->GetPropertyId(), 0 );
++
++	const uint32_t uFlags = DRM_MODE_ATOMIC_ALLOW_MODESET | DRM_MODE_ATOMIC_NONBLOCK;
++	int ret = drmModeAtomicCommit( drm->fd, req, uFlags | DRM_MODE_PAGE_FLIP_EVENT, &g_DRMSecondary );
++	bool bEvent = ret == 0;
++	// An event on a CRTC that is already off is refused (EINVAL): after a VT switch, say.
++	if ( ret == -EINVAL )
++		ret = drmModeAtomicCommit( drm->fd, req, uFlags, nullptr );
++	if ( ret != 0 )
++	{
++		if ( ret != -EACCES && sec.uFailedCommits++ % 600 == 0 )
++			drm_log.errorf( "secondary output %s: power off failed: %s (%u so far)", sec.pConnector->GetName(), strerror( -ret ), sec.uFailedCommits );
++		return false;
++	}
++
++	drm_log.infof( "secondary output %s: off", sec.pConnector->GetName() );
++	sec.bActive = false;
++	sec.bModeSet = true;
++	sec.bFlipPending = bEvent;
++	// Off screen once the commit lands: the flip event releases the visible FB.
++	sec.pQueuedFb = nullptr;
++	return true;
++}
++
+ // Until the compositor paints this output it shows black, or the debug pattern.
+ static void drm_secondary_show_debug_fb_locked( struct drm_t *drm )
+ {
+ 	drm_secondary_t &sec = g_DRMSecondary;
++	if ( !sec.bActive )
++		return;
+ 	uint32_t uNext = cv_drm_debug_secondary_pattern ? ( sec.uDebugFb == 1 ? 2 : 1 ) : 0;
+ 	if ( sec.bModeSet && uNext == sec.uDebugFb )
+ 		return;
+@@ -964,6 +1012,12 @@ static void OnSecondaryPatternChanged( gamescope::ConVar<bool> & )
+ 	g_DRMSecondary.ulMaxInterval = 0;
+ 	// Back from the pattern, the compositor repaints.
+ 	g_DRMSecondary.bNeedsFrame = true;
++	// The pattern shows on a panel that was off.
++	if ( cv_drm_debug_secondary_pattern && !g_DRMSecondary.bActive )
++	{
++		g_DRMSecondary.bActive = true;
++		g_DRMSecondary.bModeSet = false;
++	}
+ 	if ( cv_drm_debug_secondary_pattern || !g_DRMSecondary.bCompositorOwned )
+ 		drm_secondary_show_debug_fb_locked( &g_DRM );
+ }
+@@ -5217,7 +5271,33 @@ namespace gamescope
+ 			drm_secondary_t &sec = g_DRMSecondary;
+ 			std::scoped_lock lock{ sec.mutCommit };
+ 			*pbNeedsFrame = sec.bNeedsFrame || !sec.bModeSet;
+-			return sec.pConnector && !sec.bFlipPending && !g_DRM.paused && !cv_drm_debug_secondary_pattern;
++			return sec.pConnector && sec.bActive && !sec.bFlipPending && !g_DRM.paused && !cv_drm_debug_secondary_pattern;
++		}
++
++		virtual void SetSecondaryOutputActive( bool bActive ) override
++		{
++			drm_secondary_t &sec = g_DRMSecondary;
++			std::scoped_lock lock{ sec.mutCommit };
++			if ( !sec.pConnector || cv_drm_debug_secondary_pattern )
++				return;
++
++			if ( bActive )
++			{
++				// The next frame modesets the CRTC back on, straight onto that frame's FB.
++				if ( !sec.bActive )
++				{
++					drm_log.infof( "secondary output %s: on", sec.pConnector->GetName() );
++					sec.bActive = true;
++					sec.bModeSet = false;
++					sec.bNeedsFrame = true;
++				}
++				return;
++			}
++
++			// Retried every frame until it lands (a flip may be pending), and again after a VT
++			// switch, which leaves the CRTC in whatever state the other master set.
++			if ( sec.bActive || !sec.bModeSet )
++				drm_secondary_power_off_locked( &g_DRM );
+ 		}
+ 
+ 		virtual bool SecondaryPlaneMayRotate() override
+diff --git a/src/backend.h b/src/backend.h
+index 9e31f83..1006cfe 100644
+--- a/src/backend.h
++++ b/src/backend.h
+@@ -379,6 +379,9 @@ namespace gamescope
+         // Whether the secondary output can take a frame now (no flip pending), and whether it
+         // needs one even without new content (after a modeset request).
+         virtual bool SecondaryOutputReady( bool *pbNeedsFrame ) { return false; }
++        // Turns the secondary panel on or off (the CRTC; the panel's backlight follows). While off it
++        // is never ready for a frame; turned on, the next frame brings it back.
++        virtual void SetSecondaryOutputActive( bool bActive ) {}
+         // Whether the secondary plane may rotate (and scale) an app's buffer onto the panel
+         // (ConVar drm_secondary_plane_rotation), so a rotated panel can take direct scanout.
+         virtual bool SecondaryPlaneMayRotate() { return false; }
+diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
+index e8565de..3fd104c 100644
+--- a/src/steamcompmgr.cpp
++++ b/src/steamcompmgr.cpp
+@@ -5710,6 +5710,29 @@ determine_and_apply_focus( global_focus_t *pFocus )
+ 	pFocus->ulCurrentFocusSerial = GetFocusSerial();
+ }
+ 
++gamescope::ConVar<bool> cv_secondary_output_off_when_unused( "secondary_output_off_when_unused", true, "Turn the secondary output's panel off while no window is shown there." );
++
++// How long the secondary output stays on with nothing to show: a window remapping (an emulator
++// changing its screen layout) should not blank and relight the panel.
++static constexpr uint64_t k_ulSecondaryOutputOffDelay = 2'000'000'000ul;
++
++// The secondary panel is on while a window is shown there, and turns off once none has been for
++// k_ulSecondaryOutputOffDelay. Called every vblank, before painting it.
++static void update_secondary_output_power()
++{
++	static uint64_t s_ulLastInUse = get_time_in_nanos();
++	const uint64_t ulNow = get_time_in_nanos();
++	if ( g_SecondaryFocus.focusWindow || !cv_secondary_output_off_when_unused )
++	{
++		s_ulLastInUse = ulNow;
++		GetBackend()->SetSecondaryOutputActive( true );
++	}
++	else if ( ulNow - s_ulLastInUse >= k_ulSecondaryOutputOffDelay )
++	{
++		GetBackend()->SetSecondaryOutputActive( false );
++	}
++}
++
+ // Paints the secondary focus onto the secondary output when it has new content and the output can
+ // take a frame. Direct scanout first: on an unrotated panel, a buffer the size of the output goes
+ // on the plane as is. Otherwise (a rotated panel, other sizes, or a buffer the plane refuses) the
+@@ -11168,7 +11191,10 @@ steamcompmgr_main(int argc, char **argv)
+ 		// The secondary output paints on its own: it never sets bPainted, so the main output's
+ 		// repaint state and frame pacing do not see it.
+ 		if ( vblank && g_bSecondaryOutput )
++		{
++			update_secondary_output_power();
+ 			paint_secondary_output();
++		}
+ 
+ 		if ( vblank && g_bUpdateForwardedVROverlays )
+ 		{

@@ -274,6 +274,11 @@ Line numbers below are in the patched 3.16.31 tree (`work/overlay-build/aarch64/
   0034 blanked the connector the same way) and backlight off; back on when a tagged window maps.
   Check the msm DSI power-down/up time and that it does not glitch the top panel.
 - HW: idle current with the bottom panel off vs on (OGUI menu).
+- **Done 2026-10-12 (0046).** ACTIVE=0 + plane detached, mode and connector kept; off 2 s after the
+  last routed window, on with the first frame of the next. The panel driver drops the backlight
+  with the CRTC (ae96000.dsi.0 bl_power 4). HW Thor Lite: MKDS turns it on straight onto rotated
+  direct scanout, top panel undisturbed (0 frame done timeouts); OGUI menu 360 mA off vs 412 mA
+  on. ConVar secondary_output_off_when_unused 0 keeps it lit.
 
 ### 8. Later (not needed to ship)
 

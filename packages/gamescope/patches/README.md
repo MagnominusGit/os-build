@@ -541,6 +541,16 @@ root_width/height keep meaning the main output's area; focus windows are composi
 of their X origin, so both panels stay on direct scanout. HW 2026-10-12, Thor Lite: bottom-panel
 touch works in melonDS and Azahar, gamescope does no GPU work during play.
 
+`0046` — **the secondary panel is off while nothing is shown there** (ours, 2026-10-12; plan step
+7). Once no window has been routed to the secondary output for 2 s (the shell, single-screen
+games, boot) its CRTC goes ACTIVE=0 with the plane detached: a DPMS off on its own non-blocking
+commit, the mode and the connector's CRTC kept, so the next routed window turns it back on with
+the usual first-commit modeset straight onto its frame. The off commit carries an event and
+counts as the pending flip. The debug pattern keeps it on; a VT switch redoes the off commit.
+ConVar `secondary_output_off_when_unused` (default on). HW 2026-10-12, Thor Lite: the panel's
+backlight follows (bl_power 4 off / 0 on), melonDS turns it on directly onto rotated direct
+scanout, off 2 s after exit, no DPU timeouts; OGUI menu 360 mA off vs 412 mA on (~0.19 W).
+
 Drop the patch files here with those exact names (or rename and update `source.pin`'s
 `patches:` line). **Until a declared patch is present, `make overlay` / `make base` fail fast**
 with a clear "missing patch" message from `build-overlay.sh`.
