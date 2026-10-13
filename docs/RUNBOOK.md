@@ -238,8 +238,8 @@ R2_ACCOUNT_ID=… R2_ACCESS_KEY_ID=… R2_SECRET_ACCESS_KEY=… R2_BUCKET=… R2
 ```
 
 Puts the bundle in the R2 bucket and flips the channel pointer at it (normally CI does this on an
-`ota/v*` tag; `docs/ota.md`). **Devices do not point at the bucket yet** — their default host,
-`updates.retroforge.invalid`, is a placeholder that never resolves, and
+`ota/v*` tag; `docs/ota.md`). Devices fetch from `https://ota.retroforge.org` (images before
+2026-10-13 carry a placeholder host that never resolves), and
 `retroforge-update` on the device currently reports "no update" regardless (it still gates on a Steam
 login file that RetroForge never creates; see `docs/ota.md`). Until both are resolved, install by hand. **Install it on a device first** (below) — nothing on the device ends an unconfirmed
 trial boot, so a bundle that comes up to a black screen costs ~6 manual power-cycles to recover on

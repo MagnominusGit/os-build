@@ -38,7 +38,7 @@ WIFI_CONF=${RETROFORGE_WIFI_CONF:-/esp/retroforge/wifi.conf}
 # shell and the other Python. tests/test-ui.sh asserts the two agree; that assertion is the only
 # thing that keeps them the same URL.
 OTA_CONFIG=${RETROFORGE_OTA_CONFIG:-/etc/retroforge/ota.conf}
-OTA_DEFAULT_URL=https://updates.retroforge.invalid
+OTA_DEFAULT_URL=https://ota.retroforge.org
 if [ -z "${RETROFORGE_OTA_URL:-}" ] && [ -r "$OTA_CONFIG" ]; then
   RETROFORGE_OTA_URL=$(sed -n 's/^[[:space:]]*OTA_URL=//p' "$OTA_CONFIG" | tail -1 | tr -d '"'"'"' \r')
 fi

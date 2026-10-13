@@ -8,13 +8,13 @@ and the slot is free.
 > through udisks by the storage scripts under `/usr/lib/retroforge/storage/`, but no shell uses it as a
 > library yet; that arrives with the shell.
 
-> **Devices do not point at the update bucket yet, so a medium built today cannot complete an install.** The
-> installer downloads the OS from the same host `retroforge-update` uses, and that default is the
-> placeholder `https://updates.retroforge.invalid` — written into `installer/netcfg`,
-> `installer/release-info` and `retroforge-update`, which `tests/test-ui.sh` asserts agree. A placeholder
-> never resolves, so the **Network** screen stops at "could not be resolved (DNS)". The R2 bucket
-> updates are published to is described in [ota.md](ota.md); once its public URL is final, those three
-> literals name it.
+> **A medium can only install once a `stable` bundle has been published.** The installer downloads
+> the OS from the same host `retroforge-update` uses, `https://ota.retroforge.org` — written into
+> `installer/netcfg`, `installer/release-info` and `retroforge-update`, which `tests/test-ui.sh`
+> asserts agree. Until a bundle is in the bucket the pre-flight screen reports nothing published in
+> the channel. Media built before 2026-10-13 carry the never-resolving placeholder
+> `updates.retroforge.invalid` and stop at "could not be resolved (DNS)". The bucket is described in
+> [ota.md](ota.md).
 
 It is a separate image from the card: a self-contained recovery tool that boots on the handheld,
 draws its own screens on the panel, and is driven with the gamepad. It downloads the current RetroForge

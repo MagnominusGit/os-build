@@ -5,11 +5,12 @@ the RAUC A/B install, the trial boot and rollback — is in `docs/RUNBOOK.md`; t
 updates are served from and the act of publishing.
 
 **Updates are served from a Cloudflare R2 bucket** since 2026-10-13, replacing a self-hosted nginx
-host (its provisioning scripts are in git history before that date). **Devices do not point at it
-yet:** every device-side default still names the placeholder `updates.retroforge.invalid`, which never
-resolves — `retroforge-update`'s `DEFAULT_URL` and the installer medium's `netcfg` and `release-info`
-(`tests/test-ui.sh` asserts the three agree). A device built today checks, cannot resolve the host,
-fails closed and reports "no update". Once the bucket's public URL is final, set those three to it.
+host (its provisioning scripts are in git history before that date), at the custom domain
+**`https://ota.retroforge.org`**. That URL is the device-side default in three places —
+`retroforge-update`'s `DEFAULT_URL` and the installer medium's `netcfg` and `release-info`
+(`tests/test-ui.sh` asserts the three agree). Images built before 2026-10-13 carry the placeholder
+`updates.retroforge.invalid` instead, which never resolves: they fail closed and report "no update"
+until reflashed (or given `OTA_URL` in `/etc/retroforge/ota.conf`).
 
 > **The first-boot gate.** `retroforge-update`'s `check` and apply paths both begin with `setup_done()`:
 > until OpenGamepadUI's first-boot flow has written `[general] first_boot=false` into
@@ -20,7 +21,7 @@ fails closed and reports "no update". Once the bucket's public URL is final, set
 | | |
 |---|---|
 | Storage | Cloudflare R2, bucket `R2_BUCKET`, public read |
-| Public URL | `R2_PUBLIC_BASE` — the bucket's r2.dev address or a custom domain; devices still carry the placeholder |
+| Public URL | `R2_PUBLIC_BASE` = `https://ota.retroforge.org`, the bucket's custom domain; also the devices' `DEFAULT_URL` |
 | Publisher | `ota/publish-bundle.sh` (rclone, pinned in `ota/rclone.pin`), run by `release-bundle.yml` on `ota/v*` |
 | Retention | 3 bundles per channel (`RETROFORGE_OTA_KEEP`); a bundle is ~530 MiB (measured 2026-10-13) |
 

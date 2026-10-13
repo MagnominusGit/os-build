@@ -52,8 +52,8 @@
 # stable public url and Range support (rauc streams the bundle). The transport is
 # ota/publish-bundle.sh, called by the `publish` job below; the bucket layout is
 # <channel>/latest.json + <channel>/retroforge-<version>.raucb under R2_PUBLIC_BASE, which is what
-# retroforge-update reads. Devices still carry the placeholder url (retroforge-update's DEFAULT_URL)
-# until R2_PUBLIC_BASE is final and baked in; until then nothing in the field can see a publish.
+# retroforge-update reads. R2_PUBLIC_BASE is https://ota.retroforge.org, the same url devices carry
+# as retroforge-update's DEFAULT_URL (images before 2026-10-13 carry a placeholder and see nothing).
 #
 # THE PUBLISH JOB fails closed twice over, on a tag only:
 #
