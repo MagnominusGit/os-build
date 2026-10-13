@@ -14,9 +14,9 @@
 # impossible; it was retired 2026-08-04 along with the overlay store — see
 # .github/workflows/overlay.yml for the measurements behind that.
 #
-# THE TWO ARTIFACTS SHIP TO DIFFERENT PLACES, AND NEITHER SHIPS FROM HERE. A CARD goes to the public
-# Cloudflare R2 bucket a person downloads and flashes from (see ota/publish-card.sh for why not a
-# GitHub release asset: ~5 GiB against a 2 GiB cap). A BUNDLE goes to the update server
+# THE TWO ARTIFACTS SHIP TO DIFFERENT PLACES, AND NEITHER SHIPS FROM HERE. A CARD goes to the
+# `card/v*` GitHub Release a person downloads and flashes from (524 MiB compressed, measured
+# 2026-10-13, against a 2 GiB per-asset cap). A BUNDLE goes to the update server
 # devices fetch their OTAs from — a different host, different credentials, different audience. Both
 # paths stop at a workflow artifact here and are handed off to a publishing job in the caller.
 #
@@ -96,8 +96,8 @@ on:
         required: false
       RAUC_KEY_PEM:
         required: false
-      # NO R2_* HERE. The card upload lives in release-sdcard.yml's own publish job, so the bucket
-      # credentials never enter this workflow — see the header. A caller passing them would be
+      # NO R2_* HERE. The installer upload lives in release-installer.yml's own publish job, so the
+      # bucket credentials never enter this workflow — see the header. A caller passing them would be
       # handing a six-hour build a credential it has no step to use.
 
 permissions:
@@ -129,8 +129,8 @@ jobs:
       # There used to be a second knob, `VERSION`, which named the bundle independently — the pair
       # could disagree, and the OTA client's update check compares exactly those two strings. It was
       # removed 2026-08-03. A plain `VERSION` workflow variable outlived it as publish-card.sh's
-      # first argument and went with the upload in 2026-08-11; the R2 path prefix is now named in
-      # release-sdcard.yml's publish job, from the same prep output that feeds this input.
+      # first argument and went with the upload in 2026-08-11; the release tag is now named in
+      # release-sdcard.yml's release job, from the same prep output that feeds this input.
       RETROFORGE_VERSION: ${{ inputs.version }}
       ARTIFACT: ${{ inputs.artifact }}
     steps:

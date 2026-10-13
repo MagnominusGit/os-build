@@ -81,7 +81,7 @@ different cadences:
 
 | workflow | trigger | secrets | ships to |
 |---|---|---|---|
-| `release-sdcard.yml` | `card/v*` tag, or manual | `R2_*` (push-only, public bucket) | Cloudflare R2 + a GitHub Release carrying checksums/provenance |
+| `release-sdcard.yml` | `card/v*` tag, or manual | none — `GITHUB_TOKEN` only; `release-cards` for its reviewer | a GitHub Release carrying the card, checksums and provenance |
 | `release-installer.yml` | `installer/v*` tag, or manual | `R2_*`, same environment as the card | R2 under `installer/<version>/` (keeps 2) + a GitHub Release |
 | `release-bundle.yml` | `ota/v*` tag, or manual | `RAUC_CERT_PEM`/`RAUC_KEY_PEM` and `OTA_SSH_KEY`, in `release-signing` | the update server named by `vars.OTA_HOST` — **none exists yet**; the default is the placeholder `updates.retroforge.invalid`, so a tagged publish goes red (see `docs/ota.md`) |
 
@@ -91,13 +91,13 @@ gets its own namespace rather than sharing a bare `v*`. That also fixes a real i
 built a card and *never* a bundle. `card/v1.3.0` and `ota/v1.3.0` on one commit are the same OS
 delivered two ways.
 
-**A card is not a release asset** — GitHub caps those at 2 GiB, and the card measured well over that
-on the reference build (figures in `ota/publish-card.sh`; re-measure now that the root is smaller). It goes to
-a public R2 bucket (`ota/publish-card.sh`, retention N=1 to stay inside the 10 GB free tier) and
-the Release carries only `sha256sums.txt`, `manifest.lock` and the link.
+**The card is a release asset** since 2026-10-13: a release card compresses to 524 MiB (gz -6), a
+quarter of GitHub's 2 GiB per-asset cap, and the release job checks the cap before uploading. It went
+to R2 while it measured 5.08 GiB (2026-08-04, root still carrying an x86 stack). The repo is private,
+so downloading a card needs a GitHub login with access to it. The installer medium still goes to R2.
 
-**CI is the only thing that PUBLISHES a release image**, because the R2 and signing credentials live
-here. Building one is not restricted: `make sdcard` with no `RETROFORGE_DEV` produces a real release
+**CI is the only thing that PUBLISHES a release image**, because the reviewer gates and the R2 and
+signing credentials live here. Building one is not restricted: `make sdcard` with no `RETROFORGE_DEV` produces a real release
 image on a dev box, which is how a release image's first boot gets tested on hardware.
 
 The blocker that once made a release build impossible on a clean runner is worth recording. A clean

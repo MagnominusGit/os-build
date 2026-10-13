@@ -8,7 +8,13 @@
 # Metadata is built by its own script rather than here, because the non-publishing path needs the
 # identical checksums and provenance for its workflow artifact — one producer, two consumers.
 #
-# WHY THIS EXISTS RATHER THAN A RELEASE ASSET. A release card compresses to 5.08 GiB (measured
+# THE SD CARD NO LONGER COMES THROUGH HERE. Since 2026-10-13 release-sdcard.yml attaches the card
+# to its GitHub Release instead: with the x86 stack gone a release card compresses to 524 MiB, well
+# inside the cap the paragraph below is about. The only caller now is release-installer.yml
+# (RETROFORGE_R2_KIND=installer); `cards/` stays the default so the prune tests keep their meaning.
+# The history is kept because it is what to re-read if a card ever outgrows 2 GiB again.
+#
+# WHY THIS EXISTED RATHER THAN A RELEASE ASSET. A release card compressed to 5.08 GiB (measured
 # 2026-08-04, pigz -6, 19G apparent / 11G real): the payload is ALREADY-compressed content (the
 # btrfs root carries compress=zstd), so no format or level gets it near a GiB. GitHub caps a single
 # release asset at 2 GiB, which rules the Release out as the transport by 2.5x. GHCR was the other

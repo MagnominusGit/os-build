@@ -67,18 +67,17 @@ dead card. That is a setting, not a fault.
 
 ## Get a release card
 
-**A release card is published only by CI**, because the R2 credentials live there — but `make
+**A release card is published only by CI**, through a reviewed `release-cards` approval — but `make
 sdcard` on a dev box (no `RETROFORGE_DEV`) builds the same kind of image, which is how a release image's first boot gets
 tested on hardware without waiting for a run.
 
-Cards are served from Cloudflare R2, not from a GitHub release asset — GitHub caps an asset at 2 GiB,
-and the card measured well over that on the reference build (`ota/publish-card.sh` carries the
-figures; re-measure now that the root no longer carries an x86 stack). The GitHub Release for a `card/v*` tag carries the checksums, the
-package lock the card was built from, and the link:
+The card is an asset of the `card/v*` GitHub Release, next to its checksums and the package lock it
+was built from. A release card compresses to 524 MiB (gz -6, measured 2026-10-13), well inside
+GitHub's 2 GiB per-asset cap; `release-sdcard.yml` refuses to publish one that has grown past it.
+The repo is private, so downloading needs a GitHub login with access to it:
 
 ```sh
-curl -LO https://<R2_PUBLIC_BASE>/cards/v1.3.0/sdcard.img.gz
-curl -LO <the card/v1.3.0 GitHub Release>/sha256sums.txt
+gh release download card/v1.3.0 -R retroforge-linux/os-build -p sdcard.img.gz -p sha256sums.txt
 sha256sum -c sha256sums.txt                   # do this BEFORE writing the image to a card
 gzip -dc sdcard.img.gz | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress
 ```
