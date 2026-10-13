@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version for this medium (default: date-shortsha)'
+        description: 'Version for this medium, with its v (e.g. v0.0.3; default: <date>.<shortsha>)'
         required: false
         type: string
         default: ''
@@ -53,7 +53,12 @@ jobs:
           elif [ "$GITHUB_REF_TYPE" = tag ]; then
             v="${REF_NAME#installer/}"
           else
-            v="$(date -u +%Y%m%d)-$(echo "$GITHUB_SHA" | cut -c1-7)"
+            # A DOT, not a dash: the pre-release check below refuses any `-`, so `date-sha` failed
+            # every such dispatch. And NO leading `v`, unlike the card's default: this version is
+            # an R2 prefix that publish-card.sh prunes by `sort -V`, keeping the newest two. A digit
+            # sorts below `v`, so a dated test medium is the first to go; `v2026…` would sort above
+            # every real `v0.x` and push the tagged media out instead.
+            v="$(date -u +%Y%m%d).$(echo "$GITHUB_SHA" | cut -c1-7)"
           fi
           case "$v" in
             *[!A-Za-z0-9._-]*) echo "::error::version '$v' has characters that do not belong in a URL path"; exit 1 ;;
