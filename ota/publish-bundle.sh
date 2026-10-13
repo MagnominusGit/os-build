@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# retroforge OTA bundle publisher — Phase 3. Puts a signed RAUC bundle on the update server and flips
-# the channel pointer at it.
+# retroforge OTA bundle publisher — puts a signed RAUC bundle in the Cloudflare R2 bucket devices
+# update from, and flips the channel pointer at it.
 #
 #   ota/publish-bundle.sh out/images/retroforge-0.2.0.raucb [channel]
 #
-# Shaped after the old card publisher (ota/publish-card.sh, retired 2026-10-13 when cards became
-# GitHub Release assets) — credentials from the environment only, an explicit KEEP retention, and
-# verification at the PUBLIC url rather than trust in the upload — but over SSH/rsync rather than
-# rclone. This is not S3: it is a rented Ubuntu box serving a directory, so the transport
-# is the one that box already has, and there is no write surface exposed to the internet at all.
+# Credentials and the bucket come from the environment only (ota/lib-rclone.sh: R2_ACCOUNT_ID,
+# R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_PUBLIC_BASE). The bucket layout is the one
+# retroforge-update reads, rooted at R2_PUBLIC_BASE: <channel>/latest.json and <channel>/<bundle>.
+# R2 replaced a self-hosted nginx box on 2026-10-13; the SSH/rsync publisher and the server's
+# provisioning scripts are in git history before that date.
 #
 # THE SIGNATURE GATE RUNS FIRST, BEFORE A BYTE MOVES, and it has no override. A bundle is accepted
 # only if it verifies against the CA that is baked into every device's keyring
 # (ota/rauc/retroforge-ca.pem, installed as /etc/rauc/keyring.pem by rootfs/assemble-rootfs.sh).
 # Publishing an unsigned or dev-cert bundle would not be a near miss: `make bundle` without PKIDIR
-# mints an EPHEMERAL 7-day cert that is deleted with its tempdir, so the result is a ~4G download
+# mints an EPHEMERAL 7-day cert that is deleted with its tempdir, so the result is a ~530 MiB download
 # every device in the field throws away at the last step, over Wi-Fi, having already asked the user
 # to say yes. There is deliberately no --force.
 #
@@ -29,24 +29,19 @@
 # --keyring overrides only [keyring] path=, which names /etc/rauc/keyring.pem: an on-device absolute
 # path that does not exist here. Same pair as ota/rauc/verify-signing.sh and docs/RUNBOOK.md.
 #
-# ORDER OF OPERATIONS IS THE WHOLE DESIGN. Bytes first under a .part name, renamed into place,
-# hashed ON THE SERVER, and latest.json flipped LAST. A device that checks mid-publish must see
-# either the old release or the new one, never a pointer at a URL that 404s, at a file still being
-# written, or at bytes that did not survive the trip.
+# ORDER OF OPERATIONS IS THE WHOLE DESIGN. The bundle first, then its bytes read back through the
+# PUBLIC url and hashed, and latest.json written LAST. A device that checks mid-publish must see
+# either the old release or the new one, never a pointer at a URL that 404s or at bytes that did not
+# survive the trip. An S3 object appears whole or not at all, so no .part-and-rename is needed.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 . "$ROOT/build/lib-container.sh"
 
-HOST="${RETROFORGE_OTA_HOST:-updates.retroforge.invalid}"
-USER_="${RETROFORGE_OTA_USER:-ubuntu}"
-SSH_KEY="${RETROFORGE_OTA_SSH_KEY:-}"
-DOCROOT="${RETROFORGE_OTA_DOCROOT:-/srv/retroforge-ota}"
-BASE_URL="${RETROFORGE_OTA_URL:-https://$HOST}"
-# Retention. The instance has ~94G and a bundle is ~4G, so unlike the old card bucket (KEEP=1, where the
-# free tier was the constraint) there is room to keep the previous releases: if a published update
-# turns out bad, re-pointing latest.json at the one before it is the fastest fleet-wide fix there is,
-# and it only works if those bytes are still on the server.
+# Retention, per channel. A bundle is ~530 MiB (measured 2026-10-13) against R2's 10 GB free tier, so
+# three per channel leaves room for stable and beta together. Keeping the previous releases is the
+# rollback: if a published update turns out bad, re-pointing latest.json at the one before it is the
+# fastest fleet-wide fix there is, and it only works if those bytes are still in the bucket.
 KEEP="${RETROFORGE_OTA_KEEP:-3}"
 
 BUNDLE="${1:-}"
@@ -67,23 +62,12 @@ esac
 BUNDLE_ABS="$(cd "$(dirname "$BUNDLE")" && pwd)/$(basename "$BUNDLE")"
 NAME="$(basename "$BUNDLE_ABS")"
 
-# --- ssh/rsync plumbing --------------------------------------------------------------------------
-# rsync is checked HERE, before any work, because it is needed LAST: the upload (step 4) and the
-# latest.json flip (step 5). Without this the run gets all the way through the signature gate, the
-# version read and the remote space check -- minutes, on a 4G bundle -- and only then dies on a
-# `command not found` from inside a pipeline, where set -e's report names neither the tool nor the
-# fix. It is not in the Arch base install, and this bit on 2026-08-03 on a workstation that had
-# never published before. ssh gets no such check on purpose: it is used from step 2 onward, so its
-# absence is already immediate and self-describing.
-command -v rsync >/dev/null 2>&1 || die "rsync is not installed, and this script cannot publish
-  without it: it uploads the bundle and flips latest.json over rsync-over-ssh. The SERVER has it;
-  this is the publishing workstation that does not. Install it and re-run -- nothing has been
-  uploaded, so there is nothing to clean up."
-
-# BatchMode so a missing key fails immediately instead of hanging on a password prompt in CI.
-SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15)
-[ -n "$SSH_KEY" ] && SSH_OPTS+=(-i "$SSH_KEY")
-remote() { ssh "${SSH_OPTS[@]}" "$USER_@$HOST" "$@"; }
+# Credentials are checked HERE, before the signature gate and the hash, because they are needed
+# only from step 3 on: a missing one should cost seconds, not a verification and a full read first.
+. "$ROOT/ota/lib-rclone.sh"
+r2_env
+BASE_URL="${R2_PUBLIC_BASE%/}"
+REMOTE="r2:$R2_BUCKET/$CHANNEL"
 
 # --- 1. the signature gate -----------------------------------------------------------------------
 CONF_REL="rootfs/overlay/etc/rauc/system.conf"
@@ -105,7 +89,7 @@ rauc_info() { # <extra rauc args...>  — the bundle path is resolved per backen
     command -v "$RETROFORGE_CONTAINER" >/dev/null 2>&1 || die "neither rauc nor $RETROFORGE_CONTAINER is available; cannot verify the signature, so nothing will be published"
     # The bundle's directory is mounted read-only at /bundle so a path outside the repo still works.
     ctr run --rm -v "$ROOT":/src -v "$(dirname "$BUNDLE_ABS")":/bundle:ro -w /src retroforge-build \
-      -c "rauc info --conf=$CONF_REL --keyring=$KEYRING_REL $* /bundle/$NAME"
+      -c "rauc info --conf=$CONF_REL --keyring=$KEYRING_REL $* /bundle/$(printf %q "$NAME")"
   fi
 }
 
@@ -175,74 +159,80 @@ log "computing sha256 over $((SIZE / 1024 / 1024)) MiB"
 SHA="$(sha256sum "$BUNDLE_ABS" | cut -d' ' -f1)"
 log "publishing v$VERSION (mode $MODE${BUILD:+, build $BUILD}${GIT:+, git $GIT}) to $BASE_URL/$CHANNEL/"
 
+RCLONE="$(rclone_bin)"
+
+# The pointer as the bucket holds it now, read through the API rather than the public url so no CDN
+# cache can stand between this and the truth. Empty ONLY when the channel provably has no
+# latest.json: `rclone cat` fails the same way for a missing object, a 403 and a dropped connection,
+# and treating all of those as "absent" would wave the immutability check below through on a
+# transient error. So a failed read is followed by a listing, and anything but a clean "not there"
+# stops the publish. Exit 3 from lsf is rclone's "directory not found": a channel never published.
+current_pointer() {
+  local out listing rc=0
+  if out="$("$RCLONE" cat "$REMOTE/latest.json" 2>/dev/null)"; then
+    printf '%s\n' "$out" | sed -n 's/.*"bundle": *"\([^"]*\)".*/\1/p' | head -1
+    return 0
+  fi
+  listing="$("$RCLONE" lsf --files-only "$REMOTE/" 2>/dev/null)" || rc=$?
+  if [ "$rc" = 3 ] || { [ "$rc" = 0 ] && ! printf '%s\n' "$listing" | grep -qx 'latest.json'; }; then
+    return 0
+  fi
+  die "cannot read $CHANNEL/latest.json, and the bucket does not say it is absent (lsf exit $rc).
+  Refusing to go on: without the current pointer the publish cannot tell whether $NAME is already
+  live. Check the R2 credentials and endpoint, then re-run."
+}
+
 # --- 3. upload -------------------------------------------------------------------------------------
-DEST="$DOCROOT/$CHANNEL"
-remote "mkdir -p '$DEST'" || die "cannot create $DEST on $HOST (is the docroot owned by $USER_? run ota/setup-server.sh)"
+# A VERSION IS PUBLISHED ONCE. Overwriting the bundle latest.json already names would swap the bytes
+# under devices that may be mid-download (rauc streams with Range requests), so that is refused. A
+# bundle that exists but is NOT the pointer is a previous run that died before the flip, and is
+# simply replaced.
+live="$(current_pointer)" || exit 1
+[ "$live" != "$NAME" ] || die "REFUSED: $NAME is what $CHANNEL/latest.json already points at.
+  A published version is immutable: devices may be downloading it right now. Bump the version."
 
-# Space on the SERVER, before the transfer rather than after it. The mirror of the client's own
-# room_for() check, and for the same reason: finding out at the end costs the whole transfer.
-avail="$(remote "df -kP '$DEST' | awk 'NR==2{print \$4}'")"
-need=$(( (SIZE / 1024) + 524288 ))
-[ "${avail:-0}" -ge "$need" ] || die "not enough room on $HOST: need $((need / 1024)) MiB at $DEST, have $((avail / 1024)) MiB
-  Lower RETROFORGE_OTA_KEEP (currently $KEEP) and re-run, or prune by hand."
+log "uploading $NAME -> $REMOTE/ (multipart, resumable per part)"
+"$RCLONE" copyto --s3-chunk-size 64M --retries 5 --low-level-retries 10 \
+  --stats 30s --stats-one-line \
+  "$BUNDLE_ABS" "$REMOTE/$NAME" || die "upload failed; latest.json was NOT touched, so the fleet still sees the previous release"
 
-# .part, then rename. rsync --partial --inplace so an interrupted multi-GB transfer resumes
-# where it stopped; the rename is within one filesystem, so it is atomic and a device can never see a
-# half-written file under the final name.
-log "uploading $NAME (resumable)"
-rsync -e "ssh ${SSH_OPTS[*]}" --partial --inplace --progress \
-  "$BUNDLE_ABS" "$USER_@$HOST:$DEST/$NAME.part" || die "upload failed; the partial file is left at $DEST/$NAME.part and will resume on the next run"
-remote "mv -f '$DEST/$NAME.part' '$DEST/$NAME' && chmod 0644 '$DEST/$NAME'"
-
-# --- 3b. prove the bytes that LANDED are the bytes we hashed ---------------------------------------
-# $SHA is computed from the LOCAL file, before the upload. So without this step the sha256 that goes
-# into latest.json is a claim about a file on this laptop, not about the one being served. rsync's
-# own checksum covers a transfer it knows it made; it does not cover a .part a second concurrent
-# publish was also writing (two runs both rsync --inplace to the same path and NEITHER fails — they
-# interleave), a resume whose earlier half came from a different build, or a bad disk on the far end.
+# --- 4. prove the PUBLIC bytes are the bytes we hashed -----------------------------------------------
+# $SHA is computed from the LOCAL file, so without this step the sha256 that goes into latest.json is
+# a claim about this machine's copy, not the one being served. And the client does not check sha256
+# (docs/ota.md: the RAUC signature is the integrity gate), so nothing else between here and each
+# device's own signature verification would notice — after every device on the channel has spent the
+# download. Read back through R2_PUBLIC_BASE, the way a device will, so the same pass also proves
+# public access is on and catches a CDN serving a stale object under this name.
 #
-# And the client does not check sha256 at all (docs/ota.md: the RAUC signature is the integrity gate,
-# since a hash fetched from the same server proves nothing an attacker could not also rewrite). So
-# there is nothing between this line and each device's OWN signature verification that would notice
-# corrupt bytes — which is to say, nothing until every device on the channel has already spent a ~4G
-# download to find out. Caught here it costs one re-upload.
-#
-# BEFORE the pointer flip, deliberately: everything up to step 5 is invisible to devices, so a
-# failure here leaves the fleet on the previous release. The bad bundle is left on the server under
-# its FINAL name (the rename already happened), where it serves nobody because latest.json does not
-# name it. Delete it before re-running rather than trusting a resume to repair it: the next run
-# uploads to $NAME.part, which no longer exists, so it re-sends in full anyway and the stale copy
-# would just sit there eating the KEEP budget.
-log "verifying the uploaded bytes (sha256 on the server, ~$((SIZE / 1024 / 1024)) MiB to read)"
-remote_sha="$(remote "sha256sum '$DEST/$NAME' | cut -d' ' -f1" || true)"
-[ -n "$remote_sha" ] || die "could not hash $DEST/$NAME on $HOST — refusing to publish a pointer at bytes nobody has checked"
-[ "$remote_sha" = "$SHA" ] || die "CORRUPT UPLOAD: $NAME on $HOST does not match what was sent.
-  local:  $SHA
-  server: $remote_sha
-  latest.json was NOT flipped, so the fleet is unaffected and still sees the previous release.
-  Check for a second publish running against the same file (ps aux | grep rsync), then delete
-  '$DEST/$NAME' on the server and re-run. Do not leave it: it serves nobody, but it counts against
-  RETROFORGE_OTA_KEEP (currently $KEEP) and the re-run re-sends in full regardless."
-log "ok: server-side sha256 matches"
-
-# --- 4. prove it is readable from the internet -----------------------------------------------------
-# Present in the docroot and served to the world are different claims, and only the second one
-# matters. A Range request settles reachability, content type and resumability in one round trip
-# without pulling 4G back through this machine. Resume is not a nicety: it is what makes a ~4G
-# download over first-boot Wi-Fi finish at all.
+# BEFORE the pointer flip, deliberately: everything up to step 5 is invisible to devices, so a failure
+# here leaves the fleet on the previous release. The bad object stays in the bucket under its final
+# name, where it serves nobody because latest.json does not name it; the next run replaces it.
 url="$BASE_URL/$CHANNEL/$NAME"
 log "verifying public readability: $url"
 code="$(curl -fsS -o /dev/null -w '%{http_code}' -r 0-0 --max-time 30 "$url" || true)"
 case "$code" in
-  206) log "ok: 206 Partial Content (public, and Range works)" ;;
-  200) log "WARNING: 200 rather than 206 — public, but Range is not honoured; an interrupted download will restart from zero" ;;
+  206) log "ok: 206 Partial Content (public, and Range works — rauc streams the bundle with it)" ;;
+  200) die "the bundle is public but Range is NOT honoured (200 rather than 206) at $url
+  rauc streams a bundle with Range requests, so devices could not install it. latest.json was NOT
+  flipped. Check what sits in front of the bucket (a custom domain's cache or transform rules)." ;;
   *)   die "the uploaded bundle is NOT publicly readable (HTTP ${code:-no response}) at $url
-  The bytes are on the server, so this is nginx or TLS, not a failed upload. latest.json was NOT
-  flipped, so the fleet still sees the previous release. Check: ssh $USER_@$HOST 'sudo nginx -t'" ;;
+  The bytes are in the bucket, so this is an access setting, not a failed upload. Enable public
+  access on '$R2_BUCKET' (R2 -> bucket -> Settings -> Public access), or check R2_PUBLIC_BASE.
+  latest.json was NOT flipped, so the fleet still sees the previous release." ;;
 esac
 
+log "verifying the served bytes (sha256 over the public url, ~$((SIZE / 1024 / 1024)) MiB)"
+served_sha="$(curl -fsS --max-time 1800 "$url" | sha256sum | cut -d' ' -f1)" || served_sha=""
+[ -n "$served_sha" ] || die "could not read $url back — refusing to publish a pointer at bytes nobody has checked"
+[ "$served_sha" = "$SHA" ] || die "CORRUPT OR STALE: $url does not serve what was uploaded.
+  local:  $SHA
+  served: $served_sha
+  latest.json was NOT flipped, so the fleet is unaffected and still sees the previous release.
+  If a custom domain fronts the bucket, purge its cache for this url; otherwise re-run."
+log "ok: the public url serves the bytes that were hashed"
+
 # --- 5. flip the pointer, last ---------------------------------------------------------------------
-# Everything above this line is additive and invisible to devices. This is the line that publishes.
+# Everything above this line is invisible to devices. This is the line that publishes.
 tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
 # if/fi rather than `[ -n "$BUILD" ] && printf`: under `set -e` an AND-list whose test fails takes
 # the whole script down, so the terse form would abort every publish of a bundle without meta.
@@ -257,15 +247,15 @@ tmp="$(mktemp)"; trap 'rm -f "$tmp"' EXIT
   printf '}\n'
 } >"$tmp"
 
-# Written to a temp path on the server and moved into place, for the same reason the bundle was: a
-# device that fetches latest.json mid-write must not get half a JSON document. It would fail closed
-# (exit 7, "malformed latest.json") rather than do anything dangerous, but a publish should not make
-# the fleet briefly blind.
-rsync -e "ssh ${SSH_OPTS[*]}" "$tmp" "$USER_@$HOST:$DEST/.latest.json.tmp"
-remote "chmod 0644 '$DEST/.latest.json.tmp' && mv -f '$DEST/.latest.json.tmp' '$DEST/latest.json'"
+# NO-CACHE, because this one object changes in place and a cached copy is a fleet that cannot see a
+# release (or, after a rollback, one still being offered the bad one). The bundles never change once
+# published, so they keep whatever caching the bucket or domain applies.
+"$RCLONE" copyto --retries 5 \
+  --header-upload "Cache-Control: no-cache" --header-upload "Content-Type: application/json" \
+  "$tmp" "$REMOTE/latest.json" || die "could not write latest.json; the bundle is uploaded and verified, so re-running is safe"
 
-# Read it back over HTTPS — the same way a device will, not over SSH. This is what catches a caching
-# layer, a wrong content type, or a docroot that is not the one nginx is serving.
+# Read it back over HTTPS — the same way a device will. This is what catches a caching layer or an
+# R2_PUBLIC_BASE that is not the bucket being written.
 log "reading latest.json back over HTTPS"
 served="$(curl -fsS --max-time 30 "$BASE_URL/$CHANNEL/latest.json" || true)"
 [ -n "$served" ] || die "latest.json was written but does not come back from $BASE_URL/$CHANNEL/latest.json"
@@ -276,23 +266,20 @@ fi
 log "published: $url"
 
 # --- 6. prune --------------------------------------------------------------------------------------
-# Never the one just published, and never the one latest.json names — those are the same file today,
-# but they stop being the same the moment someone rolls back by hand-editing the pointer, and a prune
-# that deletes the file the pointer names would take the fleet's update path down.
-# Sent over stdin with a quoted heredoc rather than built as a giant escaped one-liner: the nested
-# quoting of an inline `ssh "...sed 's/\"/.../'"` is where this kind of thing goes wrong silently, and
-# a prune that misfires deletes releases.
+# Within this channel only, so a run of betas can never evict the stable release. Never the bundle
+# just published, which latest.json now names (step 5 read that back) — it sorts OLDEST in a
+# deliberate roll-back publish of an earlier version, and deleting it would leave the pointer dangling.
+# A failed prune does not fail the publish: the release is already live.
 if [ "$KEEP" -ge 1 ]; then
-  remote "DEST='$DEST' KEEP='$KEEP' bash -s" <<'PRUNE' >&2 || log "prune failed (continuing — the publish itself succeeded)"
-set -eu
-cd "$DEST" 2>/dev/null || exit 0
-keep=$(sed -n 's/.*"bundle": *"\([^"]*\)".*/\1/p' latest.json 2>/dev/null || true)
-ls -1 retroforge-*.raucb 2>/dev/null | sort -V | head -n "-$KEEP" | while read -r old; do
-  [ "$old" = "$keep" ] && continue
-  echo "[publish] pruning $old"
-  rm -f -- "$old"
-done
-PRUNE
+  mapfile -t old < <("$RCLONE" lsf --files-only --include 'retroforge-*.raucb' "$REMOTE/" 2>/dev/null | sort -V)
+  n=${#old[@]}
+  if [ "$n" -gt "$KEEP" ]; then
+    for f in "${old[@]:0:$((n - KEEP))}"; do
+      [ "$f" = "$NAME" ] && continue
+      log "pruning $CHANNEL/$f"
+      "$RCLONE" deletefile "$REMOTE/$f" || log "could not prune $CHANNEL/$f (continuing — the publish itself succeeded)"
+    done
+  fi
 fi
 
 log "devices on channel '$CHANNEL' will be offered v$VERSION on their next check"

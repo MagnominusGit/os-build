@@ -1,7 +1,8 @@
 # ota/
 
 Getting a built image **onto a device that is already in someone's hands**: the signed RAUC
-bundle, the server that serves it, and the publishing path that puts bundles on that server.
+bundle, and the publishing path that puts it in the Cloudflare R2 bucket devices update from
+(`docs/ota.md`).
 What is inside the root is `rootfs/`; laying it onto a disk is `image/`.
 
 Updates are A/B and atomic (RAUC + Btrfs read-only root). A slot switch carries `/etc` with it,
@@ -22,18 +23,10 @@ post-install hook rsyncs `/var` across on update
 
 | File | Purpose |
 |---|---|
-| `publish-bundle.sh` | Publish a signed bundle plus its update index, so a device's `retroforge-update` can see it. |
-
-## The server
-
-| File | Purpose |
-|---|---|
-| `setup-server.sh` | Provision the OTA host from scratch. |
-| `setup-ci-user.sh` | Provision the restricted account CI publishes as. |
-| `nginx-retroforge-ota.conf` | The vhost that serves bundles and the update index. |
-| `ci-publish.pub` | The public half of the CI publishing key. |
+| `publish-bundle.sh` | Publish a signed bundle plus its update index to R2, so a device's `retroforge-update` can see it. |
+| `lib-rclone.sh` + `rclone.pin` | Sourced, never executed. The R2 credential environment and the pinned, sha256-verified rclone. |
 
 Note that a green release workflow run does **not** by itself mean anything was published —
-check the server (bundles) or the GitHub Release (card, installer).
+check the bucket (bundles) or the GitHub Release (card, installer).
 
 _Phase 5._

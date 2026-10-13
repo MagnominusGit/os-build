@@ -233,11 +233,13 @@ with `unsuitable certificate purpose`. It is a false red. The shipped `system.co
 ### Publish it
 
 ```sh
-RETROFORGE_OTA_HOST=<host> RETROFORGE_OTA_SSH_KEY=~/.ssh/<key> ota/publish-bundle.sh out/images/retroforge-<version>.raucb
+R2_ACCOUNT_ID=… R2_ACCESS_KEY_ID=… R2_SECRET_ACCESS_KEY=… R2_BUCKET=… R2_PUBLIC_BASE=… \
+  ota/publish-bundle.sh out/images/retroforge-<version>.raucb
 ```
 
-Puts the bundle on the update server and flips the channel pointer at it. **There is no RetroForge
-server yet** — the default host, `updates.retroforge.invalid`, is a placeholder that never resolves, and
+Puts the bundle in the R2 bucket and flips the channel pointer at it (normally CI does this on an
+`ota/v*` tag; `docs/ota.md`). **Devices do not point at the bucket yet** — their default host,
+`updates.retroforge.invalid`, is a placeholder that never resolves, and
 `retroforge-update` on the device currently reports "no update" regardless (it still gates on a Steam
 login file that RetroForge never creates; see `docs/ota.md`). Until both are resolved, install by hand. **Install it on a device first** (below) — nothing on the device ends an unconfirmed
 trial boot, so a bundle that comes up to a black screen costs ~6 manual power-cycles to recover on

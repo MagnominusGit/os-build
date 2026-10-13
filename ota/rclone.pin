@@ -1,0 +1,23 @@
+# rclone — the S3 client ota/publish-bundle.sh uses to upload OTA bundles to Cloudflare R2.
+#
+# Pinned here rather than installed from a distro repo or a marketplace action for exactly the
+# reason packages/oras.pin gives for oras: an action would resolve a version at run time on a
+# runner we do not control; this resolves the same version, verified by sha256, on a runner AND
+# on a developer's box from the one file.
+#
+# WHY A TOOL AT ALL, rather than curl. A bundle is ~530 MiB today, under the S3 API's 5 GiB single-PUT
+# cap, but `curl --aws-sigv4` would still mean hand-rolling signed listing and deletion for the prune,
+# and a single PUT has no resume: one dropped connection restarts the whole upload. rclone does
+# multipart, retries parts, and lists and deletes with the same credentials.
+#
+# Two arches because the publish job runs on an x86 runner while a developer may publish by hand
+# from either.
+#
+# To bump: take the version from https://downloads.rclone.org/version.txt and BOTH sums from that
+# release's SHA256SUMS. Note the archive is a .zip, not a tarball — it unpacks to
+# rclone-v<ver>-linux-<arch>/rclone.
+version: 1.74.4
+url_amd64: https://downloads.rclone.org/v1.74.4/rclone-v1.74.4-linux-amd64.zip
+sha256_amd64: fe435e0c36228e7c2f116a8701f01127bb1f694005fc11d1f27186c8bca4115d
+url_arm64: https://downloads.rclone.org/v1.74.4/rclone-v1.74.4-linux-arm64.zip
+sha256_arm64: 97685285c9ad6a0cf17d5844115d2a67245af6444db672187074bd9c358de419

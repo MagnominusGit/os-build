@@ -99,15 +99,15 @@ CURL = os.environ.get("RETROFORGE_CURL", "curl")
 # one host by its image ([[devices-are-operator-reachable]]); the shipped default is the release
 # channel and needs no configuration on a normal device.
 #
-# The host is dedicated to updates and the docroot is its root, so there is no path prefix: a
+# The URL is the root of the R2 bucket updates are published to, so there is no path prefix: a
 # channel is the first segment, giving /<channel>/latest.json. PLACEHOLDER: `.invalid` never
-# resolves, so a device built before the retroforge update server exists checks and finds nothing,
-# rather than asking a host someone else owns. Set the real host here when there is one.
+# resolves, so a device built before the bucket's public URL is final checks and finds nothing,
+# rather than asking a host someone else owns. Set it here (and in installer/netcfg and
+# installer/release-info) when it is.
 DEFAULT_URL = "https://updates.retroforge.invalid"
 DEFAULT_CHANNEL = "stable"
 
-# The channels the shell's picker offers: the two the release pipeline publishes (ota/setup-server.sh
-# creates both; release-bundle.yml routes ota/vX.Y.Z to stable and ota/vX.Y.Z-beta.N to beta). `dev`
+# The channels the shell's picker offers: the two the release pipeline publishes (release-bundle.yml routes ota/vX.Y.Z to stable and ota/vX.Y.Z-beta.N to beta). `dev`
 # and `test` are hand-seeded test channels with no CI behind them, so they stay off the picker and
 # reachable only by writing USER_CONFIG_FILE by hand. `channels` still lists the channel in effect
 # when it is one of those, so the picker never shows a selection that is not in its own list.

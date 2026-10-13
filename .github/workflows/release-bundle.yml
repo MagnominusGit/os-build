@@ -24,12 +24,19 @@
 # SETUP, once per repo (nothing below works until this is done — the build silently falls through
 # to the dev cert, which is the safe direction):
 #
+#   ON A PLAN WITH ENVIRONMENTS (public repo, or Pro/Team/Enterprise):
 #   1. Create a PROTECTED environment (repo settings -> Environments) named `release-signing`, with
 #      required reviewers and a branch/tag restriction. The environment is what makes signing an
 #      APPROVED action rather than an available one. Override the name with the SIGNING_ENVIRONMENT
 #      repo variable if you want a different one.
-#   2. Add RAUC_CERT_PEM + RAUC_KEY_PEM to THAT environment. NOT to repo-wide secrets — repo-wide
-#      secrets reach every workflow_dispatch and the gate would evaporate with no visible change.
+#   2. Add RAUC_CERT_PEM + RAUC_KEY_PEM, and the R2_* secrets the publish job reads, to THAT
+#      environment. Not repo-wide — repo-wide secrets reach every workflow_dispatch.
+#
+#   ON THIS REPO TODAY (private, GitHub Free — no environments): the same secrets go repo-wide, plus
+#   the R2_BUCKET and R2_PUBLIC_BASE variables. The sign step then passes the RAUC key on a TAG
+#   PUSH only, so a dispatch still signs with a throwaway cert; but there is no reviewer, and anyone with
+#   write access who can push an `ota/v*` tag can sign and publish.
+#
 #   3. Nothing else. image.yml takes an `environment` input and declares it on its build job (a
 #      caller cannot attach an environment to a reusable workflow's job from outside), and the
 #      `build` job below passes it only on a tag.
@@ -39,13 +46,16 @@
 # unconditionally — a build that names no environment is the entire point of the split. (Recorded
 # here as UNVERIFIED until the split made it load-bearing for bundles too. Had it failed, the fix
 # would have been two jobs in image.yml picked with an `if:`, not a change to the model.)
-# WHERE THE BUNDLE GOES. Not to a GitHub release asset like the card and installer: bundles are served from the
-# update server devices fetch their OTAs from (docs/ota.md; none exists yet). That is a different host with different
-# credentials from the card's Release, and deliberately so — a card is downloaded by a person with a
-# browser, a bundle is fetched by a device with a keyring. The transport is ota/publish-bundle.sh
-# and the `publish` job below calls it.
+# WHERE THE BUNDLE GOES: the Cloudflare R2 bucket devices update from, since 2026-10-13 (it replaced
+# a self-hosted nginx box). Not a GitHub release asset like the card and installer: a card is
+# downloaded by a person with a browser, a bundle is fetched by a device with a keyring, which needs a
+# stable public url and Range support (rauc streams the bundle). The transport is
+# ota/publish-bundle.sh, called by the `publish` job below; the bucket layout is
+# <channel>/latest.json + <channel>/retroforge-<version>.raucb under R2_PUBLIC_BASE, which is what
+# retroforge-update reads. Devices still carry the placeholder url (retroforge-update's DEFAULT_URL)
+# until R2_PUBLIC_BASE is final and baked in; until then nothing in the field can see a publish.
 #
-# THAT JOB IS LIVE as of 2026-08-04, on a tag only, and it still fails closed twice over:
+# THE PUBLISH JOB fails closed twice over, on a tag only:
 #
 #   1. publish-bundle.sh verifies the bundle against the CA in every device's keyring BEFORE it
 #      moves a byte. A dispatch can only produce dev-cert bundles, so the job does not run at all on
@@ -53,16 +63,16 @@
 #   2. It refuses a bundle whose payload was built as a DEV image, which a signature check cannot
 #      distinguish from a shippable one (see publish-bundle.sh's second gate).
 #
-# BEFORE 2026-08-04 IT WENT GREEN WITHOUT PUBLISHING, and the tag therefore looked shipped. The
-# missing credential was reported as a `::notice::` and a skipped step, which is a distinction no
-# one reads at the bottom of an hour-long green run — `ota/v0.2.1` was cut, built, signed, and
-# published nowhere. It is now a hard `::error::` and a non-zero exit: the only two states are
-# "published" and "red".
+# A missing credential is a hard error, never a skipped step: before 2026-08-04 a missing key was a
+# `::notice::` at the bottom of a green run, and `ota/v0.2.1` was cut, built, signed and published
+# nowhere. The only two states are "published" and "red".
 #
-# The publishing principal is `otapub` on the update server — its own unprivileged account, created
-# by ota/setup-ci-user.sh, holding no sudo and writing nothing outside the docroot. The `publish`
-# job's own header covers the key; setup-ci-user.sh's covers why it is an account rather than a
-# forced command.
+# NO ENVIRONMENTS ON THIS PLAN, as of 2026-10-13. The repo is private and the org is on GitHub Free,
+# which offers environments (and their reviewers and scoped secrets) only on public repos or paid
+# plans. So the RAUC_* and R2_* secrets have to be REPO-WIDE, where every workflow and every
+# workflow_dispatch can read them, and the `environment:` lines below gate nothing. They are kept so
+# that upgrading the plan (or making the repo public) and creating the environment restores the gate
+# with no workflow change — at which point move the secrets into it.
 name: release bundle
 
 # TAG NAMESPACE: `ota/v*`. Bundles and cards ship on independent cadences — an update goes out far
@@ -116,7 +126,7 @@ jobs:
           # WHICH CHANNEL THIS TAG PUBLISHES TO: the semver PRE-RELEASE suffix, and
           # nothing else. `ota/v0.3.0` -> stable. `ota/v0.3.0-beta.1` -> beta.
           # ============================================================================
-          # The channel is the first path segment on the update server, and it is what a
+          # The channel is the first path segment in the bucket, and it is what a
           # device's OTA_CHANNEL selects — the environment, then /etc/retroforge/ota.conf,
           # then the user-writable ~/.config/retroforge/ota.conf (retroforge-update's
           # channel_setting()). There is no Settings picker: that work was dropped with
@@ -197,7 +207,7 @@ jobs:
     # built for the target arch. Same expression as image.yml's build job so the two cannot drift
     # onto different runner pools.
     runs-on: ${{ vars.OVERLAY_RUNNER || 'ubuntu-24.04-arm' }}
-    environment: ${{ github.ref_type == 'tag' && (vars.SIGNING_ENVIRONMENT || 'release-signing') || '' }}
+    environment: ${{ github.event_name == 'push' && github.ref_type == 'tag' && (vars.SIGNING_ENVIRONMENT || 'release-signing') || '' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
@@ -218,8 +228,13 @@ jobs:
 
       - name: sign the bundle
         env:
-          RAUC_CERT_PEM: ${{ secrets.RAUC_CERT_PEM }}
-          RAUC_KEY_PEM: ${{ secrets.RAUC_KEY_PEM }}
+          # TAG PUSH ONLY, in the expression rather than by the environment alone: on this plan the
+          # secrets are repo-wide (see the header), so without this a dispatch would sign with the
+          # real release key — and a dispatch is meant to be the unsigned smoke test. event_name as
+          # well as ref_type, because a workflow_dispatch can be started ON a tag (ref_type 'tag'),
+          # and its version and channel then come from a free-text input, not the tag.
+          RAUC_CERT_PEM: ${{ github.event_name == 'push' && github.ref_type == 'tag' && secrets.RAUC_CERT_PEM || '' }}
+          RAUC_KEY_PEM: ${{ github.event_name == 'push' && github.ref_type == 'tag' && secrets.RAUC_KEY_PEM || '' }}
         run: |
           set -euo pipefail
           # $RUNNER_TEMP, never the workspace — the repo tree gets uploaded as artifacts and cached,
@@ -272,9 +287,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # The upload half. See the header: this is deliberately inert until the release key reaches a
-  # protected environment, and it is written rather than commented out so that decision is a matter
-  # of adding secrets, not of writing a job under time pressure on release day.
+  # The upload half: put the signed bundle in the R2 bucket and flip the channel's latest.json.
   publish:
     # `prep` alongside `sign` because the publish step below reads needs.prep.outputs.channel —
     # a job cannot reference the outputs of one it does not declare a need on, and the reference
@@ -282,68 +295,40 @@ jobs:
     # `stable` on an empty channel, so the symptom of forgetting this would be beta tags shipping
     # to every device in the field.
     needs: [prep, sign]
-    # Only a tag can have produced a signed bundle, and only a signed bundle can be published. On a
-    # dispatch this job would exist solely to fail its own keyring gate, so it does not run at all —
-    # a skipped job that is always skipped teaches people to ignore skipped jobs.
-    if: github.ref_type == 'tag'
+    # Only a tag PUSH can have produced a signed bundle (the sign step passes the key on that only), and
+    # only a signed bundle can be published; on a dispatch this job would exist solely to fail its
+    # own keyring gate.
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-latest
-    # THE SAME PROTECTED ENVIRONMENT AS THE SIGNING JOB, and declaring it here is not optional
-    # bookkeeping: OTA_SSH_KEY is scoped to this environment, and a job that does not name it sees
-    # `secrets.OTA_SSH_KEY` as the EMPTY STRING. Not an error, not a warning — the creds step below
-    # then reports "not set" and the run goes green having published nothing, which is exactly the
-    # failure this job was written to make impossible. If a publish ever skips with the secret
-    # visibly present in repo settings, this line is the first thing to check.
-    #
-    # The cost is a SECOND approval per release: `sign` waits for a reviewer to reach the signing
-    # key, and `publish` waits again to reach the publishing key. That is the right shape rather than
-    # an accident of reusing one environment — signing produces an artifact that still goes nowhere,
-    # while this job is the one that puts bytes in front of the fleet.
-    #
-    # DO NOT COLLAPSE THE TWO into one job to save the extra artifact round trip the build/sign split
-    # costs. That trade was considered when the split was made and rejected: it would buy back a few
-    # minutes of upload by turning "may this be signed" and "may this reach the fleet" into a single
-    # click, which is the one distinction here worth paying for.
+    # Gates nothing on this plan (see the header); kept so creating the environment restores the
+    # second approval — "may this be signed" and "may this reach the fleet" as separate clicks.
     environment: ${{ vars.SIGNING_ENVIRONMENT || 'release-signing' }}
     steps:
       - uses: actions/checkout@v7
 
-      # DO NOT PUT THE INSTANCE ADMIN KEY HERE. The key used to publish from a workstation logs in
-      # as `ubuntu`, who has PASSWORDLESS SUDO on the update server — handing CI that key hands CI
-      # root on the host every device fetches from, which is a far larger grant than "may write one
-      # directory". Which key that is, and where it lives, is deliberately not written down in a
-      # public CI file; it is an operator fact, not a build input.
+      # The R2 token should be scoped to this ONE bucket with Object Read & Write. It can DELETE as
+      # well as add (the prune), so it is a write credential to what every device trusts to say
+      # which bundle to install — but not a signing key: a bundle that does not chain to the
+      # device keyring is rejected on the device whoever uploaded it.
       #
-      # WHAT IS ACTUALLY IN THE SECRET, as of 2026-08-04: an ed25519 private key whose public half is
-      # committed at ota/ci-publish.pub and installed by ota/setup-ci-user.sh as the sole
-      # authorized_keys entry — prefixed `restrict` — of `otapub`, a system account on the update
-      # server with no sudo, no group but its own, and write access to nothing outside the docroot.
-      # Proven at install time: no pty, no port forwarding (local OR remote), `sudo -n true` fails,
-      # /etc is read-only to it. A forced command was considered and rejected; setup-ci-user.sh's
-      # header says why (publish-bundle.sh is not an rsync wrapper — it also runs mkdir, df, mv,
-      # chmod, sha256sum and a `bash -s` prune, and a wrapper covering those becomes a second,
-      # unversioned copy of the publish protocol).
-      #
-      # ROTATION is cheap and needs no device involvement: ssh-keygen a new pair, replace
-      # ota/ci-publish.pub, re-run setup-ci-user.sh (it REWRITES authorized_keys rather than
-      # appending, so the old key stops working), and re-set this secret. Same shape as the signing
-      # key, where the answer to a leak is a new release cert from the offline root.
-      #
-      # The signing half above does not have this problem either. There is no equivalent for shell
-      # access, which is why the account, not the key, is what bounds the damage here.
-      #
-      # The job stops without the secret rather than silently no-opping: a publish that quietly does
-      # nothing means the tag looks shipped and the fleet never sees it.
+      # The job stops without them rather than silently no-opping: a publish that quietly does
+      # nothing means the tag looks shipped and the fleet never sees it. ota/lib-rclone.sh's r2_env
+      # would stop too, but only after the toolchain image is built.
       - name: check for publishing credentials
-        id: creds
         env:
-          KEY: ${{ secrets.OTA_SSH_KEY }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_PUBLIC_BASE: ${{ vars.R2_PUBLIC_BASE }}
         run: |
-          if [ -z "${KEY:-}" ]; then
-            echo "::error::OTA_SSH_KEY is empty — nothing was published, and this tag is NOT shipped."
-            echo "::error::The secret lives in the '${{ vars.SIGNING_ENVIRONMENT || 'release-signing' }}'"
-            echo "::error::environment. An environment-scoped secret reads as empty in any job that"
-            echo "::error::does not declare that environment — check the job's environment: line"
-            echo "::error::before assuming the secret itself is missing."
+          missing=""
+          for v in R2_ACCOUNT_ID R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET R2_PUBLIC_BASE; do
+            [ -n "${!v:-}" ] || missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::not set:$missing — nothing was published, and this tag is NOT shipped."
+            echo "::error::R2_ACCOUNT_ID, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY are secrets; R2_BUCKET and R2_PUBLIC_BASE are variables."
             exit 1
           fi
 
@@ -353,33 +338,25 @@ jobs:
           name: retroforge-bundle
           path: out/images
 
-      # $RUNNER_TEMP, never the workspace, for the reason image.yml already keeps the RAUC key
-      # there: anything left in the repo tree gets swept into artifacts and caches.
-      - name: publish to the update server
+      - name: publish to R2
         env:
-          OTA_SSH_KEY: ${{ secrets.OTA_SSH_KEY }}
-          RETROFORGE_OTA_HOST: ${{ vars.OTA_HOST || 'updates.retroforge.invalid' }}
-          # `otapub`, NOT the script's own default. ota/publish-bundle.sh defaults to `ubuntu`
-          # because its primary caller is a human at a workstation holding the ADMIN key, and that
-          # key is not in otapub's authorized_keys. CI is the other caller and names its own
-          # principal — the one ota/setup-ci-user.sh created and the secret above authenticates as.
-          RETROFORGE_OTA_USER: ${{ vars.OTA_USER || 'otapub' }}
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          R2_PUBLIC_BASE: ${{ vars.R2_PUBLIC_BASE }}
           # Derived in `prep` from the tag's pre-release suffix; that step carries the reasoning.
           # publish-bundle.sh reads this (its $2 default) and it is the ONLY thing that decides
-          # which directory devices are offered this bundle from.
+          # which prefix devices are offered this bundle from.
           RETROFORGE_OTA_CHANNEL: ${{ needs.prep.outputs.channel }}
         run: |
           set -euo pipefail
           # An empty channel would silently mean `stable` inside publish-bundle.sh — the one
-          # direction a mistake here must not go. Fail before the key is written to disk.
+          # direction a mistake here must not go.
           [ -n "${RETROFORGE_OTA_CHANNEL:-}" ] || {
             echo "::error::no channel came out of the prep job — refusing to fall back to stable"
             exit 1
           }
-          key="$RUNNER_TEMP/ota_key"
-          printf '%s\n' "$OTA_SSH_KEY" > "$key"
-          chmod 600 "$key"
-          trap 'shred -u "$key" 2>/dev/null || rm -f "$key"' EXIT
           bundle="$(ls out/images/retroforge-*.raucb)"
           # Build the toolchain image so publish-bundle.sh's keyring gate runs against the PINNED
           # rauc (build/Dockerfile, RAUC_VERSION) rather than whatever the runner's archive holds.
@@ -387,4 +364,4 @@ jobs:
           # `apt-get install rauc` here would give a gate that fails on every bundle we produce —
           # indistinguishable, from the log, from a genuinely bad signature.
           docker build -t retroforge-build -f build/Dockerfile build
-          RETROFORGE_OTA_SSH_KEY="$key" ota/publish-bundle.sh "$bundle"
+          ota/publish-bundle.sh "$bundle"

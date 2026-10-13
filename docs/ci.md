@@ -83,7 +83,7 @@ different cadences:
 |---|---|---|---|
 | `release-sdcard.yml` | `card/v*` tag, or manual | none — `GITHUB_TOKEN` only; `release-cards` for its reviewer | a GitHub Release carrying the card, checksums and provenance |
 | `release-installer.yml` | `installer/v*` tag, or manual | none — `GITHUB_TOKEN` only; `release-cards` for its reviewer | a GitHub Release carrying the medium, checksums and provenance |
-| `release-bundle.yml` | `ota/v*` tag, or manual | `RAUC_CERT_PEM`/`RAUC_KEY_PEM` and `OTA_SSH_KEY`, in `release-signing` | the update server named by `vars.OTA_HOST` — **none exists yet**; the default is the placeholder `updates.retroforge.invalid`, so a tagged publish goes red (see `docs/ota.md`) |
+| `release-bundle.yml` | `ota/v*` tag, or manual | `RAUC_CERT_PEM`/`RAUC_KEY_PEM` and `R2_*` (repo-wide: no environments on this plan) | the Cloudflare R2 bucket in `vars.R2_BUCKET`, `<channel>/` prefix; devices still point at a placeholder URL (see `docs/ota.md`) |
 
 **The tag namespaces are separate on purpose.** A bundle ships far more often than a card, so each
 gets its own namespace rather than sharing a bare `v*`. That also fixes a real inversion: while

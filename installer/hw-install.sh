@@ -110,7 +110,7 @@ log "bundle: ${BUNDLE#"$ROOT"/} ($(du -h "$BUNDLE" | cut -f1))"
 # Measured 2026-08-21 against the ACE: serving with `http2 on;` (h2c, verified working from the
 # host with `curl --http2-prior-knowledge`) does NOT silence it -- rauc does not attempt
 # prior-knowledge h2 over cleartext, so h2 arrives via TLS ALPN or not at all. The production OTA
-# vhost has both (ota/nginx-retroforge-ota.conf), and giving this lab server TLS would mean a cert
+# bucket (Cloudflare R2, HTTPS) has it, and giving this lab server TLS would mean a cert
 # the device trusts, for a stream that only has to finish once. So the gate runs on HTTP/1 and is
 # slower than the release path will be. That is a property of the harness, not a defect.
 #

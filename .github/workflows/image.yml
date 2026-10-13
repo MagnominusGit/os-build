@@ -16,7 +16,7 @@
 #
 # THE TWO ARTIFACTS SHIP TO DIFFERENT PLACES, AND NEITHER SHIPS FROM HERE. A CARD goes to the
 # `card/v*` GitHub Release a person downloads and flashes from (524 MiB compressed, measured
-# 2026-10-13, against a 2 GiB per-asset cap). A BUNDLE goes to the update server
+# 2026-10-13, against a 2 GiB per-asset cap). A BUNDLE goes to the R2 bucket
 # devices fetch their OTAs from — a different host, different credentials, different audience. Both
 # paths stop at a workflow artifact here and are handed off to a publishing job in the caller.
 #

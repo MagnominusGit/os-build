@@ -872,17 +872,17 @@ sign-bundle: | $(BUILD_STAMP) ## Sign a RAUC bundle around an EXISTING out/image
 	$(GENBUNDLE)
 
 # ==============================================================================
-# Publish an update (host) — put a signed bundle on the OTA server
+# Publish an update (host) — put a signed bundle in the OTA bucket (Cloudflare R2)
 # ==============================================================================
-# Runs on the HOST, not in the container: the transport is ssh/rsync and the credentials are the
-# operator's. The script reaches back INTO the container by itself for the one thing that needs the
+# Runs on the HOST, not in the container: the transport is the pinned rclone and the credentials are
+# the operator's (R2_* in the environment, see ota/lib-rclone.sh). The script reaches back INTO the container by itself for the one thing that needs the
 # pinned rauc — verifying the bundle against the keyring every device carries, which it does before
-# it moves a byte and without an override. Server contract: docs/ota.md.
+# it moves a byte and without an override. Bucket contract: docs/ota.md.
 #
 # No dependency on `bundle`: publishing a CI artifact or a bundle built on another machine is a
 # normal thing to do, and re-deriving it here from a possibly-newer tree would publish bytes nobody
 # tested. Pass the file you actually installed on a device.
-publish-bundle: ## Publish BUNDLE=<file.raucb> to the OTA server (host; needs RETROFORGE_OTA_SSH_KEY)
+publish-bundle: ## Publish BUNDLE=<file.raucb> to the OTA bucket (host; needs the R2_* variables)
 	@test -n "$(BUNDLE)" || { echo "pass BUNDLE=out/images/retroforge-<version>.raucb" >&2; exit 2; }
 	$(OTA_DIR)/publish-bundle.sh "$(BUNDLE)" $(CHANNEL)
 

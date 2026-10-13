@@ -8,12 +8,13 @@ and the slot is free.
 > through udisks by the storage scripts under `/usr/lib/retroforge/storage/`, but no shell uses it as a
 > library yet; that arrives with the shell.
 
-> **There is no RetroForge update server yet, so a medium built today cannot complete an install.** The
+> **Devices do not point at the update bucket yet, so a medium built today cannot complete an install.** The
 > installer downloads the OS from the same host `retroforge-update` uses, and that default is the
 > placeholder `https://updates.retroforge.invalid` — written into `installer/netcfg`,
 > `installer/release-info` and `retroforge-update`, which `tests/test-ui.sh` asserts agree. A placeholder
-> never resolves, so the **Network** screen stops at "could not be resolved (DNS)". Setting up a
-> server is described in [ota.md](ota.md); once one exists, those three literals name it.
+> never resolves, so the **Network** screen stops at "could not be resolved (DNS)". The R2 bucket
+> updates are published to is described in [ota.md](ota.md); once its public URL is final, those three
+> literals name it.
 
 It is a separate image from the card: a self-contained recovery tool that boots on the handheld,
 draws its own screens on the panel, and is driven with the gamepad. It downloads the current RetroForge
