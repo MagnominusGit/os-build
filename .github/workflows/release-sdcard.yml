@@ -38,7 +38,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version for this card (default: date-shortsha)'
+        description: 'Version for this card, with its v (e.g. v1.3.0 -> tag card/v1.3.0; default: v<date>.<shortsha>)'
         required: false
         type: string
         default: ''
@@ -80,7 +80,8 @@ jobs:
             # A dispatch with no version still needs to name itself, or the release tag and the
             # image's own /etc/retroforge-release would both say "unset". A DOT, not a dash: the
             # pre-release check below refuses any `-`, so `date-sha` failed every such dispatch.
-            v="$(date -u +%Y%m%d).$(echo "$GITHUB_SHA" | cut -c1-7)"
+            # The leading `v` matches what a tag run yields, since `card/` is all it strips.
+            v="v$(date -u +%Y%m%d).$(echo "$GITHUB_SHA" | cut -c1-7)"
           fi
           # This becomes a URL path segment; refuse anything that could escape it here rather than
           # discovering it after a four-hour build.
@@ -134,8 +135,10 @@ jobs:
   # rebuild.
   #
   # PUBLISH IS NOT THE SAME AS TAG: a `workflow_dispatch` with publish:true is a supported way to cut
-  # a card, so this gates on prep's `publish` output and creates the `card/v<version>` tag itself,
-  # on the commit that was built, when the run did not start from one. The common case — a dispatch
+  # a card, so this gates on prep's `publish` output and creates the `card/<version>` tag itself,
+  # on the commit that was built, when the run did not start from one — the exact inverse of prep
+  # stripping `card/` from a tag, so a dispatch of `v1.3.0` and a push of `card/v1.3.0` produce the
+  # same tag and the same version string in the image. The common case — a dispatch
   # answering "does this still build?" — skips this job entirely, and the image still lands as a
   # workflow artifact to download.
   release:
@@ -196,7 +199,7 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = tag ]; then
             tag="$GITHUB_REF_NAME"
           else
-            tag="card/v$VERSION"
+            tag="card/$VERSION"
           fi
           exists="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag" \
             --jq "map(select(.ref == \"refs/tags/$tag\")) | length")"
