@@ -15,7 +15,7 @@
 #
 # WHICH KEY ACTUALLY GOES TO CI, because this was mis-stated for a while and it matters. Not the
 # 20-year root: ~/retroforge-pki/ca.key.pem stays offline and never leaves the workstation. CI gets
-# release.cert.pem + release.key.pem — the SIGNING pair, whose cert expires 2028-10-04. Devices
+# release.cert.pem + release.key.pem — the SIGNING pair, whose cert expires 2028-12-21. Devices
 # trust the CA, not that cert, so if CI is ever compromised the response is to mint a new release
 # cert from the offline root and carry on. No device changes, no keyring update, no reflash. That
 # is a materially smaller decision than "put the root of trust in GitHub", which is what the old
