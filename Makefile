@@ -41,7 +41,7 @@ SIGN_IMG  ?= retroforge-sign
 #   RETROFORGE_DEV=1  build a dev image. `set -a; . ./dev.env; set +a` sets this and the rest;
 #                dev.env is TRACKED and secret-free, and sources dev.env.local (gitignored) for
 #                Wi-Fi creds. A RELEASE image (no RETROFORGE_DEV) builds locally too — it just
-#                cannot be published, since the R2 and signing credentials only exist in CI.
+#                cannot be published, since the release reviewer and signing credentials only exist in CI.
 #   RETROFORGE_WIFI_SSID/PSK  OPTIONAL dev-only Wi-Fi profile, injected from the environment so it
 #                never touches the repo. Absent => a card with NO network and no SSH, i.e. the
 #                shipping first-boot condition (the only honest way to test OOBE locally).
@@ -466,7 +466,6 @@ test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-splash-status.sh
 	bash $(TESTS_DIR)/test-update.sh
 	bash $(TESTS_DIR)/test-publish-bundle.sh
-	bash $(TESTS_DIR)/test-publish-card.sh
 	bash $(TESTS_DIR)/test-storage.sh
 	bash $(TESTS_DIR)/test-install.sh
 	bash $(TESTS_DIR)/test-ui.sh

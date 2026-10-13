@@ -39,9 +39,9 @@
 # unconditionally — a build that names no environment is the entire point of the split. (Recorded
 # here as UNVERIFIED until the split made it load-bearing for bundles too. Had it failed, the fix
 # would have been two jobs in image.yml picked with an `if:`, not a change to the model.)
-# WHERE THE BUNDLE GOES. Not to R2, and not to a GitHub release asset: bundles are served from the
+# WHERE THE BUNDLE GOES. Not to a GitHub release asset like the card and installer: bundles are served from the
 # update server devices fetch their OTAs from (docs/ota.md; none exists yet). That is a different host with different
-# credentials from the card bucket, and deliberately so — a card is downloaded by a person with a
+# credentials from the card's Release, and deliberately so — a card is downloaded by a person with a
 # browser, a bundle is fetched by a device with a keyring. The transport is ota/publish-bundle.sh
 # and the `publish` job below calls it.
 #
@@ -160,7 +160,7 @@ jobs:
   # Splitting moves the gate to where the key is actually used. The approval count is UNCHANGED at
   # two — `sign` and `publish` — because the gate moved rather than multiplied. What changed is that
   # a reviewer now approves a build that has already succeeded, which is the same correction made to
-  # the card path when its R2 upload moved out of the build job (see image.yml's header).
+  # the card path when its upload moved out of the build job (see image.yml's header).
   #
   # `secrets: inherit` stays, and stays safe for the same reason as before: the signing secrets are
   # ENVIRONMENT-scoped, and this job names no environment, so it inherits nothing that matters. It is

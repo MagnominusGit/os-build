@@ -1,7 +1,7 @@
 # ota/
 
 Getting a built image **onto a device that is already in someone's hands**: the signed RAUC
-bundle, the server that serves it, and the publishing paths that put artefacts in the bucket.
+bundle, the server that serves it, and the publishing path that puts bundles on that server.
 What is inside the root is `rootfs/`; laying it onto a disk is `image/`.
 
 Updates are A/B and atomic (RAUC + Btrfs read-only root). A slot switch carries `/etc` with it,
@@ -23,9 +23,6 @@ post-install hook rsyncs `/var` across on update
 | File | Purpose |
 |---|---|
 | `publish-bundle.sh` | Publish a signed bundle plus its update index, so a device's `retroforge-update` can see it. |
-| `publish-card.sh` | Publish a full card image (the download a new user flashes), with its bucket prefix and prune policy. |
-| `lib-rclone.sh` + `rclone.pin` | Sourced, never executed. The pinned rclone and the one place that builds its arguments, so a publish cannot differ between the two publishers. |
-| `r2-preflight.sh` | Check the bucket credentials and layout answer before a release run starts uploading. |
 
 ## The server
 
@@ -37,6 +34,6 @@ post-install hook rsyncs `/var` across on update
 | `ci-publish.pub` | The public half of the CI publishing key. |
 
 Note that a green release workflow run does **not** by itself mean anything was published —
-check the bucket.
+check the server (bundles) or the GitHub Release (card, installer).
 
 _Phase 5._

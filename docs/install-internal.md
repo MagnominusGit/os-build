@@ -182,17 +182,17 @@ cannot keep), so a second run is designed to be the answer.
 for a test build.
 
 ```
-prep  ->  build  ->  publish  ->  release
-          |          |
-          |          R2 under installer/<version>/, KEEP=2
+prep  ->  build  ->  release
+          |         |
+          |         GitHub Release installer/<version>: installer.img.gz + sums + lock
           make installer + make verify-image
 ```
 
 **A new OS release does not need a new medium.** The bundle is resolved from the channel at install
-time, so any medium installs the current OS — that is why an old medium is never an old install, and
-why R2 keeps two media rather than one. A medium is cut when the installer itself changes.
+time, so any medium installs the current OS — that is why an old medium is never an old install. A
+medium is cut when the installer itself changes.
 
-One protected environment, one approval: *may this medium reach the public bucket*. Nothing here is
+One protected environment, one approval: *may this medium become a release*. Nothing here is
 signed — a medium is flashed over USB by someone holding the device.
 
 ---

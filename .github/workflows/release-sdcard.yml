@@ -175,7 +175,7 @@ jobs:
           limit=$((2 * 1024 * 1024 * 1024))
           echo "card: $((size / 1048576)) MiB of a $((limit / 1048576)) MiB asset cap" | tee -a "$GITHUB_STEP_SUMMARY"
           if [ "$size" -ge "$limit" ]; then
-            echo "::error::sdcard.img.gz is $size bytes, over GitHub's 2 GiB per-asset cap. Shrink the card, or bring back the R2 path (ota/publish-card.sh still serves the installer)."
+            echo "::error::sdcard.img.gz is $size bytes, over GitHub's 2 GiB per-asset cap. Shrink the card, or move it to a host without the cap (git history has the old R2 publisher, ota/publish-card.sh)."
             exit 1
           fi
 

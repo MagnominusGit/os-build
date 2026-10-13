@@ -20,7 +20,7 @@
 # devices fetch their OTAs from — a different host, different credentials, different audience. Both
 # paths stop at a workflow artifact here and are handed off to a publishing job in the caller.
 #
-# The card used to be uploaded from THIS job, which meant the R2 credentials were in scope for the
+# The card used to be uploaded (to R2, then) from THIS job, which meant the credentials were in scope for the
 # whole 350-minute build — a job that bootstraps a rootfs, compiles the overlay from third-party
 # sources and runs several container stages as uid 0. Moving the upload out (2026-08-11) shrank that
 # window to the couple of minutes an upload takes, put the reviewer's approval AFTER a green build
@@ -30,7 +30,7 @@
 #
 # `artifact: rootfs` IS THE SAME MOVE, APPLIED TO SIGNING (2026-08-11). It stops at that shared
 # boundary and uploads the bare image plus its identity sidecar, signing nothing. release-bundle.yml
-# then wraps it in a separate, environment-gated `sign` job. The reason is identical to the R2 one
+# then wraps it in a separate, environment-gated `sign` job. The reason is identical to the upload one
 # above: the signing key sat in a protected environment, so the ENTIRE build queued behind a human
 # — an approval granted before a 30-minute build rather than after it, blocking on a reviewer to do
 # work that needs no key at all. Two consecutive upstream outages during ota/v0.2.4 made the cost
@@ -79,7 +79,7 @@ on:
         required: true
         type: string
       version:
-        description: 'Version stamped into the image (the R2 prefix is named by the caller)'
+        description: 'Version stamped into the image (the release tag is named by the caller)'
         required: false
         type: string
         default: ''
@@ -96,9 +96,6 @@ on:
         required: false
       RAUC_KEY_PEM:
         required: false
-      # NO R2_* HERE. The installer upload lives in release-installer.yml's own publish job, so the
-      # bucket credentials never enter this workflow — see the header. A caller passing them would be
-      # handing a six-hour build a credential it has no step to use.
 
 permissions:
   contents: read
@@ -128,7 +125,7 @@ jobs:
       #
       # There used to be a second knob, `VERSION`, which named the bundle independently — the pair
       # could disagree, and the OTA client's update check compares exactly those two strings. It was
-      # removed 2026-08-03. A plain `VERSION` workflow variable outlived it as publish-card.sh's
+      # removed 2026-08-03. A plain `VERSION` workflow variable outlived it as the old publish-card.sh's
       # first argument and went with the upload in 2026-08-11; the release tag is now named in
       # release-sdcard.yml's release job, from the same prep output that feeds this input.
       RETROFORGE_VERSION: ${{ inputs.version }}
@@ -287,11 +284,11 @@ jobs:
           ls -lh upload/ >> "$GITHUB_STEP_SUMMARY"
 
       # Same .gz as the card, for the same compatibility reason: this is a file a person downloads
-      # and writes to a card with balenaEtcher or Raspberry Pi Imager. It is ~600 MiB rather than the
-      # card's ~5 GiB, so the compression time the card's note measures barely registers here.
+      # and writes to a card with balenaEtcher or Raspberry Pi Imager. It compresses to ~400 MiB
+      # (2026-10-13), against the card's ~520 MiB.
       #
       # AND THE IDENTITY SIDECAR, which installer/mkimage.sh writes from the same values it stamped
-      # inside the image. The publish job names the R2 prefix from the release tag, but a person
+      # inside the image. The release job names the release from the tag, but a person
       # holding the downloaded file needs the build to be nameable without opening a squashfs out of
       # the middle of a GPT — and installer/verify-image.sh asserts the two are byte-identical.
       - name: compress the installer medium
@@ -322,7 +319,7 @@ jobs:
           ls -lh upload/ >> "$GITHUB_STEP_SUMMARY"
 
       # Checksums + the pins this image was actually built against. One producer (image/card-meta.sh)
-      # for both the R2 copy and the workflow artifact, so the two cannot drift.
+      # for both the GitHub Release and the workflow artifact, so the two cannot drift.
       #
       # NOT ON THE ROOTFS PATH. The sums here are what a consumer checks against the thing they
       # fetched, and nobody fetches a rootfs.img — it is an intermediate that exists for exactly one
@@ -362,7 +359,7 @@ jobs:
       # artifact is shipped from here. The card path used to skip this upload when publishing,
       # because the bucket already held the bytes; that shortcut died with the in-job upload.
       #
-      # RETENTION IS SHORT ON PURPOSE. A card is ~5 GiB and the repo default is 90 days, so keeping
+      # RETENTION IS SHORT ON PURPOSE. A card is ~520 MiB and the repo default is 90 days, so keeping
       # every release card around for a quarter is real storage against no use: a publishing job
       # downloads this within the same run, and the only reason to want it afterwards is to re-run a
       # failed publish. Seven days is far longer than anyone takes to notice that.

@@ -5,7 +5,7 @@
 # blockers are gone (the lock pins overlay rows to their SOURCES rather than to bytes no clean runner
 # could reproduce, and an overlay build turned out to cost ~34 minutes on a native aarch64 runner
 # rather than the ~4h it costs emulated on a dev box). CI is the only thing that PUBLISHES a release
-# image, because the R2 and signing credentials live here — building one locally is supported.
+# image, because the release reviewers and signing credentials live here — building one locally is supported.
 #
 # So this file covers the half that has always been cleanly CI-shaped: the offline suites. They are what
 # caught a broken RAUC backend, an unarmed slot after a failed install, and a signing self-test that

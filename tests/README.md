@@ -40,7 +40,7 @@ are invoked directly there rather than through `make test-disk` — a failure na
 - **Graphics** — `test-mesa-source.sh`, `test-splash.sh`, `test-splash-status.sh`.
 - **The tree itself** — `test-guard.sh`, `test-lib-pins.sh`, `test-verify-lock.sh`, and
   `test-upstream-name.sh` (no leftover upstream name anywhere).
-- **Publishing** — `test-publish-bundle.sh`, `test-publish-card.sh`, `test-verify-signing.sh`.
+- **Publishing** — `test-publish-bundle.sh`, `test-verify-signing.sh`.
 
 ## Adding one
 

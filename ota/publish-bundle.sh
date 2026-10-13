@@ -4,9 +4,10 @@
 #
 #   ota/publish-bundle.sh out/images/retroforge-0.2.0.raucb [channel]
 #
-# Shaped after ota/publish-card.sh — credentials from the environment only, an explicit KEEP
-# retention, and verification at the PUBLIC url rather than trust in the upload — but over SSH/rsync
-# rather than rclone. This is not S3: it is a rented Ubuntu box serving a directory, so the transport
+# Shaped after the old card publisher (ota/publish-card.sh, retired 2026-10-13 when cards became
+# GitHub Release assets) — credentials from the environment only, an explicit KEEP retention, and
+# verification at the PUBLIC url rather than trust in the upload — but over SSH/rsync rather than
+# rclone. This is not S3: it is a rented Ubuntu box serving a directory, so the transport
 # is the one that box already has, and there is no write surface exposed to the internet at all.
 #
 # THE SIGNATURE GATE RUNS FIRST, BEFORE A BYTE MOVES, and it has no override. A bundle is accepted
@@ -42,7 +43,7 @@ USER_="${RETROFORGE_OTA_USER:-ubuntu}"
 SSH_KEY="${RETROFORGE_OTA_SSH_KEY:-}"
 DOCROOT="${RETROFORGE_OTA_DOCROOT:-/srv/retroforge-ota}"
 BASE_URL="${RETROFORGE_OTA_URL:-https://$HOST}"
-# Retention. The instance has ~94G and a bundle is ~4G, so unlike the card bucket (KEEP=1, where the
+# Retention. The instance has ~94G and a bundle is ~4G, so unlike the old card bucket (KEEP=1, where the
 # free tier was the constraint) there is room to keep the previous releases: if a published update
 # turns out bad, re-pointing latest.json at the one before it is the fastest fleet-wide fix there is,
 # and it only works if those bytes are still on the server.

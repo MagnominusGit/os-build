@@ -27,7 +27,7 @@
 # so it would survive the release compression whole. Nothing dedupes it: the flash instruction is
 # `gzip -dc` (32 KiB window), and even zstd --long tops out at a 2 GiB window against a ~4 GiB gap
 # between the two copies. That was ~4 of the ~9 GiB a release card compressed to until 2026-08-04
-# (ota/publish-card.sh) — ~44% of every download — bought to cover a failover window that closes
+# (measured for the old R2 publisher) — ~44% of every download — bought to cover a failover window that closes
 # the first time RAUC writes the slot, which it writes in FULL and reads nothing prior out of. A
 # user never hand-tests a slot switch, and a fresh-card A failure is media failure, which will not
 # politely spare B. With B left empty a card compresses to ~5 GiB instead.

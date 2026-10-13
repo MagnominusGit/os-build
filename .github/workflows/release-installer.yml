@@ -5,9 +5,12 @@
 # artifacts with three cadences. A medium is cut when the installer changes, which is neither the
 # card's cadence nor the OTA's.
 #
-# NEEDS NO SIGNING KEY, exactly like the card: the medium is flashed over USB by someone holding the
-# device, so there is no signature for anything to verify. The only credential in the whole workflow
-# is the R2 one, in the publish job, which is the only job that names an environment.
+# NEEDS NO SIGNING KEY AND NO R2 CREDENTIAL, exactly like the card: the medium is flashed over USB by
+# someone holding the device, so there is no signature for anything to verify, and since 2026-10-13
+# it is a GitHub Release asset — 404 MiB under gz -6 (measured that day, bbde6b6), a fifth of the
+# 2 GiB per-asset cap. The only credential is the release job's GITHUB_TOKEN; that job names the
+# `release-cards` environment for its reviewer, as release-sdcard.yml does (its header has the why,
+# and the note that the repo is private, so a download needs a GitHub login with access).
 #
 # THE MEDIUM IS NOT PINNED TO AN OS BUNDLE. It resolves <channel>/latest.json at install time, so
 # any medium installs the current release — which is why there is no bundle input here and why an
@@ -18,12 +21,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version for this medium, with its v (e.g. v0.0.3; default: <date>.<shortsha>)'
+        description: 'Version for this medium, with its v (e.g. v0.0.3 -> tag installer/v0.0.3; default: v<date>.<shortsha>)'
         required: false
         type: string
         default: ''
       publish:
-        description: 'Upload the medium to R2 and cut a Release (off for a plain test build)'
+        description: 'Cut a GitHub Release carrying the medium (off for a plain test build)'
         required: false
         type: boolean
         default: false
@@ -54,11 +57,9 @@ jobs:
             v="${REF_NAME#installer/}"
           else
             # A DOT, not a dash: the pre-release check below refuses any `-`, so `date-sha` failed
-            # every such dispatch. And NO leading `v`, unlike the card's default: this version is
-            # an R2 prefix that publish-card.sh prunes by `sort -V`, keeping the newest two. A digit
-            # sorts below `v`, so a dated test medium is the first to go; `v2026…` would sort above
-            # every real `v0.x` and push the tagged media out instead.
-            v="$(date -u +%Y%m%d).$(echo "$GITHUB_SHA" | cut -c1-7)"
+            # every such dispatch. The leading `v` matches what a tag run yields, since
+            # `installer/` is all it strips.
+            v="v$(date -u +%Y%m%d).$(echo "$GITHUB_SHA" | cut -c1-7)"
           fi
           case "$v" in
             *[!A-Za-z0-9._-]*) echo "::error::version '$v' has characters that do not belong in a URL path"; exit 1 ;;
@@ -93,19 +94,22 @@ jobs:
       # credential at all. It ends at a workflow artifact, exactly as the card build does.
       environment: ''
 
-  publish:
+  # The publish half: the medium, its checksums and its provenance, as one GitHub Release — the same
+  # shape as release-sdcard.yml's release job, whose comments carry the reasoning (reviewer gate on a
+  # finished build, `contents: write` scoped here, retry without a rebuild).
+  #
+  # A dispatch with publish:true creates the `installer/<version>` tag itself, on the commit that was
+  # built — the exact inverse of prep stripping `installer/` from a tag, so a dispatch of `v0.0.3`
+  # and a push of `installer/v0.0.3` produce the same tag and the same version in the medium.
+  release:
     needs: [prep, build]
     if: needs.prep.outputs.publish == 'true'
     runs-on: ubuntu-latest
-    outputs:
-      medium_url: ${{ steps.publish.outputs.url }}
-    # The same environment the card publishes from — the same bucket, the same push-only credential,
-    # and the same fact that it can DELETE as well as add (see the retention note in
-    # ota/publish-card.sh). Declaring it here is what makes those secrets resolve at all.
+    permissions:
+      contents: write
+    # For the reviewer, not for secrets: the same environment the card's release job names.
     environment: ${{ vars.CARDS_ENVIRONMENT || 'release-cards' }}
     steps:
-      - uses: actions/checkout@v7
-
       - name: fetch the medium
         uses: actions/download-artifact@v8
         with:
@@ -118,41 +122,40 @@ jobs:
           name: retroforge-installer-meta
           path: meta
 
-      - name: upload the medium to R2
-        id: publish
-        env:
-          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_BUCKET: ${{ vars.R2_BUCKET }}
-          R2_PUBLIC_BASE: ${{ vars.R2_PUBLIC_BASE }}
-          VERSION: ${{ needs.prep.outputs.version }}
-          # A SEPARATE PREFIX FROM THE CARDS, so the two retentions cannot prune each other.
-          RETROFORGE_R2_KIND: installer
-          # TWO, not the card's one: a medium is small, and an older one stays a working recovery
-          # tool — it needs nothing from the server but the OS bundle.
-          RETROFORGE_CARD_KEEP: '2'
-        run: ota/publish-card.sh "$VERSION" upload/installer.img.gz meta
+      - name: check the medium fits a release asset
+        run: |
+          set -euo pipefail
+          size="$(stat -c %s upload/installer.img.gz)"
+          limit=$((2 * 1024 * 1024 * 1024))
+          echo "medium: $((size / 1048576)) MiB of a $((limit / 1048576)) MiB asset cap" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$size" -ge "$limit" ]; then
+            echo "::error::installer.img.gz is $size bytes, over GitHub's 2 GiB per-asset cap. The medium has to shrink, or move to a host without the cap."
+            exit 1
+          fi
 
-  release:
-    needs: [prep, publish]
-    if: needs.prep.outputs.publish == 'true' && github.ref_type == 'tag'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
-        with:
-          name: retroforge-installer-meta
-          path: meta
+      # A TAG THAT ALREADY EXISTS MUST BE THIS COMMIT: when it exists the release API uses it as-is
+      # and ignores --target. See release-sdcard.yml for why the lookup is shaped this way.
       - name: cut the release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ needs.prep.outputs.version }}
-          MEDIUM_URL: ${{ needs.publish.outputs.medium_url }}
         run: |
           set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag="installer/$VERSION"
+          fi
+          exists="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag" \
+            --jq "map(select(.ref == \"refs/tags/$tag\")) | length")"
+          if [ "$exists" != 0 ]; then
+            at="$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$tag" --jq .sha)"
+            if [ "$at" != "$GITHUB_SHA" ]; then
+              echo "::error::tag $tag already exists on $at, but this medium was built from $GITHUB_SHA. Pick a new version, or run from the tag itself."
+              exit 1
+            fi
+          fi
           {
             echo "## retroforge installer \`$VERSION\`"
             echo
@@ -160,8 +163,9 @@ jobs:
             echo 'an SD card, boot the device from it, and follow the screens.'
             echo
             echo '```bash'
-            echo "curl -LO $MEDIUM_URL"
-            echo "gzip -dc $(basename "$MEDIUM_URL") | sudo dd of=/dev/sdX bs=4M status=progress"
+            echo "gh release download '$tag' -R '$GITHUB_REPOSITORY' -p installer.img.gz -p sha256sums.txt"
+            echo 'sha256sum -c sha256sums.txt   # BEFORE writing the image to a card'
+            echo 'gzip -dc installer.img.gz | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress'
             echo '```'
             echo
             echo '**Before you boot it:** the medium'"'"'s first partition is a plain FAT volume that'
@@ -178,7 +182,8 @@ jobs:
             echo "This medium installs the current OS release from the update channel — it is not"
             echo "pinned to one; the OS itself is the only download during an install."
           } > notes.md
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$tag" \
+            --target "$GITHUB_SHA" \
             --title "retroforge installer $VERSION" \
             --notes-file notes.md \
-            meta/sha256sums.txt meta/provenance/manifest.lock
+            upload/installer.img.gz meta/sha256sums.txt meta/provenance/manifest.lock
