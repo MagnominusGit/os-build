@@ -49,6 +49,18 @@ ctr_run_cmdline() {
 }
 
 # Fail early, naming the runtime, when it is not installed.
+# The uid:gid a container must chown its output to for the HOST user to own it. Under docker that
+# is the host user's own ids. Under ROOTLESS podman it is 0:0: the user namespace maps container root
+# to the invoking user and every other container uid to a subordinate id (uid 1000 inside lands as
+# 525287 on the build box), so chowning to $(id -u) inside hands the files to a stranger and the
+# host script that wrote them a moment ago gets EACCES.
+ctr_host_owner() {
+  if [ "$RETROFORGE_CONTAINER" = podman ] && [ "$(id -u)" != 0 ]; then
+    printf '0:0'
+  else
+    printf '%s:%s' "$(id -u)" "$(id -g)"
+  fi
+}
 ctr_require() {
   command -v "$RETROFORGE_CONTAINER" >/dev/null 2>&1 \
     || { echo "$RETROFORGE_CONTAINER required${1:+ for $1} (RETROFORGE_CONTAINER=docker|podman)" >&2; exit 1; }

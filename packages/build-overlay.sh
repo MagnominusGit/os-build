@@ -80,6 +80,8 @@ if [ ${#PINS[@]} -eq 0 ]; then
 fi
 
 ctr_require "the overlay build"
+# Who the containers below hand their output back to: the host user, as the runtime maps it.
+HOST_OWNER="$(ctr_host_owner)"
 DEVEL_REF="$(pins_builder_ref)"
 
 pin_field() { sed -n "s/^$2:[[:space:]]*//p" "$1" | head -1; }
@@ -345,7 +347,7 @@ fi
 for name in "${BUILD_NAMES[@]}"; do
   echo "[overlay] === build $name (isolated container) ===" >&2
   ctr run --rm --platform linux/arm64 \
-    -e HOSTUID="$(id -u)" -e HOSTGID="$(id -g)" -e PKG="$name" -e USE_CCACHE="$USE_CCACHE" \
+    -e HOSTUID="${HOST_OWNER%%:*}" -e HOSTGID="${HOST_OWNER#*:}" -e PKG="$name" -e USE_CCACHE="$USE_CCACHE" \
     -v "$STAGE":/stage -v "$REPO_DIR":/repo "${CCACHE_MOUNT[@]}" "$DEVEL_REF" \
     bash -euo pipefail -c '
       useradd -m builder 2>/dev/null || true
@@ -419,7 +421,7 @@ if [ "$DO_INDEX" -eq 0 ]; then
 else
 echo "[overlay] indexing repo db" >&2
 ctr run --rm --platform linux/arm64 \
-  -e HOSTUID="$(id -u)" -e HOSTGID="$(id -g)" -e ARCH="$ARCH" \
+  -e HOSTUID="${HOST_OWNER%%:*}" -e HOSTGID="${HOST_OWNER#*:}" -e ARCH="$ARCH" \
   -v "$REPO_DIR":/repo "$DEVEL_REF" \
   bash -euo pipefail -c '
     cd /repo

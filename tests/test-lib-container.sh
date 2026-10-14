@@ -53,6 +53,19 @@ case "$out" in podman*) ok "podman when docker is absent" ;; *) bad "picked: $ou
 out="$(call "" "$TMP/bin" ps)"
 case "$out" in docker*) ok "docker when it is installed" ;; *) bad "picked: $out" ;; esac
 
+CASE=owner
+owner() {  # owner <runtime> <fake id -u>
+  printf '#!/bin/sh\n[ "$1" = -g ] && echo %s || echo %s\n' "$2" "$2" > "$TMP/bin/id"; chmod +x "$TMP/bin/id"
+  env -i PATH="$TMP/bin" RETROFORGE_CONTAINER="$1" "$BASH" -c '. "$1"; ctr_host_owner' _ "$LIB"
+}
+out="$(owner podman 1000)"
+[ "$out" = 0:0 ] && ok "rootless podman hands output back as container root" || bad "rootless podman: $out"
+out="$(owner podman 0)"
+[ "$out" = 0:0 ] && ok "rootful podman hands output back to root" || bad "rootful podman: $out"
+out="$(owner docker 1000)"
+[ "$out" = 1000:1000 ] && ok "docker hands output back to the host ids" || bad "docker: $out"
+rm -f "$TMP/bin/id"
+
 CASE=scripts
 # Code lines only. The CI workflow runs on GitHub's docker and stays as it is.
 direct="$(grep -nE '^[^#]*(^|[^A-Za-z_/$-])docker (run|build|import|commit|rm|rmi|image|volume) ' \
