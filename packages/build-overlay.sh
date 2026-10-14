@@ -370,6 +370,18 @@ for name in "${BUILD_NAMES[@]}"; do
       # from-packages bootstrap would then resolve those as installable [retroforge] packages.
       mkdir -p "/stage/$PKG/out"
       chown -R builder "/stage/$PKG" /repo
+      # The build dependencies go in HERE, as root, rather than through makepkg -s, which installs
+      # them with `sudo pacman` as builder. sudo needs its setuid bit honoured, and under qemu-user
+      # emulation that takes a binfmt registration with the C flag; Fedora registers qemu-aarch64
+      # with F only, so on an x86 podman box sudo stays unprivileged and every package with a
+      # dependency missing from the builder image failed. -s stays on below: with everything already
+      # installed it has nothing to do, and it still fails loudly if this list missed something.
+      deps=$(cd "/stage/$PKG" && sudo -u builder makepkg --printsrcinfo \
+               | sed -n "s/^[[:space:]]*\(make\)\{0,1\}depends\(_aarch64\)\{0,1\} = //p" | sort -u)
+      if [ -n "$deps" ]; then
+        # shellcheck disable=SC2086  # one dependency per word, as makepkg passes them
+        pacman -S --needed --noconfirm --asdeps $deps
+      fi
       echo "[overlay] makepkg in /stage/$PKG" >&2
       # Git sources clone over HTTP/1.1: this image`s git 2.53 sends its protocol-v2 POST over
       # HTTP/2 and GitHub answers 103 then 401 ("could not read Username") on every GitHub source.
