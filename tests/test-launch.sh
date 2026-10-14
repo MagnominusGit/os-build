@@ -724,6 +724,55 @@ for board in dual single; do
 done
 
 # =================================================================================================
+CASE="a card moved to a board with the other panel count"
+# /home is on the card: a home seeded on one kind of board boots on the other. Only the settings the
+# two variants disagree on follow the board; the player's other changes stay.
+MOVE="$T/data-move"; mkdir -p "$MOVE/duckstation"
+printf '[Main]\nVolume = 50\n\n[Window0]\nSizing = 0\n' > "$MOVE/duckstation/settings.ini"
+printf '[Main]\nVolume = 50\n\n[Window0]\nSizing = 4\n\n[Window1]\nEnabled = true\nSizing = 5\n' > "$MOVE/duckstation/settings-dual.ini"
+cp "$DUAL/duckstation/emulator.json" "$MOVE/duckstation/"
+marker="$HOME/.config/retroforge/seed-board/duckstation"
+launch_on() {  # launch_on dual|single: one run of the launcher on that kind of board
+  [ "$1" = dual ] && fake_device_env "'DSI-2'" || fake_device_env "''"
+  reset_logs; RETROFORGE_EMU_DATA_DIR="$MOVE" RETROFORGE_DEVICE_ENV="$T/device-env" start_launcher
+  wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+  touch "$T/stop-emu"; reap_launcher "$lpid"
+}
+val() { awk -v sec="[$1]" -v key="$2" '/^\[/ { in_s = ($0 == sec); next }
+  in_s { split($0, kv, " = "); if (kv[1] == key) { print kv[2]; exit } }' "$seeded"; }
+rm -rf "$HOME"; mkdir -p "$HOME"
+launch_on single
+[ "$(cat "$marker" 2>/dev/null)" = single ] && ok "the seeded variant is recorded (single)" || bad "seed-board marker: '$(cat "$marker" 2>/dev/null)'"
+sed -i 's/^Volume = 50$/Volume = 80/' "$seeded"  # the player's own change
+launch_on dual
+[ "$(val Window0 Sizing)" = 4 ] && [ "$(val Window1 Enabled)" = true ] && [ "$(val Window1 Sizing)" = 5 ] \
+  && ok "single -> dual board: the dual-screen layout (changed, and a new section added)" || bad "single -> dual: $(tr '\n' '|' < "$seeded")"
+[ "$(val Main Volume)" = 80 ] && ok "and the player's other settings are kept" || bad "the player's Volume was lost: $(tr '\n' '|' < "$seeded")"
+[ "$(cat "$marker")" = dual ] && ok "the marker follows the board" || bad "marker after the move: '$(cat "$marker")'"
+grep -q "was set up on a single-screen board" "$T/launch.err" && ok "the switch is logged" || bad "the switch is not logged"
+launch_on single
+[ "$(val Window0 Sizing)" = 0 ] && [ -z "$(val Window1 Enabled)" ] && [ -z "$(val Window1 Sizing)" ] && [ "$(val Main Volume)" = 80 ] \
+  && ok "dual -> single board: back to one window, the second window's settings gone" || bad "dual -> single: $(tr '\n' '|' < "$seeded")"
+sed -i 's/^Sizing = 0$/Sizing = 2/' "$seeded"; before="$(cat "$seeded")"
+launch_on single
+[ "$(cat "$seeded")" = "$before" ] && ok "same board: the player's own layout is left alone" || bad "same board rewrote the file"
+# A home seeded before the marker existed: judged by its layout settings.
+cp "$MOVE/duckstation/settings-dual.ini" "$seeded"; sed -i 's/^Volume = 50$/Volume = 80/' "$seeded"; rm -f "$marker"
+launch_on single
+[ "$(val Window0 Sizing)" = 0 ] && [ -z "$(val Window1 Enabled)" ] && [ "$(val Main Volume)" = 80 ] && [ "$(cat "$marker")" = single ] \
+  && ok "no marker, dual-screen layout on a single-screen board: switched, marker written" || bad "legacy dual home: $(tr '\n' '|' < "$seeded")"
+sed -i 's/^Sizing = 0$/Sizing = 2/' "$seeded"; rm -f "$marker"; before="$(cat "$seeded")"
+launch_on dual
+[ "$(cat "$seeded")" = "$before" ] && [ "$(cat "$marker")" = dual ] \
+  && ok "no marker, a layout of the player's own: left alone, marker written" || bad "legacy custom home rewritten: $(tr '\n' '|' < "$seeded")"
+# A file that cannot be rewritten is a warning: the game still starts.
+rm -f "$marker"; cp "$MOVE/duckstation/settings-dual.ini" "$seeded"; chmod a-w "$(dirname "$seeded")"
+launch_on single
+chmod u+w "$(dirname "$seeded")"
+grep -q "warning: duckstation: could not switch" "$T/launch.err" && ok "a layout switch that fails is a warning, the game still runs" \
+  || bad "no warning for a failed switch: $(cat "$T/launch.err")"
+
+# =================================================================================================
 CASE="exit_resend (a second window keeps the emulator up)"
 RESEND="$T/data-resend"; mkdir -p "$RESEND/duckstation"; cp "$DS_SEED" "$RESEND/duckstation/"
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["exit_resend"] = 0.5; json.dump(d, open(sys.argv[2], "w"))' \
