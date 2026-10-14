@@ -31,6 +31,7 @@ root (the `gamescope/` checkout inside makepkg's `$srcdir`) by
 0029-rendervulkan-safe-compute-fallback.patch           (ROCKNIX fork 0025)
 0030-composite-blit-keeps-the-dpu-colour-management.patch   (ours: 0027 under 0014/0018)
 0031-composite-blit-build-under-werror-format-security.patch   (ours: one-line build fix for 0027)
+0047-drm-offer-an-edid-less-internal-panels-native-modes-as-refresh-rates.patch   (Kettle Linux 0019, via Nova-Deck 0026)
 ```
 
 `0008`-`0013` are **retired** (see below), and so are `0022`-`0024`, which is why the pre-rotation
@@ -550,6 +551,23 @@ counts as the pending flip. The debug pattern keeps it on; a VT switch redoes th
 ConVar `secondary_output_off_when_unused` (default on). HW 2026-10-12, Thor Lite: the panel's
 backlight follows (bl_power 4 off / 0 on), melonDS turns it on directly onto rotated direct
 scanout, off 2 s after exit, no DPU timeouts; OGUI menu 360 mA off vs 412 mA on (~0.19 W).
+
+`0047` — **an EDID-less internal panel's native modes become its refresh rates** (gennro, Kettle
+Linux `0019`, body unchanged; Nova-Deck's `0026`, renumbered because our `0026` is ROCKNIX's
+upscale cache). gamescope fills the dynamic refresh rates of an internal panel that no display
+script describes from the connector's modes at the preferred size — but that fallback sits in
+`ParseEDID()` after the EDID is parsed, and a DSI panel has no EDID, so it never ran. With the
+list empty, Steam's refresh-rate slider only capped fps and the panel never left its top mode.
+Measured upstream on the Pocket FIT before the patch (modes 144/120/90/60, slider at 60): CRTC
+still 1080x1920@144, `GAMESCOPE_DYNAMIC_REFRESH` = `GAMESCOPE_DISPLAY_REFRESH_RATE_FEEDBACK` = 144,
+and a 60 fps-capped game ran at a solid 48 fps (each frame waiting three 144 Hz vblanks). After it,
+the slider switches the CRTC (HW-checked upstream on the FIT, 2026-10-14). Kettle's opt-in knobs on
+top of it (`ui_refresh_hz`, generated lower rates, `refresh_hz`, `auto_refresh_max_hz`) are not
+taken. `ui_refresh_hz` was tried upstream and dropped: it did run the Steam UI at 60 Hz, but
+Steam's Quick Access slider kept showing its own stored request (144), so the screen said one rate
+while the panel ran another. With no game open, gamescope ignores Steam's request anyway
+(`GAMESCOPE_DISPLAY_DYNAMIC_REFRESH_BASED_ON_GAME_PRESENCE`) and runs the panel's highest mode.
+Applied last, after the secondary-output series, at fuzz 0.
 
 Drop the patch files here with those exact names (or rename and update `source.pin`'s
 `patches:` line). **Until a declared patch is present, `make overlay` / `make base` fail fast**
