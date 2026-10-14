@@ -98,10 +98,15 @@ mkdir -p "$STAGE" "$REPO_DIR" "$STAMPS"
 CCACHE_HOST="${RETROFORGE_CCACHE_DIR:-$ROOT/work/ccache/overlay-$ARCH}"
 if [ -n "${CI:-}" ]; then USE_CCACHE="${RETROFORGE_CCACHE:-0}"; else USE_CCACHE="${RETROFORGE_CCACHE:-1}"; fi
 CCACHE_MOUNT=()
-# No host-side mkdir: the kernel build container creates work/ccache as root, so a host mkdir of
-# a sibling fails with EACCES. `docker -v` creates a missing source itself, and the build below
-# chowns /ccache to its builder user, so who owns the host directory never matters.
-[ "$USE_CCACHE" = 0 ] || CCACHE_MOUNT=(-v "$CCACHE_HOST":/ccache)
+# The host directory is created here because podman, unlike `docker -v`, refuses to bind-mount a
+# source that does not exist ("statfs ...: no such file or directory"). The Makefile creates
+# work/ccache on the host before the kernel container can make it root-owned, so this mkdir of a
+# sibling no longer meets EACCES. The build below chowns /ccache to its builder user, so who owns
+# the host directory never matters.
+if [ "$USE_CCACHE" != 0 ]; then
+  mkdir -p "$CCACHE_HOST"
+  CCACHE_MOUNT=(-v "$CCACHE_HOST":/ccache)
+fi
 
 # --- decide which packages need a (re)build ------------------------------------------------
 # A package is up-to-date when its stored input hash matches AND every artifact it last produced
