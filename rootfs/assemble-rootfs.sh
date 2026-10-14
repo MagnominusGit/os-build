@@ -51,7 +51,12 @@ trap 'rm -rf "$stage"' EXIT
 echo "[retroforge] assembling unified read-only root (base=$BASE)"
 
 # STAGE base-userspace — the Holo aarch64 preview rootfs.
-if command -v rsync >/dev/null 2>&1; then rsync -aHAX --numeric-ids "$BASE"/ "$stage"/
+#
+# -X carries the xattrs the image needs (security.capability above all), but NOT security.selinux.
+# On an SELinux host (the Fedora build box) every file of work/base carries the HOST's label for the
+# user's home (user_home_t), which means nothing on the device, and the container's /tmp cannot store
+# it: rsync then exits 23 over ~59k files and the assembly dies.
+if command -v rsync >/dev/null 2>&1; then rsync -aHAX --filter='-x security.selinux' --numeric-ids "$BASE"/ "$stage"/
 else cp -a "$BASE"/. "$stage"/; fi
 
 # NOTHING TO SCRUB (Phase 4c). This is where sanitize_base_provenance() used to run: the tree
