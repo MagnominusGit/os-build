@@ -68,6 +68,7 @@ echo \$\$ >> "$T/pids"
 read -r _ _ _ _ pgid sid _< <(cut -d' ' -f1-7 /proc/\$\$/stat)
 { echo "pid=\$\$"; echo "pgid=\$pgid"; echo "sid=\$sid"; echo "self=\$0"; echo "vk=\${VK_DRIVER_FILES-}"
   echo "sharun_sys=\${SHARUN_ALLOW_SYS_VKICD-}"; echo "no_updates=\${DISABLE_AUTO_UPDATES-}"; echo "core=\$(ulimit -c)"
+  echo "lowprio=\${RETROFORGE_GAME_LOWPRIO-}"; echo "tu_autotune=\${TU_AUTOTUNE_FLAGS-}"
   printf 'arg=%s\n' "\$@"; } >> "\$log"
 if [ "\${1-}" = --fake-install ]; then  # an install step (emulator.json "install"), not a game
   echo "install \$*" >> "$T/install.log"
@@ -771,6 +772,32 @@ launch_on single
 chmod u+w "$(dirname "$seeded")"
 grep -q "warning: duckstation: could not switch" "$T/launch.err" && ok "a layout switch that fails is a warning, the game still runs" \
   || bad "no warning for a failed switch: $(cat "$T/launch.err")"
+
+# =================================================================================================
+CASE="GPU priority (the game-priority Vulkan layer)"
+# Every emulator gets RETROFORGE_GAME_LOWPRIO=1 (the layer runs its queues at LOW, below the shell);
+# the A7xx boards also get Turnip's preempt_optimize. The SoC class comes from device-env.
+soc_device_env() { printf '#!/bin/sh\necho "RETROFORGE_SOC_CLASS=%s"\n' "$1" > "$T/device-env"; chmod +x "$T/device-env"; }
+for soc in SM8550 SM8650 SM8250 SM6115 ""; do
+  soc_device_env "'$soc'"; reset_logs
+  RETROFORGE_DEVICE_ENV="$T/device-env" start_launcher
+  wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+  touch "$T/stop-emu"; reap_launcher "$lpid"
+  want=""; case "$soc" in SM8550|SM8650) want=preempt_optimize ;; esac
+  [ "$(field lowprio)" = 1 ] && [ "$(field tu_autotune)" = "$want" ] \
+    && ok "${soc:-unknown board}: RETROFORGE_GAME_LOWPRIO=1, TU_AUTOTUNE_FLAGS='$want'" \
+    || bad "${soc:-unknown board}: lowprio='$(field lowprio)' tu_autotune='$(field tu_autotune)'"
+done
+# A definition's env wins: an emulator that misbehaves at LOW opts out in its emulator.json.
+PRIO="$T/data-prio"; mkdir -p "$PRIO/duckstation"; cp "$DS_SEED" "$PRIO/duckstation/"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["env"] = dict(d.get("env", {}), RETROFORGE_GAME_LOWPRIO="0", TU_AUTOTUNE_FLAGS="");
+json.dump(d, open(sys.argv[2], "w"))' "$DS_DEF" "$PRIO/duckstation/emulator.json"
+soc_device_env "'SM8650'"; reset_logs
+RETROFORGE_EMU_DATA_DIR="$PRIO" RETROFORGE_DEVICE_ENV="$T/device-env" start_launcher
+wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+[ "$(field lowprio)" = 0 ] && [ -z "$(field tu_autotune)" ] && ok "a definition's env overrides both" \
+  || bad "definition env lost: lowprio='$(field lowprio)' tu_autotune='$(field tu_autotune)'"
 
 # =================================================================================================
 CASE="exit_resend (a second window keeps the emulator up)"

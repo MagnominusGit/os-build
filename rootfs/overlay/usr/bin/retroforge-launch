@@ -106,6 +106,15 @@
 #     released with SIGHUP (the runtime holds the mount busy until it exits) and fusermount3 -u.
 #   - Exit pressed twice is SIGKILL for everything, which leaves a dead mount: sweep ours first.
 #
+# GPU priority: every emulator (game or --gui) starts with RETROFORGE_GAME_LOWPRIO=1, which turns on
+# the implicit Vulkan layer VK_LAYER_RETROFORGE_game_priority (packages/retroforge-gpu-priority): its
+# queues run at LOW global priority, so OGUI's overlay, Xwayland and mangoapp -- which never get the
+# variable -- preempt it instead of waiting behind its frames. On the A7xx boards (SM8550, SM8650)
+# TU_AUTOTUNE_FLAGS=preempt_optimize too: smaller tiles reach a preemption point sooner. Not on the
+# single-ring A650/A610 (SM8250, SM6115), which do not preempt; there kernel/patches/0270 keeps the UI
+# ahead. The SoC class comes from device-env (the session does not export it). A definition's "env"
+# overrides both, e.g. {"DISABLE_RETROFORGE_GAME_LOWPRIO": "1"} for an emulator that misbehaves.
+#
 # core_dumps false: the emulator starts with RLIMIT_CORE 0, so systemd-coredump logs a crash in the
 # journal but stores no core. For an emulator known to crash on a normal exit (Snes9x 1.63 did, until
 # the sigdefer shim moved its exit out of its SIGTERM handler): ~14 MB per Exit otherwise.
@@ -147,6 +156,7 @@ TMP_LINK_DIR = ENV.get("RETROFORGE_TMP_LINK_DIR", "/tmp")
 DEVICE_ENV = ENV.get("RETROFORGE_DEVICE_ENV", "/usr/lib/retroforge/device-env")
 PM_MOUNTS = ENV.get("RETROFORGE_PM_MOUNTS",
                     os.path.join(ENV.get("XDG_RUNTIME_DIR") or "/tmp", "retroforge-portmaster-mounts"))
+PREEMPTING_SOCS = {"SM8550", "SM8650"}  # A7xx: four preemptible GPU rings
 SYSTEM_VULKAN_ICD = "/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json"
 UNMOUNT_TRIES = 50   # x 0.1 s for the runtime to let go of the mount after SIGHUP
 MOUNT_TIMEOUT = 30   # s for the AppImage runtime to print its mount point
@@ -316,14 +326,27 @@ def load_definition(emulator):
             "exit_resend": exit_resend}
 
 
-def dual_screen():
-    """Whether the board has a second panel: device-env's RETROFORGE_SECONDARY_CONNECTOR is set."""
+def device_field(name):
+    """One of device-env's RETROFORGE_* fields, unquoted; "" when unset or device-env cannot run."""
     try:
         out = subprocess.run([DEVICE_ENV], capture_output=True, text=True, timeout=10).stdout
     except (OSError, subprocess.SubprocessError):
-        return False
-    m = re.search(r"^RETROFORGE_SECONDARY_CONNECTOR=(.*)$", out, re.M)
-    return bool(m and m.group(1).strip("'\""))
+        return ""
+    m = re.search(rf"^{name}=(.*)$", out, re.M)
+    return m.group(1).strip("'\"") if m else ""
+
+
+def dual_screen():
+    """Whether the board has a second panel: device-env's RETROFORGE_SECONDARY_CONNECTOR is set."""
+    return bool(device_field("RETROFORGE_SECONDARY_CONNECTOR"))
+
+
+def gpu_priority_env():
+    """The emulator's GPU priority environment (header: GPU priority)."""
+    env = {"RETROFORGE_GAME_LOWPRIO": "1"}
+    if device_field("RETROFORGE_SOC_CLASS") in PREEMPTING_SOCS:
+        env["TU_AUTOTUNE_FLAGS"] = "preempt_optimize"
+    return env
 
 
 def seed_first_run(emulator, seed):
@@ -877,7 +900,7 @@ def run(argv):
         except Exit as err:
             fail("mount-failed", emulator, str(err))
         binary = os.path.join(root, definition["binary"])
-        env = {**ENV, **package.env(), **definition["env"]}
+        env = {**ENV, **gpu_priority_env(), **package.env(), **definition["env"]}
         run_installs(emulator, binary, env, todo, interrupted)
         program = SCRIPT_SHELL if package.runs_rom and rom is not None else binary
         log(f"{system or 'gui'} -> {emulator}: {program} {' '.join(args)}")
