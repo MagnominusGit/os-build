@@ -351,6 +351,15 @@ for name in "${BUILD_NAMES[@]}"; do
     -v "$STAGE":/stage -v "$REPO_DIR":/repo "${CCACHE_MOUNT[@]}" "$DEVEL_REF" \
     bash -euo pipefail -c '
       useradd -m builder 2>/dev/null || true
+      # Hand everything this container touches back to the host user on ANY exit. The chowns at the
+      # end only run when the build succeeds; a failed one used to leave /stage/<pkg> owned by
+      # builder, which under rootless podman is a subordinate host uid, and the next run could not
+      # even remove it.
+      handback() {
+        chown -R "$HOSTUID:$HOSTGID" "/stage/$PKG" /repo 2>/dev/null || true
+        [ ! -d /ccache ] || chown -R "$HOSTUID:$HOSTGID" /ccache 2>/dev/null || true
+      }
+      trap handback EXIT
       printf "builder ALL=(ALL) NOPASSWD: ALL\n" > /etc/sudoers.d/builder
       chmod 0440 /etc/sudoers.d/builder
       pacman -Sy --noconfirm
