@@ -387,9 +387,10 @@ for name in "${BUILD_NAMES[@]}"; do
       # installed it has nothing to do, and it still fails loudly if this list missed something.
       # Only the pkgbase section of .SRCINFO, as makepkg -s itself: a split package`s own depends
       # can name a sibling the same build produces (mesa`s vulkan-mesa-device-select), which no repo
-      # has yet.
+      # has yet. The split sections are DELETED rather than quit on: sed quitting early would close
+      # the pipe under makepkg, and with pipefail its SIGPIPE fails the whole build (exit 141).
       deps=$(cd "/stage/$PKG" && sudo -u builder makepkg --printsrcinfo \
-               | sed -n -e "/^pkgname = /q" -e "s/^[[:space:]]*\(make\)\{0,1\}depends\(_aarch64\)\{0,1\} = //p" \
+               | sed -n -e "/^pkgname = /,\$d" -e "s/^[[:space:]]*\(make\)\{0,1\}depends\(_aarch64\)\{0,1\} = //p" \
                | sort -u)
       if [ -n "$deps" ]; then
         # shellcheck disable=SC2086  # one dependency per word, as makepkg passes them
