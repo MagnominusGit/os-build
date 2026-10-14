@@ -385,8 +385,12 @@ for name in "${BUILD_NAMES[@]}"; do
       # with F only, so on an x86 podman box sudo stays unprivileged and every package with a
       # dependency missing from the builder image failed. -s stays on below: with everything already
       # installed it has nothing to do, and it still fails loudly if this list missed something.
+      # Only the pkgbase section of .SRCINFO, as makepkg -s itself: a split package`s own depends
+      # can name a sibling the same build produces (mesa`s vulkan-mesa-device-select), which no repo
+      # has yet.
       deps=$(cd "/stage/$PKG" && sudo -u builder makepkg --printsrcinfo \
-               | sed -n "s/^[[:space:]]*\(make\)\{0,1\}depends\(_aarch64\)\{0,1\} = //p" | sort -u)
+               | sed -n -e "/^pkgname = /q" -e "s/^[[:space:]]*\(make\)\{0,1\}depends\(_aarch64\)\{0,1\} = //p" \
+               | sort -u)
       if [ -n "$deps" ]; then
         # shellcheck disable=SC2086  # one dependency per word, as makepkg passes them
         pacman -S --needed --noconfirm --asdeps $deps
