@@ -7,6 +7,10 @@
 #   * gallium-rusticl=false — no OpenCL on a handheld; avoids dragging the Rust toolchain + a
 #                             per-release rust-crate table that would need regenerating each bump.
 #   * html-docs=disabled    — no Sphinx HTML docs in the image.
+#   * vram-report-limit is an IMPLICIT layer (upstream installs it explicit), gated on
+#                             ENABLE_MESA_VRAM_REPORT_LIMIT=1 / DISABLE_MESA_VRAM_REPORT_LIMIT=1,
+#                             the shape Valve ships it in on the Steam Frame. Nothing turns it on
+#                             but the emulator environment retroforge-launch builds.
 # Everything else (arch-meson invocation, --auto-features=enabled behaviour, the rest of the meson
 # options, the kept makedepends, and the package split for the components we DO build) mirrors
 # upstream. LLVM/clang stay ON, exactly as upstream ships mesa.
@@ -320,6 +324,26 @@ package_vulkan-mesa-layers() {
   replaces=(vulkan-mesa-layer)
 
   mv vklayer/* "$pkgdir"
+
+  # retroforge: vram-report-limit moves from explicit to implicit with an enable/disable env pair
+  # (see the header). Rewritten from mesa's own manifest so its settings block stays upstream's.
+  local layers="$pkgdir/usr/share/vulkan"
+  python - "$layers/explicit_layer.d/VkLayer_MESA_vram_report_limit.json" \
+           "$layers/implicit_layer.d/VkLayer_MESA_vram_report_limit.json" <<'PYEOF'
+import json, os, sys
+src, dst = sys.argv[1], sys.argv[2]
+with open(src) as f:
+    m = json.load(f)
+m["layer"]["enable_environment"] = {"ENABLE_MESA_VRAM_REPORT_LIMIT": "1"}
+m["layer"]["disable_environment"] = {"DISABLE_MESA_VRAM_REPORT_LIMIT": "1"}
+os.makedirs(os.path.dirname(dst), exist_ok=True)
+with open(dst, "w") as f:
+    json.dump(m, f, indent=3)
+    f.write("\n")
+os.remove(src)
+PYEOF
+  [ -s "$pkgdir/usr/lib/libVkLayer_MESA_vram_report_limit.so" ] \
+    || { echo "vram-report-limit layer library missing" >&2; return 1; }
 
   install -Dm644 mesa-$_pkgver/docs/license.rst -t "$pkgdir/usr/share/licenses/$pkgname"
 }

@@ -69,6 +69,8 @@ read -r _ _ _ _ pgid sid _< <(cut -d' ' -f1-7 /proc/\$\$/stat)
 { echo "pid=\$\$"; echo "pgid=\$pgid"; echo "sid=\$sid"; echo "self=\$0"; echo "vk=\${VK_DRIVER_FILES-}"
   echo "sharun_sys=\${SHARUN_ALLOW_SYS_VKICD-}"; echo "no_updates=\${DISABLE_AUTO_UPDATES-}"; echo "core=\$(ulimit -c)"
   echo "lowprio=\${RETROFORGE_GAME_LOWPRIO-}"; echo "tu_autotune=\${TU_AUTOTUNE_FLAGS-}"
+  echo "vram_on=\${ENABLE_MESA_VRAM_REPORT_LIMIT-}"; echo "vram_mib=\${VK_VRAM_REPORT_LIMIT_HEAP_SIZE-}"
+  echo "vram_id=\${VK_VRAM_REPORT_LIMIT_DEVICE_ID-}"
   printf 'arg=%s\n' "\$@"; } >> "\$log"
 if [ "\${1-}" = --fake-install ]; then  # an install step (emulator.json "install"), not a game
   echo "install \$*" >> "$T/install.log"
@@ -799,6 +801,64 @@ wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
 touch "$T/stop-emu"; reap_launcher "$lpid"
 [ "$(field lowprio)" = 0 ] && [ -z "$(field tu_autotune)" ] && ok "a definition's env overrides both" \
   || bad "definition env lost: lowprio='$(field lowprio)' tu_autotune='$(field tu_autotune)'"
+
+# =================================================================================================
+CASE="VRAM report limit (mesa's vram-report-limit layer)"
+# Every emulator gets the layer at 4096 MiB, keyed on the chip id Turnip reports, which comes from the
+# GPU node's compatible: hex on A7xx, core/major/minor.patch on the older Adreno. No GPU node, no limit.
+# Nor below 15/16 of RAM = 4096 MiB, where the layer would report MORE than Turnip's real heap.
+meminfo() { printf 'MemTotal:       %s kB\nMemFree:          123456 kB\n' "$1" > "$T/meminfo"; }
+meminfo 15820000   # a 16 GB board
+export RETROFORGE_MEMINFO="$T/meminfo"
+gpu_tree() {  # gpu_tree <parent> <compatible>  -> $T/dt
+  rm -rf "$T/dt"; mkdir -p "$T/dt/$1/gpu@3d00000"
+  printf '%s\0qcom,adreno\0' "$2" > "$T/dt/$1/gpu@3d00000/compatible"
+}
+for pair in "soc@0 qcom,adreno-43051401 0x5143:0x43051401" "soc@0 qcom,adreno-43050a01 0x5143:0x43050a01" \
+            "soc@0 qcom,adreno-650.2 0x5143:0x06050002" "soc@0 qcom,adreno-610.0 0x5143:0x06010000" \
+            "soc qcom,adreno-650.2 0x5143:0x06050002" "soc@0 qcom,adreno-gmu-wrapper -"; do
+  read -r parent compat want <<<"$pair"
+  gpu_tree "$parent" "$compat"; reset_logs
+  RETROFORGE_DEVICE_TREE="$T/dt" start_launcher
+  wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+  touch "$T/stop-emu"; reap_launcher "$lpid"
+  if [ "$want" = - ]; then
+    [ -z "$(field vram_on)$(field vram_mib)$(field vram_id)" ] && ok "$compat: no Adreno chip id, no limit" \
+      || bad "$compat: vram_on='$(field vram_on)' vram_id='$(field vram_id)'"
+  else
+    [ "$(field vram_on)" = 1 ] && [ "$(field vram_mib)" = 4096 ] && [ "$(field vram_id)" = "$want" ] \
+      && ok "$parent/$compat: 4096 MiB for $want" \
+      || bad "$parent/$compat: vram_on='$(field vram_on)' mib='$(field vram_mib)' id='$(field vram_id)' (want $want)"
+  fi
+done
+rm -rf "$T/dt"; mkdir -p "$T/dt"; reset_logs
+RETROFORGE_DEVICE_TREE="$T/dt" start_launcher
+wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+[ -z "$(field vram_on)$(field vram_id)" ] && ok "no GPU node: no limit" || bad "no GPU node: vram_on='$(field vram_on)'"
+# A definition's env wins, as for GPU priority.
+VRAM="$T/data-vram"; mkdir -p "$VRAM/duckstation"; cp "$DS_SEED" "$VRAM/duckstation/"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["env"] = dict(d.get("env", {}), ENABLE_MESA_VRAM_REPORT_LIMIT="0");
+json.dump(d, open(sys.argv[2], "w"))' "$DS_DEF" "$VRAM/duckstation/emulator.json"
+gpu_tree soc@0 qcom,adreno-43051401; reset_logs
+RETROFORGE_EMU_DATA_DIR="$VRAM" RETROFORGE_DEVICE_TREE="$T/dt" start_launcher
+wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+[ "$(field vram_on)" = 0 ] && ok "a definition's env turns the limit off" || bad "definition env lost: vram_on='$(field vram_on)'"
+# The RAM gate: 4 GB and 3 GB boards (Turnip heap ~3.4 / ~2.6 GiB) get no limit; 4369 MiB of RAM is
+# exactly 4096 MiB of heap (not above: off); 6 GB is on; an unreadable meminfo is off.
+gpu_tree soc@0 qcom,adreno-610.0
+for pair in "3770000 -" "2860000 -" "4473856 -" "5700000 1" "missing -"; do
+  read -r kb want <<<"$pair"
+  if [ "$kb" = missing ]; then rm -f "$T/meminfo"; else meminfo "$kb"; fi
+  reset_logs; RETROFORGE_DEVICE_TREE="$T/dt" start_launcher
+  wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+  touch "$T/stop-emu"; reap_launcher "$lpid"
+  [ "$want" = - ] && want=""
+  [ "$(field vram_on)" = "$want" ] && ok "MemTotal $kb kB: limit '${want:-off}'" \
+    || bad "MemTotal $kb kB: vram_on='$(field vram_on)', want '${want:-off}'"
+done
+unset RETROFORGE_MEMINFO
 
 # =================================================================================================
 CASE="exit_resend (a second window keeps the emulator up)"
