@@ -93,3 +93,20 @@ Settings > Emulators) and every port script it installs locate themselves throug
 handheld firmwares). The link points them at the player's `~/roms`, so PortMaster lives in
 `~/roms/ports/PortMaster` and its ports in `~/roms/ports` with no change to PortMaster's own files,
 which its self-updates would overwrite. The overlay-ownership stage resets it to root (`-h`).
+
+**Game-time quiet — keeping background work off a game's CPUs**
+- `usr/lib/retroforge/cpu-affinity.conf` + `usr/lib/systemd/system-generators/retroforge-cpu-affinity`
+  — `CPUAffinity` by CLASS, resolved per device at every boot from `cpu_capacity`, so a new SoC
+  layout needs no edit. `interactive` (the services a game talks to: InputPlumber, PowerStation,
+  `retroforge-powerbuttond`) = every CPU outside the prime cluster; `background`
+  (`retroforge-powerd`, `-pairingd`, `-power-led`) = the little cluster. Today: SM8250 0-6 / 0-3,
+  SM8550 0-6 / 0-2, SM8650 0-6 / 0-1, SM6115 0-3 / 0-3 (its gold four share one level, so there is
+  no prime core to keep free). Both always contain cpu0, the one CPU the suspend engine never
+  offlines; uniform cores get no drop-in at all. The generator writes
+  `/run/systemd/generator/<unit>.d/50-retroforge-cpus.conf` (`systemctl cat <unit>` shows it).
+  Affinity is inherited by a service's whole process tree. `tests/test-cpu-affinity.sh` drives it
+  against fabricated topologies.
+- `etc/systemd/system/{shadow,archlinux-keyring-wkd-sync,man-db}.timer -> /dev/null` — Arch
+  maintenance timers with nothing to do on an image OS (users and groups are pinned at build time,
+  release images carry no pacman keyring, man-db is not installed), which can otherwise fire in
+  the middle of a game. `man-db.timer` is masked ahead of time, in case a dependency pulls man-db in.
