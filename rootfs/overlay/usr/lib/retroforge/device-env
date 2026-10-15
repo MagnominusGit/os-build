@@ -58,6 +58,31 @@ if [[ -n "$profile" && -r "$device_dir/$profile.conf" ]]; then
     source "$device_dir/$profile.conf"
 fi
 
+# The Adreno's vendorID:deviceID as Turnip reports it, for mesa's vram-report-limit layer, which
+# matches one exact id (retroforge-session for the shell, retroforge-launch for emulators). Turnip's
+# chip id is the kernel's, which comes from the GPU node's compatible string: hex on A7xx
+# ("qcom,adreno-43051401") or core/major/minor.patch on older parts ("qcom,adreno-650.2" ->
+# 0x06050002). Live from the devicetree, not a profile: it follows the DTB that booted. Empty without
+# an Adreno node.
+gpu_chip_id() {
+    local dt=${RETROFORGE_DEVICE_TREE:-/sys/firmware/devicetree/base} f c v
+    for f in "$dt"/soc@0/gpu@*/compatible "$dt"/soc/gpu@*/compatible; do
+        [[ -r "$f" ]] || continue
+        while IFS= read -r -d '' c; do
+            v=${c#qcom,adreno-}
+            [[ "$v" != "$c" ]] || continue
+            if [[ "$v" =~ ^[0-9a-f]{8}$ ]]; then
+                echo "0x5143:0x$v"; return
+            elif [[ "$v" =~ ^([0-9])([0-9])([0-9])\.([0-9]{1,2})$ ]]; then
+                printf '0x5143:0x%02x%02x%02x%02x\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" \
+                    "${BASH_REMATCH[3]}" "$((10#${BASH_REMATCH[4]}))"
+                return
+            fi
+        done <"$f"
+    done
+}
+RETROFORGE_GPU_CHIP_ID=$(gpu_chip_id)
+
 vars=(
     RETROFORGE_DEVICE_ID
     RETROFORGE_DEVICE_NAME
@@ -88,6 +113,7 @@ vars=(
     RETROFORGE_GAMESCOPE_NESTED_H
     RETROFORGE_SECONDARY_CONNECTOR
     RETROFORGE_SECONDARY_TOUCHSCREEN
+    RETROFORGE_GPU_CHIP_ID
 )
 
 for var in "${vars[@]}"; do

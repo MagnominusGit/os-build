@@ -78,6 +78,33 @@ for conf in "$DEVICES"/*.conf; do
 done
 [ "$n" -ge 1 ] && ok "$n board(s) declare a second panel" || bad "no board declares a second panel"
 
+# =================================================================================================
+CASE="GPU chip id (RETROFORGE_GPU_CHIP_ID)"
+# The id mesa's vram-report-limit layer matches, as Turnip reports it: the GPU node's compatible, hex
+# on A7xx, core/major/minor.patch on the older Adreno. Read live from the devicetree.
+DT=$(mktemp -d); trap 'rm -rf "$DT"' EXIT
+chip() {  # chip <parent dir|-> <compatible...>  -> what device-env reports
+  rm -rf "$DT"/*; local parent=$1; shift
+  if [ "$parent" != - ]; then mkdir -p "$DT/$parent/gpu@3d00000"; printf '%s\0' "$@" > "$DT/$parent/gpu@3d00000/compatible"; fi
+  (eval "$(RETROFORGE_MODEL="AYN Thor" RETROFORGE_DEVICE_DIR="$DEVICES" RETROFORGE_DEVICE_TREE="$DT" bash "$DEVENV")"
+   printf '%s' "$RETROFORGE_GPU_CHIP_ID")
+}
+for row in "soc@0 qcom,adreno-43051401 0x5143:0x43051401" "soc@0 qcom,adreno-43050a01 0x5143:0x43050a01" \
+           "soc@0 qcom,adreno-650.2 0x5143:0x06050002" "soc@0 qcom,adreno-610.0 0x5143:0x06010000" \
+           "soc qcom,adreno-650.2 0x5143:0x06050002" "soc@0 qcom,adreno-gmu-wrapper -" "- - -"; do
+  read -r parent compat want <<<"$row"; [ "$want" = - ] && want=""
+  got=$(chip "$parent" "$compat" qcom,adreno)
+  [ "$got" = "$want" ] && ok "$parent/$compat -> '${want:-none}'" || bad "$parent/$compat -> '$got', want '${want:-none}'"
+done
+# The four SoCs we ship, from the DTS the kernel builds: each board's GPU node must yield an id.
+for soc in sm6115 sm8250 sm8550 sm8650; do
+  f=$(find "$ROOT/work" -path "*/arch/arm64/boot/dts/qcom/$soc.dtsi" 2>/dev/null | head -1)
+  [ -n "$f" ] || { ok "skipped: no unpacked kernel tree with $soc.dtsi"; continue; }
+  c=$(grep -o 'qcom,adreno-[0-9a-f.]*"' "$f" | head -1 | tr -d '"')
+  got=$(chip soc@0 "$c" qcom,adreno)
+  [ -n "$got" ] && ok "$soc ($c) -> $got" || bad "$soc's compatible '$c' yields no chip id"
+done
+
 echo
 echo "test-device-env.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

@@ -191,6 +191,7 @@ cat > "$T/bin/gamescope" <<EOF
 #!/bin/bash
 trap 'echo gamescope-term >> "$T/log"; exit 0' TERM
 echo \$\$ > "$T/gs.pid"
+echo "gs-vram=\${ENABLE_MESA_VRAM_REPORT_LIMIT-}\${VK_VRAM_REPORT_LIMIT_HEAP_SIZE-}" >> "$T/log"
 while [ \$# -gt 0 ]; do [ "\$1" = -R ] && { r=\$2; shift; }; shift; done
 echo ":1 gamescope-0" > "\$r"
 while :; do sleep 0.05; done
@@ -199,6 +200,7 @@ EOF
 cat > "$T/client" <<EOF
 #!/bin/bash
 echo "stdin=\$(readlink /proc/\$\$/fd/0)" >> "$T/log"
+echo "vram=\${ENABLE_MESA_VRAM_REPORT_LIMIT-}:\${VK_VRAM_REPORT_LIMIT_HEAP_SIZE-}:\${VK_VRAM_REPORT_LIMIT_DEVICE_ID-}" >> "$T/log"
 trap 'echo client-term >> "$T/log"; exit 0' TERM
 if [ -e "$T/with-game" ]; then "$T/reaper" "$T/reaper.sh" & fi
 echo client-up >> "$T/log"
@@ -270,6 +272,43 @@ else
   else
     bad "the fake client never started (second run)"
   fi
+fi
+
+# -------------------------------------------------------------------------------------------------
+CASE="the shell's VRAM report"
+# OGUI (Godot's VMA) reserves blocks sized from the reported heap, so the shell alone gets mesa's
+# vram-report-limit layer: 512 MiB below 4 GiB of RAM, 1 GiB up to 6 GiB, nothing above, and
+# nothing without device-env's GPU chip id (the layer matches one id).
+if [ -e /etc/retroforge/session.conf ] || [ -e /usr/lib/retroforge/device-env ]; then
+  ok "skipped: this host has RetroForge's session.conf/device-env, which would override the fakes"
+else
+  for row in "3386492 0x5143:0x06010000 1:512:0x5143:0x06010000" \
+             "4194303 0x5143:0x06010000 1:512:0x5143:0x06010000" \
+             "4194304 0x5143:0x06050002 1:1024:0x5143:0x06050002" \
+             "5700000 0x5143:0x06050002 1:1024:0x5143:0x06050002" \
+             "6291456 0x5143:0x43051401 1:1024:0x5143:0x43051401" \
+             "6291457 0x5143:0x43051401 ::" \
+             "15826200 0x5143:0x43051401 ::" \
+             "3386492 - ::" \
+             "missing 0x5143:0x06010000 ::"; do
+    read -r kb chip want <<<"$row"
+    if [ "$kb" = missing ]; then rm -f "$T/meminfo"; else printf 'MemTotal:       %s kB\n' "$kb" > "$T/meminfo"; fi
+    [ "$chip" = - ] && chip=""
+    RETROFORGE_MEMINFO="$T/meminfo" RETROFORGE_GPU_CHIP_ID="$chip" run_session
+    if waitfor 'grep -qx client-up "$T/log"'; then
+      got=$(sed -n 's/^vram=//p' "$T/log")
+      [ "$got" = "$want" ] && ok "MemTotal $kb kB, chip '${chip:-none}': shell gets '$want'" \
+        || bad "MemTotal $kb kB, chip '${chip:-none}': shell got '$got', want '$want'"
+      [ "$kb" = 3386492 ] && [ -n "$chip" ] && { grep -qx 'gs-vram=' "$T/log" \
+        && ok "gamescope itself does not get the shell's report" || bad "gamescope got the report: $(grep gs-vram "$T/log")"; }
+    else
+      bad "the fake client never started ($kb kB)"
+    fi
+    touch "$T/client-exit"
+    waitfor "! kill -0 $spid 2>/dev/null" || kill -KILL "$spid"
+    wait "$spid" 2>/dev/null
+  done
+  rm -f "$T/meminfo"
 fi
 
 # -------------------------------------------------------------------------------------------------

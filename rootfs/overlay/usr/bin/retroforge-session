@@ -341,6 +341,29 @@ if [ -x "$RETROFORGE_PLUGIN_INSTALLER" ]; then
   "$RETROFORGE_PLUGIN_INSTALLER" || echo "retroforge-session: the RetroForge plugin could not be installed" >&2
 fi
 
+# The shell's VRAM report. OGUI is Godot, whose Vulkan allocator (VMA) reserves blocks sized from
+# the heap Turnip reports: 256 MiB blocks once that heap is over 1 GiB, which on a 3 GB Air X held
+# 578 MiB for ~230 MiB of real use. mesa's vram-report-limit layer (packages/mesa) reports a smaller
+# heap to the SHELL ONLY, so the blocks shrink (heap/8 at most, starting at an eighth of that):
+#   MemTotal < 4 GiB    512 MiB   (Air X MQ66 3.2 GiB: 578 -> 316 MiB, HW 2026-10-15)
+#   MemTotal <= 6 GiB   1 GiB     (447 MiB on the same board)
+#   above               unchanged: the RAM is there
+# The layer only changes what is REPORTED; Godot reads the budget for statistics, never to refuse
+# an allocation. Gamescope, Xwayland and mangoapp do not get it, and retroforge-launch drops it from
+# every emulator's environment. Needs device-env's RETROFORGE_GPU_CHIP_ID: the layer matches one id.
+: "${RETROFORGE_MEMINFO:=/proc/meminfo}"
+shell_vram_mib() {
+  _kb=$(sed -n 's/^MemTotal:[[:space:]]*\([0-9]*\) kB$/\1/p' "$RETROFORGE_MEMINFO" 2>/dev/null)
+  [ -n "$_kb" ] || return 1
+  if [ "$_kb" -lt $((4 * 1024 * 1024)) ]; then echo 512
+  elif [ "$_kb" -le $((6 * 1024 * 1024)) ]; then echo 1024
+  else return 1
+  fi
+}
+if [ -n "${RETROFORGE_GPU_CHIP_ID:-}" ] && _mib=$(shell_vram_mib); then
+  RETROFORGE_SESSION_CMD="env ENABLE_MESA_VRAM_REPORT_LIMIT=1 VK_VRAM_REPORT_LIMIT_HEAP_SIZE=$_mib VK_VRAM_REPORT_LIMIT_DEVICE_ID=$RETROFORGE_GPU_CHIP_ID $RETROFORGE_SESSION_CMD"
+fi
+
 set +e
 exec 3<&0
 # Without the CAP_WAKE_ALARM pam_systemd puts in every login session's ambient set (systemd >= 254).

@@ -120,12 +120,12 @@
 # vram-report-limit layer (implicit, gated on ENABLE_MESA_VRAM_REPORT_LIMIT; packages/mesa) reporting
 # a 4096 MiB heap, which engines that size their budgets from VRAM plan around, while Turnip's own
 # heap is 15/16 of RAM (drirc.d/01-retroforge-turnip.conf). The layer applies to ONE exact
-# vendorID:deviceID, so ours is derived from the GPU node's compatible string, the chip id Turnip
-# reports: hex ("qcom,adreno-43050a01") or the older core/major/minor.patch form ("qcom,adreno-650.2"
-# -> 0x06050002). No Adreno node, no limit: the layer stays off. Nor when 15/16 of RAM is not above
+# vendorID:deviceID: device-env's RETROFORGE_GPU_CHIP_ID, derived from the GPU node's compatible
+# string. No Adreno node, no limit: the layer stays off. Nor when 15/16 of RAM is not above
 # 4096 MiB: the layer does not clamp, it REPORTS 4096 MiB and scales the budget up to match, so on a
 # small board an emulator would plan around memory the device does not have. Turnip's real heap is
-# already the smaller one there. A definition's "env" overrides it.
+# already the smaller one there. The shell's own report (retroforge-session) is never passed on:
+# the layer's variables are dropped from what we inherit. A definition's "env" overrides it.
 #
 # core_dumps false: the emulator starts with RLIMIT_CORE 0, so systemd-coredump logs a crash in the
 # journal but stores no core. For an emulator known to crash on a normal exit (Snes9x 1.63 did, until
@@ -139,7 +139,6 @@
 # <emulator>`), cleared at every start: the RetroForge plugin's EXIT hook reads it and tells the player
 # what to do.
 
-import glob
 import json
 import secrets
 import os
@@ -170,9 +169,12 @@ DEVICE_ENV = ENV.get("RETROFORGE_DEVICE_ENV", "/usr/lib/retroforge/device-env")
 PM_MOUNTS = ENV.get("RETROFORGE_PM_MOUNTS",
                     os.path.join(ENV.get("XDG_RUNTIME_DIR") or "/tmp", "retroforge-portmaster-mounts"))
 PREEMPTING_SOCS = {"SM8550", "SM8650"}  # A7xx: four preemptible GPU rings
-DEVICE_TREE = ENV.get("RETROFORGE_DEVICE_TREE", "/proc/device-tree")
 MEMINFO = ENV.get("RETROFORGE_MEMINFO", "/proc/meminfo")
 VRAM_REPORT_LIMIT_MIB = 4096
+# The layer's switches. Never inherited: the shell runs with its own (smaller) report on most boards
+# (retroforge-session), and an emulator must not get the shell's.
+VRAM_REPORT_LIMIT_VARS = ("ENABLE_MESA_VRAM_REPORT_LIMIT", "VK_VRAM_REPORT_LIMIT_HEAP_SIZE",
+                          "VK_VRAM_REPORT_LIMIT_DEVICE_ID")
 TURNIP_HEAP_SHARE = 15 / 16  # heap_memory_percent in drirc.d/01-retroforge-turnip.conf
 SYSTEM_VULKAN_ICD = "/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json"
 UNMOUNT_TRIES = 50   # x 0.1 s for the runtime to let go of the mount after SIGHUP
@@ -365,23 +367,6 @@ def gpu_priority_env():
     return {"RETROFORGE_GAME_LOWPRIO": "1", "TU_AUTOTUNE_FLAGS": "preempt_optimize"}
 
 
-def gpu_device_id():
-    """Turnip's vendorID:deviceID for this board's Adreno, from its compatible string; None without one."""
-    for f in sorted(glob.glob(os.path.join(DEVICE_TREE, "soc@0", "gpu@*", "compatible")) +
-                    glob.glob(os.path.join(DEVICE_TREE, "soc", "gpu@*", "compatible"))):
-        try:
-            with open(f, "rb") as fh:
-                compatibles = fh.read().decode("ascii", "replace").split("\0")
-        except OSError:
-            continue
-        for c in compatibles:
-            if m := re.fullmatch(r"qcom,adreno-([0-9a-f]{8})", c):
-                return f"0x5143:0x{m.group(1)}"
-            if m := re.fullmatch(r"qcom,adreno-(\d)(\d)(\d)\.(\d{1,2})", c):
-                return "0x5143:0x" + "".join(f"{int(g):02x}" for g in m.groups())
-    return None
-
-
 def turnip_heap_mib():
     """Turnip's own heap in MiB (15/16 of MemTotal); None when /proc/meminfo cannot say."""
     try:
@@ -397,8 +382,8 @@ def vram_limit_env():
     heap = turnip_heap_mib()
     if heap is None or heap <= VRAM_REPORT_LIMIT_MIB:
         return {}
-    device_id = gpu_device_id()
-    if device_id is None:
+    device_id = device_field("RETROFORGE_GPU_CHIP_ID")
+    if not device_id:
         return {}
     return {"ENABLE_MESA_VRAM_REPORT_LIMIT": "1", "VK_VRAM_REPORT_LIMIT_HEAP_SIZE": str(VRAM_REPORT_LIMIT_MIB),
             "VK_VRAM_REPORT_LIMIT_DEVICE_ID": device_id}
@@ -955,7 +940,8 @@ def run(argv):
         except Exit as err:
             fail("mount-failed", emulator, str(err))
         binary = os.path.join(root, definition["binary"])
-        env = {**ENV, **gpu_priority_env(), **vram_limit_env(), **package.env(), **definition["env"]}
+        inherited = {k: v for k, v in ENV.items() if k not in VRAM_REPORT_LIMIT_VARS}
+        env = {**inherited, **gpu_priority_env(), **vram_limit_env(), **package.env(), **definition["env"]}
         run_installs(emulator, binary, env, todo, interrupted)
         program = SCRIPT_SHELL if package.runs_rom and rom is not None else binary
         log(f"{system or 'gui'} -> {emulator}: {program} {' '.join(args)}")
