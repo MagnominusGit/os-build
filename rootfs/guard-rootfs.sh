@@ -41,7 +41,8 @@
 #   8. the system UID/GID allocation matches the pin — the ids baked into this tree's passwd and
 #      group are the ones rootfs/overlay's sysusers.d pin names, not whatever sysusers counted down to
 #   9. no Steam, x86-emulation or Android payload came back — those stacks were removed on
-#      purpose, and a stray prebuilt pin or overlay copy would bring them back silently; and (9b)
+#      purpose, and a stray prebuilt pin or overlay copy would bring them back silently (the
+#      Steam client is downloaded into /home on demand by /usr/bin/steam, never shipped); and (9b)
 #      the shell landed where the session looks for it, without its self-updater
 #  10. no __pycache__ — host-CPython bytecode the device cannot load, which rootfs/overlay's verbatim
 #      copy will carry in whenever an offline suite has imported one of its Python clients
@@ -762,11 +763,21 @@ fi
 # ------------------------------------------------------------------------------------------
 # 9. No Steam, x86-emulation or Android payload came back.
 #
-# retroforge ships none of them: no Steam client or its contracts, no FEX/Proton x86 stack, no Android
-# container, no Decky. Each used to arrive through a path that is easy to re-open by accident — a
-# prebuilt pin, an overlay file, an assembler stage — and none of them would fail a build on its
-# own; the image would simply grow gigabytes and carry dead services. Named paths rather than a
+# retroforge ships none of them: no Steam client or upstream's Steam contracts, no FEX/Proton x86 stack,
+# no Android container, no Decky. Each used to arrive through a path that is easy to re-open by
+# accident — a prebuilt pin, an overlay file, an assembler stage — and none of them would fail a build
+# on its own; the image would simply grow gigabytes and carry dead services. Named paths rather than a
 # glob over names, so a typo'd entry is visible in review.
+#
+# Steam itself is NOT shipped, and is not missing either. The OGUI Steam plugin launches games with
+# `steam ... steam://rungameid/<id>`, so the image carries /usr/bin/steam: a wrapper that downloads
+# Valve's arm64 client and Steam Runtime into the player's home the first time it runs
+# (/usr/lib/retroforge/steam-bootstrap, ~560 MB unpacked, ~3 GB after the client's own update), and
+# runs it from there. The only Steam pieces the root carries are that wrapper, its bootstrap, the
+# runtime's pin, and Valve's arm64 steamcmd for the plugin (packages/steamcmd, 4 MB). FEX for x86
+# games is left to Steam as well. The arm64 client adds it to a game as a dependency, as it does
+# Proton ("adding FEX dependency to %s %u" and STEAM_COMPAT_FEX_CONFIG in steamclient.so; not yet seen
+# on hardware), so nothing x86 belongs here. See docs/steam-arm64.md.
 # ------------------------------------------------------------------------------------------
 echo "  9. no Steam / x86 / Android payload"
 REMOVED=(

@@ -14,7 +14,8 @@ polish: Resume, memory-card check) last, not blocking.
 RetroForge is a standalone retro-emulation Linux distribution for Qualcomm Snapdragon handhelds
 (SM8250 / SM8550 / SM8650). It is derived from the upstream project credited in README.md (GPL-2.0-or-later): it reuses
 that project's Holo aarch64 base, unified kernel/DTS, steamcl + GRUB boot chain, RAUC A/B updates
-and installer, without the Steam client, x86 emulation or the Android container. The shell is
+and installer, without shipping the Steam client (`/usr/bin/steam` downloads Valve's arm64 client into
+/home on demand), x86 emulation or the Android container. The shell is
 [OpenGamepadUI](https://github.com/ShadowBlip/OpenGamepadUI) inside gamescope. Emulators are upstream
 AppImages that the RetroForge OGUI plugin downloads from their own releases (not in the image), started
 per ROM by `retroforge-launch`.
@@ -27,7 +28,8 @@ per ROM by `retroforge-launch`.
 | Base | Holo aarch64 packages, pinned snapshot, sealed read-only Btrfs root |
 | Targets | SM8250, SM8550, SM8650 — same kernel/DTS/boot chain as upstream; ROCKNIX ABL prerequisite |
 | Shell | OpenGamepadUI under gamescope |
-| Removed | Steam client + seed, Decky, FEX, Proton, lsfg-vk, Android container (Lepton, Play, podman, adb), gtk2, vpower, steamos-* entry points |
+| Removed | Steam client + seed (from the image; see Steam below), Decky, FEX, Proton, lsfg-vk, Android container (Lepton, Play, podman, adb), gtk2, vpower, steamos-* entry points |
+| Steam (2026-10-15) | Downloaded on demand, never shipped. The OGUI Steam plugin needs `steam` to launch games and `steamcmd` for the library. `/usr/bin/steam` downloads Valve's arm64 client and the pinned arm64 Steam Runtime into /home on first use (`steam-bootstrap`; ~830 MB download, ~3 GB on disk) and runs it there. The image carries only that wrapper, the runtime pin and Valve's arm64 steamcmd (4 MB, `packages/steamcmd`). FEX for x86 games is left to Steam, which adds it per game (not yet seen on hardware), so no FEX or x86 Mesa in the image. SM6115 needs kernel 0025 (Valve's LSE atomics). `docs/steam-arm64.md` |
 | Kept | retroforge-pairingd (always on until the shell has a switch), userspace fake-suspend (retroforge-suspend / retroforge-rest) |
 | Names | Display RetroForge, os-release ID `retroforge`, D-Bus `org.retroforge`, session user `player` (uid 1000) |
 | Root slots | 2G each (was 4G until 2026-10-03 trim, 7G with the x86 payloads) |
