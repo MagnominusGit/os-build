@@ -32,7 +32,9 @@ alongside the prebuilt (e.g. shared libraries the binary links), so a prebuilt's
 deps live with the pin instead of being hardcoded in the install list. The set of installed
 prebuilts **and their deps** is recorded in the base at `/usr/lib/retroforge/prebuilt.manifest`,
 which keys the base reuse-cache (bump a pin, or change its deps, → the base rebuilds).
-Current pins: `inputplumber/` (InputPlumber input daemon; `deps: libiio`).
+Current pins: `inputplumber/` (InputPlumber input daemon; `deps: libiio`), `steamcmd/` (Valve's arm64
+steamcmd for the OGUI Steam plugin. It is the one pin that is not LSE-clean, so on SM6115 it needs
+`kernel/patches/0025`; see the pin).
 
 ## What CI does with these packages
 

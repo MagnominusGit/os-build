@@ -52,6 +52,15 @@ Found on the way, independent of the CPU:
 Test install on the Air X: `/home/player/steamtest/` (client, runtime, `lse_shim.so`), started by
 `/home/player/steamtest/run-steam.sh`.
 
+## steamcmd
+
+The OGUI Steam plugin uses `steamcmd` for the library, installs and updates, not the client. Valve
+publishes an arm64 build next to the x86 one (`steamcmd_linuxarm64.tar.gz`, update manifest
+`steam_cmd_linuxarm64`). The plugin only ever downloads the x86 one, so the image ships the arm64
+build (`packages/steamcmd/prebuilt.pin`), and `retroforge-session` puts it at
+`~/.steam/steamcmd/` before the shell starts (`/usr/lib/retroforge/install-steamcmd`). It is built
+like the client: ~300 unguarded LSE atomics in the bootstrapper alone, so the same `0025` applies.
+
 ## Open
 
 - Boot the kernel with 0025 and drop the shim (0025 also removes the shim's one weakness: no

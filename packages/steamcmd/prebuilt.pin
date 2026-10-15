@@ -1,0 +1,36 @@
+# steamcmd — Valve's arm64 build, for the OpenGamepadUI Steam plugin.
+#
+# Auto-discovered by rootfs/customize-base.sh like every packages/*/prebuilt.pin: fetched,
+# sha256-verified on the host, extracted read-only into the base at /usr/lib/retroforge/steamcmd.
+#
+# WHY. The OGUI Steam plugin (ShadowBlip/OpenGamepadUI-steam, from OGUI's plugin store) drives steamcmd
+# for the library, installs and updates. Its core/steam_client.gd downloads Valve's x86 bootstrapper
+# (steamcmd_linux.tar.gz: steamcmd.sh + linux32/steamcmd, an i386 binary) into ~/.steam/steamcmd and
+# cannot run it here. It downloads only when ~/.steam/steamcmd/steamcmd.sh is missing, so
+# retroforge-session puts this arm64 one there first (/usr/lib/retroforge/install-steamcmd), and the
+# plugin runs it unchanged. steamcmd then self-updates in the player's copy, as it does on x86.
+#
+# WHAT IS IN IT (checked 2026-10-15): steamcmd.sh + linuxarm64/{steamcmd, crashhandler.so,
+# steamerrorreporter}, all ELF64 aarch64, NEEDED only glibc (libc/libdl/libm/libpthread, GLIBC_2.30),
+# so no Steam Runtime. Valve's steamcmd.sh picks linuxarm64 on `uname -m` = aarch64 and linux32
+# otherwise. Rooted at ., so strip 0.
+#
+# ARMv8.0 (SM6115): NOT LSE-clean, unlike everything we build (packages/README.md, "CPU baseline").
+# steamcmd has ~300 unguarded LSE atomics (281 ldaddal, casal, swpa, ...), crashhandler.so ~135,
+# steamerrorreporter 5, with no outline-atomic helpers, which is the same toolchain as Valve's arm64 client
+# (docs/steam-arm64.md). The SM8250/SM8550/SM8650 boards run it natively. The Air X needs
+# kernel/patches/0025 (LSE emulation) or it SIGILLs as soon as steamcmd goes multithreaded. It is
+# Valve's binary, so this cannot be fixed with a rebuild.
+#
+# TO BUMP. The URL is unversioned and Valve replaces it in place, so a "sha256 mismatch" on a cold
+# fetch means Valve republished the bootstrapper, not a corrupt download. Re-check the layout, the ELF
+# arch and the LSE count of the new one, then set version (its Last-Modified date) + sha256 together.
+# The players' copies are not affected by a bump: they self-update from Valve's own manifest
+# (media.steampowered.com/client/steam_cmd_linuxarm64), and install-steamcmd never replaces a working
+# arm64 copy.
+name: steamcmd
+version: 20260727
+url: https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linuxarm64.tar.gz
+sha256: 32eef1a7c3fd98bed9e1bd0bf6bdc41a3c7c58583351a1d802f449e623f7a86c
+strip: 0
+dest: /usr/lib/retroforge/steamcmd

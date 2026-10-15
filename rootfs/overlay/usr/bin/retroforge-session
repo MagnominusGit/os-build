@@ -340,6 +340,13 @@ trap stop_session HUP INT TERM
 if [ -x "$RETROFORGE_PLUGIN_INSTALLER" ]; then
   "$RETROFORGE_PLUGIN_INSTALLER" || echo "retroforge-session: the RetroForge plugin could not be installed" >&2
 fi
+# The OGUI Steam plugin runs ~/.steam/steamcmd/steamcmd.sh and, when it is missing, downloads Valve's
+# x86 build there. Put the image's arm64 one there first (or over an x86 one). Never a reason not to
+# start the shell either.
+: "${RETROFORGE_STEAMCMD_INSTALLER:=/usr/lib/retroforge/install-steamcmd}"
+if [ -x "$RETROFORGE_STEAMCMD_INSTALLER" ]; then
+  "$RETROFORGE_STEAMCMD_INSTALLER" || echo "retroforge-session: steamcmd could not be installed" >&2
+fi
 
 # The shell's VRAM report. OGUI is Godot, whose Vulkan allocator (VMA) reserves blocks sized from
 # the heap Turnip reports: 256 MiB blocks once that heap is over 1 GiB, which on a 3 GB Air X held
