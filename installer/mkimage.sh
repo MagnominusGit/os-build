@@ -164,7 +164,7 @@ ROOT_UUID="$(part_uuid 2)"
 # therefore 512e. The 4Kn hazard the shipped table warns about cannot reach this partition.
 esp="$WORK/esp.img"
 truncate -s "${esp_mib}M" "$esp"
-mkfs.vfat -F 32 -n NDINSTALLER "$esp" >/dev/null
+mkfs.vfat -F 32 -n RFINSTALLER "$esp" >/dev/null
 
 fatdir() {  # <img> <msdos path, no leading '::'>
   local img="$1" path="$2" p=""

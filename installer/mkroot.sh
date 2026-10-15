@@ -67,7 +67,7 @@ RESOLVE="${RETROFORGE_RESOLVE:-}"
 # card ([[internal-install-phase6-plan]]), and an installer that mounted the target's ESP at its own
 # /esp would write its failure log onto the disk it just failed to install. 11 characters exactly,
 # which is all a FAT label has room for.
-ESP_LABEL="NDINSTALLER"
+ESP_LABEL="RFINSTALLER"
 
 log() { echo "[retroforge] $*" >&2; }
 die() { echo "$*" >&2; exit 1; }

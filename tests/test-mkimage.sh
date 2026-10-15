@@ -69,9 +69,9 @@ case "$esp_label" in
   [Nn][Oo][Vv][Aa][Dd][Ee][Cc][Kk]*) bad "the ESP label is a retroforge-* one — it would collide with the target" ;;
   *) ok "the ESP label does not collide with an install's labels" ;;
 esac
-grep -q 'NDINSTALLER' "$ROOT/installer/mkroot.sh" \
+grep -q 'RFINSTALLER' "$ROOT/installer/mkroot.sh" \
   && ok "mkroot.sh's fstab entry names the same label" \
-  || bad "mkroot.sh does not mention NDINSTALLER — /esp would never mount"
+  || bad "mkroot.sh does not mention RFINSTALLER — /esp would never mount"
 
 # ---------------------------------------------------------------------------------------------
 CASE="grub.cfg"

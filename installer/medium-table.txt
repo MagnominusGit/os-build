@@ -34,7 +34,7 @@
 # THE FAT LABEL IS NOT A `retroforge-*` ONE, deliberately. A dev card and an internal install already
 # share those labels, which is exactly why REPLACES_OURS=1 cannot be judged from a dev card — and an
 # installer whose /esp matched the TARGET's ESP would mount the disk it is about to overwrite and
-# write its failure log there. NDINSTALLER is 11 characters, all a FAT label has room for.
+# write its failure log there. RFINSTALLER is 11 characters, all a FAT label has room for.
 #
 # ON FAT WIDTH, because image/partition-table.txt carries a loud warning against forcing -F 32 and
 # this file does force it (installer/mkimage.sh, like image/make-sdcard.sh). The warning is about
@@ -51,7 +51,7 @@
 # The ESP carries NO GPT bit 63 here, unlike the shipped card. That bit exists to stop systemd's
 # gpt-auto generator claiming /efi, a name the shipped initramfs reserves for the slot's efi
 # partition. This medium has no initramfs, no slots and no /efi — and the fstab entry naming
-# LABEL=NDINSTALLER is the only mount definition either way.
+# LABEL=RFINSTALLER is the only mount definition either way.
 #
 # Consumed by image/genpart.sh exactly as the shipped table is. Row order = partition number.
 #
@@ -62,5 +62,5 @@
 # is a mistake waiting to be made by whoever next edits either.
 #
 # name      size  typecode  fs         label            attrs
-esp         256M  0700      vfat       NDINSTALLER      -
+esp         256M  0700      vfat       RFINSTALLER      -
 root        rest  8300      squashfs   retroforge-instrt  -

@@ -118,8 +118,8 @@ grep -q 'FAT32' "$T/minfo" && ok "FAT32 (forced, not negotiated from the geometr
   || bad "p1 is not FAT32: $(grep -i 'fat' "$T/minfo" | head -1)"
 label=$(mlabel -i "$IMG@@$ESP_OFF" -s :: 2>/dev/null | sed 's/^ *Volume label is *//')
 case "$label" in
-  *NDINSTALLER*) ok "labelled NDINSTALLER — deliberately not a retroforge-* name, so /esp cannot collide with the TARGET's ESP" ;;
-  *) bad "p1's label is '$label', not NDINSTALLER — installer/units mounts it by LABEL" ;;
+  *RFINSTALLER*) ok "labelled RFINSTALLER — deliberately not a retroforge-* name, so /esp cannot collide with the TARGET's ESP" ;;
+  *) bad "p1's label is '$label', not RFINSTALLER — installer/units mounts it by LABEL" ;;
 esac
 
 # The byte ABL actually loads, and the three files the boot depends on.

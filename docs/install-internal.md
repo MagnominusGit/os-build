@@ -73,7 +73,7 @@ than to a card, so the card only has to be big enough to hold it.
 devices have no keyboard and no guaranteed touchscreen, so the credentials come from a file you
 write on another computer, before you boot.
 
-Plug the card into a PC or Mac. Its first partition mounts as **NDINSTALLER** — a plain FAT volume,
+Plug the card into a PC or Mac. Its first partition mounts as **RFINSTALLER** — a plain FAT volume,
 deliberately *not* an EFI System Partition, because Windows and macOS hide those. Inside it:
 
 ```
@@ -157,7 +157,7 @@ A refusal always names the disk and the reason. There is no override flag, delib
 ## When it fails
 
 **Power-cycle the device, pull the card, and read `retroforge-install.log`** in the root of the
-NDINSTALLER partition on any computer.
+RFINSTALLER partition on any computer.
 
 The log is written when the installer's unit *stops*, so a running installer has not produced one
 yet — that is why the power-cycle comes first. It carries the medium's own build identity in its

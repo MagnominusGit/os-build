@@ -289,7 +289,7 @@ class NetworkScreen:
             "No Wi-Fi settings on this card",
             "The installer downloads RetroForge over the network, and it found no {path} telling it "
             "which network to join.",
-            "Power off and take the card out. On another computer, open the NDINSTALLER volume and "
+            "Power off and take the card out. On another computer, open the RFINSTALLER volume and "
             "look in the retroforge folder: copy wifi.conf.example to a file named wifi.conf, open "
             "the copy, and put your network name and password in it. Put the card back and switch "
             "on. Or plug in a USB-C Ethernet adapter -- that needs no file at all.",
