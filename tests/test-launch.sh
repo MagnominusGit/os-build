@@ -70,7 +70,7 @@ read -r _ _ _ _ pgid sid _< <(cut -d' ' -f1-7 /proc/\$\$/stat)
   echo "sharun_sys=\${SHARUN_ALLOW_SYS_VKICD-}"; echo "no_updates=\${DISABLE_AUTO_UPDATES-}"; echo "core=\$(ulimit -c)"
   echo "lowprio=\${RETROFORGE_GAME_LOWPRIO-}"; echo "tu_autotune=\${TU_AUTOTUNE_FLAGS-}"
   echo "vram_on=\${ENABLE_MESA_VRAM_REPORT_LIMIT-}"; echo "vram_mib=\${VK_VRAM_REPORT_LIMIT_HEAP_SIZE-}"
-  echo "vram_id=\${VK_VRAM_REPORT_LIMIT_DEVICE_ID-}"
+  echo "vram_id=\${VK_VRAM_REPORT_LIMIT_DEVICE_ID-}"; echo "opt_env=\${FAKE_OPT-}"
   printf 'arg=%s\n' "\$@"; } >> "\$log"
 if [ "\${1-}" = --fake-install ]; then  # an install step (emulator.json "install"), not a game
   echo "install \$*" >> "$T/install.log"
@@ -946,7 +946,9 @@ kill -0 "$lpid" 2>/dev/null && ok "the launcher keeps waiting for the emulator a
 touch "$T/stop-emu"; reap_launcher "$lpid"
 
 # =================================================================================================
-CASE="CPU pinning (--cpus big)"
+CASE="CPU pinning (CPUS=big)"
+# The game's own conf (Game settings > RetroForge) holds the per-game choice.
+GCONF="$HOME/.config/retroforge/games/psx/$(basename "$ROM").conf"
 # A fake /sys/devices/system/cpu: online list + per-CPU cpu_capacity (offline CPUs have none).
 mkcpus() {  # mkcpus <online> <cpu:capacity>...
   rm -rf "$T/cpu"; mkdir -p "$T/cpu"; echo "$1" > "$T/cpu/online"; shift
@@ -959,9 +961,10 @@ cat > "$T/bin/taskset" <<EOF
 echo "cpus=\$2" >> "$T/taskset.log"; shift 2; exec "\$@"
 EOF
 chmod +x "$T/bin/taskset"
-pinned_run() {  # one launch with --cpus big and the fake topology; prints the taskset list or "none"
+pinned_run() {  # one launch with the game's CPUS=big and the fake topology; prints the taskset list or "none"
   rm -f "$T/taskset.log"; reset_logs
-  RETROFORGE_CPU_ROOT="$T/cpu" "$LAUNCH" --cpus big psx "$ROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+  mkdir -p "$(dirname "$GCONF")"; echo "CPUS=big" > "$GCONF"
+  RETROFORGE_CPU_ROOT="$T/cpu" "$LAUNCH" psx "$ROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
   wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
   touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
   sed -n 's/^cpus=//p' "$T/taskset.log" 2>/dev/null | grep . || echo none
@@ -983,21 +986,19 @@ mkcpus 0-3,7 0:284 1:284 2:284 3:284 7:1024
 # Homogeneous SoC: nothing to prefer.
 mkcpus 0-3 0:1024 1:1024 2:1024 3:1024
 [ "$(pinned_run)" = none ] && ok "all cores alike: not pinned" || bad "pinned on a homogeneous SoC"
-# Without --cpus (and nothing in the image can ask for it) nothing is pinned.
+# Without a CPUS line (and nothing in the image can write one) nothing is pinned.
 mkcpus 0-7 0:284 1:284 2:284 3:284 4:871 5:871 6:871 7:1024
-rm -f "$T/taskset.log"; reset_logs
+rm -f "$T/taskset.log" "$GCONF"; reset_logs
 RETROFORGE_CPU_ROOT="$T/cpu" start_launcher; wait_for emu_up; touch "$T/stop-emu"; reap_launcher "$lpid"
-[ ! -e "$T/taskset.log" ] && ok "no --cpus: no taskset (pinning is never the default)" || bad "pinned without --cpus"
-[ "$(code --cpus fast psx "$ROM")" = 2 ] && ok "--cpus fast (unknown value) is refused: exit 2" || bad "accepted --cpus fast"
-[ "$(code --cpus)" = 2 ] && ok "--cpus with no value: exit 2" || bad "accepted a bare --cpus"
-[ "$(code --cpus big psx)" = 2 ] && ok "--cpus big with a missing ROM argument: exit 2" || bad "accepted --cpus big psx"
+[ ! -e "$T/taskset.log" ] && ok "no CPUS line: no taskset (pinning is never the default)" || bad "pinned without a CPUS line"
+[ "$(code --cpus big psx "$ROM")" = 2 ] && ok "--cpus is no longer an option (the confs hold the choice): exit 2" || bad "accepted --cpus"
 grep -qs 'CPUS\|taskset' "$SEED_DIR"/*/emulator.json && bad "an emulator definition in the image pins CPUs: pinning must stay the player's choice" \
   || ok "no emulator definition in the image pins anything"
 
 # =================================================================================================
 CASE="player's emulator default (CPUS=)"
-# Settings > Emulators writes ~/.config/retroforge/emulators/<emu>.conf; a game's --cpus overrides it
-# (Game settings > RetroForge: emulator default / on = --cpus big / off = --cpus all).
+# Settings > Emulators writes ~/.config/retroforge/emulators/<emu>.conf; the game's conf overrides it
+# (Game settings > RetroForge: emulator default = no line / on = CPUS=big / off = CPUS=all).
 PCONF="$HOME/.config/retroforge/emulators/duckstation.conf"
 cpus_run() {  # one launch with the given arguments and the fake topology; prints the taskset list or "none"
   rm -f "$T/taskset.log"; reset_logs
@@ -1015,16 +1016,79 @@ echo "CPUS=all" > "$PCONF"
 printf '# set by Settings > Emulators\nCPUS=big\n' > "$PCONF"
 [ "$(cpus_run psx "$ROM")" = "4,5,6,7" ] && ok "CPUS=big: a game with no override is pinned" || bad "CPUS=big did not pin a ROM launch"
 [ "$(cpus_run --gui duckstation)" = "4,5,6,7" ] && ok "CPUS=big: Open (--gui) is pinned too" || bad "CPUS=big did not pin --gui"
-[ "$(cpus_run --cpus all psx "$ROM")" = none ] && ok "a game's --cpus all beats the emulator's CPUS=big" || bad "--cpus all did not override CPUS=big"
-echo "CPUS=all" > "$PCONF"
-[ "$(cpus_run --cpus big psx "$ROM")" = "4,5,6,7" ] && ok "a game's --cpus big beats the emulator's CPUS=all" || bad "--cpus big did not override CPUS=all"
+echo "CPUS=all" > "$GCONF"
+[ "$(cpus_run psx "$ROM")" = none ] && ok "the game's CPUS=all beats the emulator's CPUS=big" || bad "the game's CPUS=all did not override CPUS=big"
+[ "$(cpus_run --gui duckstation)" = "4,5,6,7" ] && ok "a game's conf never applies to Open (--gui)" || bad "a game's CPUS reached --gui"
+echo "CPUS=all" > "$PCONF"; echo "CPUS=big" > "$GCONF"
+[ "$(cpus_run psx "$ROM")" = "4,5,6,7" ] && ok "the game's CPUS=big beats the emulator's CPUS=all" || bad "the game's CPUS=big did not override CPUS=all"
+rm -f "$GCONF"
 printf 'CPUS=fast\n' > "$PCONF"
 [ "$(cpus_run psx "$ROM")" = none ] && grep -q "ignoring" "$T/launch.err" \
   && ok "an unknown CPUS value is ignored (not pinned) and reported" || bad "a bad CPUS value was not ignored with a warning"
+echo "CPUS=big" > "$PCONF"; echo "CPUS=fast" > "$GCONF"
+[ "$(cpus_run psx "$ROM")" = "4,5,6,7" ] && grep -q "ignoring" "$T/launch.err" \
+  && ok "an unknown game CPUS value falls back to the emulator's, reported" || bad "a bad game CPUS value did not fall back"
+rm -f "$GCONF"
 printf 'CPUS=big\n$(touch %s/pwned)\n' "$T" > "$PCONF"
 cpus_run psx "$ROM" >/dev/null
 [ ! -e "$T/pwned" ] && ok "the player conf is read, never run as shell" || bad "the player conf was executed"
 rm -f "$PCONF"
+
+# =================================================================================================
+CASE="per-emulator options (options.json)"
+# Settings > Emulators and Game settings > RetroForge write option lines into the same confs as CPUS;
+# options.json says what each value does. The emulator's choice is written into its settings and stays;
+# the game's is put back when the emulator exits, and by the next launch after a double Exit.
+OPTD="$T/data-options"; mkdir -p "$OPTD/duckstation"; cp "$DS_DEF" "$DS_SEED" "$OPTD/duckstation/"
+cat > "$OPTD/duckstation/options.json" <<'JSON'
+{"files": {"main": {"path": ".local/share/duckstation/settings.ini", "format": "ini", "separator": " = "}},
+ "options": [{"id": "aspect", "label": "Aspect ratio", "choices": [
+   {"value": "4:3", "label": "4:3", "set": [{"file": "main", "section": "Display", "key": "AspectRatio", "value": "4:3"}]},
+   {"value": "16:9", "label": "16:9", "set": [{"file": "main", "section": "Display", "key": "AspectRatio", "value": "16:9"},
+                                            {"args": ["-fakewide"]}, {"env": {"FAKE_OPT": "wide"}}]}]}]}
+JSON
+DSINI="$HOME/.local/share/duckstation/settings.ini"
+OPCONF="$HOME/.config/retroforge/emulators/duckstation.conf"
+OGCONF="$HOME/.config/retroforge/games/psx/$(basename "$ROM").conf"
+JOURNAL="$HOME/.local/state/retroforge/restore/duckstation.json"
+aspect() { sed -n 's/^AspectRatio *= *//p' "$DSINI"; }
+mkdir -p "$(dirname "$OPCONF")" "$(dirname "$OGCONF")"
+echo "aspect=4:3" > "$OPCONF"; echo "aspect=16:9" > "$OGCONF"
+reset_logs; RETROFORGE_EMU_DATA_DIR="$OPTD" start_launcher
+wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+mapfile -t args < <(sed -n 's/^arg=//p' "$T/emu.log")
+[ "${args[0]}" = -fakewide ] && [ "${args[*]:1}" = "-batch -fullscreen -- $ROM" ] \
+  && ok "a game choice's arguments come first, the definition's after" || bad "arguments were: $(printf '[%s] ' "${args[@]}")"
+[ "$(field opt_env)" = wide ] && ok "a game choice's env reaches the emulator" || bad "opt env: '$(field opt_env)'"
+[ "$(aspect)" = 16:9 ] && [ -f "$JOURNAL" ] && ok "during the run the game's value is in the emulator's settings (journalled)" \
+  || bad "during the run AspectRatio='$(aspect)', journal $( [ -f "$JOURNAL" ] && echo present || echo missing)"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
+[ "$(aspect)" = 4:3 ] && [ ! -e "$JOURNAL" ] && ok "after the run the emulator's own choice is back, no journal left" \
+  || bad "after the run AspectRatio='$(aspect)'"
+reset_logs; RETROFORGE_EMU_DATA_DIR="$OPTD" "$LAUNCH" --gui duckstation 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+[ "$(aspect)" = 4:3 ] && ! grep -qx arg=-fakewide "$T/emu.log" && ok "Open (--gui) gets the emulator's choice, never a game's" \
+  || bad "--gui: AspectRatio='$(aspect)'"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
+# A double Exit SIGKILLed the last run mid-game: its journal is still there, the game's value in the file.
+rm -f "$OGCONF"; sed -i 's/^AspectRatio = .*/AspectRatio = 16:9/' "$DSINI"
+mkdir -p "$(dirname "$JOURNAL")"
+printf '{"version": 1, "restore": [{"path": "%s", "format": "ini", "separator": " = ", "section": "Display", "key": "AspectRatio", "value": "Auto (Game Native)"}]}' "$DSINI" > "$JOURNAL"
+rm -f "$OPCONF"
+reset_logs; RETROFORGE_EMU_DATA_DIR="$OPTD" start_launcher
+wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+[ "$(aspect)" = "Auto (Game Native)" ] && [ ! -e "$JOURNAL" ] \
+  && ok "a journal a killed run left is restored before the next start" || bad "after a killed run AspectRatio='$(aspect)'"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
+echo "aspect=21:9" > "$OGCONF"
+reset_logs; RETROFORGE_EMU_DATA_DIR="$OPTD" start_launcher
+wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+grep -q "aspect=21:9 is not one of" "$T/launch.err" && [ "$(aspect)" = "Auto (Game Native)" ] \
+  && ok "a value options.json does not have is ignored with a warning" || bad "unknown value: AspectRatio='$(aspect)'"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
+rm -f "$OGCONF"
+echo '{"options": [{"id": "x"}]}' > "$OPTD/duckstation/options.json"
+[ "$(RETROFORGE_EMU_DATA_DIR="$OPTD" code psx "$ROM")" = 2 ] && ok "an invalid options.json is refused (exit 2)" || bad "an invalid options.json was accepted"
 
 # =================================================================================================
 CASE="emulator GUI (--gui)"
@@ -1060,12 +1124,6 @@ reap_launcher "$lpid"; rc=$?
 [ "$rc" = 7 ] && ok "--gui: the launcher exits with the emulator's status" || bad "--gui: launcher exited $rc, the emulator 7"
 wait_for 'grep -qx hup "$T/appimage.log"' && grep -q -- "^-u $T/mnt" "$T/fusermount.log" 2>/dev/null \
   && ok "--gui: the mount is released after the emulator exits" || bad "--gui: the mount was not released"
-rm -f "$T/taskset.log"; reset_logs
-RETROFORGE_CPU_ROOT="$T/cpu" "$LAUNCH" --cpus big --gui duckstation 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
-wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
-touch "$T/stop-emu"; reap_launcher "$lpid"
-[ "$(sed -n 's/^cpus=//p' "$T/taskset.log" 2>/dev/null)" = "4,5,6,7" ] \
-  && ok "--cpus big --gui pins the GUI like a game" || bad "--cpus big --gui was not pinned"
 
 # =================================================================================================
 CASE="folder of scripts (PortMaster)"

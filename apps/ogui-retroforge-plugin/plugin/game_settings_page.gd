@@ -2,7 +2,7 @@ extends ScrollContainer
 
 ## Game settings > RetroForge: per-ROM options, in the screen the gear on OGUI's launch menu opens.
 ## For now "Run on fast cores": the emulator's default (Settings > Emulators), On or Off for this
-## game (retroforge-launch --cpus big / all on its command line).
+## game (CPUS=big / all in the game's conf, which retroforge-launch reads; launch_args.gd).
 ##
 ## Wired like that screen's own sections (game_settings.tscn): the button replaces the
 ## game-settings state with this page's State on focus and hands the focus to the page when

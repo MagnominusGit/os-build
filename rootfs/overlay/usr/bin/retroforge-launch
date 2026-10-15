@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # retroforge-launch — start a ROM in its system's emulator, from an OpenGamepadUI library card.
 #
-#   retroforge-launch [--cpus big|all] <system> <rom>
-#   retroforge-launch [--cpus big|all] --gui <emulator>
+#   retroforge-launch <system> <rom>
+#   retroforge-launch --gui <emulator>
 #
 # --gui starts the emulator's own UI with no ROM: Settings > Emulators > Open, for the settings OGUI
 # does not expose. It runs exactly like a ROM (prepare, seed, own session, exit handling below),
@@ -36,7 +36,7 @@
 # Anything else in it, or a format this script does not know, is refused (exit 2): a definition that
 # needs code is a new FORMAT here, never shell in the definition (plan Phase 4b, launcher redesign).
 #
-# CPU pinning (--cpus big): the emulator is started on the device's fast cores, so its threads stay
+# CPU pinning (CPUS=big): the emulator is started on the device's fast cores, so its threads stay
 # off the little cluster and do not migrate across clusters; background work (audio, input, Wi-Fi)
 # keeps the little cores. "Fast" is every ONLINE CPU whose cpu_capacity is above the smallest online
 # one — never a CPU number (Qualcomm numbers slowest-first, other SoCs do not), and never only the top
@@ -45,8 +45,15 @@
 # homogeneous SoC, nothing is pinned. sched_ext schedulers (scx_lavd) honour the affinity mask (HW
 # 2026-10-03). It is the PLAYER's choice, never the image's: a default per emulator (Settings >
 # Emulators -> ~/.config/retroforge/emulators/<emulator>.conf, CPUS=big|all, also used by --gui) and an
-# override per game (the plugin puts --cpus big|all on that game's command line). Nothing ships
-# pinned: with neither, all cores.
+# override per game (Game settings > RetroForge -> ~/.config/retroforge/games/<system>/<rom file>.conf,
+# the same CPUS line). Nothing ships pinned: with neither, all cores.
+#
+# Per-emulator options (renderer, resolution, aspect...): /usr/share/retroforge/emulators/<emulator>/
+# options.json says what each value does (command-line arguments, environment, settings in the
+# emulator's own files); the player's choices are lines of the same two confs, the game's winning.
+# emuopts (/usr/lib/retroforge/python) applies them before the start: an emulator-level value stays
+# in the emulator's settings, a game-level one is put back when the emulator exits (and at the next
+# launch, after a double Exit). Its header has the details.
 #
 # First-run settings (seed) live in the image next to emulator.json and are copied into $HOME before
 # the emulator's first start — never over an existing file, so whatever the player changes in the
@@ -151,6 +158,13 @@ import subprocess
 import sys
 import time
 
+# emuopts (per-emulator options, the player confs) ships beside us: /usr/lib/retroforge/python in the
+# image, the same place under rootfs/overlay when the offline tests run this file from the repo (no
+# bytecode: /usr is read-only on the device, and in the repo it would land inside rootfs/overlay).
+sys.dont_write_bytecode = True
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib", "retroforge", "python"))
+import emuopts  # noqa: E402
+
 ENV = os.environ
 LAUNCH_CONF = ENV.get("RETROFORGE_LAUNCH_CONF", "/etc/retroforge/launch.conf")
 EMU_DATA_DIR = ENV.get("RETROFORGE_EMU_DATA_DIR", "/usr/share/retroforge/emulators")
@@ -159,9 +173,11 @@ MOUNTS = ENV.get("RETROFORGE_MOUNTS", "/proc/mounts")
 CPU_ROOT = ENV.get("RETROFORGE_CPU_ROOT", "/sys/devices/system/cpu")
 HOME = ENV.get("HOME", "/home/player")
 SEED_BOARD_DIR = os.path.join(HOME, ".config", "retroforge", "seed-board")
-PLAYER_CONF_DIR = ENV.get("RETROFORGE_PLAYER_CONF_DIR",
-                          os.path.join(ENV.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"),
-                                       "retroforge", "emulators"))
+CONFIG_HOME = ENV.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config")
+PLAYER_CONF_DIR = ENV.get("RETROFORGE_PLAYER_CONF_DIR", os.path.join(CONFIG_HOME, "retroforge", "emulators"))
+GAME_CONF_DIR = ENV.get("RETROFORGE_GAME_CONF_DIR", os.path.join(CONFIG_HOME, "retroforge", "games"))
+STATE_DIR = ENV.get("RETROFORGE_STATE_DIR",
+                    os.path.join(ENV.get("XDG_STATE_HOME") or os.path.join(HOME, ".local", "state"), "retroforge"))
 STATUS = ENV.get("RETROFORGE_LAUNCH_STATUS",
                  os.path.join(ENV.get("XDG_RUNTIME_DIR") or "/tmp", "retroforge-launch.status"))
 TMP_LINK_DIR = ENV.get("RETROFORGE_TMP_LINK_DIR", "/tmp")
@@ -181,7 +197,7 @@ UNMOUNT_TRIES = 50   # x 0.1 s for the runtime to let go of the mount after SIGH
 MOUNT_TIMEOUT = 30   # s for the AppImage runtime to print its mount point
 INSTALL_SETTLE = 1.0  # s to wait after an install step for OGUI's Exit to reach us too (below)
 
-USAGE = "usage: retroforge-launch [--cpus big|all] <system> <rom> | [--cpus big|all] --gui <emulator>"
+USAGE = "usage: retroforge-launch <system> <rom> | --gui <emulator>"
 SYSTEM_ID = re.compile(r"[a-z0-9_]+")
 EMU_ID = re.compile(r"[a-z0-9_-]+")
 DEFINITION_KEYS = {"format", "root", "binary", "args", "gui_args", "system_args", "env", "seed",
@@ -208,26 +224,19 @@ def log(msg):
 # ---------------------------------------------------------------------------------- invocation --
 
 def parse_args(argv):
-    """-> (cpus or None, system or None, rom or None, emulator or None)."""
-    cpus = None
-    if argv and argv[0] == "--cpus":
-        if len(argv) < 2:
-            raise Exit(2, USAGE)
-        cpus, argv = argv[1], argv[2:]
-        if cpus not in ("big", "all"):
-            raise Exit(2, f"--cpus must be 'big' or 'all', not '{cpus}'")
+    """-> (system or None, rom or None, emulator or None)."""
     if len(argv) != 2:
         raise Exit(2, USAGE)
     if argv[0] == "--gui":
         if not EMU_ID.fullmatch(argv[1]):
             raise Exit(2, f"bad emulator name '{argv[1]}'")
-        return cpus, None, None, argv[1]
+        return None, None, argv[1]
     system, rom = argv
     if not SYSTEM_ID.fullmatch(system):
         raise Exit(2, f"bad system name '{system}'")
     if not (os.path.isfile(rom) or os.path.isdir(rom)):  # a folder: a PS3 disc dump
         raise Exit(2, f"no such ROM: {rom}")
-    return cpus, system, rom, None
+    return system, rom, None
 
 
 def emulator_for(system):
@@ -431,14 +440,14 @@ def follow_board(emulator, entries, board):
             was = recorded if recorded in ("single", "dual") else seeded_board(dst, layout)
             if was in (None, board):
                 continue
-            write_atomic(dst, switch_layout(dst, layout, board).encode())
+            emuopts.write_atomic(dst, switch_layout(dst, layout, board).encode())
         except (OSError, UnicodeError) as err:
             log(f"warning: {emulator}: could not switch {dst} to the {board}-screen layout: {err}")
             continue
         log(f"{emulator}: {dst} was set up on a {was}-screen board: {board}-screen layout")
     if recorded != board:
         try:
-            write_atomic(marker, f"{board}\n".encode())
+            emuopts.write_atomic(marker, f"{board}\n".encode())
         except OSError as err:
             log(f"warning: {emulator}: could not record the {board}-screen seed in {marker}: {err}")
 
@@ -510,22 +519,6 @@ def switch_layout(path, layout, board):
     return "\n".join(out) + "\n"
 
 
-def write_atomic(dst, data):
-    """dst holding data, replaced in one rename (a crash leaves the old file or the new one)."""
-    tmp = f"{dst}.retroforge-{secrets.token_hex(4)}"
-    try:
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        with open(tmp, "wb") as f:
-            f.write(data)
-        os.replace(tmp, dst)
-    except OSError:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
-
-
 def sync_files(emulator, sync):
     """RetroForge's own files (sync above): the image's copy, whenever the one under $HOME differs."""
     for s in sync:
@@ -540,32 +533,13 @@ def sync_files(emulator, sync):
                         continue
             except OSError:
                 pass
-            write_atomic(dst, want)
+            emuopts.write_atomic(dst, want)
             log(f"{emulator}: updated {dst}")
         except OSError as err:
             log(f"warning: {emulator}: could not place {dst}: {err}")
 
 
 # -------------------------------------------------------------------------------------- CPUs --
-
-def player_cpus(emulator):
-    """The player's default for this emulator: Settings > Emulators writes CPUS=big|all. Read,
-    never sourced: it is the player's file, and only that one key means anything in it."""
-    path = os.path.join(PLAYER_CONF_DIR, f"{emulator}.conf")
-    value = ""
-    try:
-        with open(path, errors="replace") as f:
-            for line in f:
-                if line.startswith("CPUS="):
-                    value = line[len("CPUS="):].rstrip("\n")
-    except OSError:
-        return "all"
-    if value in ("big", "all"):
-        return value
-    if value:
-        log(f"{path}: ignoring CPUS={value} (want big or all)")
-    return "all"
-
 
 def read_text(path):
     try:
@@ -894,9 +868,18 @@ def no_core_dumps():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
 
 
+def cpus_for(emulator_conf, game_conf):
+    """The run's CPUS: the game's, else the emulator's, else all. A value that is neither big nor all
+    is reported and skipped."""
+    for name, conf in (("game", game_conf), ("emulator", emulator_conf)):
+        if conf.get("CPUS", "big") not in emuopts.CPUS_VALUES:
+            log(f"{name} conf: ignoring CPUS={conf['CPUS']} (want big or all)")
+    return emuopts.cpus_choice(emulator_conf, game_conf)
+
+
 def pinning(emulator, cpus):
-    """`taskset -c <fast cpus>` when this run goes on the fast cores, else []."""
-    if (cpus or player_cpus(emulator)) != "big":
+    """`taskset -c <fast cpus>` when this run goes on the fast cores (cpus "big"), else []."""
+    if cpus != "big":
         return []
     fast = fast_cpus()
     if not fast:
@@ -906,8 +889,36 @@ def pinning(emulator, cpus):
     return ["taskset", "-c", fast]
 
 
+def player_confs(emulator, system, rom):
+    """(the emulator's conf, the game's conf) as {key: value}; the game's is {} for --gui."""
+    game = emuopts.read_conf(emuopts.game_conf_path(GAME_CONF_DIR, system, rom)) if rom is not None else {}
+    return emuopts.read_conf(os.path.join(PLAYER_CONF_DIR, f"{emulator}.conf")), game
+
+
+def load_options(emulator, definition):
+    try:
+        options = emuopts.load_options(EMU_DATA_DIR, emulator)
+    except emuopts.OptionsError as err:
+        raise Exit(2, str(err)) from None
+    if options is not None and definition["format"] == "scripts":
+        raise Exit(2, f"{emulator}: options.json is for emulators, not the scripts format")
+    return options
+
+
+def options_warning(emulator):
+    return lambda msg: log(f"warning: {emulator}: {msg}")
+
+
+def apply_options(emulator, options, confs):
+    """Restore a journal a killed run left, then apply this run's choices: -> (args, env)."""
+    emuopts.restore(HOME, STATE_DIR, emulator, options_warning(emulator))
+    if options is None:
+        return [], {}
+    return emuopts.apply(options, HOME, STATE_DIR, emulator, *confs, options_warning(emulator))
+
+
 def run(argv):
-    cpus, system, rom, emulator = parse_args(argv)
+    system, rom, emulator = parse_args(argv)
     if emulator is None:
         emulator = emulator_for(system)
     definition = load_definition(emulator)
@@ -926,7 +937,9 @@ def run(argv):
     seed_first_run(emulator, definition["seed"])
     sync_files(emulator, definition["sync"])
     todo = missing_installs(emulator, definition["install"], rom is not None)
-    pin = pinning(emulator, cpus)
+    options = load_options(emulator, definition)
+    confs = player_confs(emulator, system, rom)
+    pin = pinning(emulator, cpus_for(*confs))
 
     # From here on, survive our own signals (OGUI's Exit reaches us too) and wait: never forward
     # them. Caught signals go back to default in the emulator at exec.
@@ -935,13 +948,17 @@ def run(argv):
         signal.signal(sig, lambda signum, _: interrupted.append(signum))
     package = FORMATS[definition["format"]](emulator, image)
     try:
+        # Before the mount: the restore in `finally` must cover every way out from here on.
+        opt_args, opt_env = apply_options(emulator, options, confs)
+        args = opt_args + args
         try:
             root = package.prepare()
         except Exit as err:
             fail("mount-failed", emulator, str(err))
         binary = os.path.join(root, definition["binary"])
         inherited = {k: v for k, v in ENV.items() if k not in VRAM_REPORT_LIMIT_VARS}
-        env = {**inherited, **gpu_priority_env(), **vram_limit_env(), **package.env(), **definition["env"]}
+        env = {**inherited, **gpu_priority_env(), **vram_limit_env(), **package.env(), **definition["env"],
+               **opt_env}
         run_installs(emulator, binary, env, todo, interrupted)
         program = SCRIPT_SHELL if package.runs_rom and rom is not None else binary
         log(f"{system or 'gui'} -> {emulator}: {program} {' '.join(args)}")
@@ -955,6 +972,7 @@ def run(argv):
         return 128 - rc if rc < 0 else rc
     finally:
         package.release()
+        emuopts.restore(HOME, STATE_DIR, emulator, options_warning(emulator))
 
 
 def wait_emulator(emu, resend_after, interrupted):

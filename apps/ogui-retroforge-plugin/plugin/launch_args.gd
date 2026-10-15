@@ -1,14 +1,14 @@
 extends RefCounted
 
 ## retroforge-launch's command line for a ROM, the key a ROM's options are saved under, and the
-## player's per-emulator defaults retroforge-launch reads. No OGUI types, so tests/test-plugin.sh can
-## run them in a stock Godot.
+## player confs retroforge-launch reads. No OGUI types, so tests/test-plugin.sh can run them in a
+## stock Godot.
 ##
-## "Run on fast cores" is decided in two places, like retroforge-launch does:
-##   - per emulator, Settings > Emulators: CPUS=big|all in ~/.config/retroforge/emulators/<emu>.conf
-##     (retroforge-launch reads it for every launch of that emulator, Open included);
-##   - per game, Game settings > RetroForge: "" = the emulator's default, "big" / "all" = an override,
-##     put on the game's command line as --cpus.
+## The player's choices live in two confs of `KEY=value` lines (the last line of a key wins), read
+## by retroforge-launch at each start (emuopts):
+##   - per emulator, Settings > Emulators: ~/.config/retroforge/emulators/<emu>.conf (Open included);
+##   - per game, Game settings > RetroForge: ~/.config/retroforge/games/<system>/<rom file>.conf.
+## "Run on fast cores" is CPUS=big|all in either; no line in the game's conf = the emulator's default.
 
 const LAUNCH_CONF := "/etc/retroforge/launch.conf"
 const CPUS_VALUES := ["big", "all"]
@@ -17,17 +17,18 @@ const CPUS_VALUES := ["big", "all"]
 ## A ROM's identity for per-game options: "<system>/<file name>". Not the card name, which
 ## changes when a same-named ROM appears (rom_names.gd).
 static func rom_id(system: String, path: String) -> String:
-	return system + "/" + path.get_file()
+	return system + "/" + _rom_file(path)
 
 
-## Arguments for retroforge-launch. cpus: "" follows the emulator's default (no --cpus), "big" or
-## "all" overrides it. An array, not a command line: a ROM path with spaces stays one argument.
-static func for_rom(system: String, path: String, cpus: String) -> PackedStringArray:
-	var args := PackedStringArray()
-	if cpus in CPUS_VALUES:
-		args.append_array(["--cpus", cpus])
-	args.append_array([system, path])
-	return args
+## The ROM's file name (a folder's name for a PS3 dump), as retroforge-launch names its game conf.
+static func _rom_file(path: String) -> String:
+	return path.trim_suffix("/").get_file()
+
+
+## Arguments for retroforge-launch. An array, not a command line: a ROM path with spaces stays one
+## argument. Every choice is in the confs, so a card never needs rewriting when one changes.
+static func for_rom(system: String, path: String) -> PackedStringArray:
+	return PackedStringArray([system, path])
 
 
 ## The emulator launch.conf maps a system to ("" if none). Same rule as retroforge-launch: a
@@ -42,32 +43,48 @@ static func emulator_for(system: String, launch_conf: String) -> String:
 	return emulator
 
 
-## The CPUS value of a player conf ("big", "all", or "" when unset or not one of those), read the
-## way retroforge-launch reads it: the last CPUS= line.
-static func conf_cpus(conf: String) -> String:
+## A conf's value for key ("" when unset), read the way retroforge-launch reads it: the last line.
+static func conf_value(conf: String, key: String) -> String:
 	var value := ""
 	for line in conf.split("\n"):
-		if line.begins_with("CPUS="):
-			value = line.trim_prefix("CPUS=")
+		if line.begins_with(key + "="):
+			value = line.trim_prefix(key + "=")
+	return value
+
+
+## The CPUS value of a conf: "big", "all", or "" when unset or not one of those.
+static func conf_cpus(conf: String) -> String:
+	var value := conf_value(conf, "CPUS")
 	return value if value in CPUS_VALUES else ""
 
 
-## The player conf with CPUS set to value: every CPUS= line replaced by one, other lines kept.
-static func conf_with_cpus(conf: String, value: String) -> String:
+## The conf with key set to value: every key= line replaced by one, other lines kept. An empty
+## value removes the key (the level above decides).
+static func conf_with(conf: String, key: String, value: String) -> String:
 	var lines := PackedStringArray()
 	for line in conf.split("\n"):
-		if line != "" and not line.begins_with("CPUS="):
+		if line != "" and not line.begins_with(key + "="):
 			lines.append(line)
-	lines.append("CPUS=" + value)
-	return "\n".join(lines) + "\n"
+	if value != "":
+		lines.append(key + "=" + value)
+	return "\n".join(lines) + "\n" if not lines.is_empty() else ""
+
+
+static func _config_dir() -> String:
+	var config := OS.get_environment("XDG_CONFIG_HOME")
+	if config == "":
+		config = OS.get_environment("HOME").path_join(".config")
+	return config.path_join("retroforge")
 
 
 ## Where retroforge-launch looks for the player's settings of an emulator.
 static func player_conf_path(emulator: String) -> String:
-	var config := OS.get_environment("XDG_CONFIG_HOME")
-	if config == "":
-		config = OS.get_environment("HOME").path_join(".config")
-	return config.path_join("retroforge/emulators/%s.conf" % emulator)
+	return _config_dir().path_join("emulators/%s.conf" % emulator)
+
+
+## Where retroforge-launch looks for a game's own settings.
+static func game_conf_path(system: String, path: String) -> String:
+	return _config_dir().path_join("games/%s/%s.conf" % [system, _rom_file(path)])
 
 
 static func read_text(path: String) -> String:
@@ -80,13 +97,28 @@ static func emulator_fast_cores(emulator: String) -> bool:
 
 
 ## Save the player's fast-cores default for an emulator. False when the file could not be written.
-## Written to a temporary file and renamed over the conf, so a full disk or a power cut never
-## leaves it half written.
 static func set_emulator_fast_cores(emulator: String, on: bool) -> bool:
-	var path := player_conf_path(emulator)
+	return set_conf_value(player_conf_path(emulator), "CPUS", "big" if on else "all")
+
+
+## A game's fast-cores override: "" (the emulator's default), "big" or "all".
+static func game_cpus(system: String, path: String) -> String:
+	return conf_cpus(read_text(game_conf_path(system, path)))
+
+
+## Save a game's fast-cores override ("" = the emulator's default). False when it could not be written.
+static func set_game_cpus(system: String, path: String, cpus: String) -> bool:
+	return set_conf_value(game_conf_path(system, path), "CPUS", cpus if cpus in CPUS_VALUES else "")
+
+
+## Set key=value in a conf ("" removes it). Written to a temporary file and renamed over the conf,
+## so a full disk or a power cut never leaves it half written. False when it could not be written.
+static func set_conf_value(path: String, key: String, value: String) -> bool:
+	var text := conf_with(read_text(path), key, value)
+	if text == "" and not FileAccess.file_exists(path):
+		return true  # nothing to keep: no empty conf for a game that only has defaults
 	if DirAccess.make_dir_recursive_absolute(path.get_base_dir()) != OK:
 		return false
-	var text := conf_with_cpus(read_text(path), "big" if on else "all")
 	var tmp := path + ".part"
 	var f := FileAccess.open(tmp, FileAccess.WRITE)
 	if not f:

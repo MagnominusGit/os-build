@@ -10,12 +10,6 @@ const RomNames := preload("rom_names.gd")
 const LaunchArgs := preload("launch_args.gd")
 const GameDirs := preload("game_dirs.gd")
 
-## OGUI settings section of a game's "Run on fast cores" override: key = ROM id (launch_args.gd),
-## value "big" (on) or "all" (off). Absent = the emulator's default (Settings > Emulators).
-const CPUS_SECTION := "retroforge.cpus"
-
-var settings_manager := load("res://core/global/settings_manager.tres") as SettingsManager
-
 ## Systems the image can launch, in tab order (by maker, then by age). Tab label, and the file
 ## extensions that are a game. An .m3u playlist wins over the disc images it lists, so a multi-disc
 ## game is one card. "dirs": the files that make a subfolder a game (game_dirs.gd): a PS3 disc dump
@@ -152,7 +146,7 @@ func _launch_item(name: String, system: String, path: String) -> LibraryLaunchIt
 	item.name = name
 	item.provider_app_id = LaunchArgs.rom_id(system, path)
 	item.command = LAUNCHER
-	item.args = LaunchArgs.for_rom(system, path, _cpus_saved(item.provider_app_id))
+	item.args = LaunchArgs.for_rom(system, path)
 	item.tags = PackedStringArray(["retroforge", system])
 	item.categories = PackedStringArray(["game"])
 	item.installed = true
@@ -160,14 +154,9 @@ func _launch_item(name: String, system: String, path: String) -> LibraryLaunchIt
 	return item
 
 
-func _cpus_saved(rom_id: String) -> String:
-	var value = settings_manager.get_value(CPUS_SECTION, rom_id, "")
-	return value if value in LaunchArgs.CPUS_VALUES else ""
-
-
 ## A game's fast-cores override: "" (the emulator's default), "big" or "all".
 func get_cpus(item: LibraryLaunchItem) -> String:
-	return _cpus_saved(item.provider_app_id)
+	return LaunchArgs.game_cpus(item.metadata["system"], item.metadata["rom"])
 
 
 ## Whether the emulator this game runs in defaults to the fast cores (Settings > Emulators).
@@ -176,22 +165,11 @@ func emulator_fast_cores(item: LibraryLaunchItem) -> bool:
 	return emulator != "" and LaunchArgs.emulator_fast_cores(emulator)
 
 
-## Save a game's override and rewrite its arguments: OGUI builds the command line from them at
-## each launch, so the next launch follows without a rescan.
+## Save a game's override in its conf, which retroforge-launch reads at the next start.
 func set_cpus(item: LibraryLaunchItem, cpus: String) -> void:
-	if cpus in LaunchArgs.CPUS_VALUES:
-		settings_manager.set_value(CPUS_SECTION, item.provider_app_id, cpus)
-	elif settings_manager.get_value(CPUS_SECTION, item.provider_app_id) != null:
-		# ConfigFile logs an error when erasing a key that is not there.
-		settings_manager.erase_section_key(CPUS_SECTION, item.provider_app_id)
-	# A rescan may have replaced the item the settings page holds: update the library's live one
-	# too, by ROM id (its name can have changed).
-	var args := LaunchArgs.for_rom(item.metadata["system"], item.metadata["rom"], cpus)
-	item.args = args
-	for app in library_manager.get_library_items([]):
-		var live := app.get_launch_item(library_id)
-		if live and live != item and live.provider_app_id == item.provider_app_id:
-			live.args = args
+	if not LaunchArgs.set_game_cpus(item.metadata["system"], item.metadata["rom"], cpus):
+		logger.warn("could not write " + LaunchArgs.game_conf_path(item.metadata["system"], item.metadata["rom"]))
+		return
 	logger.info("%s: fast cores %s" % [item.name, {"big": "on", "all": "off"}.get(cpus, "emulator default")])
 
 

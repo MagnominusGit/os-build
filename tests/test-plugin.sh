@@ -129,16 +129,10 @@ func _init() -> void:
 		RomNames.stale({"A": "/r/A.chd", "B": "/r/B.chd"}, {"A": "/r/A.chd"}), PackedStringArray(["B"]))
 	check("a name now meaning another file is dropped (re-added with the new ROM)",
 		RomNames.stale({"A": "/r/A.cue"}, {"A": "/r/A.chd"}), PackedStringArray(["A"]))
-	# Run on fast cores: per game "" (emulator default) / "big" / "all" -> retroforge-launch --cpus.
+	# Every choice is in the player confs (retroforge-launch reads them): a card is just system + ROM.
 	var rom := "/home/player/roms/psx/Crash Team Racing (USA).chd"
-	check("launch args: the emulator default adds no --cpus",
-		LaunchArgs.for_rom("psx", rom, ""), PackedStringArray(["psx", rom]))
-	check("launch args: On puts --cpus big first (retroforge-launch reads it there)",
-		LaunchArgs.for_rom("psx", rom, "big"), PackedStringArray(["--cpus", "big", "psx", rom]))
-	check("launch args: Off is --cpus all (beats an emulator default of On)",
-		LaunchArgs.for_rom("psx", rom, "all"), PackedStringArray(["--cpus", "all", "psx", rom]))
-	check("launch args: an unknown value adds nothing",
-		LaunchArgs.for_rom("psx", rom, "fast"), PackedStringArray(["psx", rom]))
+	check("launch args: system and ROM, nothing else (choices live in the confs)",
+		LaunchArgs.for_rom("psx", rom), PackedStringArray(["psx", rom]))
 	check("options are saved per system + file, not per card name",
 		LaunchArgs.rom_id("psx", rom), "psx/Crash Team Racing (USA).chd")
 	var launch_conf := "# system=emulator\npsx=duckstation\nps2=armsx2\npsx=other  \npsxx=nope\n"
@@ -151,7 +145,13 @@ func _init() -> void:
 	check("player conf: an unknown CPUS value reads as unset",
 		LaunchArgs.conf_cpus("CPUS=fast\n"), "")
 	check("player conf: CPUS rewritten once, other lines kept",
-		LaunchArgs.conf_with_cpus("# mine\nCPUS=all\nFOO=1\nCPUS=all\n", "big"), "# mine\nFOO=1\nCPUS=big\n")
+		LaunchArgs.conf_with("# mine\nCPUS=all\nFOO=1\nCPUS=all\n", "CPUS", "big"), "# mine\nFOO=1\nCPUS=big\n")
+	check("player conf: an empty value removes the key",
+		LaunchArgs.conf_with("CPUS=all\naspect=4:3\n", "CPUS", ""), "aspect=4:3\n")
+	check("player conf: removing the last key leaves nothing",
+		LaunchArgs.conf_with("CPUS=all\n", "CPUS", ""), "")
+	check("player conf: any key read like retroforge-launch (last line, prefix-safe)",
+		LaunchArgs.conf_value("aspect_x=1\naspect=4:3\naspect=16:9\n", "aspect"), "16:9")
 	check("player conf: written under XDG_CONFIG_HOME, where retroforge-launch looks",
 		LaunchArgs.player_conf_path("duckstation"), OS.get_environment("XDG_CONFIG_HOME") + "/retroforge/emulators/duckstation.conf")
 	check("emulator default: off before anything is saved", LaunchArgs.emulator_fast_cores("duckstation"), false)
@@ -161,6 +161,20 @@ func _init() -> void:
 		FileAccess.get_file_as_string(LaunchArgs.player_conf_path("duckstation")), "CPUS=big\n")
 	LaunchArgs.set_emulator_fast_cores("duckstation", false)
 	check("emulator default: Off reads back off", LaunchArgs.emulator_fast_cores("duckstation"), false)
+	# Game settings > RetroForge: the game's own conf, named after the ROM file like retroforge-launch's.
+	check("game conf: under XDG_CONFIG_HOME/retroforge/games/<system>/<rom file>.conf",
+		LaunchArgs.game_conf_path("psx", rom), OS.get_environment("XDG_CONFIG_HOME") + "/retroforge/games/psx/Crash Team Racing (USA).chd.conf")
+	check("game conf: a folder ROM (PS3 dump) is named after the folder",
+		LaunchArgs.game_conf_path("ps3", "/home/player/roms/ps3/GAME/"), OS.get_environment("XDG_CONFIG_HOME") + "/retroforge/games/ps3/GAME.conf")
+	check("game fast cores: the emulator default before anything is saved", LaunchArgs.game_cpus("psx", rom), "")
+	check("game fast cores: choosing the default writes no file",
+		LaunchArgs.set_game_cpus("psx", rom, "") and not FileAccess.file_exists(LaunchArgs.game_conf_path("psx", rom)), true)
+	check("game fast cores: saving On succeeds", LaunchArgs.set_game_cpus("psx", rom, "big"), true)
+	check("game fast cores: reads back On", LaunchArgs.game_cpus("psx", rom), "big")
+	check("game fast cores: the file holds CPUS=big", FileAccess.get_file_as_string(LaunchArgs.game_conf_path("psx", rom)), "CPUS=big\n")
+	LaunchArgs.set_game_cpus("psx", rom, "")
+	check("game fast cores: back to the emulator default", LaunchArgs.game_cpus("psx", rom), "")
+	check("game fast cores: an unknown value saves the default", LaunchArgs.set_game_cpus("psx", rom, "fast") and LaunchArgs.game_cpus("psx", rom) == "", true)
 	test_rom_watch()
 	test_game_dirs()
 	test_credits()
