@@ -70,7 +70,7 @@ replies — lore was not reachable, so "never posted" means no patchwork hit). `
 trees (msm-next, qcom `clk-for-7.4` / `arm64-for-7.4`, pci `next`). Re-audit on
 every bump: this table is a snapshot, the `Drop when` column is what to re-check.
 
-Totals: 5 `mainline`, 18 `posted`, 22 `retroforge`, 79 `community`. (`0310` and `0430` were
+Totals: 5 `mainline`, 18 `posted`, 22 `retroforge`, 80 `community`. (`0310` and `0430` were
 deleted at the 7.2.8 bump: stable backported both, byte-identical.) Half the stack will
 never land upstream, which is why provenance is a table and not a number band.
 
@@ -213,6 +213,7 @@ never land upstream, which is why provenance is a table and not a number band.
 | `1084` | community | jaewun, Kettle Linux `20-sm8550/1015`, body byte-identical: RX LineCfg on for link startup, off right after, as downstream does. | when upstreamed |
 | `1085` | community | gennro, Kettle Linux `1385`, body byte-identical: fixes `1083`'s PHY power count when the link state differs between clocks-off and clocks-on. | with `1083` |
 | `1086` | community | gh123man, Kettle Linux `1401`, body byte-identical: recover a failed clock-gating hibern8 enter inline instead of leaving the link unusable. Kettle's `1400` (clock-gating hold across system PM) is NOT taken: we never enter system suspend. | when upstreamed |
+| `1087` | community | gennro, Kettle Linux `40-kettle/1402`, body byte-identical: gives the SM8550 UFS PHY a `vdda-qref` supply at downstream's 30 mA, so LDO L1E (the QREF reference-clock buffer) stays in HPM with the screen off. Wired to `vreg_l1e_0p88` in `qcs8550-ayaneo-pocket-common.dtsi` and `qcs8550-ayn-common.dtsi`. Kettle's trigger is a PHY recalibration on resume from s2idle, which we never reach; ours is the fake suspend, which blanks the DSI PHY (L1E's only declared load) while `1083` keeps the UFS PHY powered in HIBERN8 parking. Untested on hardware by Kettle or us; needs a UFS-booted SM8550 board. | when upstreamed |
 | `1105` | posted | Krishna Chaitanya Chundru root_port v2 15/15 `<20260917-root_port_v2-v2-15-6272b7caae9a@oss.qualcomm.com>`, applied to qcom `arm64-for-7.4` as `bbc442a64823`. 7.3 renames `pcieport0` → `pcie0_port0`. | v7.4; rework at 7.3 either way |
 | `1110` | posted | Same series, 12/15 `<20260917-root_port_v2-v2-12-6272b7caae9a@oss.qualcomm.com>`, applied to qcom `arm64-for-7.4` as `c51818ded215`. | v7.4 |
 | `1115` | community | ROCKNIX SM8250 `0005`. Never posted. | never |
