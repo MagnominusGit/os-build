@@ -1,7 +1,8 @@
 # Per-emulator options (aspect ratio, renderer, resolution...) — plan
 
-Status: phase 2 (framework) implemented on branch feat/emulator-options (2026-10-15), no emulator has an
-options.json yet. Next: phase 3 (plugin pages). See "As built" below for where phase 2 departs from the design.
+Status: phases 2 (framework) and 3 (plugin pages) implemented on branch feat/emulator-options (2026-10-15).
+No emulator has an options.json yet, so no page shows an option. Next: phase 4 (adapters wave 1). See
+"As built" below for where the implementation departs from the design.
 Sources: each emulator's source at the pinned version (catalog.json); file:line references were taken from
 those trees (shallow clones, scratchpad of session 8826cb34, not kept).
 
@@ -181,7 +182,10 @@ game-level values, the same pattern as `retroforge-emu list`. GDScript never par
    - restore journal and crash recovery;
    - `--options` JSON.
    - Tests in tests/ for every patcher and for crash recovery (journal present at start).
-3. **Plugin pages**: generic dropdown pages built from the JSON. tests/test-plugin.sh covers the pure parts.
+3. **Plugin pages** (DONE): emu_options.gd (pure; holds options.json to the launcher's id/value/choice
+   rules), one Dropdown per option on Settings > Emulators (between the version row and fast cores) and on
+   Game settings > RetroForge (rebuilt per visit). tests/test-plugin.sh covers the pure parts; the pages were
+   type-checked with `godot --check-only` inside a copy of the OGUI 0.46.1 build tree (not automated).
 4. **Adapters, wave 1 (cli / run-copy)**: mGBA, Flycast, Dolphin, xemu, ARMSX2, RPCS3.
 5. **Adapters, wave 2 (patch + restore)**: DuckStation, PPSSPP, Azahar, melonDS, Snes9x, ClownMDEmu, Cemu.
 6. **HW validation** per option on SM6115 / SM8250 / SM8550:

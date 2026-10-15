@@ -159,9 +159,14 @@ func get_cpus(item: LibraryLaunchItem) -> String:
 	return LaunchArgs.game_cpus(item.metadata["system"], item.metadata["rom"])
 
 
+## The emulator this game runs in ("" when launch.conf maps its system to none).
+func emulator_of(item: LibraryLaunchItem) -> String:
+	return LaunchArgs.emulator_for(item.metadata["system"], LaunchArgs.read_text(LaunchArgs.LAUNCH_CONF))
+
+
 ## Whether the emulator this game runs in defaults to the fast cores (Settings > Emulators).
 func emulator_fast_cores(item: LibraryLaunchItem) -> bool:
-	var emulator := LaunchArgs.emulator_for(item.metadata["system"], LaunchArgs.read_text(LaunchArgs.LAUNCH_CONF))
+	var emulator := emulator_of(item)
 	return emulator != "" and LaunchArgs.emulator_fast_cores(emulator)
 
 

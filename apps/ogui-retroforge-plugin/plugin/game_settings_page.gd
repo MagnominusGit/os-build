@@ -1,8 +1,11 @@
 extends ScrollContainer
 
 ## Game settings > RetroForge: per-ROM options, in the screen the gear on OGUI's launch menu opens.
-## For now "Run on fast cores": the emulator's default (Settings > Emulators), On or Off for this
-## game (CPUS=big / all in the game's conf, which retroforge-launch reads; launch_args.gd).
+## "Run on fast cores": the emulator's default (Settings > Emulators), On or Off for this game
+## (CPUS=big / all in the game's conf, which retroforge-launch reads; launch_args.gd). Then one
+## dropdown per option of the game's emulator (options.json, emu_options.gd): "Emulator default
+## (<its choice>)" or a value for this game only, rebuilt at each visit (another game may run in
+## another emulator).
 ##
 ## Wired like that screen's own sections (game_settings.tscn): the button replaces the
 ## game-settings state with this page's State on focus and hands the focus to the page when
@@ -10,6 +13,8 @@ extends ScrollContainer
 ## returns through the screen's shared focus stack. The button only shows for RetroForge ROMs.
 
 const LIBRARY_ID := "retroforge-roms"
+const EmuOptions := preload("emu_options.gd")
+const LaunchArgs := preload("launch_args.gd")
 const TITLE := "RetroForge"
 
 var game_settings_state := load("res://assets/state/states/game_settings.tres") as State
@@ -30,6 +35,8 @@ var _focus_group: FocusGroup
 const CPUS_CHOICES := ["", "big", "all"]
 
 var _fast_cores: Control  # OGUI Dropdown
+var _rows: VBoxContainer
+var _option_rows: Array = []  # this game's option dropdowns, rebuilt at each visit
 var _section_label: Label
 var _item: LibraryLaunchItem  # the RetroForge launch item of the game being configured
 
@@ -89,6 +96,7 @@ func _build_page() -> void:
 	add_child(margin)
 	var rows := VBoxContainer.new()
 	margin.add_child(rows)
+	_rows = rows
 
 	_fast_cores = dropdown_scene.instantiate()
 	_fast_cores.title = "Run on fast cores"
@@ -133,6 +141,8 @@ func _on_game_settings_entered(_from: State) -> void:
 	if button.visible != show:
 		button.visible = show
 		_recalculate(button.get_parent())
+	if not show:
+		_build_options("")  # no RetroForge game: no rows of the last one left behind
 	if show:
 		# Filled on each visit: the default's label follows the emulator's current setting.
 		# select() does not emit item_selected, so loading never saves.
@@ -141,6 +151,49 @@ func _on_game_settings_entered(_from: State) -> void:
 		_fast_cores.add_item("On")
 		_fast_cores.add_item("Off")
 		_fast_cores.select(CPUS_CHOICES.find(roms.get_cpus(_item)))
+		_build_options(roms.emulator_of(_item))
+
+
+## The game's emulator options, after the fast-cores row. Removed from the tree before they are
+## freed, so the FocusGroup never walks a dying row.
+func _build_options(emulator: String) -> void:
+	if _focus_group.current_focus in _option_rows:
+		_focus_group.current_focus = _fast_cores
+	for row in _option_rows:
+		_rows.remove_child(row)
+		row.queue_free()
+	_option_rows.clear()
+	if emulator != "":
+		for option in EmuOptions.options_for(emulator):
+			_add_option(emulator, option)
+	_focus_group.recalculate_focus()
+
+
+func _add_option(emulator: String, option: Dictionary) -> void:
+	var dropdown = dropdown_scene.instantiate()
+	dropdown.title = option["label"]
+	dropdown.description = option["description"]
+	_rows.add_child(dropdown)
+	_option_rows.append(dropdown)
+	for text in EmuOptions.game_items(option, EmuOptions.emulator_choice(emulator, option)):
+		dropdown.add_item(text)
+	var system: String = _item.metadata["system"]
+	var rom: String = _item.metadata["rom"]
+	dropdown.select(EmuOptions.index_of(option, EmuOptions.game_choice(system, rom, option)))
+	dropdown.item_selected.connect(_on_option_selected.bind(option, dropdown))
+
+
+func _on_option_selected(index: int, option: Dictionary, dropdown: Control) -> void:
+	var values := EmuOptions.values(option)
+	if not _item or index < 0 or index >= values.size():
+		return
+	var system: String = _item.metadata["system"]
+	var rom: String = _item.metadata["rom"]
+	if EmuOptions.set_game_choice(system, rom, option, values[index]):
+		logger.info("%s: %s = %s" % [_item.name, option["id"], values[index] if values[index] != "" else "(emulator default)"])
+		return
+	logger.warn("could not write " + LaunchArgs.game_conf_path(system, rom))
+	dropdown.select(EmuOptions.index_of(option, EmuOptions.game_choice(system, rom, option)))  # what is saved
 
 
 func _on_fast_cores_selected(index: int) -> void:

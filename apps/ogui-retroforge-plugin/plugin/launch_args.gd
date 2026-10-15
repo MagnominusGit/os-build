@@ -115,8 +115,8 @@ static func set_game_cpus(system: String, path: String, cpus: String) -> bool:
 ## so a full disk or a power cut never leaves it half written. False when it could not be written.
 static func set_conf_value(path: String, key: String, value: String) -> bool:
 	var text := conf_with(read_text(path), key, value)
-	if text == "" and not FileAccess.file_exists(path):
-		return true  # nothing to keep: no empty conf for a game that only has defaults
+	if text == "":  # nothing left: no empty conf for a game that only has defaults
+		return not FileAccess.file_exists(path) or DirAccess.remove_absolute(path) == OK
 	if DirAccess.make_dir_recursive_absolute(path.get_base_dir()) != OK:
 		return false
 	var tmp := path + ".part"

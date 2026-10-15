@@ -88,6 +88,7 @@ const LaunchArgs := preload("$SRC/launch_args.gd")
 const RomWatch := preload("$SRC/rom_watch.gd")
 const Credits := preload("$SRC/credits.gd")
 const GameDirs := preload("$SRC/game_dirs.gd")
+const EmuOptions := preload("$SRC/emu_options.gd")
 const SYSTEMS := {"psx": "PlayStation", "ps2": "PlayStation 2"}
 var failed := 0
 
@@ -178,6 +179,7 @@ func _init() -> void:
 	test_rom_watch()
 	test_game_dirs()
 	test_credits()
+	test_emu_options()
 	quit(1 if failed else 0)
 
 ## Games that are folders: a PS3 disc dump is PS3_GAME/USRDIR/EBOOT.BIN in a folder RPCS3 boots.
@@ -226,6 +228,84 @@ func test_credits() -> void:
 		Credits.version_text("v0.1-11894"), "v0.1-11894")
 	check("version: a nightly build (retroforge-emu's nightly-<id>) says Nightly",
 		[Credits.version_text("nightly-cc6fea125"), Credits.version_text("nightly")], ["Nightly cc6fea125", "Nightly"])
+
+## Per-emulator options: what the pages offer from options.json, and the choice at each level.
+func test_emu_options() -> void:
+	var json := JSON.stringify({"files": {"main": {"path": "x.ini", "format": "ini"}},
+		"options": [{"id": "aspect", "label": "Aspect ratio", "description": "How the picture fills the screen.",
+			"choices": [{"value": "4:3", "label": "4:3", "set": [{"args": ["-a"]}]},
+				{"value": "16:9", "label": "16:9 (widescreen)", "set": [{"args": ["-w"]}]}]}]})
+	var opts := EmuOptions.parse(json)
+	check("options: parsed in order, choices without their actions",
+		opts, [{"id": "aspect", "label": "Aspect ratio", "description": "How the picture fills the screen.",
+			"choices": [{"value": "4:3", "label": "4:3"}, {"value": "16:9", "label": "16:9 (widescreen)"}]}])
+	check("options: none without an options.json", EmuOptions.parse(""), [])
+	check("options: an option missing its choices hides them all (never offer what cannot apply)",
+		EmuOptions.parse('{"options": [{"id": "a", "label": "A"}]}'), [])
+	check("options: not JSON", EmuOptions.parse("{"), [])
+	# What the launcher refuses is never offered: a saved value would not apply (or would break the conf).
+	var bad_cases := {
+		"an id that is the CPUS key": {"id": "CPUS"},
+		"an uppercase id": {"id": "Aspect"},
+		"an id with =": {"id": "a=b"},
+		"an empty value (it is the unset item)": {"choices": [{"value": "", "label": "x", "set": [{"args": ["-x"]}]}]},
+		"a value with a space": {"choices": [{"value": "a b", "label": "x", "set": [{"args": ["-x"]}]}]},
+		"a value with a newline": {"choices": [{"value": "a\nCPUS=big", "label": "x", "set": [{"args": ["-x"]}]}]},
+		"a repeated value": {"choices": [{"value": "a", "label": "x", "set": [{"args": ["-x"]}]},
+			{"value": "a", "label": "y", "set": [{"args": ["-y"]}]}]},
+		"a choice with nothing to do": {"choices": [{"value": "a", "label": "x", "set": []}]},
+		"a choice without set": {"choices": [{"value": "a", "label": "x"}]},
+		"a two-line label": {"label": "A\nB"},
+	}
+	for what in bad_cases:
+		var option := {"id": "aspect", "label": "A", "choices": [{"value": "a", "label": "x", "set": [{"args": ["-x"]}]}]}
+		option.merge(bad_cases[what], true)
+		check("options: refused with " + what, EmuOptions.parse(JSON.stringify({"options": [option]})), [])
+	var one := {"id": "aspect", "label": "A", "choices": [{"value": "a", "label": "x", "set": [{"args": ["-x"]}]}]}
+	check("options: refused with a repeated option id", EmuOptions.parse(JSON.stringify({"options": [one, one]})), [])
+	write(OS.get_environment("XDG_CONFIG_HOME") + "/../data/fakeemu/options.json", json)
+	check("options: read from <data dir>/<emulator>/options.json",
+		EmuOptions.options_for("fakeemu", OS.get_environment("XDG_CONFIG_HOME") + "/../data").size(), 1)
+	check("options: an emulator without options.json has none",
+		EmuOptions.options_for("nope", OS.get_environment("XDG_CONFIG_HOME") + "/../data"), [])
+	var aspect: Dictionary = opts[0]
+	check("emulator level: the emulator's own setting first, then the choices",
+		EmuOptions.emulator_items(aspect), PackedStringArray(["Emulator's setting", "4:3", "16:9 (widescreen)"]))
+	check("game level: the emulator's choice named in the default",
+		EmuOptions.game_items(aspect, "16:9"), PackedStringArray(["Emulator default (16:9 (widescreen))", "4:3", "16:9 (widescreen)"]))
+	check("game level: no emulator choice",
+		EmuOptions.game_items(aspect, "")[0], "Emulator default (emulator's setting)")
+	check("items stand for: unset, then each value", EmuOptions.values(aspect), ["", "4:3", "16:9"])
+	check("a saved value selects its item", EmuOptions.index_of(aspect, "16:9"), 2)
+	check("an unknown saved value selects unset", EmuOptions.index_of(aspect, "21:9"), 0)
+	check("conf: the option id is the key, last line wins",
+		EmuOptions.conf_choice("aspect=4:3\nCPUS=big\naspect=16:9\n", aspect), "16:9")
+	check("conf: a value the option does not have reads as unset", EmuOptions.conf_choice("aspect=21:9\n", aspect), "")
+	var rom := "/home/player/roms/psx/Crash Team Racing (USA).chd"
+	check("emulator choice: unset at first", EmuOptions.emulator_choice("duckstation", aspect), "")
+	EmuOptions.set_emulator_choice("duckstation", aspect, "4:3")
+	LaunchArgs.set_emulator_fast_cores("duckstation", true)
+	check("emulator choice: saved beside CPUS", FileAccess.get_file_as_string(LaunchArgs.player_conf_path("duckstation")),
+		"aspect=4:3\nCPUS=big\n")
+	EmuOptions.set_game_choice("psx", rom, aspect, "16:9")
+	check("game choice: in the game's conf", EmuOptions.game_choice("psx", rom, aspect), "16:9")
+	EmuOptions.set_game_choice("psx", rom, aspect, "")
+	check("game choice: back to the emulator default, no file left", FileAccess.file_exists(LaunchArgs.game_conf_path("psx", rom)), false)
+	LaunchArgs.set_game_cpus("psx", rom, "big")
+	EmuOptions.set_game_choice("psx", rom, aspect, "16:9")
+	EmuOptions.set_game_choice("psx", rom, aspect, "")
+	check("game choice: clearing an option keeps the game's CPUS line",
+		FileAccess.get_file_as_string(LaunchArgs.game_conf_path("psx", rom)), "CPUS=big\n")
+	LaunchArgs.set_game_cpus("psx", rom, "")
+	write(LaunchArgs.game_conf_path("psx", rom), "# mine\naspect=4:3\nother=1\naspect=21:9\n")
+	EmuOptions.set_game_choice("psx", rom, aspect, "16:9")
+	check("game choice: other lines kept, repeated lines collapse to one",
+		FileAccess.get_file_as_string(LaunchArgs.game_conf_path("psx", rom)), "# mine\nother=1\naspect=16:9\n")
+	DirAccess.remove_absolute(LaunchArgs.game_conf_path("psx", rom))
+	EmuOptions.set_emulator_choice("duckstation", aspect, "")
+	LaunchArgs.set_emulator_fast_cores("duckstation", false)
+	check("emulator choice: back to the emulator's setting", EmuOptions.emulator_choice("duckstation", aspect), "")
+
 
 func write(path: String, text: String) -> void:
 	DirAccess.make_dir_recursive_absolute(path.get_base_dir())

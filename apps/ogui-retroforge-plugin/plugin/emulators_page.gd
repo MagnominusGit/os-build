@@ -6,8 +6,10 @@ extends ScrollContainer
 ## the attribution every emulator's licence asks for), installed vs pinned version and size, and
 ## a button that is Download, Update or Open (the emulator's own UI, `retroforge-launch --gui`), plus
 ## Delete once installed (a nightly entry -- catalog "channel": "nightly", Cemu -- adds an Update
-## row instead: whether a newer build exists is only known online, so the button asks), and the player's "Run on fast cores" default for that emulator (every
-## launch of it, Open included, unless a game overrides it). Everything else goes through /usr/bin/retroforge-emu (list / install / remove);
+## row instead: whether a newer build exists is only known online, so the button asks), the player's
+## choice for each of the emulator's options (options.json: renderer, resolution, aspect...; see
+## emu_options.gd), and the player's "Run on fast cores" default for that emulator (every launch of it,
+## Open included, unless a game overrides it). Everything else goes through /usr/bin/retroforge-emu (list / install / remove);
 ## the page never downloads or verifies anything itself.
 ##
 ## Built in code on the pattern of OGUI's own settings pages (library_settings_menu.tscn): a
@@ -18,6 +20,7 @@ const EMU_TOOL := "/usr/bin/retroforge-emu"
 const LAUNCHER := "/usr/bin/retroforge-launch"
 const LaunchArgs := preload("launch_args.gd")
 const Credits := preload("credits.gd")
+const EmuOptions := preload("emu_options.gd")
 const PROGRESS_POLL := 0.5  # s between download progress samples
 const BLOCK_GAP := 24  # px between two emulators' blocks
 const EXIT_TEXT := {
@@ -32,6 +35,7 @@ var notification_manager := load("res://core/global/notification_manager.tres")
 var section_scene := load("res://core/ui/components/section_label.tscn") as PackedScene
 var row_scene := load("res://core/ui/components/card_button_setting.tscn") as PackedScene
 var toggle_scene := load("res://core/ui/components/toggle.tscn") as PackedScene
+var dropdown_scene := load("res://core/ui/components/dropdown.tscn") as PackedScene
 var focus_group_scene := load("res://core/systems/input/focus_group.tscn") as PackedScene
 var input_watcher_scene := load("res://core/systems/input/input_watcher.tscn") as PackedScene
 var state_updater_scene := load("res://core/systems/state/state_updater.tscn") as PackedScene
@@ -146,8 +150,10 @@ func _add_credit(emu: Dictionary) -> void:
 	_rows.add_child(label)
 
 
-## One block per emulator: its name once (heading), who made it, then three rows -- the version
-## with Download / Update / Open, the fast-cores default, and Delete once installed. Only the last
+## One block per emulator: its name once (heading), who made it, then its rows -- the version with
+## Download / Update / Open, one dropdown per option, the fast-cores default, and Delete once
+## installed. Options show before the download too: a choice made then applies from the first
+## launch. Only the last
 ## row draws a separator, so a line marks where one emulator ends (OGUI's toggle draws one by
 ## default, which used to split a block in two), and a gap opens before the next heading.
 func _add_emulator(id: String, emu: Dictionary) -> void:
@@ -193,6 +199,9 @@ func _add_emulator(id: String, emu: Dictionary) -> void:
 	_rows.add_child(main)
 	if _busy.has(id):
 		main.disabled = true
+
+	for option in EmuOptions.options_for(id):
+		_add_option(id, name_text, option)
 
 	var fast = toggle_scene.instantiate()
 	fast.text = "Run on fast cores"
@@ -286,6 +295,32 @@ func _remove(id: String, name_text: String, row: Control) -> void:
 	_busy.erase(id)
 	_notify(name_text + (" deleted" if code == 0 else " could not be deleted"))
 	refresh()
+
+
+## One option's dropdown: "Emulator's setting" (RetroForge leaves it alone), then each choice.
+## Items are added once it is in the tree (the Dropdown's OptionButton is @onready); select() does
+## not emit item_selected, so building the rows never saves.
+func _add_option(id: String, name_text: String, option: Dictionary) -> void:
+	var dropdown = dropdown_scene.instantiate()
+	dropdown.title = option["label"]
+	dropdown.description = option["description"]
+	_rows.add_child(dropdown)
+	for text in EmuOptions.emulator_items(option):
+		dropdown.add_item(text)
+	dropdown.select(EmuOptions.index_of(option, EmuOptions.emulator_choice(id, option)))
+	dropdown.item_selected.connect(_set_option.bind(id, name_text, option, dropdown))
+
+
+func _set_option(index: int, id: String, name_text: String, option: Dictionary, dropdown: Control) -> void:
+	var values := EmuOptions.values(option)
+	if index < 0 or index >= values.size():
+		return
+	if EmuOptions.set_emulator_choice(id, option, values[index]):
+		logger.info("%s: %s = %s" % [id, option["id"], values[index] if values[index] != "" else "(emulator's setting)"])
+		return
+	logger.warn("could not write " + LaunchArgs.player_conf_path(id))
+	_notify("Could not save the %s setting of %s" % [option["label"], name_text])
+	dropdown.select(EmuOptions.index_of(option, EmuOptions.emulator_choice(id, option)))  # what is saved
 
 
 ## The Toggle only emits on the player's input: this never fires while the rows are built.
