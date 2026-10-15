@@ -1,0 +1,148 @@
+{
+  "files": {
+    "main": {
+      "path": ".config/mgba/config.ini",
+      "format": "ini",
+      "separator": "="
+    },
+    "qt": {
+      "path": ".config/mgba/qt.ini",
+      "format": "ini",
+      "separator": "="
+    }
+  },
+  "options": [
+    {
+      "id": "renderer",
+      "label": "Graphics backend",
+      "description": "How mGBA draws the picture. OpenGL is the usual choice; Software works everywhere but is slower.",
+      "choices": [
+        {
+          "value": "opengl",
+          "label": "OpenGL",
+          "set": [
+            {
+              "file": "qt",
+              "section": "General",
+              "key": "displayDriver",
+              "value": "1"
+            }
+          ]
+        },
+        {
+          "value": "software",
+          "label": "Software",
+          "set": [
+            {
+              "file": "qt",
+              "section": "General",
+              "key": "displayDriver",
+              "value": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aspect",
+      "label": "Aspect ratio",
+      "description": "Keep the console's own picture shape, or stretch it to fill the screen.",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "Game's own",
+          "set": [
+            {
+              "file": "main",
+              "section": "ports.qt",
+              "key": "lockAspectRatio",
+              "value": "1"
+            }
+          ]
+        },
+        {
+          "value": "stretch",
+          "label": "Stretch to screen",
+          "set": [
+            {
+              "file": "main",
+              "section": "ports.qt",
+              "key": "lockAspectRatio",
+              "value": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "integer_scale",
+      "label": "Integer scaling",
+      "description": "Only enlarge the picture by whole steps, so every pixel has the same size. Leaves borders around it.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "ports.qt",
+              "key": "lockIntegerScaling",
+              "value": "1"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "ports.qt",
+              "key": "lockIntegerScaling",
+              "value": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "smoothing",
+      "label": "Screen filter",
+      "description": "Sharp keeps crisp square pixels; Smooth blurs them slightly when the picture is enlarged.",
+      "choices": [
+        {
+          "value": "sharp",
+          "label": "Sharp",
+          "set": [
+            {
+              "file": "main",
+              "section": "ports.qt",
+              "key": "resampleVideo",
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "value": "smooth",
+          "label": "Smooth",
+          "set": [
+            {
+              "file": "main",
+              "section": "ports.qt",
+              "key": "resampleVideo",
+              "value": "1"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "config.ini keys are read from [ports.qt] first: mCoreConfigInit(&m_config, PORT) with PORT \"qt\" makes the port section \"ports.qt\" (src/platform/qt/ConfigController.h:67, ConfigController.cpp:117, src/core/config.c:151-157); _lookupValue tries overrides (-C), then [ports.qt], then the root section (src/core/config.c:49-77). The Qt settings dialog writes [ports.qt] too (mCoreConfigSetIntValue uses config->port, src/core/config.c:351-353).",
+    "Booleans are integers: _lookupBoolValue is strtol and drops a value with trailing text, so 'true' is ignored (src/core/config.c:91-104); the frontend writes 0/1 (ConfigController::setOption(bool) -> mCoreConfigSetIntValue, src/platform/qt/ConfigController.cpp:258-259).",
+    "lockAspectRatio (default 1, ConfigController.cpp:130), lockIntegerScaling and resampleVideo (bilinear filtering) are read by mCoreConfigMap (src/core/config.c:420-423) and applied to the display at game start by Display::configure (src/platform/qt/Display.cpp:106-111) and Window's ConfigOptions (src/platform/qt/Window.cpp:1554-1594). Our -C arguments only set savegamePath/savestatePath, so nothing on the command line shadows these.",
+    "Integer scaling with aspect 'stretch': each axis is scaled by its own whole step (clampSize, src/platform/qt/utils.h:49-58; src/platform/opengl/gl.c:88-93).",
+    "renderer: the display driver is a QSettings value, not a config.ini key: ~/.config/mgba/qt.ini (configDir() + \"qt.ini\", QSettings::IniFormat, src/platform/qt/ConfigController.cpp:110-115), key displayDriver with no group, so QSettings' [General] section (setQtOption, ConfigController.cpp:299-305). Read once at startup, before the window exists (src/platform/qt/GBAApp.cpp:56-57). Values: Display::Driver QT = 0, OPENGL = 1, OPENGL1 = 2 (src/platform/qt/Display.h:29-33); default OPENGL when built with GL (Display.cpp:18-22). The pkgforge 0.10.5 AppImage has DisplayGL and the GLES2 backend (strings in bin/mgba-qt and libmgba.so). OPENGL1 (forced GL 1.x) is not offered.",
+    "Left out: resolution and widescreen_hack (no such setting for GB/GBA), vsync (videoSync is 'Sync to video', emulation pacing; the swap interval is 1 whenever audio or video sync is on, src/platform/qt/DisplayGL.cpp:768-771, so 'off' would not turn VSync off), show_fps (showFps only writes the FPS in the window title, src/platform/qt/Window.cpp:1186-1199, invisible in fullscreen)."
+  ]
+}

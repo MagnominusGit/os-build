@@ -1,8 +1,9 @@
 # Per-emulator options (aspect ratio, renderer, resolution...) — plan
 
 Status: phases 2 (framework) and 3 (plugin pages) implemented on branch feat/emulator-options (2026-10-15).
-No emulator has an options.json yet, so no page shows an option. Next: phase 4 (adapters wave 1). See
-"As built" below for where the implementation departs from the design.
+Phase 4 (wave 1: options.json for mGBA, Flycast, Dolphin, xemu, ARMSX2, RPCS3) written and offline-tested,
+NOT yet tried on hardware. Next: HW check of wave 1, then phase 5 (DuckStation, PPSSPP, Azahar, melonDS,
+Snes9x, ClownMDEmu, Cemu). See "As built" below for where the implementation departs from the design.
 Sources: each emulator's source at the pinned version (catalog.json); file:line references were taken from
 those trees (shallow clones, scratchpad of session 8826cb34, not kept).
 
@@ -186,7 +187,16 @@ game-level values, the same pattern as `retroforge-emu list`. GDScript never par
    rules), one Dropdown per option on Settings > Emulators (between the version row and fast cores) and on
    Game settings > RetroForge (rebuilt per visit). tests/test-plugin.sh covers the pure parts; the pages were
    type-checked with `godot --check-only` inside a copy of the OGUI 0.46.1 build tree (not automated).
-4. **Adapters, wave 1 (cli / run-copy)**: mGBA, Flycast, Dolphin, xemu, ARMSX2, RPCS3.
+4. **Wave 1** (DONE offline, 2026-10-15): options.json for mGBA, Flycast, Dolphin, xemu, ARMSX2, RPCS3, all
+   as FILE actions in each emulator's own config (so its menu shows the emulator-level choice; no -C/-config
+   args needed). Every key verified in the pinned source (citations in each file's "notes"). Left out where
+   the emulator has no such setting: mGBA resolution/widescreen/vsync/fps (its "sync to video" is speed,
+   its FPS only in the window title); xemu integer/widescreen/fps; RPCS3 integer/widescreen/"auto" aspect;
+   Dolphin integer; Flycast aspect is only auto/16:9 (ScreenStretching). Dolphin "Sharp" = Sharp Bilinear
+   output resampling (it has no nearest). Known: ARMSX2 shows "Graphics API is not set to Automatic" once per
+   run when a renderer is chosen (WarnAboutUnsafeSettings would hide every warning: not set).
+   test-emuopts.sh applies every choice of every image options.json to its seed and checks an exact restore;
+   test-plugin.sh checks the pages offer every image option.
 5. **Adapters, wave 2 (patch + restore)**: DuckStation, PPSSPP, Azahar, melonDS, Snes9x, ClownMDEmu, Cemu.
 6. **HW validation** per option on SM6115 / SM8250 / SM8550:
    - every renderer choice on each SoC (e.g. Flycast Vulkan resets the A610, see memory

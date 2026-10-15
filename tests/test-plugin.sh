@@ -266,6 +266,13 @@ func test_emu_options() -> void:
 	write(OS.get_environment("XDG_CONFIG_HOME") + "/../data/fakeemu/options.json", json)
 	check("options: read from <data dir>/<emulator>/options.json",
 		EmuOptions.options_for("fakeemu", OS.get_environment("XDG_CONFIG_HOME") + "/../data").size(), 1)
+	# Every options.json the image ships: the pages offer it in full (emuopts loads them in test-emuopts.sh).
+	var data_dir := "$ROOT/rootfs/overlay/usr/share/retroforge/emulators"
+	for emu in DirAccess.get_directories_at(data_dir):
+		var path := data_dir.path_join(emu).path_join("options.json")
+		if FileAccess.file_exists(path):
+			var raw = JSON.parse_string(FileAccess.get_file_as_string(path))
+			check("image %s/options.json: every option offered" % emu, EmuOptions.options_for(emu, data_dir).size(), raw["options"].size())
 	check("options: an emulator without options.json has none",
 		EmuOptions.options_for("nope", OS.get_environment("XDG_CONFIG_HOME") + "/../data"), [])
 	var aspect: Dictionary = opts[0]

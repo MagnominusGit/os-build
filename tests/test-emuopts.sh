@@ -86,10 +86,15 @@ check("add: after the section's last setting, before its blank line",
       "; comment\n[Display]\nAspectRatio = Auto (Game Native)\nVSync=false\nShowFPS=true\n\n[GPU]\nRenderer=Vulkan\n")
 check("add: a new section at the end, with the file's separator",
       eo.ini_set(INI, "Main", "EmulationSpeed", "1", " = "),
-      INI + "\n[Main]\nEmulationSpeed = 1\n")
+      INI + "[Main]\nEmulationSpeed = 1\n")
 check("remove: the line goes, nothing else", eo.ini_set(INI, "Display", "VSync", None),
       "; comment\n[Display]\nAspectRatio = Auto (Game Native)\n\n[GPU]\nRenderer=Vulkan\n")
 check("remove what is not there: unchanged", eo.ini_set(INI, "GPU", "Nope", None), INI)
+for text in (INI, INI + "\n", "[a]\nx=1"):
+    check(f"add then remove in a new section: the file as it was ({text[-6:]!r})",
+          eo.ini_set(eo.ini_set(text, "Hacks", "K", "1"), "Hacks", "K", None), text if text.endswith("\n") else text + "\n")
+check("removing the last key of a section that has comments keeps it",
+      eo.ini_set("[s]\n; mine\nk=1\n", "s", "k", None), "[s]\n; mine\n")
 check("root section (before any header)", eo.ini_set("[x]\na=1\n", "", "top", "1"), "top=1\n[x]\na=1\n")
 check("an empty file gets the section", eo.ini_set("", "S", "k", "v"), "[S]\nk=v\n")
 QT = "[Renderer]\ngraphics_api\\default=true\ngraphics_api=1\n"
@@ -137,6 +142,10 @@ check("add a missing child mapping under an existing parent",
       eo.yaml_set("Video:\n  Renderer: Vulkan\nAudio:\n  x: 1\n", "Video/Vulkan", "Adapter", "Turnip"),
       "Video:\n  Renderer: Vulkan\n  Vulkan:\n    Adapter: Turnip\nAudio:\n  x: 1\n")
 check("remove a leaf", eo.yaml_set(YML, "Video", "Frame limit", None), YML.replace("  Frame limit: Auto\n", ""))
+check("add then remove under new parents: the file as it was",
+      eo.yaml_set(eo.yaml_set(YML, "Core/SPU", "Block", "Mega"), "Core/SPU", "Block", None), YML)
+check("a parent that keeps other children stays",
+      eo.yaml_set(YML, "Video/Performance Overlay", "Enabled", None).count("Performance Overlay:"), 1)
 LIST = "Video:\n  Res: 1\n  Foo:\n    - a\n    - b\nOther: 1\n"
 check("add after a list under the parent's last child, not inside it",
       eo.yaml_set(LIST, "Video", "New", "2"), "Video:\n  Res: 1\n  Foo:\n    - a\n    - b\n  New: 2\nOther: 1\n")
@@ -218,6 +227,47 @@ for emu in sorted(os.listdir(DATA)):
             check(f"the image's {emu}/options.json loads", True, True)
         except eo.OptionsError as err:
             check(f"the image's {emu}/options.json loads", str(err), True)
+
+# ================================================================================================
+CASE = "image options.json against its seeds"
+# Every choice of every shipped options.json, on the file RetroForge seeds there (empty when none):
+# each setting reads back as written, a TOML/XML file still parses, and the restore gives the seed back
+# byte for byte.
+import tomllib
+import xml.etree.ElementTree as ET
+for emu in sorted(os.listdir(DATA)):
+    opts_path = os.path.join(DATA, emu, "options.json")
+    if not os.path.exists(opts_path):
+        continue
+    try:
+        opts = eo.load_options(DATA, emu)
+    except eo.OptionsError:
+        continue  # reported by the case above
+    with open(os.path.join(DATA, emu, "emulator.json")) as f:
+        seeds = {s["to"]: s["file"] for s in json.load(f).get("seed", [])}
+    home = f"{T}/seedhome-{emu}"
+    for option in opts["options"]:
+        for choice in option["choices"]:
+            for name, fdef in opts["files"].items():
+                src = os.path.join(DATA, emu, seeds[fdef["path"]]) if fdef["path"] in seeds else None
+                write(os.path.join(home, fdef["path"]), read(src) if src else "")
+            originals = {n: read(os.path.join(home, f["path"])) for n, f in opts["files"].items()}
+            got = []
+            eo.apply(opts, home, f"{home}/state", emu, {}, {option["id"]: choice["value"]}, got.append)
+            where = f"{emu} {option['id']}={choice['value']}"
+            ok = not got
+            for a in (a for a in choice["set"] if "file" in a):
+                fdef = opts["files"][a["file"]]
+                text = read(os.path.join(home, fdef["path"]))
+                ok = ok and eo.get_setting(fdef["format"], text, a["section"], a["key"]) == a["value"]
+                if fdef["format"] == "toml":
+                    tomllib.loads(text)
+                if fdef["format"] == "xml":
+                    ET.fromstring(text)
+            check(f"{where}: written as declared, file still valid", (ok, got), (True, []))
+            eo.restore(home, f"{home}/state", emu, got.append)
+            back = {n: read(os.path.join(home, f["path"])) for n, f in opts["files"].items()}
+            check(f"{where}: restored to the seed exactly", back == originals, True)
 
 # ================================================================================================
 CASE = "apply and restore"

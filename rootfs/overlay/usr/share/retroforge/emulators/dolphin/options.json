@@ -1,0 +1,302 @@
+{
+  "files": {
+    "main": {
+      "path": ".config/dolphin-emu/Dolphin.ini",
+      "format": "ini",
+      "separator": " = "
+    },
+    "gfx": {
+      "path": ".config/dolphin-emu/GFX.ini",
+      "format": "ini",
+      "separator": " = "
+    }
+  },
+  "options": [
+    {
+      "id": "renderer",
+      "label": "Graphics backend",
+      "description": "How Dolphin draws the game. Vulkan is usually the fastest; Software is far too slow to play and is only for checking graphics bugs.",
+      "choices": [
+        {
+          "value": "vulkan",
+          "label": "Vulkan",
+          "set": [
+            {
+              "file": "main",
+              "section": "Core",
+              "key": "GFXBackend",
+              "value": "Vulkan"
+            }
+          ]
+        },
+        {
+          "value": "opengl",
+          "label": "OpenGL",
+          "set": [
+            {
+              "file": "main",
+              "section": "Core",
+              "key": "GFXBackend",
+              "value": "OGL"
+            }
+          ]
+        },
+        {
+          "value": "software",
+          "label": "Software",
+          "set": [
+            {
+              "file": "main",
+              "section": "Core",
+              "key": "GFXBackend",
+              "value": "Software Renderer"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "resolution",
+      "label": "Internal resolution",
+      "description": "Draws the game's 3D at a multiple of the console's resolution for a sharper picture. Higher costs speed.",
+      "choices": [
+        {
+          "value": "1x",
+          "label": "Native",
+          "set": [
+            {
+              "file": "gfx",
+              "section": "Settings",
+              "key": "InternalResolution",
+              "value": "1"
+            }
+          ]
+        },
+        {
+          "value": "2x",
+          "label": "2x (720p)",
+          "set": [
+            {
+              "file": "gfx",
+              "section": "Settings",
+              "key": "InternalResolution",
+              "value": "2"
+            }
+          ]
+        },
+        {
+          "value": "3x",
+          "label": "3x (1080p)",
+          "set": [
+            {
+              "file": "gfx",
+              "section": "Settings",
+              "key": "InternalResolution",
+              "value": "3"
+            }
+          ]
+        },
+        {
+          "value": "4x",
+          "label": "4x (1440p)",
+          "set": [
+            {
+              "file": "gfx",
+              "section": "Settings",
+              "key": "InternalResolution",
+              "value": "4"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aspect",
+      "label": "Aspect ratio",
+      "description": "The shape of the picture. Game's own follows what the game asks for (4:3 or 16:9).",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "Game's own",
+          "set": [
+            {
+              "file": "gfx",
+              "section": "Settings",
+              "key": "AspectRatio",
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "value": "4:3",
+          "label": "4:3",
+          "set": [
+            {
+              "file": "gfx",
+              "section": "Settings",
+              "key": "AspectRatio",
+              "value": "2"
+            }
+          ]
+        },
+        {
+          "value": "16:9",
+          "label": "16:9",
+          "set": [
+            {
+              "file": "gfx",
+              "section": "Settings",
+              "key": "AspectRatio",
+              "value": "1"
+            }
+          ]
+        },
+        {
+          "value": "stretch",
+          "label": "Stretch to screen",
+          "set": [
+            {
+              "file": "gfx",
+              "section": "Settings",
+              "key": "AspectRatio",
+              "value": "3"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "smoothing",
+      "label": "Screen filter",
+      "description": "How the picture is scaled up to the screen. Sharp keeps edges crisp; Smooth blends them.",
+      "choices": [
+        {
+          "value": "sharp",
+          "label": "Sharp",
+          "set": [
+            {
+              "file": "gfx",
+              "section": "Enhancements",
+              "key": "OutputResampling",
+              "value": "5"
+            }
+          ]
+        },
+        {
+          "value": "smooth",
+          "label": "Smooth",
+          "set": [
+            {
+              "file": "gfx",
+              "section": "Enhancements",
+              "key": "OutputResampling",
+              "value": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "widescreen_hack",
+      "label": "Widescreen hack",
+      "description": "Makes 4:3 games draw a wider 16:9 view. Can show glitches at the screen edges; set the aspect ratio to 16:9 with it.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "gfx",
+              "section": "Settings",
+              "key": "wideScreenHack",
+              "value": "True"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "gfx",
+              "section": "Settings",
+              "key": "wideScreenHack",
+              "value": "False"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vsync",
+      "label": "VSync",
+      "description": "Waits for the screen's refresh to stop tearing. Can add a little input lag.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "gfx",
+              "section": "Hardware",
+              "key": "VSync",
+              "value": "True"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "gfx",
+              "section": "Hardware",
+              "key": "VSync",
+              "value": "False"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "show_fps",
+      "label": "Show FPS",
+      "description": "Shows the frame rate in a corner of the screen.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "gfx",
+              "section": "Settings",
+              "key": "ShowFPS",
+              "value": "True"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "gfx",
+              "section": "Settings",
+              "key": "ShowFPS",
+              "value": "False"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Verified against dolphin-emu tag 2609 (f84df02). Dolphin.ini [Core] GFXBackend is a string of the backend's config name: Source/Core/Core/Config/MainSettings.cpp:250; names 'Vulkan', 'OGL', 'Software Renderer' in Source/Core/VideoBackends/{Vulkan,OGL,Software}/VideoBackend.h CONFIG_NAME (Null and the Windows/macOS ones are left out). Linux builds list OGL and Vulkan (HAS_OPENGL/HAS_VULKAN): Source/Core/VideoCommon/VideoBackendBase.cpp:202-220.",
+    "GFX.ini (System::GFX, F_GFXCONFIG_IDX, Source/Core/Common/CommonPaths.h:108) is not seeded: the first patch creates it with only our [section] key = value lines. The base loader copies whatever keys an ini has into the layer and leaves every other key at its default (Source/Core/Core/ConfigLoaders/BaseConfigLoader.cpp:146-176; IniFile::Load of a missing file just yields no sections). The ini parser strips spaces around '=' (Source/Core/Common/IniFile.cpp ParseLine).",
+    "Keys and sections: [Settings] InternalResolution int (GFX_EFB_SCALE, default 1 = native, 0 = auto; Source/Core/Core/Config/GraphicsSettings.cpp:91), [Settings] AspectRatio (GraphicsSettings.cpp:22), [Settings] wideScreenHack (:21), [Settings] ShowFPS (:45), [Hardware] VSync (:16), [Enhancements] OutputResampling (:146). The GUI labels 2x/3x/4x 'for 720p/1080p/1440p' (Source/Core/DolphinQt/Config/Graphics/EnhancementsWidget.cpp:69-77).",
+    "AspectRatio is the AspectMode enum stored as its int: 0 Auto, 1 ForceWide (16:9), 2 ForceStandard (4:3), 3 Stretch (Source/Core/VideoCommon/VideoConfig.h:22-31; enums parse via their underlying int, Source/Core/Common/Config/Layer.h:37-44). 'Game's own' (Auto) follows the game's widescreen flag, helped by SuggestedAspectRatio in Sys GameSettings.",
+    "Screen filter = Output Resampling (Source/Core/VideoCommon/VideoConfig.h:68-77): 0 Default (the GPU's bilinear sampler, fastest) for Smooth, 5 Sharp Bilinear for Sharp (Data/Sys/Shaders/default_pre_post_process.glsl:389). Dolphin has no nearest-neighbour output choice in its enum, and no integer scaling, so integer_scale is left out. Needs post-processing support: OGL and Vulkan have it (Source/Core/VideoBackends/OGL/OGLMain.cpp:122, Vulkan/VulkanContext.cpp:438); the Software renderer does not.",
+    "Booleans are written True/False as Dolphin writes them (ValueToString(bool), Source/Core/Common/StringUtil.cpp:318-321; TryParse accepts true/false in any case or 1/0, :269-281).",
+    "Settings are read at boot from the config layers (Source/Core/VideoCommon/VideoConfig.cpp:83-152); -b -e does not touch them. Precedence: Data/Sys/GameSettings set none of these keys at 2609 (only SuggestedAspectRatio and widescreen heuristics), but a player's own per-game GameSettings ini (Dolphin's game Properties) outranks GFX.ini/Dolphin.ini."
+  ]
+}

@@ -247,9 +247,21 @@ def _join(lines):
     return "\n".join(lines) + "\n" if lines else ""
 
 
+def _drop_empty_sections(lines, section):
+    """lines without [section]'s header where removing a key left it empty (the restore of a setting a
+    game added to a section that was not there). Only a section with no lines at all: a blank line
+    may be the player's."""
+    out = list(lines)
+    for sec, start, end in reversed(_sections(lines)):
+        if sec == section and sec != "" and start > 0 and start == end:
+            del out[start - 1]
+    return out
+
+
 def ini_set(text, section, key, value, separator="="):
-    """text with key=value in [section]; value None removes every such line. A line that is there keeps
-    its spacing; a new one goes after the section's last non-blank line (a new section at the end)."""
+    """text with key=value in [section]; value None removes every such line (and the section, if that
+    leaves it empty). A line that is there keeps its spacing; a new one goes after the section's last
+    non-blank line (a new section at the end)."""
     lines, pattern = _lines(text), _key_line(key)
     spans = [s for s in _sections(lines) if s[0] == section]
     found = False
@@ -259,6 +271,8 @@ def ini_set(text, section, key, value, separator="="):
                 found = True
                 lines[i] = None if value is None else f"{m.group(1)}{key}{m.group(2)}{value}"
     lines = [line for line in lines if line is not None]
+    if found and value is None:
+        return _join(_drop_empty_sections(lines, section))
     if found or value is None:
         return _join(lines)
     new = f"{key}{separator}{value}"
@@ -272,7 +286,7 @@ def ini_set(text, section, key, value, separator="="):
     elif section == "":
         lines.insert(0, new)
     else:
-        lines += ([""] if lines and lines[-1].strip() else []) + [f"[{section}]", new]
+        lines += [f"[{section}]", new]  # no blank line before it: a restore leaves the file exactly as it was
     return _join(lines)
 
 
@@ -336,6 +350,23 @@ def _yaml_insert_point(lines, index, path):
     return 0, len(lines), children[0] if children else 0, 2
 
 
+def _yaml_drop_empty_parents(lines, parents):
+    """lines without the parent mappings a removal left with no value and no children (the restore
+    of a setting a game added under parents that were not there), innermost first."""
+    while parents:
+        index = _yaml_index(lines)
+        hit = [(i, indent, value) for p, i, indent, value in index if p == parents]
+        if not hit or hit[0][2]:
+            break
+        i, indent, _ = hit[0]
+        nxt = next((l for l in lines[i + 1:] if l.strip() and not l.strip().startswith("#")), None)
+        if nxt is not None and _indent(nxt) > indent:
+            break  # it still has children
+        del lines[i]
+        parents = parents[:-1]
+    return lines
+
+
 def yaml_set(text, section, key, value):
     """text with the mapping key at section/key set to value; None removes its line. Missing parent
     mappings are added, two spaces per level, at the end of the deepest one that exists."""
@@ -345,8 +376,8 @@ def yaml_set(text, section, key, value):
         if p == path:
             if value is None:
                 del lines[i]
-            else:
-                lines[i] = f"{' ' * indent}{key}: {value}"
+                return _join(_yaml_drop_empty_parents(lines, path[:-1]))
+            lines[i] = f"{' ' * indent}{key}: {value}"
             return _join(lines)
     if value is None:
         return text

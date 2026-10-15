@@ -1,0 +1,330 @@
+{
+  "files": {
+    "main": {
+      "path": ".config/ARMSX2/inis/PCSX2.ini",
+      "format": "ini",
+      "separator": " = "
+    }
+  },
+  "options": [
+    {
+      "id": "renderer",
+      "label": "Graphics backend",
+      "description": "How the PS2 picture is drawn. Vulkan is usually fastest; Software is the most accurate but very slow.",
+      "choices": [
+        {
+          "value": "vulkan",
+          "label": "Vulkan",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "Renderer",
+              "value": "14"
+            }
+          ]
+        },
+        {
+          "value": "opengl",
+          "label": "OpenGL",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "Renderer",
+              "value": "12"
+            }
+          ]
+        },
+        {
+          "value": "software",
+          "label": "Software",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "Renderer",
+              "value": "13"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "resolution",
+      "label": "Internal resolution",
+      "description": "Draws games at a higher resolution for a sharper picture. Higher settings cost speed. Not used by the Software backend.",
+      "choices": [
+        {
+          "value": "1x",
+          "label": "Native",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "upscale_multiplier",
+              "value": "1"
+            }
+          ]
+        },
+        {
+          "value": "2x",
+          "label": "2x (720p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "upscale_multiplier",
+              "value": "2"
+            }
+          ]
+        },
+        {
+          "value": "3x",
+          "label": "3x (1080p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "upscale_multiplier",
+              "value": "3"
+            }
+          ]
+        },
+        {
+          "value": "4x",
+          "label": "4x (1440p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "upscale_multiplier",
+              "value": "4"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aspect",
+      "label": "Aspect ratio",
+      "description": "The shape of the picture. Game's own uses 4:3, or the game's widescreen mode when it has one.",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "Game's own",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "AspectRatio",
+              "value": "Auto 4:3/3:2"
+            }
+          ]
+        },
+        {
+          "value": "4:3",
+          "label": "4:3",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "AspectRatio",
+              "value": "4:3"
+            }
+          ]
+        },
+        {
+          "value": "16:9",
+          "label": "16:9",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "AspectRatio",
+              "value": "16:9"
+            }
+          ]
+        },
+        {
+          "value": "stretch",
+          "label": "Stretch to screen",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "AspectRatio",
+              "value": "Stretch"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "integer_scale",
+      "label": "Integer scaling",
+      "description": "Scales the picture only by whole steps, so every pixel is the same size. Leaves black borders.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "IntegerScaling",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "IntegerScaling",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "smoothing",
+      "label": "Screen filter",
+      "description": "Sharp keeps hard pixel edges; Smooth blurs them slightly when the picture is scaled to the screen.",
+      "choices": [
+        {
+          "value": "sharp",
+          "label": "Sharp",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "linear_present_mode",
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "value": "smooth",
+          "label": "Smooth",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "linear_present_mode",
+              "value": "1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "widescreen_hack",
+      "label": "Widescreen hack",
+      "description": "Applies a widescreen patch when one exists for the game, so it fills a wide screen. Can cause glitches.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore",
+              "key": "EnableWideScreenPatches",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore",
+              "key": "EnableWideScreenPatches",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vsync",
+      "label": "VSync",
+      "description": "Syncs frames to the screen to stop tearing. Can add a little input lag.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "VsyncEnable",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "VsyncEnable",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "show_fps",
+      "label": "Show FPS",
+      "description": "Shows the frame rate in a corner of the screen.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "OsdShowFPS",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "EmuCore/GS",
+              "key": "OsdShowFPS",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Every key is read from ~/.config/ARMSX2/inis/PCSX2.ini (base layer); a game's own gamesettings/<SERIAL>_<CRC>.ini, when the player made one in ARMSX2, is a layer above it and wins for any [EmuCore/GS] key it holds (pcsx2/VMManager.cpp:1232-1250 UpdateGameSettingsLayer).",
+    "Booleans: SimpleIni writes and reads true/false (3rdparty/simpleini/include/SimpleIni.h:2372, pcsx2/INISettingsInterface.cpp:259); the seed and ARMSX2 write ' = '.",
+    "Renderer is an int enum: -1 Auto, 12 OpenGL, 13 Software, 14 Vulkan (pcsx2/Config.h:309-317; read as [EmuCore/GS] Renderer, pcsx2/Pcsx2Config.cpp:1125). USE_OPENGL and USE_VULKAN default ON on Linux (cmake/BuildParameters.cmake:42,44) and the Software renderer has an arm64 JIT (pcsx2/GS/Renderers/SW/GSDrawScanlineCodeGenerator.arm64.cpp).",
+    "Forcing Vulkan or OpenGL (anything but Auto or Software) shows 'Graphics API is not set to Automatic' once per run, unless [EmuCore] WarnAboutUnsafeSettings = false (pcsx2/VMManager.cpp:4185-4191, 4065). The seed leaves Renderer unset (Auto, which picks Vulkan on Turnip).",
+    "upscale_multiplier is a float written as '1', '2', '3', '4' (pcsx2/Pcsx2Config.cpp:1126; the UI's own values, pcsx2/ImGui/FullscreenUI_Settings.cpp:2847-2857). The Software renderer ignores it.",
+    "AspectRatio is a string enum: Stretch, Auto 4:3/3:2, 4:3, 16:9, ... (pcsx2/Pcsx2Config.cpp:659-669, read at :1014). 'Auto 4:3/3:2' is ARMSX2's default.",
+    "linear_present_mode: 0 Off (nearest), 1 Bilinear (Smooth), 2 Bilinear (Sharp) (pcsx2/Config.h:353-358, read at pcsx2/Pcsx2Config.cpp:1115).",
+    "IntegerScaling, VsyncEnable, OsdShowFPS are [EmuCore/GS] booleans (pcsx2/Pcsx2Config.cpp:1034, 1005, 1047).",
+    "EnableWideScreenPatches lives in [EmuCore] (pcsx2/Pcsx2Config.cpp:2195) and is deleted from per-game inis (:2378), so a game's ini cannot override it. It enables the 'Widescreen 16:9' patch from the bundled patches.zip (pcsx2/Patch.cpp:656; .github/workflows/linux_build_qt.yml:126-129) for games that have one."
+  ]
+}

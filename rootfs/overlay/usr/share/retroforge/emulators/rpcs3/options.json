@@ -1,0 +1,260 @@
+{
+  "files": {
+    "main": {
+      "path": ".config/rpcs3/config.yml",
+      "format": "yaml"
+    }
+  },
+  "options": [
+    {
+      "id": "renderer",
+      "label": "Graphics backend",
+      "description": "How the PS3 picture is drawn. Vulkan is faster and better supported.",
+      "choices": [
+        {
+          "value": "vulkan",
+          "label": "Vulkan",
+          "set": [
+            {
+              "file": "main",
+              "section": "Video",
+              "key": "Renderer",
+              "value": "Vulkan"
+            }
+          ]
+        },
+        {
+          "value": "opengl",
+          "label": "OpenGL",
+          "set": [
+            {
+              "file": "main",
+              "section": "Video",
+              "key": "Renderer",
+              "value": "OpenGL"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "resolution",
+      "label": "Internal resolution",
+      "description": "Draws games at a higher resolution for a sharper picture. Higher settings cost speed.",
+      "choices": [
+        {
+          "value": "1x",
+          "label": "Native",
+          "set": [
+            {
+              "file": "main",
+              "section": "Video",
+              "key": "Resolution Scale",
+              "value": "100"
+            }
+          ]
+        },
+        {
+          "value": "2x",
+          "label": "2x",
+          "set": [
+            {
+              "file": "main",
+              "section": "Video",
+              "key": "Resolution Scale",
+              "value": "200"
+            }
+          ]
+        },
+        {
+          "value": "3x",
+          "label": "3x",
+          "set": [
+            {
+              "file": "main",
+              "section": "Video",
+              "key": "Resolution Scale",
+              "value": "300"
+            }
+          ]
+        },
+        {
+          "value": "4x",
+          "label": "4x",
+          "set": [
+            {
+              "file": "main",
+              "section": "Video",
+              "key": "Resolution Scale",
+              "value": "400"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aspect",
+      "label": "Aspect ratio",
+      "description": "The TV shape the PS3 tells the game it has; most games then draw in that shape. Stretch fills the whole screen.",
+      "choices": [
+        {
+          "value": "4:3",
+          "label": "4:3",
+          "set": [
+            {
+              "file": "main",
+              "section": "Video",
+              "key": "Aspect ratio",
+              "value": "4:3"
+            },
+            {
+              "file": "main",
+              "section": "Video",
+              "key": "Stretch To Display Area",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "16:9",
+          "label": "16:9",
+          "set": [
+            {
+              "file": "main",
+              "section": "Video",
+              "key": "Aspect ratio",
+              "value": "16:9"
+            },
+            {
+              "file": "main",
+              "section": "Video",
+              "key": "Stretch To Display Area",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "stretch",
+          "label": "Stretch to screen",
+          "set": [
+            {
+              "file": "main",
+              "section": "Video",
+              "key": "Aspect ratio",
+              "value": "16:9"
+            },
+            {
+              "file": "main",
+              "section": "Video",
+              "key": "Stretch To Display Area",
+              "value": "true"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "smoothing",
+      "label": "Screen filter",
+      "description": "Sharp keeps hard pixel edges; Smooth blurs them slightly when the picture is scaled to the screen.",
+      "choices": [
+        {
+          "value": "sharp",
+          "label": "Sharp",
+          "set": [
+            {
+              "file": "main",
+              "section": "Video",
+              "key": "Output Scaling Mode",
+              "value": "Nearest"
+            }
+          ]
+        },
+        {
+          "value": "smooth",
+          "label": "Smooth",
+          "set": [
+            {
+              "file": "main",
+              "section": "Video",
+              "key": "Output Scaling Mode",
+              "value": "Bilinear"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vsync",
+      "label": "VSync",
+      "description": "Syncs frames to the screen to stop tearing. Can add a little input lag.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "Video",
+              "key": "VSync Mode",
+              "value": "Full"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "Video",
+              "key": "VSync Mode",
+              "value": "Disabled"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "show_fps",
+      "label": "Show FPS",
+      "description": "Shows the frame rate in a corner of the screen.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "Video/Performance Overlay",
+              "key": "Enabled",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "Video/Performance Overlay",
+              "key": "Enabled",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "RPCS3 reads ~/.config/rpcs3/config.yml at every boot (rpcs3/Emu/System.cpp:507, 606-622; Utilities/File.cpp get_config_dir: $XDG_CONFIG_HOME or ~/.config, + /rpcs3/, no config/ subdirectory off Windows). It writes it only when missing or empty (:525) or when the player saves in its settings dialog.",
+    "Then a per-game ~/.config/rpcs3/custom_configs/config_<TITLEID>.yml (or <eboot>.yml), when the player made one, is applied over it and wins for every key it holds (rpcs3/Emu/System.cpp:1802-1830; rpcs3/Emu/system_utils.cpp:573-581). Without one, RPCS3's game database config is applied over config.yml for the games that have one (rpcs3/Emu/System.cpp:1765-1775, 1839-1845).",
+    "Keys are the Video node's (rpcs3/Emu/system_config.h:116): Renderer :119, Aspect ratio :125, VSync Mode :131, Stretch To Display Area :143, Resolution Scale :168 (uint 25..800, percent), Output Scaling Mode :181, Performance Overlay/Enabled :203-205.",
+    "Enum spellings from fmt_class_string (rpcs3/Emu/system_config_types.cpp): Renderer OpenGL/Vulkan :28-29; Aspect ratio 4:3/16:9 :67-68; Output Scaling Mode Nearest/Bilinear :715-716 (FidelityFX Super Resolution left out: an upscaler, not a filter choice); VSync Mode Disabled/Adaptive/Full :779-781. Booleans true/false (Utilities/Config.h:207).",
+    "4:3 and 16:9 are written unquoted, as RPCS3 itself writes them: yaml-cpp's emitter only quotes a ':' followed by a blank or the end (3rdparty yaml-cpp 51a5d62, src/exp.h:165-168, src/emitterutils.cpp:156-198).",
+    "Both renderers are offered on Linux: OpenGL is supported everywhere but macOS (rpcs3/rpcs3qt/render_creator.cpp:85-90), Vulkan when an adapter is found (rpcs3/main_application.cpp:72-91); an unsupported choice falls back to the default renderer (rpcs3/Emu/System.cpp:316-322).",
+    "Aspect ratio is the TV shape reported to the game (rpcs3/Emu/Cell/Modules/cellVideoOut.cpp:151), not a display crop; Stretch To Display Area fills the window instead of letterboxing (rpcs3/Emu/RSX/VK/VKPresent.cpp:639, GL/GLPresent.cpp:265). Stretch therefore also writes Aspect ratio 16:9 (RPCS3's default, system_config.h:125).",
+    "Performance Overlay at its default Detail level (medium) shows the FPS (rpcs3/Emu/RSX/Overlays/overlay_perf_metrics.cpp:592-604)."
+  ]
+}

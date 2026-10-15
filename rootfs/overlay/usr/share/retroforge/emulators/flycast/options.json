@@ -1,0 +1,305 @@
+{
+  "files": {
+    "main": {
+      "path": ".config/flycast/emu.cfg",
+      "format": "ini",
+      "separator": " = "
+    }
+  },
+  "options": [
+    {
+      "id": "renderer",
+      "label": "Graphics backend",
+      "description": "How Flycast draws the game. Vulkan is usually faster; try OpenGL if a game shows glitches or crashes.",
+      "choices": [
+        {
+          "value": "vulkan",
+          "label": "Vulkan",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "pvr.rend",
+              "value": "4"
+            }
+          ]
+        },
+        {
+          "value": "opengl",
+          "label": "OpenGL",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "pvr.rend",
+              "value": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "resolution",
+      "label": "Internal resolution",
+      "description": "Draws the 3D picture at a higher resolution for a sharper image. Higher settings cost speed.",
+      "choices": [
+        {
+          "value": "1x",
+          "label": "Native",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "rend.Resolution",
+              "value": "480"
+            }
+          ]
+        },
+        {
+          "value": "1.5x",
+          "label": "1.5x (720p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "rend.Resolution",
+              "value": "720"
+            }
+          ]
+        },
+        {
+          "value": "2x",
+          "label": "2x (960p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "rend.Resolution",
+              "value": "960"
+            }
+          ]
+        },
+        {
+          "value": "3x",
+          "label": "3x (1440p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "rend.Resolution",
+              "value": "1440"
+            }
+          ]
+        },
+        {
+          "value": "4x",
+          "label": "4x (1920p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "rend.Resolution",
+              "value": "1920"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aspect",
+      "label": "Aspect ratio",
+      "description": "Show the game in its own shape, or stretch the picture sideways to 16:9. Use the game's own shape with the widescreen hack.",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "Game's own",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "rend.ScreenStretching",
+              "value": "100"
+            }
+          ]
+        },
+        {
+          "value": "16:9",
+          "label": "16:9",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "rend.ScreenStretching",
+              "value": "134"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "integer_scale",
+      "label": "Integer scaling",
+      "description": "Only enlarge the picture by whole steps, so every pixel has the same size. Leaves borders around it.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "rend.IntegerScale",
+              "value": "yes"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "rend.IntegerScale",
+              "value": "no"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "smoothing",
+      "label": "Screen filter",
+      "description": "Smooth blends pixels when the picture is resized; Sharp keeps them crisp.",
+      "choices": [
+        {
+          "value": "sharp",
+          "label": "Sharp",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "rend.LinearInterpolation",
+              "value": "no"
+            }
+          ]
+        },
+        {
+          "value": "smooth",
+          "label": "Smooth",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "rend.LinearInterpolation",
+              "value": "yes"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "widescreen_hack",
+      "label": "Widescreen hack",
+      "description": "Draws more of the scene on the sides to fill a wide screen. Some games show glitches at the edges.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "rend.WideScreen",
+              "value": "yes"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "rend.WideScreen",
+              "value": "no"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vsync",
+      "label": "VSync",
+      "description": "Syncs frames with the screen to avoid tearing. Turning it off can help a slow game but may tear.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "rend.vsync",
+              "value": "yes"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "rend.vsync",
+              "value": "no"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "show_fps",
+      "label": "Show FPS",
+      "description": "Shows the frames per second on screen while you play.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "rend.ShowFPS",
+              "value": "yes"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "config",
+              "key": "rend.ShowFPS",
+              "value": "no"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Every emu.cfg setting is Option(name, default, section = \"config\") (core/cfg/option.h:107), read from [config] as e.g. 'rend.Resolution' (core/cfg/option.cpp:68-108); the GUI saves to the same [config] key (option.h:150-151). A per-game section [<game id>] with keys 'config.rend.X', written when the player turns on per-game settings in Flycast's menu, takes priority (option.h:119-121, 147-149).",
+    "Values: emu.cfg is read as 'key = value' (one space each side is dropped, core/cfg/ini.cpp:213-221); booleans are read as yes/true/on/1 (ini.cpp:57-69) and written as yes/no (core/cfg/ini.h:93-94); saved as 'name = value' (ini.cpp, IniFile::save, ini.cpp:253-270).",
+    "renderer: pvr.rend is RenderType: OpenGL = 0, Vulkan = 4 (core/types.h:97-105; RendererOption, core/cfg/option.h:409-425; this build's default is OpenGL). The per-pixel transparency variants 3 and 5 are not offered: a player who chose per-pixel sorting in Flycast is put back on per-strip sorting by these choices. Flycast Vulkan resets the SM6115 GPU during play (memory note flycast-a610-reset).",
+    "resolution: rend.Resolution is the vertical render height, 480 = native (core/cfg/option.cpp:105; scale = Resolution / 480, core/rend/transform_matrix.cpp:264). 480/720/960/1440/1920 are entries of the menu's list (480 x {1, 1.5, 2, 3, 4}, core/ui/settings_video.cpp:154-161), so Flycast's own menu shows them.",
+    "aspect: rend.ScreenStretching is a horizontal stretch in percent, 100..250 in the menu (core/ui/settings_video.cpp:253); the output aspect is 4:3 (16:9 with rend.WideScreen) x ScreenStretching / 100 (core/rend/transform_matrix.cpp:305-327). 134 is the value Flycast itself uses for '4:3 -> 16:9' (core/emulator.cpp:670). A game with a widescreen cheat overrides it to 134 for the run (emulator.cpp:667-671).",
+    "widescreen_hack: rend.WideScreen, Flycast's 'Widescreen' ('Draw geometry outside of the normal 4:3 aspect ratio', settings_video.cpp:241-242; used in transform_matrix.cpp:106, 148, 315). The per-game 'Widescreen Game Cheats' (rend.WidescreenGameHacks, core/cheats.cpp:600) are not part of this option.",
+    "integer_scale rend.IntegerScale, smoothing rend.LinearInterpolation (default yes), vsync rend.vsync (default yes), show_fps rend.ShowFPS (on-screen counter, core/ui/gui.cpp:1421-1430): core/cfg/option.cpp:72, 106-108; menu checkboxes core/ui/settings_video.cpp:204-207, 388.",
+    "emulator.json only passes -config window:fullscreen=yes, so no transient command-line value shadows these [config] keys (transient options, option.h:124-126)."
+  ]
+}
