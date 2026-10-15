@@ -20,7 +20,8 @@
 #
 # SCOPE. The manifest's enable_environment gates it on RETROFORGE_GAME_LOWPRIO=1, which
 # usr/bin/retroforge-launch puts in the environment of every emulator it starts (ROM cards and
-# --gui alike), never the shell's own. Off for one emulator with "env":
+# --gui alike) on the A7xx boards only, never the shell's own: on the single-ring boards the layer
+# would change nothing, so it is not loaded at all. Off for one emulator with "env":
 # {"DISABLE_RETROFORGE_GAME_LOWPRIO": "1"} in its emulator.json.
 pkgname=retroforge-gpu-priority
 pkgver=1.0

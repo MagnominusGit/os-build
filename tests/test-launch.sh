@@ -775,17 +775,18 @@ grep -q "warning: duckstation: could not switch" "$T/launch.err" && ok "a layout
 
 # =================================================================================================
 CASE="GPU priority (the game-priority Vulkan layer)"
-# Every emulator gets RETROFORGE_GAME_LOWPRIO=1 (the layer runs its queues at LOW, below the shell);
-# the A7xx boards also get Turnip's preempt_optimize. The SoC class comes from device-env.
+# Only the A7xx boards (SM8550, SM8650: preemptible rings) get RETROFORGE_GAME_LOWPRIO=1 and Turnip's
+# preempt_optimize; the single-ring boards and an unknown one get neither, so the layer stays out of
+# the process. The SoC class comes from device-env.
 soc_device_env() { printf '#!/bin/sh\necho "RETROFORGE_SOC_CLASS=%s"\n' "$1" > "$T/device-env"; chmod +x "$T/device-env"; }
 for soc in SM8550 SM8650 SM8250 SM6115 ""; do
   soc_device_env "'$soc'"; reset_logs
   RETROFORGE_DEVICE_ENV="$T/device-env" start_launcher
   wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
   touch "$T/stop-emu"; reap_launcher "$lpid"
-  want=""; case "$soc" in SM8550|SM8650) want=preempt_optimize ;; esac
-  [ "$(field lowprio)" = 1 ] && [ "$(field tu_autotune)" = "$want" ] \
-    && ok "${soc:-unknown board}: RETROFORGE_GAME_LOWPRIO=1, TU_AUTOTUNE_FLAGS='$want'" \
+  lp=""; want=""; case "$soc" in SM8550|SM8650) lp=1; want=preempt_optimize ;; esac
+  [ "$(field lowprio)" = "$lp" ] && [ "$(field tu_autotune)" = "$want" ] \
+    && ok "${soc:-unknown board}: RETROFORGE_GAME_LOWPRIO='$lp', TU_AUTOTUNE_FLAGS='$want'" \
     || bad "${soc:-unknown board}: lowprio='$(field lowprio)' tu_autotune='$(field tu_autotune)'"
 done
 # A definition's env wins: an emulator that misbehaves at LOW opts out in its emulator.json.
