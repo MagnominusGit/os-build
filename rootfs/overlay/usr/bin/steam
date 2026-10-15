@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# steam — Valve's arm64 Steam client, started the way the OpenGamepadUI Steam plugin asks for it:
+#   steam -gamepadui -steamos3 -steampal -steamdeck -silent steam://rungameid/<appid>
+#
+# The image ships no Steam (Holo's aarch64 repo has none, and the client is ~560 MB with its runtime),
+# so this:
+#   1. has /usr/lib/retroforge/steam-bootstrap download Valve's arm64 client and Steam Runtime into
+#      the player's home the first time (a ~160 MB download), and get the runtime's `run`;
+#   2. points ~/.steam/steam and ~/.steam/root at the client ("Steam data link does not exist,
+#      client is misconfigured" otherwise);
+#   3. drops a D-Bus session address that belongs to another user, because pressure-vessel's bwrap
+#      fails on it (seen with root's, over SSH), and the STEAM_RUNTIME variables Valve's steam.sh also
+#      unsets;
+#   4. runs steamrtarm64/steam inside the runtime's container. The client strips LD_LIBRARY_PATH, and
+#      steamui.so needs the runtime's GTK2 and the rest;
+#   5. starts it again when it exits 42, which it does after installing an update ("Update
+#      complete, launching Steam..."). That is the same exit code Valve's steam.sh and steamcmd.sh
+#      restart on.
+# A second `steam steam://...` while the client runs goes through the same path, and the client hands
+# the URI to the running instance itself.
+#
+# Stopping: when the game's windows are gone, OGUI SIGTERMs the launch's process NAMED steam
+# (RunningApp.find_steam). That is the client: this script runs as `bash`, because env re-execs it.
+# A TERM/INT/HUP sent to this script is passed on to the client, so it is never left running
+# without its wrapper.
+#
+# First start, measured in a linux/arm64 container on 2026-10-15: the bootstrap took 9 s (runtime 222 MB,
+# client binaries 324 MB unpacked), then the client updated itself from Valve's manifest (667 MB
+# download) to ~3 GB, because the linuxarm64 manifest also carries the x86 client and runtimes.
+#
+# ARMv8.0 (SM6115): Valve builds the client with unguarded LSE atomics, so on a CPU without them it
+# dies of SIGILL unless the kernel emulates them (kernel/patches/0025). See docs/steam-arm64.md.
+#
+# TEST SEAMS (tests/test-steam.sh): RETROFORGE_STEAM_BOOTSTRAP, RETROFORGE_STEAM_ROOT, RETROFORGE_CPUINFO.
+set -u
+
+: "${RETROFORGE_STEAM_BOOTSTRAP:=/usr/lib/retroforge/steam-bootstrap}"
+export RETROFORGE_STEAM_ROOT="${RETROFORGE_STEAM_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/Steam}"
+MAGIC_RESTART_EXITCODE=42
+
+log() { echo "steam: $*" >&2; }
+
+run="$("$RETROFORGE_STEAM_BOOTSTRAP")"
+if [ $? -ne 0 ] || [ ! -x "$run" ]; then
+  log "Valve's arm64 Steam client could not be set up (see above)"
+  exit 1
+fi
+
+mkdir -p "$HOME/.steam"
+for link in steam root; do
+  # A real directory there is not ours to replace.
+  if [ -d "$HOME/.steam/$link" ] && [ ! -L "$HOME/.steam/$link" ]; then
+    log "$HOME/.steam/$link is a directory, not a link; leaving it alone"
+  else
+    ln -sfn "$RETROFORGE_STEAM_ROOT" "$HOME/.steam/$link"
+  fi
+done
+
+case "${DBUS_SESSION_BUS_ADDRESS-}" in
+  unix:path=*)
+    bus="${DBUS_SESSION_BUS_ADDRESS#unix:path=}"
+    bus="${bus%%,*}"
+    [ -O "$bus" ] || { log "ignoring a D-Bus session bus that is not ours: $bus"; unset DBUS_SESSION_BUS_ADDRESS; }
+    ;;
+esac
+unset STEAM_RUNTIME STEAM_RUNTIME_LIBRARY_PATH
+
+cd "$RETROFORGE_STEAM_ROOT" || exit 1
+child=""; stopping=""
+trap 'stopping=1; [ -n "$child" ] && kill -TERM "$child" 2>/dev/null' TERM INT HUP
+while :; do
+  "$run" -- "$RETROFORGE_STEAM_ROOT/steamrtarm64/steam" "$@" &
+  child=$!
+  # A trapped signal ends `wait` early; keep waiting until the client has really exited.
+  while :; do
+    wait "$child"; status=$?
+    kill -0 "$child" 2>/dev/null || break
+  done
+  [ -n "$stopping" ] && exit "$status"
+  if [ "$status" -eq "$MAGIC_RESTART_EXITCODE" ]; then
+    log "restarting the client by request"
+    continue
+  fi
+  if [ "$status" -eq 132 ] && ! grep -qw atomics "${RETROFORGE_CPUINFO:-/proc/cpuinfo}" 2>/dev/null; then
+    log "the client died of SIGILL on a CPU without LSE atomics: the kernel needs kernel/patches/0025"
+  fi
+  exit "$status"
+done

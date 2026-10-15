@@ -52,6 +52,34 @@ Found on the way, independent of the CPU:
 Test install on the Air X: `/home/player/steamtest/` (client, runtime, `lse_shim.so`), started by
 `/home/player/steamtest/run-steam.sh`.
 
+## In the image: `/usr/bin/steam`
+
+The OGUI Steam plugin launches games with `steam -gamepadui ... steam://rungameid/<appid>`. The
+image now has that `steam`, which does the five things above. Neither the client nor the runtime
+ships in the image, because a root slot is 2 GB and the two unpack to ~560 MB. The first `steam`
+downloads them into the player's home (`/usr/lib/retroforge/steam-bootstrap`):
+
+- **Runtime:** pinned in `/usr/share/retroforge/steam/runtime.pin` to Valve's versioned image
+  directory, sha256-checked, unpacked to `~/.local/share/retroforge/steam-runtime/<version>/`.
+- **Client:** only its arm64 binaries (`bins_linuxarm64_linuxarm64`, where `steamrtarm64/` comes
+  from). Its file name and sha256 come from Valve's current `steam_client_linuxarm64` manifest,
+  because a pinned one would stop existing at the next client release. It goes into
+  `~/.local/share/Steam`, and the client updates itself from there.
+
+Valve's manifest has no arm64 bootstrapper: its one `IsBootstrapperPackage`, `steam_linuxarm64`,
+holds the i386 `ubuntu12_32/steam`. That is why the bootstrap starts from the binaries package.
+
+Checked in a linux/arm64 container on 2026-10-15:
+- The bootstrap took 9 s.
+- In the runtime's container, `steam` and `steamclient.so` resolve every library.
+- The client then updated itself headless: a 667 MB download, ~3 GB on disk, because the
+  linuxarm64 manifest also carries the x86 client and runtimes. It stopped at "Unable to open
+  X11 display".
+- On the second start it verified every executable checksum and found nothing to update.
+
+Not yet seen: the client signed in, a game launched by OGUI, the 42 restart from a real client,
+anything on hardware.
+
 ## steamcmd
 
 The OGUI Steam plugin uses `steamcmd` for the library, installs and updates, not the client. Valve
@@ -71,4 +99,6 @@ like the client: ~300 unguarded LSE atomics in the bootstrapper alone, so the sa
 - One `steamwebhelper` child segfaulted once at startup (Chromium restarted it).
 - Integration: who owns the Guide button when OGUI launches Steam -- with Big Picture in front,
   Steam's input takes the quick-bar chord.
+- Whether the client finds games `steamcmd` installed (the plugin sets no install folder), and
+  whether `steamcmd` and the client can stay signed in to the same account at once.
 - x86 games need FEX, which is a separate question on ARMv8.0.

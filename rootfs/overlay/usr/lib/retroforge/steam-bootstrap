@@ -1,0 +1,224 @@
+#!/usr/bin/env python3
+# steam-bootstrap — set up Valve's arm64 Steam client and its runtime in the player's home, for
+# /usr/bin/steam. Prints the runtime's `run` on stdout. Everything else goes to stderr.
+#
+# Nothing of it is in the image (a root slot is 2 GB; the two unpack to ~560 MB), so the first `steam`
+# downloads them. This is what the OpenGamepadUI Steam plugin does for steamcmd, but done here with
+# the arm64 builds:
+#   - the RUNTIME (steamrt3c arm64) from the version /usr/share/retroforge/steam/runtime.pin pins,
+#     sha256-checked, unpacked to ~/.local/share/retroforge/steam-runtime/<version>/. Older versions are
+#     removed once the pinned one is in place.
+#   - the CLIENT from Valve's own update manifest (steam_client_linuxarm64): its arm64 binaries
+#     (package bins_linuxarm64_linuxarm64, unpacked to <Steam root>/steamrtarm64/), checked
+#     against the sha256 the manifest gives for them. Only the binaries: the client updates itself
+#     from the same manifest when it starts, as it does after a manual install (docs/steam-arm64.md).
+#     The manifest is read fresh every time instead of pinned, because its package files are
+#     content-addressed and replaced on every client release, so a pinned one would stop existing.
+# Each lands under a temporary name and is renamed into place, so a failed or interrupted download
+# never leaves a half-set-up client that looks ready. Once both are there this does nothing but check
+# that they exist.
+#
+# Valve's client zips need care: some entries use '\' as the separator, regular files carry mode 0666
+# (no execute bits), and symlinks are Unix link entries. ELF files and #! scripts get 0755.
+#
+# Exit 0 with the run path on stdout, or 1 when something could not be set up (no network, a
+# checksum mismatch, a manifest without the package).
+#
+# TEST SEAMS (tests/test-steam.sh): RETROFORGE_STEAM_ROOT (also set by /usr/bin/steam),
+# RETROFORGE_STEAM_RUNTIME_DIR, RETROFORGE_STEAM_RUNTIME_PIN, RETROFORGE_STEAM_CDN.
+import fcntl
+import hashlib
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import urllib.request
+import zipfile
+
+DATA = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+STEAM_ROOT = os.environ.get("RETROFORGE_STEAM_ROOT") or os.path.join(DATA, "Steam")
+RUNTIME_HOME = os.environ.get("RETROFORGE_STEAM_RUNTIME_DIR",
+                              os.path.join(DATA, "retroforge", "steam-runtime"))
+PIN = os.environ.get("RETROFORGE_STEAM_RUNTIME_PIN", "/usr/share/retroforge/steam/runtime.pin")
+CDN = os.environ.get("RETROFORGE_STEAM_CDN", "https://media.steampowered.com/client")
+MANIFEST = "steam_client_linuxarm64"
+PACKAGE = "bins_linuxarm64_linuxarm64"
+CLIENT = os.path.join("steamrtarm64", "steam")
+
+
+class Failed(Exception):
+    pass
+
+
+def log(msg):
+    print(f"steam-bootstrap: {msg}", file=sys.stderr)
+
+
+def pin_field(text, key):
+    m = re.search(rf"^{key}:[ \t]*(\S+)", text, re.M)
+    return m.group(1) if m else None
+
+
+def download(url, dest, sha256):
+    """url -> dest, refusing it unless its sha256 matches."""
+    digest = hashlib.sha256()
+    try:
+        with urllib.request.urlopen(url, timeout=60) as r, open(dest, "wb") as out:
+            while chunk := r.read(1 << 20):
+                digest.update(chunk)
+                out.write(chunk)
+    except OSError as err:
+        raise Failed(f"could not download {url}: {err}")
+    if digest.hexdigest() != sha256.lower():
+        raise Failed(f"sha256 mismatch for {url}: got {digest.hexdigest()}, want {sha256}")
+
+
+def runtime():
+    """The pinned runtime's `run`, unpacking it first if it is not there yet."""
+    try:
+        with open(PIN, encoding="utf-8") as f:
+            pin = f.read()
+    except OSError as err:
+        raise Failed(f"no runtime pin: {err}")
+    version, url, sha = (pin_field(pin, k) for k in ("version", "url", "sha256"))
+    if not (version and url and sha):
+        raise Failed(f"{PIN}: needs version, url and sha256")
+    final = os.path.join(RUNTIME_HOME, version)
+    run = find_run(final)
+    if run is None:
+        log(f"downloading the Steam Runtime {version}")
+        tmp = tempfile.mkdtemp(dir=RUNTIME_HOME, prefix=".tmp-")
+        try:
+            archive = os.path.join(tmp, "runtime.tar.xz")
+            download(url, archive, sha)
+            tree = os.path.join(tmp, "tree")
+            os.mkdir(tree)
+            # GNU tar, not tarfile: the runtime is a whole sysroot of symlinks, which tarfile's
+            # default "data" filter refuses.
+            res = subprocess.run(["tar", "-xJf", archive, "-C", tree], stderr=subprocess.PIPE, text=True)
+            if res.returncode != 0:
+                raise Failed(f"could not unpack the runtime: {res.stderr.strip()}")
+            if find_run(tree) is None:
+                raise Failed(f"{url} has no */run")
+            if os.path.lexists(final):
+                shutil.rmtree(final)
+            os.rename(tree, final)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        run = find_run(final)
+    for old in os.listdir(RUNTIME_HOME):
+        if old != version and not old.startswith("."):
+            shutil.rmtree(os.path.join(RUNTIME_HOME, old), ignore_errors=True)
+    return run
+
+
+def find_run(tree):
+    """<tree>/<one dir>/run, the runtime's entry point, or None."""
+    try:
+        names = sorted(os.listdir(tree))
+    except OSError:
+        return None
+    for name in names:
+        run = os.path.join(tree, name, "run")
+        if os.path.isfile(run) and os.access(run, os.X_OK):
+            return run
+    return None
+
+
+def manifest_package(text, name):
+    """(file, sha256) of a package in a Steam client manifest (VDF text), or None."""
+    m = re.search(rf'\n\s*"{re.escape(name)}"\s*\{{(.*?)\}}', text, re.S)
+    if not m:
+        return None
+    f = re.search(r'"file"\s+"([^"]+)"', m.group(1))
+    s = re.search(r'"sha2"\s+"([0-9a-fA-F]{64})"', m.group(1))
+    return (f.group(1), s.group(1)) if f and s else None
+
+
+def unpack_zip(path, dest):
+    """Valve's client zip -> dest: '\\' separators, no execute bits, Unix symlinks."""
+    with zipfile.ZipFile(path) as z:
+        for info in z.infolist():
+            rel = info.filename.replace("\\", "/")
+            parts = [p for p in rel.split("/") if p]
+            if not parts or rel.startswith("/") or ".." in parts:
+                raise Failed(f"unsafe path in the client zip: {info.filename!r}")
+            out = os.path.join(dest, *parts)
+            mode = info.external_attr >> 16
+            if rel.endswith("/") or stat.S_ISDIR(mode):
+                os.makedirs(out, exist_ok=True)
+                continue
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            data = z.read(info)
+            if info.create_system == 3 and stat.S_ISLNK(mode):
+                target = data.decode()
+                if target.startswith("/") or ".." in target.split("/"):
+                    raise Failed(f"unsafe symlink in the client zip: {rel} -> {target}")
+                os.symlink(target, out)
+                continue
+            with open(out, "wb") as f:
+                f.write(data)
+            os.chmod(out, 0o755 if data[:4] == b"\x7fELF" or data[:2] == b"#!" else 0o644)
+
+
+def client():
+    """Valve's arm64 client binaries in STEAM_ROOT, downloaded first if they are not there."""
+    if os.path.isfile(os.path.join(STEAM_ROOT, CLIENT)):
+        return
+    os.makedirs(STEAM_ROOT, exist_ok=True)
+    try:
+        with urllib.request.urlopen(f"{CDN}/{MANIFEST}", timeout=60) as r:
+            manifest = r.read().decode("utf-8", "replace")
+    except OSError as err:
+        raise Failed(f"could not read Valve's client manifest {CDN}/{MANIFEST}: {err}")
+    pkg = manifest_package(manifest, PACKAGE)
+    if pkg is None:
+        raise Failed(f"{MANIFEST} lists no {PACKAGE} with a sha2")
+    file, sha = pkg
+    log(f"downloading Valve's arm64 Steam client ({file})")
+    tmp = tempfile.mkdtemp(dir=STEAM_ROOT, prefix=".retroforge-bootstrap-")
+    try:
+        archive = os.path.join(tmp, "client.zip")
+        download(f"{CDN}/{file}", archive, sha)
+        tree = os.path.join(tmp, "tree")
+        os.mkdir(tree)
+        try:
+            unpack_zip(archive, tree)
+        except (OSError, zipfile.BadZipFile) as err:
+            raise Failed(f"could not unpack the client: {err}")
+        if not os.path.isfile(os.path.join(tree, CLIENT)):
+            raise Failed(f"{file} has no {CLIENT}")
+        # Only steamrtarm64/ is moved in (all the package holds today): STEAM_ROOT may already hold
+        # the player's games and settings. A steamrtarm64/ without the client binary is left over
+        # from a failed earlier attempt.
+        top = os.path.dirname(CLIENT)
+        final = os.path.join(STEAM_ROOT, top)
+        if os.path.isdir(final) and not os.path.islink(final):
+            shutil.rmtree(final)
+        elif os.path.lexists(final):
+            os.unlink(final)
+        os.rename(os.path.join(tree, top), final)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def main():
+    try:
+        os.makedirs(RUNTIME_HOME, exist_ok=True)
+        # One bootstrap at a time: OGUI can start `steam` again while the first one is downloading.
+        with open(os.path.join(os.path.dirname(RUNTIME_HOME), "steam-bootstrap.lock"), "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            run = runtime()
+            client()
+    except (Failed, OSError) as err:
+        log(str(err))
+        return 1
+    print(run)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
