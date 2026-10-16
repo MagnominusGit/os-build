@@ -332,8 +332,10 @@ cat >"$W/bootstrap" <<EOF
 mkdir -p "\$RETROFORGE_STEAM_ROOT"; echo "$W/rt/run"
 EOF
 chmod +x "$W/rt/run" "$W/bootstrap"
+# RETROFORGE_STEAM_X86_GUEST=0: the FEX guest has its own suite (test-steam-x86-guest.sh). Here it would
+# reach the real helper, and on a device start a real 1.4 GB download into the test's home.
 WENV=(env -u RETROFORGE_STEAM_ROOT -u XDG_DATA_HOME HOME="$W/home" RETROFORGE_STEAM_BOOTSTRAP="$W/bootstrap"
-      RETROFORGE_CPUINFO="$W/cpuinfo")
+      RETROFORGE_CPUINFO="$W/cpuinfo" RETROFORGE_STEAM_X86_GUEST=0)
 wrap() {  # wrap <exit codes of successive runs> [args...]
   echo "$1" >"$W/codes"; shift; rm -f "$W/count" "$W"/call*
   WOUT="$("${WENV[@]}" bash "$WRAP" "$@" 2>"$W/err")"; WRC=$?
