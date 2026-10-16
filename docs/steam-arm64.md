@@ -410,6 +410,38 @@ Not yet seen:
   device, anything on hardware. A release after `cachyos-11.0-20261005-slr` is not ISA-scanned before
   players get it.
 
+## x86 games: the guest and its Mesa
+
+Native x86 Linux games run under FEX, which the arm64 client adds to a game as a dependency. An
+emulated x86 process loads only x86 libraries, so Steam needs an x86_64 + i386 **graphics
+provider**: a root with `/graphics_provider.json` at the top, the x86 dynamic loaders, glibc and an
+x86 Mesa, named by `STEAM_COMPAT_GRAPHICS_PROVIDER`. FEX can forward GL and Vulkan to the arm64
+driver ("thunks"), but its `ThunkConfig` defaults to empty, so by default the guest's x86 Mesa is
+the driver: x86 Turnip, compiled and run under emulation.
+
+The guest is downloaded, never shipped: `/usr/share/retroforge/steam/x86-guest.pin` names a
+squashfs image that the device fetches and mounts under `/home` with squashfuse. It starts out on
+FEX's own ArchLinux RootFS (2026-08-11), whose Mesa is FEX's build of upstream 26.2.0, without our
+Adreno patches.
+
+`packages/mesa-x86` builds the replacement: the same Mesa tarball and patches as the host driver,
+for x86_64 and i686 (Turnip, and GL as zink over it, which is what Valve's own FEX guest Mesa
+ships), laid over that same FEX RootFS as `retroforge-fex-guest-<mesa version>-<revision>.sqsh`.
+Composing it checks that both arches' ICDs and GL libraries resolve to our build and that every
+library we add loads in the guest. `.github/workflows/release-fex-guest.yml` publishes it as a
+Release asset (manual dispatch only, tag `fex-guest/v<version>`).
+
+To switch devices to it, set `x86-guest.pin`'s `name`, `version`, `url` and `sha256` to the
+published image (the release notes print all four) and ship that in a bundle. One condition first:
+the repo is private, and a device cannot download a private repo's Release asset, so the image has
+to be publicly reachable (a public repo or releases repo, or a copy in the R2 bucket behind
+`ota.retroforge.org`). A Mesa bump in `packages/mesa` carries into the guest with nothing to edit
+there; it needs a new dispatch and a pin bump. Details and the bump steps:
+[`packages/mesa-x86/README.md`](../packages/mesa-x86/README.md).
+
+Not yet seen: our guest (or FEX's) mounted by a device and driving a game, zink GL on Adreno under
+FEX, and whether Valve's tool enables thunks.
+
 ## Open
 
 - Boot the kernel with 0025 and drop the shim (0025 also removes the shim's one weakness: no

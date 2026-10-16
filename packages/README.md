@@ -34,6 +34,16 @@ prebuilts **and their deps** is recorded in the base at `/usr/lib/retroforge/pre
 which keys the base reuse-cache (bump a pin, or change its deps, → the base rebuilds).
 Current pins: `inputplumber/` (InputPlumber input daemon; `deps: libiio`).
 
+## Built here, never in the image: `mesa-x86/`
+
+`mesa-x86/` builds `mesa/`'s pinned tarball and patches for x86_64 + i686 (Turnip, zink GL) and
+composes it over FEX's ArchLinux RootFS into a squashfs **guest image that devices download** for
+x86 games under Valve's FEX tool. It has no `source.pin`, `prebuilt.pin` or `PKGBUILD`, so neither
+`build-overlay.sh` nor `customize-base.sh` picks it up, and it is published by its own
+manual-only workflow (`release-fex-guest.yml`), not by `overlay.yml` or `image.yml`. Its CPU
+baseline is `-march=x86-64`, the guest's own; the aarch64 rules below do not apply to it. See
+[`mesa-x86/README.md`](mesa-x86/README.md).
+
 ## What CI does with these packages
 
 Nothing is published anywhere. `.github/workflows/overlay.yml` builds the packages a pull request

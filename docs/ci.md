@@ -109,6 +109,18 @@ claim that survives crossing a machine. A release image's overlay is built from 
 in the run itself, or by `main`'s `warm` job under stamps that hash them — so the source pins are also
 its byte provenance. See `packages/README.md`.
 
+## Today: the FEX guest image, `.github/workflows/release-fex-guest.yml`
+
+Not part of any OS image. It builds `packages/mesa-x86` (our Mesa pin and patches for x86_64 +
+i686) on an `ubuntu-24.04` x86_64 runner, composes it over FEX's ArchLinux RootFS, and uploads the
+squashfs as a workflow artifact. With `publish` ticked it cuts a Release `fex-guest/v<version>` on
+the built commit (reviewer: the `release-cards` environment), after the same 2 GiB per-asset check
+as the card. **`workflow_dispatch` is its only trigger**: no push, tag or schedule, so nothing
+starts it but a person. The version comes from the tree (`<mesa pkgver>-<guest.pin revision>`),
+not from an input. Devices only use a published guest once
+`rootfs/overlay/usr/share/retroforge/steam/x86-guest.pin` names it, and only if its url is public,
+which a private repo's Release asset is not. See `packages/mesa-x86/README.md`.
+
 ## Not here yet, and why
 
 **Bundle signing, beyond a CI secret.** `release-bundle.yml` signs only on an `ota/v*` tag, in its

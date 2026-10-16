@@ -9,6 +9,7 @@
 #     unpatched Mesa (or no Vulkan at all) while the image looks right;
 #   - an x86 file reaching the OS image breaks the "downloaded, not shipped" rule
 #     (rootfs/guard-rootfs.sh section 9);
+#   - a workflow that starts on its own would publish a release nobody asked for.
 #
 # guest-overlay.py is driven on fabricated trees (fake ELF headers, no real Mesa). The build and
 # the compose themselves need docker and the network; they are checked by running them (README).
@@ -18,6 +19,7 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 D="$ROOT/packages/mesa-x86"
 OVERLAY="$D/guest-overlay.py"
+WF="$ROOT/.github/workflows/release-fex-guest.yml"
 
 PASS=0; FAIL=0
 ok()  { printf '  ok   %s\n' "$1"; PASS=$((PASS + 1)); }
@@ -75,6 +77,22 @@ grep -q '/repo/packages/mesa/fetch-source.sh' "$D/container-build.sh" \
 grep -q 'mx86_patches' "$D/build.sh" && grep -q 'patches:\|source.pin' "$D/lib.sh" \
   && ok "the patch list is packages/mesa/source.pin's" \
   || bad "build.sh does not take its patches from packages/mesa/source.pin"
+
+echo
+echo "the workflow starts only by hand"
+
+# Exactly one trigger, workflow_dispatch. Read the `on:` block: every key indented two spaces under
+# it is a trigger.
+triggers="$(awk '/^on:/{f=1;next} f&&/^[^ #]/{f=0} f&&/^  [a-z_]+:/{sub(/:.*/,"");gsub(/ /,"");print}' "$WF")"
+[ "$triggers" = "workflow_dispatch" ] \
+  && ok "release-fex-guest.yml has workflow_dispatch and no other trigger" \
+  || bad "release-fex-guest.yml triggers: $(echo $triggers)"
+awk '/^permissions:/{getline; print; exit}' "$WF" | grep -q 'contents: read' \
+  && ok "the workflow's default token is read-only" \
+  || bad "release-fex-guest.yml's top-level permissions are not contents: read"
+grep -q '2 \* 1024 \* 1024 \* 1024' "$WF" && grep -q '2 \* 1024 \* 1024 \* 1024' "$D/compose.sh" \
+  && ok "the 2 GiB release-asset cap is checked before upload" \
+  || bad "no 2 GiB size check"
 
 echo
 echo "guest-overlay.py"

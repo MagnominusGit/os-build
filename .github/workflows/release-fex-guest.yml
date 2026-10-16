@@ -1,0 +1,186 @@
+# retroforge FEX GUEST — the x86 graphics provider Valve's FEX tool runs native x86 Linux games
+# against: FEX's ArchLinux RootFS with our x86_64 + i686 Mesa (Turnip, zink GL) laid over it, so x86
+# games get the same Mesa pin and Adreno patches as the host. packages/mesa-x86/README.md has the
+# why and the recipe.
+#
+# DOWNLOADED BY THE DEVICE, NEVER IN THE OS IMAGE. Nothing here touches image.yml or the card,
+# bundle or installer: a device fetches the published .sqsh on demand, named by
+# rootfs/overlay/usr/share/retroforge/steam/x86-guest.pin. Publishing one does not change what any
+# device uses until that pin is bumped to it.
+#
+# MANUAL ONLY: workflow_dispatch and nothing else. No push, pull_request, tag or schedule trigger,
+# so pushing a branch or a tag can never start it. (A guest is wanted when the Mesa pin or the FEX
+# rootfs moves, which a person decides; the build is an x86 Mesa compile plus a 1.3 GB download,
+# not something to spend on every push.) The `fex-guest/v<version>` tag is CREATED by the release
+# job below, on the commit that was built, never consumed as a trigger.
+#
+# THE VERSION IS NOT AN INPUT. It is derived from the tree (packages/mesa-x86/lib.sh):
+# <packages/mesa pkgver>-<packages/mesa-x86/guest.pin revision>, e.g. 26.2.4-1 ->
+# tag fex-guest/v26.2.4-1, asset retroforge-fex-guest-26.2.4-1.sqsh. To publish a new guest for the
+# same Mesa, bump guest.pin's revision in a commit, then dispatch.
+#
+# THE REPO IS PRIVATE, and that matters more here than for a card: a Release asset of a private
+# repo needs a GitHub login to download, and a device has none. x86-guest.pin can point at this
+# asset only once it is publicly reachable (the repo goes public, or the release moves to a public
+# releases repo, or the asset is mirrored to the R2 bucket at ota.retroforge.org). See the README.
+name: release fex guest
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Cut a GitHub Release (tag fex-guest/v<version>) carrying the image (off for a plain test build)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fex-guest-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # NO SECRETS AND NO ENVIRONMENT: this job compiles third-party sources and runs a downloaded root
+  # filesystem's loader in a chroot, as uid 0 in a container. Nothing in it needs a credential.
+  build:
+    # x86_64, so the Arch builder container runs natively and the guest's i386 loader can execute
+    # for compose.sh's closure check. Not the arm runners the image builds use.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    outputs:
+      version: ${{ steps.names.outputs.version }}
+      asset: ${{ steps.names.outputs.asset }}
+      tag: ${{ steps.names.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: names
+        run: |
+          set -euo pipefail
+          {
+            echo "version=$(packages/mesa-x86/compose.sh --print-version)"
+            echo "asset=$(packages/mesa-x86/compose.sh --print-asset)"
+            echo "tag=$(packages/mesa-x86/compose.sh --print-tag)"
+          } | tee -a "$GITHUB_OUTPUT" >> "$GITHUB_STEP_SUMMARY"
+
+      # ~5 GB unpacked guest + the build tree + the image, inside docker's storage on /.
+      - name: disk before
+        run: df -h / | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: build the x86 Mesa
+        run: packages/mesa-x86/build.sh
+
+      - name: compose the guest
+        run: packages/mesa-x86/compose.sh
+
+      - name: summary
+        env:
+          ASSET: ${{ steps.names.outputs.asset }}
+        run: |
+          set -euo pipefail
+          {
+            echo '```'
+            ls -l out/fex-guest/
+            cat "out/fex-guest/$ASSET.sha256"
+            cat "out/fex-guest/$ASSET.release"
+            echo '```'
+            echo '<details><summary>paths replaced or added in the guest</summary>'
+            echo
+            echo '```'
+            cat "out/fex-guest/$ASSET.overlay.txt"
+            echo '```'
+            echo '</details>'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: upload the image artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: retroforge-fex-guest
+          path: out/fex-guest/
+          if-no-files-found: error
+          retention-days: 7
+          # Already zstd inside; deflating it again costs minutes and saves nothing.
+          compression-level: 0
+
+  # The publish half, split out for the same reasons as release-sdcard.yml's: `contents: write`
+  # only here, the reviewer approves a finished build, and a failed upload is a re-run, not a
+  # rebuild.
+  release:
+    needs: build
+    if: inputs.publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # For the reviewer, as on the card: devices will mount what this publishes once a pin names it.
+    environment: ${{ vars.CARDS_ENVIRONMENT || 'release-cards' }}
+    steps:
+      - name: fetch the image
+        uses: actions/download-artifact@v8
+        with:
+          name: retroforge-fex-guest
+          path: upload
+
+      - name: check it fits a release asset
+        env:
+          ASSET: ${{ needs.build.outputs.asset }}
+        run: |
+          set -euo pipefail
+          (cd upload && sha256sum -c "$ASSET.sha256")
+          size="$(stat -c %s "upload/$ASSET")"
+          limit=$((2 * 1024 * 1024 * 1024))
+          echo "guest: $((size / 1048576)) MiB of a $((limit / 1048576)) MiB asset cap" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$size" -ge "$limit" ]; then
+            echo "::error::$ASSET is $size bytes, over GitHub's 2 GiB per-asset cap."
+            exit 1
+          fi
+
+      # The tag is created here, on the commit that was built. If it already exists it must be that
+      # commit (the release API ignores --target for an existing tag; see release-sdcard.yml), and
+      # an existing release with this tag fails `gh release create` -- bump guest.pin's revision
+      # rather than replace bytes a device may already have pinned by sha256.
+      - name: cut the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          ASSET: ${{ needs.build.outputs.asset }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          set -euo pipefail
+          exists="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$TAG" \
+            --jq "map(select(.ref == \"refs/tags/$TAG\")) | length")"
+          if [ "$exists" != 0 ]; then
+            at="$(gh api "repos/$GITHUB_REPOSITORY/commits/refs/tags/$TAG" --jq .sha)"
+            if [ "$at" != "$GITHUB_SHA" ]; then
+              echo "::error::tag $TAG already exists on $at, but this guest was built from $GITHUB_SHA. Bump packages/mesa-x86/guest.pin's revision."
+              exit 1
+            fi
+          fi
+          sha="$(cut -d' ' -f1 "upload/$ASSET.sha256")"
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/$ASSET"
+          {
+            echo "## retroforge FEX guest \`$VERSION\`"
+            echo
+            echo "FEX's ArchLinux RootFS with RetroForge's x86_64 + i686 Mesa (Turnip, zink GL)."
+            echo
+            echo '```'
+            cat "upload/$ASSET.release"
+            echo '```'
+            echo
+            echo 'To make devices use it, set these in `rootfs/overlay/usr/share/retroforge/steam/x86-guest.pin`'
+            echo '(the url must be publicly reachable first; see packages/mesa-x86/README.md):'
+            echo
+            echo '```'
+            echo "name: retroforge-fex-guest"
+            echo "version: $VERSION"
+            echo "url: $url"
+            echo "sha256: $sha"
+            echo '```'
+          } > notes.md
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
+            --title "retroforge FEX guest $VERSION" \
+            --notes-file notes.md \
+            "upload/$ASSET" "upload/$ASSET.sha256" "upload/$ASSET.release" "upload/$ASSET.overlay.txt"
