@@ -1,0 +1,36 @@
+# The x86 guest our Mesa is laid over: FEX's ArchLinux RootFS, squashfs build.
+#
+# NOT a prebuilt.pin, on purpose: rootfs/customize-base.sh installs every packages/*/prebuilt.pin
+# into the OS image, and nothing x86 belongs there (rootfs/guard-rootfs.sh section 9). This file is
+# read only by ./compose.sh, which builds a separate image that devices download.
+#
+# Source: https://rootfs.fex-emu.gg/RootFS_links.json, entry "ArchLinux (SquashFS)". It already
+# carries /graphics_provider.json, x86_64 + i386 glibc and FEX's own build of upstream Mesa 26.2.0;
+# compose.sh replaces that Mesa's Turnip and GL stack with ours.
+#
+# squashfs, not erofs: the device mounts the guest with squashfuse (the x86-guest.pin consumer),
+# and that is the format compose.sh writes back out.
+#
+# Fields:
+#   version   the dated build directory. Also the Arch snapshot the guest was made from, which
+#             ./builder.pin's `snapshot` must match.
+#   url, sha256
+#             the image and the sha256 of the downloaded bytes. Upstream publishes no sha256: the
+#             index's `Hash` is XXH3-64 (`xxhsum -H3`), recorded below as `xxh3`. compose.sh
+#             checks the sha256; the xxh3 is how the sha256 was established on a bump:
+#               xxhsum -H3 ArchLinux.sqsh   ->  XXH3_<xxh3>
+#               sha256sum ArchLinux.sqsh    ->  <sha256>
+#   revision  the guest image's own revision for this Mesa version. The published image is
+#             retroforge-fex-guest-<mesa pkgver>-<revision>.sqsh (see ./lib.sh). Bump it for any
+#             change that ships different bytes without a Mesa bump (a guest bump, a recipe
+#             change); reset it to 1 when packages/mesa bumps pkgver.
+#
+# To bump the guest: pick a newer dated "ArchLinux (SquashFS)" build from RootFS_links.json, set
+# version + url + xxh3, download it into an empty directory, check its xxh3, take its sha256, and
+# move ./builder.pin (snapshot AND image) to the same date. Then bump revision.
+name: fex-rootfs-archlinux
+version: 2026-08-11
+url: https://rootfs.fex-emu.gg/ArchLinux/2026-08-11/ArchLinux.sqsh
+sha256: 5d0c1a38590c68e5c2597c2c8a26d2f80170b1b738c857d63e1cdadada5f5f2a
+xxh3: 23350f949fc1413d
+revision: 1

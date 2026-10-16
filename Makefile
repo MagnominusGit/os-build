@@ -493,6 +493,7 @@ test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-verify-lock.sh
 	bash $(TESTS_DIR)/test-mkimage.sh
 	bash $(TESTS_DIR)/test-mesa-source.sh
+	bash $(TESTS_DIR)/test-fex-guest.sh
 	bash $(TESTS_DIR)/test-guard.sh
 	bash $(TESTS_DIR)/test-upstream-name.sh
 

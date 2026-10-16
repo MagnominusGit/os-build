@@ -1,0 +1,26 @@
+# The x86_64 Arch container that builds the guest Mesa and composes the guest image.
+#
+# NOT build/builder.pin: that one is the arm64 holo builder the image is made in. This is an x86_64
+# Arch Linux image with multilib, because the guest is x86_64 + i386 Arch (FEX's ArchLinux RootFS,
+# ./guest.pin) and the driver has to link against the same library generation it will load next to.
+#
+# THE TWO FIELDS ARE A PAIR, and both are tied to ./guest.pin:
+#
+#   snapshot  Arch Linux Archive date the container's pacman is locked to
+#             (archive.archlinux.org/repos/<snapshot>/). It MUST be guest.pin's version written
+#             with slashes (2026-08-11 -> 2026/08/11); build.sh refuses to build otherwise. The
+#             driver must not reference glibc (or libdrm, libxcb ...) symbols newer than the guest
+#             ships, and building against the guest's own package generation is what guarantees
+#             it. compose.sh then checks the result against the real guest anyway (ldd -r inside
+#             it), so drift shows up as a refused compose, not as a game that cannot start.
+#
+#   image     The docker.io archlinux:base-devel tag the build starts from, dated just BEFORE the
+#             snapshot (pacman -Syyuu then moves it to the snapshot). A newer image would have to
+#             downgrade across package splits and keyring changes. Pinned by digest as well, so the
+#             tag cannot move under us. On a guest bump, take the last tag before the new snapshot:
+#               https://hub.docker.com/_/archlinux/tags?name=base-devel-
+#             and read the digest with `docker pull --platform linux/amd64 <tag>`.
+#
+# Pairing adapted from upstream's guest-mesa recipe for the same 2026-08-11 guest (see README.md).
+image: archlinux:base-devel-20260809.0.570793@sha256:ee205c220399524a683cf495d411691b921baed8ab47cdc6d732efa782fae484
+snapshot: 2026/08/11

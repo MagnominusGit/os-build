@@ -57,7 +57,7 @@ CASE=scripts
 # Code lines only. The CI workflow runs on GitHub's docker and stays as it is.
 direct="$(grep -nE '^[^#]*(^|[^A-Za-z_/$-])docker (run|build|import|commit|rm|rmi|image|volume) ' \
           "$ROOT_REAL"/Makefile "$ROOT_REAL"/build/*.sh "$ROOT_REAL"/rootfs/*.sh "$ROOT_REAL"/installer/*.sh \
-          "$ROOT_REAL"/packages/*.sh "$ROOT_REAL"/ota/*.sh "$ROOT_REAL"/kernel/*.sh "$ROOT_REAL"/firmware/*.sh \
+          "$ROOT_REAL"/packages/*.sh "$ROOT_REAL"/packages/*/*.sh "$ROOT_REAL"/ota/*.sh "$ROOT_REAL"/kernel/*.sh "$ROOT_REAL"/firmware/*.sh \
           2>/dev/null || true)"
 [ -z "$direct" ] && ok "no build script calls docker directly" \
   || bad "direct docker calls: $(printf '%s' "$direct" | cut -c1-120 | tr '\n' ' ')"
