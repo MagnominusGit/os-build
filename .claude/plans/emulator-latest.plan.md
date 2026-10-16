@@ -1,7 +1,7 @@
 # Emulators follow upstream's newest release — plan
 
-Status: DRAFT 2026-10-16, branch plan/emulator-latest. Nothing implemented. Decisions D1-D6 below
-need the user's yes before Phase 1.
+Status: decisions D1-D6 + Phase 4 AGREED 2026-10-16 (branch plan/emulator-latest). Nothing
+implemented yet; next is Phase 1.
 
 ## Why, and what it reverses
 
@@ -19,7 +19,7 @@ is one button.
 The hosted catalog (retroforge.plan.md Phase 5, not started) is not needed for this and is not
 blocked by it: with "latest" as the default, the hosted catalog would only move tested markers.
 
-## Decisions to confirm
+## Decisions (agreed 2026-10-16)
 
 - **D1 Default = latest.** Download and Update install the newest upstream release whose asset
   matches; the pinned build is no longer what a player gets by default.
@@ -34,7 +34,10 @@ blocked by it: with "latest" as the default, the hosted catalog would only move 
   `latest`) never match.
 - **D5 Cemu's nightly channel folds into this.** Same code path, `tag_pattern: ^nightly$`; its
   `nightly-<id>` naming stays.
-- **D6 PortMaster unchanged.** `self_update` still means the pin is the first install only.
+- **D6 PortMaster: latest FIRST install, then it updates itself.** The first install takes the
+  newest release (not the pin); after that PortMaster's own updater runs as today, and
+  retroforge-emu never offers it an update. The unpack check "version file == pinned tag" becomes
+  "version file == the tag being installed".
 
 ## Risks this plan accepts, and what it does about each
 
@@ -53,7 +56,8 @@ blocked by it: with "latest" as the default, the hosted catalog would only move 
 Catalog (schema stays 1; all additions optional, so an old image reading a new catalog still works
 off the pin):
 - `tag_pattern`: anchored regex over release tags. Present = the entry follows latest (D1); absent
-  = pinned-only, today's behaviour (kept for PortMaster and as a per-entry escape hatch).
+  = pinned-only, today's behaviour (kept as a per-entry escape hatch; no entry uses it after
+  Phase 3).
 - `asset` becomes version-agnostic (today most embed the version, e.g.
   `^Azahar-2126\.1\.2-anylinux-aarch64\.AppImage$` → `^Azahar-[0-9.]+-anylinux-aarch64\.AppImage$`).
   The pinned tag must still match exactly one asset (test-catalog.sh).
@@ -111,9 +115,9 @@ tests/test-catalog.sh` gains a "latest resolves to exactly one asset" check):
 | ppsspp | `^v[0-9]+\.[0-9]+(\.[0-9]+)?$` | |
 | rpcs3 | `^build-[0-9a-f]{40}$` | a build per upstream commit |
 | xemu | `^v[0-9]+\.[0-9]+\.[0-9]+$` | |
-| portmaster | (none) | D6, pinned-only |
+| portmaster | `^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]{4}$` | D6: first install only, `self_update` stays |
 
-## Phase 4 — CI (optional, but it is what covers the invisible risk)
+## Phase 4 — CI (agreed: in this plan; it is what covers the invisible risk)
 
 - **Key drift**: a weekly job resolves each emulator's latest tag, shallow-clones that tag of
   the UPSTREAM source (not the pkgforge repackage), and greps every key our seeds and
