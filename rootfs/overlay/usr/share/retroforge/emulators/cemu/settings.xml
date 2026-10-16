@@ -6,7 +6,7 @@
        ~/saves/wiiu. Cemu has no save states.
      - check_update false: RetroForge pins the version. use_discord_presence false (on when missing).
      - GamePaths: Open's game list shows ~/roms/wiiu.
-     - Graphic/api 1 = Vulkan (Turnip): with the key missing Cemu picks OpenGL.
+     - Graphic/api 1 = Vulkan (Turnip), written out though Cemu already defaults to it when built with Vulkan.
      - Audio/api 3 = Cubeb on the "default" device: with the key missing Cemu picks api 0
        (DirectSound), which Linux does not have, and quits as soon as a game starts.
      - Audio/TVVolume 100: with the key missing Cemu loads 20 (%), and the game is barely audible

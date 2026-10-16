@@ -144,66 +144,6 @@
               "value": "5"
             }
           ]
-        },
-        {
-          "value": "6x",
-          "label": "6x (1632p)",
-          "set": [
-            {
-              "file": "main",
-              "section": "Graphics",
-              "key": "InternalResolution",
-              "value": "6"
-            }
-          ]
-        },
-        {
-          "value": "7x",
-          "label": "7x (1904p)",
-          "set": [
-            {
-              "file": "main",
-              "section": "Graphics",
-              "key": "InternalResolution",
-              "value": "7"
-            }
-          ]
-        },
-        {
-          "value": "8x",
-          "label": "8x (2176p)",
-          "set": [
-            {
-              "file": "main",
-              "section": "Graphics",
-              "key": "InternalResolution",
-              "value": "8"
-            }
-          ]
-        },
-        {
-          "value": "9x",
-          "label": "9x (2448p)",
-          "set": [
-            {
-              "file": "main",
-              "section": "Graphics",
-              "key": "InternalResolution",
-              "value": "9"
-            }
-          ]
-        },
-        {
-          "value": "10x",
-          "label": "10x (2720p)",
-          "set": [
-            {
-              "file": "main",
-              "section": "Graphics",
-              "key": "InternalResolution",
-              "value": "10"
-            }
-          ]
         }
       ]
     },
@@ -379,7 +319,7 @@
     "Verified against hrydgard/ppsspp tag v1.20.4 (fa50bb1). PPSSPP reads ppsspp.ini once at startup (Config::Load, Core/Config.cpp:1315; ReadAllSettings :1282-1303) and rewrites it on exit (g_Config.Save(\"NativeShutdown\"), UI/NativeApp.cpp:1493; Config::Save, Core/Config.cpp:1443): it re-loads the file and sets every setting it knows, so our values are what it saves back. Lines are written 'key = value' (ParsedIniLine::Reconstruct, Common/Data/Format/IniFile.cpp:184), hence the ' = ' separator; booleans as True/False (Section::Set(bool), Common/Data/Format/IniFile.h:82-84; TryParse accepts 1/0/true/false, Common/Data/Text/Parsers.cpp:152-161), floats with %f (IniFile.cpp:232-237).",
     "Game-specific configs: a <DISCID>_ppsspp.ini the player made in PPSSPP (Game settings > Create game config) is loaded over ppsspp.ini for that game (Config::LoadGameConfig, Core/Config.cpp:1885) and wins for every PER_GAME key below; GraphicsBackend is not PER_GAME (Core/Config.cpp:705), so it always comes from ppsspp.ini. While a game config is active, PER_GAME keys are saved to the game ini, not ppsspp.ini (Core/Config.cpp:1453-1456).",
     "renderer: [Graphics] GraphicsBackend (Core/Config.cpp:705) is written by PPSSPP as 'N (NAME)' (ConfigTranslator::To, Core/Config.cpp:615-627): 0 (OPENGL), 3 (VULKAN); it reads the leading int or the name (GPUBackendFromString, :88-96). 2 = Direct3D 11 is Windows-only. Software rendering is a separate PER_GAME switch, [Graphics] SoftwareRenderer (Core/Config.cpp:722; 'Software Rendering (slow)', UI/GameSettingsScreen.cpp:355, disabled while a game runs, so it is a boot setting); it still presents through a backend, so Software writes Vulkan with it, and every choice writes both keys.",
-    "resolution: [Graphics] InternalResolution int (Core/Config.cpp:728): 0 = Auto (1:1 with the window), 1..10 = 1x..10x PSP (480x272) (UI/GameSettingsScreen.cpp:339). The SDL build's default when the key is missing is 2 on a screen whose longest side is >= 1000 px, else 1 (DefaultInternalResolution, Core/Config.cpp:412-427). Ignored by the software renderer (UI/GameSettingsScreen.cpp:349).",
+    "resolution: [Graphics] InternalResolution int (Core/Config.cpp:728): 0 = Auto (1:1 with the window), 1..10 = 1x..10x PSP (480x272) (UI/GameSettingsScreen.cpp:339). The SDL build's default when the key is missing is 2 on a screen whose longest side is >= 1000 px, else 1 (DefaultInternalResolution, Core/Config.cpp:412-427). Ignored by the software renderer (UI/GameSettingsScreen.cpp:349). RetroForge offers up to 5x (user, 2026-10-16: 5x already fills a 1080p panel); higher steps stay in the emulator's own menu.",
     "Display layout keys live in [DisplayLayout.Landscape] (g_sectionMeta, Core/Config.cpp:1176; keys :665-671). PPSSPP picks Landscape unless the window is taller than 1.1x its width (DisplayProperties::GetDeviceOrientation, Common/System/Display.cpp:9-11); [DisplayLayout.Portrait] is not touched. When the Landscape section is missing PPSSPP reads the old keys from [Graphics] instead (fallback, Core/Config.cpp:1288-1292); once our patch creates the section that fallback is no longer used, and the keys it does not hold take their struct defaults (Core/Config.h:77-87), which is what PPSSPP itself writes into the section on its first exit anyway.",
     "aspect: DisplayStretch bool (Core/Config.cpp:666) fills the screen; DisplayAspectRatio float (:671) is a free 0.1-2.0 slider relative to the PSP's own 480:272 ratio, 1.0 = PSP's own (Core/Config.h:84; UI/DisplayLayoutScreen.cpp:268). Both choices write DisplayAspectRatio = 1.000000 so a slider value left by the player does not distort 'PSP's own'. Stretch only applies with integer scale off (GPU/Common/PresentationCommon.cpp:101) and multiplies nothing else (:111-121). Fixed 4:3 and 16:9 are left out: the PSP picture is already ~16:9 (16:9 would be 1.007407, the same picture), and 4:3 (0.755556) would only squash it.",
     "integer_scale: [DisplayLayout.Landscape] DisplayIntegerScale bool (Core/Config.cpp:670; 'Integer scale factor', UI/DisplayLayoutScreen.cpp:276); it disables Stretch and the aspect slider (UI/DisplayLayoutScreen.cpp:264, 270-272; PresentationCommon.cpp:101).",

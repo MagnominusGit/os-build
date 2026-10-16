@@ -210,6 +210,8 @@ game-level values, the same pattern as `retroforge-emu list`. GDScript never par
    no OpenGL (ENABLE_OPENGL off upstream on Linux aarch64): Vulkan/Software only. PPSSPP show_fps writes the
    whole iShowStatusFlags mask (FPS only). Appendix A's melonDS `Screen.Filter` is wrong: the key is
    `[Instance0.Window0] ScreenFilter`.
+   Resolution lists stop at 5x everywhere (user, 2026-10-16: 5x fills a 1080p panel; higher steps stay in
+   the emulator's own menu): a deliberate exception to D5.
 6. **HW validation** per option on SM6115 / SM8250 / SM8550:
    - every renderer choice on each SoC (e.g. Flycast Vulkan resets the A610, see memory
      flycast-a610-reset). Per D5 the schema gets no `soc` filter: problems found
