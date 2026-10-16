@@ -183,6 +183,79 @@ unreachable, the stub exited 1 and stayed in place, and the next start succeeded
 It is built like the client: ~300 unguarded LSE atomics in the bootstrapper alone, so the same
 `0025` applies.
 
+## x86 games: the FEX guest
+
+Valve's arm64 client runs x86 games, and x86 Protons, through its FEX tool (Steam app 3127680,
+which Steam downloads itself). That tool needs an x86_64 + i386 **graphics provider**: a tree with
+`ld.so`, glibc and x86 Mesa (Turnip), with `graphics_provider.json` at its root. SteamOS ships one
+at `/usr/share/guestos/fex-mesa` (Valve's `deckard-mesa-linux-x86_64`). We can't: a root slot is
+2 GB, and `rootfs/guard-rootfs.sh` section 9 keeps `usr/share/guestos` and FEX out of the image. The
+tool also honours `STEAM_COMPAT_GRAPHICS_PROVIDER=/abs/path/graphics_provider.json`, and the
+parent directory then becomes both pressure-vessel's graphics provider and FEX's RootFS. Symlinks
+from that tree into another one reportedly do not work, so it has to be a real tree.
+
+**The guest:** FEX's own ArchLinux RootFS, pinned in
+`/usr/share/retroforge/steam/x86-guest.pin` to the dated URL
+`rootfs.fex-emu.gg/ArchLinux/2026-08-11/ArchLinux.sqsh` (from `RootFS_links.json`; 1,359,826,944
+bytes, sha256 `5d0c1a38...5f5f2a`). Checked with `unsquashfs` on 2026-10-16:
+- It is squashfs 4.0, zstd.
+- `graphics_provider.json` is at its root: x86_64 from `/usr/lib`, i386 from `/usr/lib32`.
+- `freedreno_icd.x86_64.json` and `freedreno_icd.i686.json` point at
+  `/usr/lib{,32}/libvulkan_freedreno.so`, Mesa 26.2.0.
+- Both arches have glibc and `ld.so`.
+
+The squashfs is the smaller build (the EroFS one is ~2.18 GB), and the image already ships
+squashfuse. Thunks stay off, as Steam leaves them (`ThunksDB_GL:0,ThunksDB_Vulkan:0`).
+
+**How it gets there** (`/usr/lib/retroforge/steam-x86-guest`, separate from `steam-bootstrap`). The
+first `steam` doesn't wait for the download:
+- `steam` runs `steam-x86-guest start $$` before the client. When the pinned image is missing, that
+  starts `fetch` detached in its own session, logging to steam's stderr, and returns at once.
+- `fetch` downloads to `~/.local/share/retroforge/fex-guest/.<name>-<version>.sqsh.part`. It
+  resumes a cut-off download with a Range request, checks the sha256 and renames the file to
+  `<name>-<version>.sqsh`.
+- An older version stays, and is mounted, until the new one is in place. It is removed then.
+- Only one fetch runs at a time, and it refuses to start without ~1.6 GB free.
+
+**The mount.** squashfuse mounts the image on `~/.local/share/retroforge/fex-guest/root`, as the
+player. `steam` always exports `STEAM_COMPAT_GRAPHICS_PROVIDER=<that>/graphics_provider.json`,
+because the client's environment is fixed when it starts.
+- **Mounted** by `start` when the image is there and nothing is mounted yet. A mount is never made
+  twice. A dead one (squashfuse killed: `ENOTCONN`) is released and replaced.
+- **Download finishes while Steam runs:** it is mounted right then, so the next game has it. If an
+  older image is already mounted for a running game, it is left alone, and the next start mounts
+  the new one.
+- **Released** when the last `steam` exits. `start` leaves a holder process outside steam's process
+  tree, so OGUI's Exit cannot reap it, with TERM, INT and HUP ignored. It holds
+  `fex-guest/.users.lock` shared, watches steam's PID through a pidfd, and when that PID is gone
+  (SIGKILL included) it lets go and unmounts with `fusermount3 -u -z`. It skips the unmount if
+  another steam still holds the lock. The client does not inherit the lock, so its leftover
+  children cannot keep the mount. Mount and unmount run under `fex-guest/.mount.lock`.
+- squashfuse starts with TERM and INT ignored, like PortMaster's runtimes.
+
+`steam` also links `~/.steam/sdk64` to `<Steam root>/linux64` and `~/.steam/sdk32` to
+`<Steam root>/linux32`, which Proton under FEX needs (omarchy-pkgs issue 973).
+`RETROFORGE_STEAM_X86_GUEST=0` turns the guest off: no download, no mount, no
+`STEAM_COMPAT_GRAPHICS_PROVIDER`. The links are still made. The guest costs 1.36 GB in /home, on
+top of the client's ~3 GB.
+
+Checked on 2026-10-16:
+- `tests/test-steam-x86-guest.sh`, with stub squashfuse and fusermount3 and a local HTTP server:
+  60/60.
+- In a linux/arm64 container with `/dev/fuse` (Debian's squashfuse 0.5.2 and fuse3 3.17.2; the
+  image ships 0.6.1), as a non-root player, with the real helper and wrapper:
+  - `fetch` took the real image from a local server and matched the pin's sha256.
+  - squashfuse mounted it, and `graphics_provider.json`, both ICDs, both `libvulkan_freedreno.so`
+    and both `ld.so` were readable.
+  - In Valve's arm64 Steam Runtime (`run --`, pressure-vessel, "Steam Runtime 3c"), the FUSE mount
+    under `$HOME` was there and `$STEAM_COMPAT_GRAPHICS_PROVIDER` was readable.
+  - The mount was released after `steam` exited normally, after a second `steam` (which neither
+    mounted again nor released), after `steam` was SIGKILLed, and after a TERM to every process of
+    the launch. A killed squashfuse's dead mount was replaced at the next start.
+
+Not yet seen: the FEX tool using this provider, an x86 game or Proton running, anything on
+hardware, and FEX on ARMv8.0.
+
 ## Open
 
 - Boot the kernel with 0025 and drop the shim (0025 also removes the shim's one weakness: no

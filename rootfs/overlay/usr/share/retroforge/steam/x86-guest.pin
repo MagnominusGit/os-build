@@ -1,0 +1,28 @@
+# FEX's x86_64 + i386 ArchLinux RootFS: the "graphics provider" Valve's FEX tool needs to give x86
+# Steam games and x86 Protons a GPU driver.
+#
+# Read by /usr/lib/retroforge/steam-x86-guest, which /usr/bin/steam starts in the background: it
+# downloads this image into the player's home (~/.local/share/retroforge/fex-guest/<name>-<version>.sqsh),
+# checks the sha256, and the wrapper mounts it with squashfuse on ~/.local/share/retroforge/fex-guest/root
+# while Steam runs. STEAM_COMPAT_GRAPHICS_PROVIDER points at root/graphics_provider.json, so that tree
+# is both pressure-vessel's graphics provider and FEX's RootFS (docs/steam-arm64.md).
+#
+# Not in the image: it is 1.36 GB, a root slot is 2 GB (image/partition-table.txt), and
+# rootfs/guard-rootfs.sh section 9 keeps x86 out of the root. SteamOS's own provider
+# (/usr/share/guestos/fex-mesa, Valve's deckard-mesa-linux-x86_64) is the same kind of tree.
+#
+# Same fields as runtime.pin. The URL is FEX's dated directory, not RootFS_links.json's current entry,
+# so the bytes cannot move under the sha256. Checked on 2026-10-16: 1,359,826,944 bytes, squashfs 4.0,
+# zstd; graphics_provider.json at its root (x86_64-linux-gnu: /usr/lib, i386-linux-gnu: /usr/lib32);
+# usr/share/vulkan/icd.d/freedreno_icd.{x86_64,i686}.json pointing at /usr/lib{,32}/libvulkan_freedreno.so
+# (Mesa 26.2.0); glibc with usr/lib/ld-linux-x86-64.so.2 and usr/lib32/ld-linux.so.2. The sha256 is our
+# own: FEX's links file gives only a 64-bit xxhash ("23350f949fc1413d").
+#
+# TO BUMP: read https://rootfs.fex-emu.gg/RootFS_links.json ("ArchLinux (SquashFS)"), download the new
+# URL, check graphics_provider.json and the freedreno ICDs are still at those paths (unsquashfs -l), then
+# set version + url + sha256 together. A player keeps the old image (and x86 games keep working from it)
+# until the new one is downloaded; it is removed then.
+name: fex-rootfs-archlinux
+version: 2026-08-11
+url: https://rootfs.fex-emu.gg/ArchLinux/2026-08-11/ArchLinux.sqsh
+sha256: 5d0c1a38590c68e5c2597c2c8a26d2f80170b1b738c857d63e1cdadada5f5f2a

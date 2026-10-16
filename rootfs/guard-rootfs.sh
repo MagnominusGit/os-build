@@ -42,8 +42,8 @@
 #      group are the ones rootfs/overlay's sysusers.d pin names, not whatever sysusers counted down to
 #   9. no Steam, x86-emulation or Android payload came back — those stacks were removed on
 #      purpose, and a stray prebuilt pin or overlay copy would bring them back silently (the
-#      Steam client and steamcmd are downloaded into /home on demand, never shipped; no box64 or x86
-#      binfmt_misc entry either); and (9b)
+#      Steam client, steamcmd and the FEX x86 guest are downloaded into /home on demand, never shipped;
+#      no box64 or x86 binfmt_misc entry either); and (9b)
 #      the shell landed where the session looks for it, without its self-updater
 #  10. no __pycache__ — host-CPython bytecode the device cannot load, which rootfs/overlay's verbatim
 #      copy will carry in whenever an offline suite has imported one of its Python clients
@@ -782,7 +782,11 @@ fi
 #     the stub's first run installs Valve's arm64 steamcmd from its update manifest (steamcmd.pin). It
 #     used to be a prebuilt (packages/steamcmd, at usr/lib/retroforge/steamcmd), which is why that path
 #     is listed.
-# The root carries only the wrapper, its bootstrap, the steamcmd stub and its helper, and their pins. FEX itself is
+#   - the x86 guest Valve's FEX tool needs for x86 games and x86 Protons (ld.so, glibc, x86 Mesa;
+#     SteamOS ships it as usr/share/guestos/fex-mesa): steam-x86-guest follows FEX's ArchLinux RootFS
+#     channel (x86-guest.pin, ~1.4 GB) and mounts it with squashfuse while Steam runs.
+#     usr/share/guestos stays listed.
+# The root carries only the wrapper, those helpers, their pins and the steamcmd stub. FEX itself is
 # Steam's: the arm64 client adds it to a game as a dependency, as it does Proton ("adding FEX dependency
 # to %s %u" and STEAM_COMPAT_FEX_CONFIG in steamclient.so; not yet seen on hardware), so nothing x86
 # belongs here. See docs/steam-arm64.md.

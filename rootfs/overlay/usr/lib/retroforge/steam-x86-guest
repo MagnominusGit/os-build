@@ -1,0 +1,392 @@
+#!/usr/bin/env python3
+# steam-x86-guest — the x86 guest Valve's FEX tool needs for x86 Steam games: downloaded into the
+# player's home, and mounted while /usr/bin/steam runs.
+#
+# Valve's arm64 client runs x86 games and x86 Protons through its FEX tool (Steam app 3127680). That
+# tool needs an x86_64 + i386 "graphics provider": a tree with ld.so, glibc, x86 Mesa (Turnip) and
+# graphics_provider.json at its root. SteamOS ships one at /usr/share/guestos/fex-mesa. The image ships
+# none, because a root slot is 2 GB and rootfs/guard-rootfs.sh section 9 keeps x86 out of it. The tool
+# also takes STEAM_COMPAT_GRAPHICS_PROVIDER=<dir>/graphics_provider.json, and <dir> then becomes both
+# pressure-vessel's graphics provider and FEX's RootFS. It has to be a real tree (symlinks into another
+# tree do not work). So: FEX's own ArchLinux RootFS, a squashfs image pinned in
+# /usr/share/retroforge/steam/x86-guest.pin, kept as one file in ~/.local/share/retroforge/fex-guest/
+# and mounted with squashfuse on fex-guest/root while Steam runs.
+#
+#   steam-x86-guest start <pid>  what /usr/bin/steam (<pid>) runs before the client: hold the guest for as
+#                                long as <pid> runs (below), mount it, and when the pinned image is not
+#                                downloaded yet, start `fetch` detached and return at once, so the first
+#                                `steam` never waits 1.4 GB for it.
+#   steam-x86-guest fetch        download the pinned image unless it is there. It is sha256-checked,
+#                                resumed when an earlier download was cut short, and renamed into place;
+#                                older versions are removed after that. One fetch at a time: another one
+#                                exits 0 at once. When a `steam` is running and nothing is mounted, the new
+#                                image is mounted as soon as it is in place, so the next game has it.
+#   steam-x86-guest mount        mount the image on fex-guest/root unless a working mount is there. A
+#                                dead one (squashfuse killed) is released first. The pinned image, or
+#                                while it is still downloading, the newest older one. Exit 2 when the
+#                                pinned image is not downloaded yet, whether or not an older one got mounted.
+#   steam-x86-guest release      unmount fex-guest/root, unless a `steam` is still running.
+#
+# Who uses the mount: for each running /usr/bin/steam, a holder process holds fex-guest/.users.lock
+# SHARED. `start` forks it before mounting, outside the steam's process tree (OGUI's Exit reaps that
+# tree), with TERM, INT and HUP ignored; it waits for the steam's PID to exit (a pidfd), whatever ends
+# it, SIGKILL included, then lets go of the lock and releases. `release` and `fetch` try the lock
+# EXCLUSIVE without waiting: getting it means no steam runs. So the last steam to exit releases the
+# mount, and a second `steam steam://...` never releases what the first one is using. The client does
+# not inherit the lock, so its leftover children cannot keep the mount. Mounting and unmounting happen
+# under fex-guest/.mount.lock, so they never race.
+#
+# squashfuse starts with TERM and INT ignored, as PortMaster's runtimes do (portmaster/bin/mount), so
+# OGUI's Exit cannot pull the tree out from under a game that is still shutting down. It ends with a
+# lazy unmount (fusermount3 -u -z): whatever still has a file open keeps it, and squashfuse exits once
+# that is gone.
+#
+# Everything goes to stderr (the session log). A fetch outlives the `steam` that started it, so a
+# stderr that went away is ignored rather than ending the download.
+#
+# TEST SEAMS (tests/test-steam-x86-guest.sh): RETROFORGE_STEAM_X86_GUEST_DIR (also set by
+# /usr/bin/steam), RETROFORGE_STEAM_X86_GUEST_PIN, RETROFORGE_MOUNTS, RETROFORGE_SQUASHFUSE,
+# RETROFORGE_FUSERMOUNT.
+import fcntl
+import glob
+import hashlib
+import http.client
+import os
+import re
+import select
+import shutil
+import signal
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+DATA = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+GUEST = os.path.abspath(os.environ.get("RETROFORGE_STEAM_X86_GUEST_DIR")
+                        or os.path.join(DATA, "retroforge", "fex-guest"))
+PIN = os.environ.get("RETROFORGE_STEAM_X86_GUEST_PIN", "/usr/share/retroforge/steam/x86-guest.pin")
+MOUNTS = os.environ.get("RETROFORGE_MOUNTS", "/proc/self/mounts")
+SQUASHFUSE = os.environ.get("RETROFORGE_SQUASHFUSE", "squashfuse")
+FUSERMOUNT = os.environ.get("RETROFORGE_FUSERMOUNT", "fusermount3")
+ROOT = os.path.join(GUEST, "root")
+PROVIDER = os.path.join(ROOT, "graphics_provider.json")
+USERS = os.path.join(GUEST, ".users.lock")
+MOUNT_LOCK = os.path.join(GUEST, ".mount.lock")
+FETCH_LOCK = os.path.join(GUEST, ".fetch.lock")
+SPARE = 256 << 20  # left free in /home after the download
+MOUNT_WAIT = 5.0
+
+
+class Failed(Exception):
+    pass
+
+
+def log(msg):
+    try:
+        print(f"steam-x86-guest: {msg}", file=sys.stderr, flush=True)
+    except (OSError, ValueError):
+        pass
+
+
+def pinned():
+    """(name, version, url, sha256) from the pin."""
+    try:
+        with open(PIN, encoding="utf-8") as f:
+            text = f.read()
+    except OSError as err:
+        raise Failed(f"no x86 guest pin: {err}")
+    fields = []
+    for key in ("name", "version", "url", "sha256"):
+        m = re.search(rf"^{key}:[ \t]*(\S+)", text, re.M)
+        if not m:
+            raise Failed(f"{PIN}: needs name, version, url and sha256")
+        fields.append(m.group(1))
+    return tuple(fields)
+
+
+def image_path(name, version):
+    return os.path.join(GUEST, f"{name}-{version}.sqsh")
+
+
+def lock(path, mode):
+    """An open lock file, locked with `mode` (fcntl.LOCK_*); None when LOCK_NB could not get it."""
+    f = open(path, "a")
+    try:
+        fcntl.flock(f, mode)
+    except BlockingIOError:
+        f.close()
+        return None
+    return f
+
+
+def steam_running():
+    """True while some steam's holder holds .users.lock."""
+    f = lock(USERS, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    if f is None:
+        return True
+    f.close()
+    return False
+
+
+def unescape(field):
+    """A /proc/mounts field: a space is \\040, a tab \\011, a newline \\012, a backslash \\134."""
+    return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), field)
+
+
+def mounted():
+    try:
+        with open(MOUNTS, encoding="utf-8", errors="replace") as f:
+            return any(len(fl) > 1 and unescape(fl[1]) == ROOT for fl in (line.split() for line in f))
+    except OSError:
+        return False
+
+
+def working():
+    """A mount there that serves the tree (a killed squashfuse leaves one that fails: ENOTCONN)."""
+    try:
+        return os.path.isfile(PROVIDER)
+    except OSError:
+        return False
+
+
+def fusermount_u():
+    try:
+        subprocess.run([FUSERMOUNT, "-u", "-z", ROOT], stdin=subprocess.DEVNULL,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False)
+    except OSError as err:
+        log(f"{FUSERMOUNT}: {err}")
+
+
+def do_mount(image):
+    """Mount image on ROOT (the caller holds MOUNT_LOCK); True when it serves the tree afterwards."""
+    if mounted():
+        if working():
+            return True
+        log(f"releasing a dead mount on {ROOT}")
+        fusermount_u()
+    os.makedirs(ROOT, exist_ok=True)
+    # Ignored signals survive exec, and libfuse keeps them (it only replaces default handlers).
+    old = [signal.signal(s, signal.SIG_IGN) for s in (signal.SIGTERM, signal.SIGINT)]
+    try:
+        res = subprocess.run([SQUASHFUSE, image, ROOT], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    except OSError as err:
+        log(f"could not run {SQUASHFUSE}: {err}")
+        return False
+    finally:
+        signal.signal(signal.SIGTERM, old[0])
+        signal.signal(signal.SIGINT, old[1])
+    if res.returncode != 0:
+        log(f"{SQUASHFUSE} could not mount {image}: {res.stderr.strip()}")
+        return False
+    deadline = time.monotonic() + MOUNT_WAIT
+    while not (mounted() and working()):
+        if time.monotonic() > deadline:
+            if mounted():
+                log(f"{image} is mounted but has no graphics_provider.json at its root")
+            else:
+                log(f"{image} did not mount on {ROOT}")
+            return False
+        time.sleep(0.05)
+    log(f"mounted {os.path.basename(image)} on {ROOT}")
+    return True
+
+
+def cmd_mount():
+    name, version, _, _ = pinned()
+    image = image_path(name, version)
+    have = os.path.isfile(image)
+    if not have:
+        older = sorted(glob.glob(os.path.join(GUEST, f"{glob.escape(name)}-*.sqsh")), key=os.path.getmtime)
+        image = older[-1] if older else None
+    with lock(MOUNT_LOCK, fcntl.LOCK_EX):
+        if image:
+            if not do_mount(image):
+                return 1
+        elif mounted() and not working():
+            log(f"releasing a dead mount on {ROOT}")
+            fusermount_u()
+    return 0 if have else 2
+
+
+def cmd_release():
+    with lock(MOUNT_LOCK, fcntl.LOCK_EX):
+        if not mounted() or steam_running():
+            return 0
+        fusermount_u()
+        if mounted():
+            log(f"could not release {ROOT}")
+            return 1
+    return 0
+
+
+def hold(pid, ready):
+    """The holder: .users.lock shared until steam (pid) exits, then release. Never returns."""
+    code = 0
+    try:
+        for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            signal.signal(s, signal.SIG_IGN)
+        null = os.open(os.devnull, os.O_RDWR)
+        os.dup2(null, 0)
+        os.dup2(null, 1)
+        os.close(null)
+        os.chdir("/")
+        users = lock(USERS, fcntl.LOCK_SH)
+        try:
+            pidfd = os.pidfd_open(pid)
+        except OSError:
+            pidfd = None  # gone already, or no pidfd: poll below
+        os.write(ready, b"1")
+        os.close(ready)
+        if pidfd is not None:
+            p = select.poll()
+            p.register(pidfd, select.POLLIN)
+            p.poll()
+        else:
+            while True:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    break
+                except PermissionError:
+                    pass
+                time.sleep(1)
+        users.close()
+        cmd_release()
+    except BaseException as err:  # noqa: BLE001 -- a forked child must never return into the caller
+        log(f"holder: {err}")
+        code = 1
+    os._exit(code)
+
+
+def cmd_start(pid):
+    # The holder first: a steam exiting between our mount and our lock would release our mount.
+    r, w = os.pipe()
+    child = os.fork()
+    if child == 0:
+        os.close(r)
+        try:
+            os.setsid()
+            if os.fork():
+                os._exit(0)
+        except BaseException:  # noqa: BLE001
+            os._exit(1)
+        hold(pid, w)
+    os.close(w)
+    os.waitpid(child, 0)
+    held = os.read(r, 1) == b"1"
+    os.close(r)
+    if not held:
+        log("could not hold the x86 guest for this steam; not mounting it")
+        return 1
+    code = cmd_mount()
+    if code == 2:
+        try:
+            subprocess.Popen([sys.executable, os.path.abspath(sys.argv[0]), "fetch"], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, start_new_session=True)
+        except OSError as err:
+            log(f"could not start the download: {err}")
+            return 1
+    return 1 if code == 1 else 0
+
+
+def download(url, part, sha256):
+    """url -> part, continuing a part an earlier download left; removed unless its sha256 matches."""
+    have = on_disk = os.path.getsize(part) if os.path.isfile(part) else 0
+    req = urllib.request.Request(url, headers={"Range": f"bytes={have}-"} if have else {})
+    response = None
+    try:
+        response = urllib.request.urlopen(req, timeout=60)
+    except urllib.error.HTTPError as err:
+        if not (err.code == 416 and have):  # 416: the part is already whole
+            raise Failed(f"could not download {url}: {err}")
+    except (OSError, http.client.HTTPException) as err:
+        raise Failed(f"could not download {url}: {err}")
+    if response is not None:
+        with response:
+            if getattr(response, "status", None) != 206:
+                have = 0  # the server sent it all again
+            size = response.headers.get("Content-Length")
+            todo = int(size) if size and size.isdigit() else 0
+            if todo + SPARE > shutil.disk_usage(GUEST).free + on_disk - have:
+                raise Failed(f"not enough space in {GUEST}: the x86 guest needs {(todo + SPARE) >> 20} MB free")
+            if have:
+                log(f"continuing the download at {have >> 20} MB")
+            done, step = 0, max(todo // 10, 1)
+            try:
+                with open(part, "ab" if have else "wb") as out:
+                    while chunk := response.read(1 << 20):
+                        out.write(chunk)
+                        if todo and (done + len(chunk)) // step > done // step:
+                            log(f"{min(100, (done + len(chunk)) * 100 // todo)}% of {todo >> 20} MB")
+                        done += len(chunk)
+            except (OSError, http.client.HTTPException) as err:  # the part stays, for the next fetch
+                raise Failed(f"download of {url} cut short at {(have + done) >> 20} MB: {err!r}")
+            # http.client ends a body the server cut off without an error; the part stays for next time.
+            if todo and done < todo:
+                raise Failed(f"download of {url} cut short at {(have + done) >> 20} MB of {(have + todo) >> 20} MB")
+    digest = hashlib.sha256()
+    with open(part, "rb") as f:
+        while chunk := f.read(1 << 20):
+            digest.update(chunk)
+    if digest.hexdigest() != sha256.lower():
+        os.unlink(part)
+        raise Failed(f"sha256 mismatch for {url}: got {digest.hexdigest()}, want {sha256}")
+
+
+def prune(keep):
+    """Remove every image and partial download but `keep` (a mounted one stays readable until unmounted)."""
+    for path in glob.glob(os.path.join(GUEST, "*.sqsh")) + glob.glob(os.path.join(GUEST, ".*.sqsh.part")):
+        if path not in keep:
+            log(f"removing {os.path.basename(path)}")
+            try:
+                os.unlink(path)
+            except OSError as err:
+                log(f"could not remove {path}: {err}")
+
+
+def cmd_fetch():
+    name, version, url, sha = pinned()
+    image = image_path(name, version)
+    part = os.path.join(GUEST, f".{name}-{version}.sqsh.part")
+    busy = lock(FETCH_LOCK, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    if busy is None:
+        return 0  # another fetch is at it
+    with busy:
+        if not os.path.isfile(image):
+            # Older images stay until this one is in place (`mount` falls back to them); older parts go now.
+            prune({part} | set(glob.glob(os.path.join(GUEST, "*.sqsh"))))
+            log(f"downloading the x86 guest for Steam's FEX ({name} {version}) in the background")
+            download(url, part, sha)
+            os.rename(part, image)
+            log(f"the x86 guest is in place: {image}")
+        prune({image})
+    with lock(MOUNT_LOCK, fcntl.LOCK_EX):
+        # A steam that started before this finished gets it now, unless an older image is mounted for it
+        # (a game may be running from that one): then the next steam start does.
+        if not (mounted() and working()) and steam_running():
+            do_mount(image)
+    return 0
+
+
+def main():
+    cmds = {"fetch": cmd_fetch, "mount": cmd_mount, "release": cmd_release}
+    args = sys.argv[1:]
+    if not ((len(args) == 1 and args[0] in cmds) or (len(args) == 2 and args[0] == "start" and args[1].isdigit())):
+        print("usage: steam-x86-guest start <steam pid> | fetch | mount | release", file=sys.stderr)
+        return 64
+    # A steam's .users.lock inherited here would count as a running Steam.
+    os.closerange(3, os.sysconf("SC_OPEN_MAX"))
+    try:
+        os.makedirs(GUEST, exist_ok=True)
+        if args[0] == "start":
+            return cmd_start(int(args[1]))
+        return cmds[args[0]]()
+    except (Failed, OSError) as err:
+        log(str(err))
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

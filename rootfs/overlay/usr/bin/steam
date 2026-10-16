@@ -73,6 +73,35 @@ for link in steam root; do
   fi
 done
 
+# ---- x86 games: the FEX guest ----------------------------------------------------------------------
+# Valve's FEX tool runs x86 games and x86 Protons, but needs an x86_64 + i386 graphics provider (ld.so,
+# glibc, x86 Mesa, graphics_provider.json at its root), and the image ships none.
+# /usr/lib/retroforge/steam-x86-guest keeps FEX's ArchLinux RootFS (x86-guest.pin, 1.4 GB) in the
+# player's home and mounts it with squashfuse on $RETROFORGE_STEAM_X86_GUEST_DIR/root. `start`:
+#   - mounts it when it is downloaded and not mounted yet (never twice; a dead mount is replaced);
+#   - when it is not downloaded yet, starts the download DETACHED in the background, logging to this
+#     stderr, and returns: this `steam` goes on without it. If it finishes while Steam runs, it is
+#     mounted right then and the next game has it;
+#   - leaves a holder outside this process tree that waits for this script's PID ($$) to exit, however
+#     it ends, and then releases the mount unless another `steam` still runs.
+# STEAM_COMPAT_GRAPHICS_PROVIDER is set before the download is done too: the client's environment is
+# fixed when it starts, and the path is the same once mounted. Proton under FEX also needs
+# ~/.steam/sdk32 and sdk64. RETROFORGE_STEAM_X86_GUEST=0: no download, no mount, no provider.
+# TEST SEAMS (tests/test-steam-x86-guest.sh): RETROFORGE_STEAM_X86_GUEST_HELPER, RETROFORGE_STEAM_X86_GUEST_DIR.
+for b in 32 64; do
+  if [ -d "$HOME/.steam/sdk$b" ] && [ ! -L "$HOME/.steam/sdk$b" ]; then
+    log "$HOME/.steam/sdk$b is a directory, not a link; leaving it alone"
+  else
+    ln -sfn "$RETROFORGE_STEAM_ROOT/linux$b" "$HOME/.steam/sdk$b"
+  fi
+done
+if [ "${RETROFORGE_STEAM_X86_GUEST:-1}" != 0 ]; then
+  export RETROFORGE_STEAM_X86_GUEST_DIR="${RETROFORGE_STEAM_X86_GUEST_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/retroforge/fex-guest}"
+  "${RETROFORGE_STEAM_X86_GUEST_HELPER:-/usr/lib/retroforge/steam-x86-guest}" start "$$"
+  export STEAM_COMPAT_GRAPHICS_PROVIDER="$RETROFORGE_STEAM_X86_GUEST_DIR/root/graphics_provider.json"
+fi
+# ----------------------------------------------------------------------------------------------------
+
 case "${DBUS_SESSION_BUS_ADDRESS-}" in
   unix:path=*)
     bus="${DBUS_SESSION_BUS_ADDRESS#unix:path=}"
