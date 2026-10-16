@@ -332,10 +332,12 @@ cat >"$W/bootstrap" <<EOF
 mkdir -p "\$RETROFORGE_STEAM_ROOT"; echo "$W/rt/run"
 EOF
 chmod +x "$W/rt/run" "$W/bootstrap"
-# RETROFORGE_STEAM_X86_GUEST=0: the FEX guest has its own suite (test-steam-x86-guest.sh). Here it would
-# reach the real helper, and on a device start a real 1.4 GB download into the test's home.
+# The x86 guest and the DXVK-Sarek block have their own suites (test-steam-x86-guest.sh,
+# test-steam-compat-tools.sh). Here they would reach the real helpers, and on a device start real
+# downloads into the test's home (1.4 GB; on an SM6115, Proton-CachyOS too): RETROFORGE_STEAM_X86_GUEST=0
+# turns the guest off, and RETROFORGE_STEAM_SAREK_CLI names no such file.
 WENV=(env -u RETROFORGE_STEAM_ROOT -u XDG_DATA_HOME HOME="$W/home" RETROFORGE_STEAM_BOOTSTRAP="$W/bootstrap"
-      RETROFORGE_CPUINFO="$W/cpuinfo" RETROFORGE_STEAM_X86_GUEST=0)
+      RETROFORGE_CPUINFO="$W/cpuinfo" RETROFORGE_STEAM_X86_GUEST=0 RETROFORGE_STEAM_SAREK_CLI="$W/no-sarek-cli")
 wrap() {  # wrap <exit codes of successive runs> [args...]
   echo "$1" >"$W/codes"; shift; rm -f "$W/count" "$W"/call*
   WOUT="$("${WENV[@]}" bash "$WRAP" "$@" 2>"$W/err")"; WRC=$?
