@@ -175,6 +175,7 @@ func _add_option(emulator: String, option: Dictionary) -> void:
 	dropdown.description = option["description"]
 	_rows.add_child(dropdown)
 	_option_rows.append(dropdown)
+	dropdown.clear()  # dropdown.tscn ships one placeholder item, which would shift every index
 	for text in EmuOptions.game_items(option, EmuOptions.emulator_choice(emulator, option)):
 		dropdown.add_item(text)
 	var system: String = _item.metadata["system"]
@@ -185,7 +186,10 @@ func _add_option(emulator: String, option: Dictionary) -> void:
 
 func _on_option_selected(index: int, option: Dictionary, dropdown: Control) -> void:
 	var values := EmuOptions.values(option)
-	if not _item or index < 0 or index >= values.size():
+	if not _item:
+		return
+	if index < 0 or index >= values.size():
+		logger.warn("%s: no choice at item %d" % [option["id"], index])
 		return
 	var system: String = _item.metadata["system"]
 	var rom: String = _item.metadata["rom"]
