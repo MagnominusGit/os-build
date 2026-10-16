@@ -573,9 +573,11 @@ WLOG="$WHOME/.local/share/retroforge/steam-compat-tools.log"
 WCONF="$WHOME/.config/retroforge/steam.conf"
 echo 0 >"$W/helper-sleep"
 # Every run of the setting or the wrapper: the stubs, a clean environment, and VAR=value extras.
+# RETROFORGE_STEAM_X86_GUEST=0: the wrapper's FEX guest block has its own suite (test-steam-x86-guest.sh);
+# here it would reach the real helper (and on a device start a real 1.4 GB download).
 STUBS=(env -u RETROFORGE_STEAM_ROOT -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u PROTON_DXVK_SAREK -u RETROFORGE_STEAM_SAREK
        -u RETROFORGE_SOC_CLASS HOME="$WHOME" PATH="$W/bin:$PATH" RETROFORGE_DEVICE_ENV="$W/device-env"
-       RETROFORGE_STEAM_COMPAT_TOOLS="$W/helper")
+       RETROFORGE_STEAM_COMPAT_TOOLS="$W/helper" RETROFORGE_STEAM_X86_GUEST=0)
 reset() {  # reset <SoC class> <systemd-run exit>
   echo "$1" >"$W/soc"; echo "$2" >"$W/systemd-run.rc"
   rm -f "$W/client" "$W/helper.call" "$W/helper.done" "$W/systemd-run.args" "$W/systemctl.args" "$W/sequence"

@@ -527,9 +527,11 @@ echo "helper \$*" >>"$T/calls"
 exec python3 "$HELPER" "\$@"
 EOF
 chmod +x "$W/rt/run" "$W/bootstrap" "$W/helper"
+# RETROFORGE_STEAM_SAREK_CLI names no such file: the wrapper's DXVK-Sarek block has its own suite
+# (test-steam-compat-tools.sh); here the real command would, on an SM6115, start a real download.
 WENV=(env -u RETROFORGE_STEAM_ROOT -u XDG_DATA_HOME -u RETROFORGE_STEAM_X86_GUEST -u STEAM_COMPAT_GRAPHICS_PROVIDER
       -u RETROFORGE_STEAM_X86_GUEST_DIR HOME="$WHOME" RETROFORGE_STEAM_BOOTSTRAP="$W/bootstrap"
-      RETROFORGE_STEAM_X86_GUEST_HELPER="$W/helper" RETROFORGE_CPUINFO=/dev/null)
+      RETROFORGE_STEAM_X86_GUEST_HELPER="$W/helper" RETROFORGE_CPUINFO=/dev/null RETROFORGE_STEAM_SAREK_CLI="$W/no-sarek-cli")
 w_mounted() { in_table "$WGUEST/root"; }
 w_unmounted() { ! w_mounted; }
 wrap() {  # wrap <exit codes of successive runs> [args...]
