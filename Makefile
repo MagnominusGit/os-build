@@ -636,8 +636,8 @@ $(BASE_STAMP): build/builder.pin build/snapshot.pin build/lib-pins.sh $(ROOTFS_D
 	 done
 	@: "sentinel: the tree must be in the mode this build asked for (see above)"; \
 	 got=release; grep -qx 'dev:1' work/base/usr/lib/retroforge/pkgs 2>/dev/null && got=dev; \
-	 [ "$$got" = "$(ROOTFS_MODE)" ] || { \
-	   echo "base tree is a $$got build, this is a $(ROOTFS_MODE) build (stale work/base)" >&2; \
+	 [ "$$got" = "$(BASE_MODE)" ] || { \
+	   echo "base tree is a $$got build, this is a $(BASE_MODE) build (stale work/base)" >&2; \
 	   exit 1; }
 	@mkdir -p $(@D) && touch $@   # recency marker outside the root-owned tree (frozen mtimes)
 
