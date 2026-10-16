@@ -42,7 +42,8 @@
 #      group are the ones rootfs/overlay's sysusers.d pin names, not whatever sysusers counted down to
 #   9. no Steam, x86-emulation or Android payload came back — those stacks were removed on
 #      purpose, and a stray prebuilt pin or overlay copy would bring them back silently (the
-#      Steam client and steamcmd are downloaded into /home on demand, never shipped); and (9b)
+#      Steam client and steamcmd are downloaded into /home on demand, never shipped; no box64 or x86
+#      binfmt_misc entry either); and (9b)
 #      the shell landed where the session looks for it, without its self-updater
 #  10. no __pycache__ — host-CPython bytecode the device cannot load, which rootfs/overlay's verbatim
 #      copy will carry in whenever an offline suite has imported one of its Python clients
@@ -785,6 +786,15 @@ fi
 # Steam's: the arm64 client adds it to a game as a dependency, as it does Proton ("adding FEX dependency
 # to %s %u" and STEAM_COMPAT_FEX_CONFIG in steamclient.so; not yet seen on hardware), so nothing x86
 # belongs here. See docs/steam-arm64.md.
+#
+# No box64 or box86 either, and no binfmt_misc registration for x86 binaries from anything. PortMaster's
+# box64 ports each bring their own box64 and call it by path, and its box86 ports are armhf, which
+# PortMaster already hides here. Valve's client starts x86 code through STEAM_COMPAT_EMULATOR (its FEX
+# tool), not binfmt. A system-wide FEX or box64 registered for x86 ELF would take those execs instead,
+# inside Steam's containers too, and with two registered the kernel tries the newest first (ROCKNIX
+# unregisters its own before starting arm64 Steam). So the named paths below cover both projects'
+# binaries and binfmt.d files, and every binfmt.d file is also checked for an x86 ELF magic, whatever
+# it is called (qemu-user's included).
 # ------------------------------------------------------------------------------------------
 echo "  9. no Steam / x86 / Android payload"
 REMOVED=(
@@ -792,6 +802,10 @@ REMOVED=(
   usr/bin/steamos-update usr/bin/steamos-select-branch usr/bin/retroforge-select-branch
   usr/share/decky-loader usr/share/decky-plugins usr/lib/systemd/system/plugin_loader.service
   usr/bin/FEXInterpreter usr/share/fex-emu usr/share/guestos usr/share/steam/compatibilitytools.d
+  usr/bin/FEX usr/bin/FEXLoader usr/bin/FEXServer
+  usr/lib/binfmt.d/FEX-x86.conf usr/lib/binfmt.d/FEX-x86_64.conf
+  usr/bin/box64 usr/bin/box86 usr/lib/binfmt.d/box64.conf usr/lib/binfmt.d/box86.conf
+  usr/lib/binfmt.d/box32.conf etc/binfmt.d/box64.conf etc/binfmt.d/box86.conf
   usr/bin/podman usr/bin/retroforge-android usr/share/retroforge-android
   usr/lib/retroforge/steamcmd
 )
@@ -800,6 +814,17 @@ for n in "${REMOVED[@]}"; do
   if [ -e "$STAGE/$n" ] || [ -L "$STAGE/$n" ]; then bad "removed stack came back: /$n"; removed_bad=1; fi
 done
 [ "$removed_bad" = 0 ] && echo "    ok  none of ${#REMOVED[@]} Steam / x86 / Android paths present"
+# Any binfmt.d entry whose magic is an x86 ELF header, under whatever name: e_machine (bytes 18-19)
+# 0x03 (i386) or 0x3e (x86_64), written as binfmt.d files write it, "\x7fELF" then one \xHH per byte.
+# Anchored on that position, because e_type (bytes 16-17) is \x03\x00 for any PIE.
+x86_binfmt_bad=0
+for f in "$STAGE"/usr/lib/binfmt.d/*.conf "$STAGE"/etc/binfmt.d/*.conf; do
+  [ -f "$f" ] || continue
+  if grep -qiE '\\x7fELF(\\x[0-9a-f]{2}){14}\\x(03|3e)\\x00' "$f"; then
+    bad "x86 binfmt_misc registration in the image: /${f#"$STAGE"/}"; x86_binfmt_bad=1
+  fi
+done
+[ "$x86_binfmt_bad" = 0 ] && echo "    ok  no binfmt.d entry registers x86 binaries"
 
 # ------------------------------------------------------------------------------------------
 # 9b. The shell is there, and its self-updater is not.
