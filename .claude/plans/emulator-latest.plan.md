@@ -16,8 +16,9 @@ unnoticed)". That risk is real and this plan keeps it visible rather than preten
 pin survives as the TESTED marker, the player sees when they run something newer, and going back
 is one button.
 
-The hosted catalog (retroforge.plan.md Phase 5, not started) is not needed for this and is not
-blocked by it: with "latest" as the default, the hosted catalog would only move tested markers.
+It also DROPS the hosted catalog (retroforge.plan.md Phase 4/5, never built): with "latest" as the
+default, a hosted catalog would only move tested markers, and the image + OTA already carry the
+catalog (D7).
 
 ## Decisions (agreed 2026-10-16)
 
@@ -38,6 +39,10 @@ blocked by it: with "latest" as the default, the hosted catalog would only move 
   newest release (not the pin); after that PortMaster's own updater runs as today, and
   retroforge-emu never offers it an update. The unpack check "version file == pinned tag" becomes
   "version file == the tag being installed".
+- **D7 No online catalog.** The only catalog is `/usr/share/retroforge/catalog.json` in the
+  image; an OTA bundle is how tested pins and tag patterns change on a device. retroforge-emu stops
+  reading `~/.cache/retroforge/catalog.json`, and the plugin never fetches a catalog. The
+  `$RETROFORGE_CATALOG` override stays (test seam).
 
 ## Risks this plan accepts, and what it does about each
 
@@ -53,8 +58,10 @@ blocked by it: with "latest" as the default, the hosted catalog would only move 
 
 ## Phase 1 — retroforge-emu
 
-Catalog (schema stays 1; all additions optional, so an old image reading a new catalog still works
-off the pin):
+Catalog source (D7): `CATALOGS` becomes `$RETROFORGE_CATALOG`, else the image's file; the
+`~/.cache/retroforge/catalog.json` entry and the header's "hosted catalog" wording go.
+
+Catalog (schema stays 1; all additions optional, so an entry without them keeps working off the pin):
 - `tag_pattern`: anchored regex over release tags. Present = the entry follows latest (D1); absent
   = pinned-only, today's behaviour (kept as a per-entry escape hatch; no entry uses it after
   Phase 3).

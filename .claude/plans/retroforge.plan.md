@@ -260,8 +260,8 @@ resume state). Catalog done 2026-10-04: `/usr/share/retroforge/catalog.json` in 
 systems, github owner/repo, tag, anchored asset regex, sha256, size, homepage, licence; launch
 details stay in the image's emulator conf), DuckStation pinned to v0.1-11894 (sha256 = GitHub's
 digest), checked by `tests/test-catalog.sh` (`RETROFORGE_NET_TEST=1` also re-checks every pin against
-GitHub). The image's copy is the offline fallback; the plugin keeps the hosted one in
-`~/.cache/retroforge/catalog.json`, which wins.
+GitHub). The image's copy is the only one (OTA updates it); the hosted catalog that was to win from
+`~/.cache/retroforge/catalog.json` is dropped (emulator-latest.plan.md D7, 2026-10-16).
 Part 2 started 2026-10-04: `/usr/bin/retroforge-emu list | install <emu> | remove <emu>` (Python,
 `tests/test-emu.sh`), the download half the plugin drives (stdout = `N%` lines / JSON; exit 2 usage,
 3 network, 4 verification, 5 local). Install: GitHub API for the pinned tag, refuse unless the
@@ -283,8 +283,8 @@ Plugin side done 2026-10-04 (HW ✅ Pocket ACE):
   each action with the focus handed back.
 - retroforge-emu retries every transient curl error (`--retry-all-errors`): a curl 55 (Wi-Fi drop)
   failed the first in-UI download on the ACE.
-Still open in part 2/3: an OGUI notification when the hosted catalog offers an update (needs the
-hosted catalog, Phase 5); the plugin fetching that catalog into `~/.cache/retroforge/`.
+Still open in part 2/3: an OGUI notification when an emulator update is available (now from
+retroforge-emu `check`, emulator-latest.plan.md; the hosted catalog is dropped, D7).
 HW 2026-10-04, Pocket ACE, v0.1-11894 from a card: first-run seed, launch, OGUI Exit
 (double SIGTERM, clean, mount released); DuckStation keeps every seeded value when it rewrites
 settings.ini (drops our comments, adds [UI] geometry). Memory card and resume state not checked
@@ -371,7 +371,8 @@ delete one (card goes), copy during a game (nothing until exit).
 - Attribution per emulator: done 2026-10-05 (plugin 0.1.7). Catalog `author` (required by
   tests/test-catalog.sh) + homepage + licence name/url, shown as one dimmed line under each
   emulator on Settings > Emulators (`credits.gd`); HW ✅ Pocket ACE.
-- Hosted catalog + update notification + plugin updates from the store: need the Phase 5 server.
+- Update notification + plugin updates from the store. (Hosted catalog dropped 2026-10-16:
+  emulator-latest.plan.md D7.)
 
 Decided 2026-10-03: one OGUI card per ROM, grouped in one library tab per system (PSX, PS2, ...),
 and emulators fetched on demand. Both live in ONE plugin (`retroforge`), since the ROM card is what
@@ -429,8 +430,8 @@ plus the ROM library that launches them)
    tested tag per emulator, so RetroForge alone decides when an update is offered: bumping a tag in the
    hosted catalog after testing is what makes the plugin offer it. No "newest" mode (armada follows
    upstream's newest; an upstream change could break a seed or the launch args unnoticed).
-   PROPOSED REVERSAL 2026-10-16 (not decided): emulator-latest.plan.md — latest by default, the
-   pin kept as the "tested" marker, one-press revert. Rolling
+   REVERSED 2026-10-16 (emulator-latest.plan.md): latest by default, the pin kept as the "tested"
+   marker, one-press revert, and NO hosted catalog — the image's catalog (OTA-updated) is the only one. Rolling
    tags are never pinned: DuckStation's `latest` (the 0.1-12070 build tested so far) replaces its
    asset in place, so its pin must be a numbered release (v0.1-11894 or newer), re-tested on HW.
    Install: fetch that tag's release, download over HTTPS only (refuse a
@@ -823,7 +824,7 @@ plus the ROM library that launches them)
 - The other three: Azahar (3DS), rpcs3 (PS3, needs firmware), Cemu (Wii U). Recipe from DuckStation, per emulator: an aarch64 AppImage that uses our
   Mesa/Turnip (armada's catalog has working asset patterns for all five); `.conf` + minimal seed;
   `launch.conf` system + folder-layout rows; every exit path (SIGTERM vs menu: ConfirmPowerOff-style
-  dialogs, save state on exit); licence and author's stated terms; pinned tag in the hosted catalog.
+  dialogs, save state on exit); licence and author's stated terms; tag pattern + tested pin in catalog.json.
 - Emulator save/load-state hotkeys (DuckStation first: seed bindings that avoid in-game combos).
 - Device-specific values only when needed (Azahar's dual-screen layout on the Pocket DS is the
   likely first).
