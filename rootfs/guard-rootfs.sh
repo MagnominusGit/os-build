@@ -42,7 +42,7 @@
 #      group are the ones rootfs/overlay's sysusers.d pin names, not whatever sysusers counted down to
 #   9. no Steam, x86-emulation or Android payload came back — those stacks were removed on
 #      purpose, and a stray prebuilt pin or overlay copy would bring them back silently (the
-#      Steam client is downloaded into /home on demand by /usr/bin/steam, never shipped); and (9b)
+#      Steam client and steamcmd are downloaded into /home on demand, never shipped); and (9b)
 #      the shell landed where the session looks for it, without its self-updater
 #  10. no __pycache__ — host-CPython bytecode the device cannot load, which rootfs/overlay's verbatim
 #      copy will carry in whenever an offline suite has imported one of its Python clients
@@ -773,11 +773,15 @@ fi
 # `steam ... steam://rungameid/<id>`, so the image carries /usr/bin/steam: a wrapper that downloads
 # Valve's arm64 client and Steam Runtime into the player's home the first time it runs
 # (/usr/lib/retroforge/steam-bootstrap, ~560 MB unpacked, ~3 GB after the client's own update), and
-# runs it from there. The only Steam pieces the root carries are that wrapper, its bootstrap, the
-# runtime's pin, and Valve's arm64 steamcmd for the plugin (packages/steamcmd, 4 MB). FEX for x86
-# games is left to Steam as well. The arm64 client adds it to a game as a dependency, as it does
-# Proton ("adding FEX dependency to %s %u" and STEAM_COMPAT_FEX_CONFIG in steamclient.so; not yet seen
-# on hardware), so nothing x86 belongs here. See docs/steam-arm64.md.
+# runs it from there. The plugin's steamcmd goes the same way: /usr/lib/retroforge/install-steamcmd
+# puts a stub at ~/.steam/steamcmd/steamcmd.sh, and the stub's first run downloads Valve's arm64
+# steamcmd over itself (/usr/share/retroforge/steam/steamcmd.pin). It used to be a prebuilt
+# (packages/steamcmd, 4 MB, at /usr/lib/retroforge/steamcmd), which is why that path is listed
+# below. The only Steam pieces the root carries are the wrapper, its bootstrap, the steamcmd stub
+# and its installer, and the two pins. FEX for x86 games is left to Steam as well. The arm64 client
+# adds it to a game as a dependency, as it does Proton ("adding FEX dependency to %s %u" and
+# STEAM_COMPAT_FEX_CONFIG in steamclient.so; not yet seen on hardware), so nothing x86 belongs here.
+# See docs/steam-arm64.md.
 # ------------------------------------------------------------------------------------------
 echo "  9. no Steam / x86 / Android payload"
 REMOVED=(
@@ -786,6 +790,7 @@ REMOVED=(
   usr/share/decky-loader usr/share/decky-plugins usr/lib/systemd/system/plugin_loader.service
   usr/bin/FEXInterpreter usr/share/fex-emu usr/share/guestos usr/share/steam/compatibilitytools.d
   usr/bin/podman usr/bin/retroforge-android usr/share/retroforge-android
+  usr/lib/retroforge/steamcmd
 )
 removed_bad=0
 for n in "${REMOVED[@]}"; do

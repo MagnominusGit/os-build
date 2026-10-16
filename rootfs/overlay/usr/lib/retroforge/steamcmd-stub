@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# RETROFORGE_STEAMCMD_STUB
+# steamcmd-stub — RetroForge's stand-in for ~/.steam/steamcmd/steamcmd.sh. The first time the
+# OpenGamepadUI Steam plugin runs it, it downloads Valve's arm64 steamcmd into its own folder,
+# replaces itself with Valve's steamcmd.sh, and runs that with the same arguments.
+#
+# WHY A STUB. The plugin (ShadowBlip/OpenGamepadUI-steam, core/steam_client.gd) runs
+# ~/.steam/steamcmd/steamcmd.sh, and when that file is missing it downloads Valve's x86 bootstrapper
+# there, which cannot run on this machine. Something has to sit at that name before the plugin looks,
+# and the image ships no steamcmd (everything that can be downloaded is). So
+# /usr/lib/retroforge/install-steamcmd puts this file there before every start of the shell, and the
+# real download waits until a player actually opens Steam. Line 2 is the marker install-steamcmd and
+# this script use to tell the stub from Valve's steamcmd.sh; it must stay a line of its own.
+#
+# WHAT IT DOES, on the plugin's `steamcmd.sh +@ShutdownOnFailedCommand 0` (run in a pty):
+#   1. takes a flock on its own folder. OGUI can start the plugin again while the first download is
+#      still running, and two downloads renaming files over each other would be a mess. The lock is the
+#      folder itself, so no lock file is left behind, and install-steamcmd leaves the folder alone
+#      while it is held. A copy that waited finds Valve's steamcmd.sh in place and just runs it;
+#   2. removes the temporary folders of a download a power cut interrupted (under the lock, no other
+#      copy can be using them);
+#   3. downloads the tarball /usr/share/retroforge/steam/steamcmd.pin names, with curl, into a
+#      temporary folder INSIDE this one: same filesystem, so every move below is a rename(2);
+#   4. refuses it unless its sha256 is the pin's, and unless it holds steamcmd.sh and
+#      linuxarm64/steamcmd. An x86 tarball would not run, and one holding this stub as its
+#      steamcmd.sh would exec a stub that downloads again, forever;
+#   5. renames each file into place, Valve's steamcmd.sh LAST. The plugin runs whatever steamcmd.sh
+#      is, so steamcmd.sh must never point at a binary that is not there yet. Only the tarball's
+#      own files are replaced: an x86 linux32/, the plugin's game installs, and files a half-finished
+#      earlier copy of steamcmd left in linuxarm64/ stay. steamcmd checks and replaces its own
+#      files when it starts ("Verifying installation...");
+#   6. execs Valve's steamcmd.sh "$@". steamcmd then self-updates in this folder, as it does on x86.
+#
+# WHEN IT FAILS (offline, a checksum mismatch, a tarball of the wrong shape, a full disk): one line on
+# stderr says why, the exit status is 1, and the stub stays where it is, so the plugin's next run of
+# steamcmd tries again (the plugin starts steamcmd once per start of the shell). Nothing it fetched
+# is left behind. Files already renamed in are Valve's own and harmless, because steamcmd.sh is
+# still the stub. A sha256 mismatch on a good connection means Valve republished the tarball at the
+# same URL: the pin needs a bump (see the pin).
+#
+# The whole script is one function, called on the last line. Bash reads a script while it runs it,
+# and step 5 replaces this very file. The rename leaves this process reading the old inode anyway,
+# but a function is parsed in full before any of it runs, so nothing depends on that.
+#
+# ARMv8.0 (SM6115): Valve's steamcmd needs LSE atomics, so the Air X needs kernel/patches/0025. This
+# stub is plain bash and runs everywhere.
+#
+# TEST SEAMS (tests/test-steamcmd-stub.sh): RETROFORGE_STEAMCMD_PIN, RETROFORGE_STEAMCMD_CURL.
+set -u
+
+STUB_MARKER='# RETROFORGE_STEAMCMD_STUB'
+work=""   # global, not local: the EXIT trap runs after main has returned
+
+say() { echo "steamcmd (RetroForge): $*" >&2; }
+
+is_stub() { grep -qxF "$STUB_MARKER" "$1" 2>/dev/null; }
+
+pin_field() {  # pin_field <pin> <key>: the value of the first "key: value" line, up to whitespace
+  sed -n "s/^$2:[[:space:]]*\([^[:space:]]*\).*/\1/p" "$1" | head -n 1
+}
+
+main() {
+  local pin="${RETROFORGE_STEAMCMD_PIN:-/usr/share/retroforge/steam/steamcmd.pin}"
+  local curl="${RETROFORGE_STEAMCMD_CURL:-curl}"
+  local here self url sha got rel left
+
+  # Only ever as <folder>/steamcmd.sh. Run as /usr/lib/retroforge/steamcmd-stub, it would try to
+  # unpack into the read-only image, and Valve's steamcmd.sh takes its binary's name from its own.
+  if [ "${0##*/}" != steamcmd.sh ]; then
+    say "this is the stub for ~/.steam/steamcmd/steamcmd.sh (install-steamcmd puts it there); not running as $0"
+    return 1
+  fi
+  here="$(CDPATH='' cd -P -- "$(dirname -- "$0")" && pwd)" || return 1
+  self="$here/steamcmd.sh"
+
+  # 1. One copy at a time, on the folder itself. Closed before the exec below, so steamcmd never
+  #    holds it.
+  if ! exec 9<"$here" || ! flock 9; then
+    say "could not lock $here"
+    return 1
+  fi
+  if [ -f "$self" ] && ! is_stub "$self"; then
+    exec 9<&-
+    exec "$self" "$@"
+  fi
+
+  # 2. What an interrupted download left.
+  rm -rf -- "$here"/.steamcmd-download.*
+
+  if [ ! -r "$pin" ]; then
+    say "no pin at $pin, so Valve's arm64 steamcmd cannot be downloaded"
+    return 1
+  fi
+  url="$(pin_field "$pin" url)"; sha="$(pin_field "$pin" sha256)"
+  if [ -z "$url" ] || [ -z "$sha" ]; then
+    say "$pin has no url or no sha256"
+    return 1
+  fi
+
+  # 3. Download. Redirects may only go to https. A stalled transfer (under 1 kB/s for a minute) is
+  #    given up instead of holding the lock forever; there is no overall cap, so a slow link still
+  #    gets there.
+  work="$(mktemp -d "$here/.steamcmd-download.XXXXXX")" || { say "cannot write to $here"; return 1; }
+  trap 'rm -rf -- "$work"' EXIT
+  say "downloading Valve's arm64 steamcmd from $url"
+  if ! "$curl" -fsSL --proto-redir =https --retry 2 --connect-timeout 20 \
+         --speed-limit 1024 --speed-time 60 -o "$work/steamcmd.tar.gz" "$url"; then
+    say "could not download $url (offline?). Nothing changed; the next start of steamcmd tries again."
+    return 1
+  fi
+
+  # 4. Checksum, then shape.
+  got="$(sha256sum <"$work/steamcmd.tar.gz")" || { say "could not checksum the download"; return 1; }
+  got="${got%% *}"
+  if [ "$got" != "${sha,,}" ]; then
+    say "sha256 mismatch for $url: got $got, the pin wants $sha. Nothing changed. If this keeps" \
+        "happening, Valve has republished steamcmd and $pin needs a bump."
+    return 1
+  fi
+  mkdir "$work/tree" || return 1
+  if ! tar -xzf "$work/steamcmd.tar.gz" -C "$work/tree" --no-same-owner 2>"$work/tar.err"; then
+    say "could not unpack $url: $(head -n 3 "$work/tar.err")"
+    return 1
+  fi
+  if [ ! -f "$work/tree/steamcmd.sh" ] || [ ! -f "$work/tree/linuxarm64/steamcmd" ] \
+     || ! grep -q linuxarm64 "$work/tree/steamcmd.sh" || is_stub "$work/tree/steamcmd.sh"; then
+    say "$url is not Valve's arm64 steamcmd (no steamcmd.sh + linuxarm64/steamcmd). Nothing changed."
+    return 1
+  fi
+
+  # 5. Into place, one rename per file, steamcmd.sh last. mv -T: a folder in the way is an error,
+  #    not something to move the file into.
+  while IFS= read -r -d '' rel; do
+    if ! mkdir -p -- "$here/$(dirname -- "$rel")" || ! mv -fT -- "$work/tree/$rel" "$here/$rel"; then
+      say "could not put $rel in $here. steamcmd.sh is still the stub; the next start tries again."
+      return 1
+    fi
+  done < <(cd "$work/tree" && find . -mindepth 1 ! -type d ! -path ./steamcmd.sh -printf '%P\0' | sort -z)
+  # find or sort failing would show up only as files not moved: check, before steamcmd.sh goes in.
+  left="$(cd "$work/tree" && find . ! -type d ! -path ./steamcmd.sh -print -quit)"
+  if [ -n "$left" ] || [ ! -x "$here/linuxarm64/steamcmd" ]; then
+    say "not every file of $url reached $here. steamcmd.sh is still the stub; the next start tries again."
+    return 1
+  fi
+  if ! mv -fT -- "$work/tree/steamcmd.sh" "$self"; then
+    say "could not put Valve's steamcmd.sh in place. The next start tries again."
+    return 1
+  fi
+
+  # 6. exec runs no EXIT trap, so clean up first, and hand over without the lock.
+  rm -rf -- "$work"; trap - EXIT
+  exec 9<&-
+  say "Valve's arm64 steamcmd is in place; starting it"
+  exec "$self" "$@"
+}
+
+main "$@"
+exit $?

@@ -1,65 +1,74 @@
 #!/usr/bin/env python3
-# install-steamcmd — put the image's arm64 steamcmd where the OpenGamepadUI Steam plugin runs it from.
+# install-steamcmd — put RetroForge's steamcmd stub where the OpenGamepadUI Steam plugin runs steamcmd.
 #
 # The plugin (ShadowBlip/OpenGamepadUI-steam) runs ~/.steam/steamcmd/steamcmd.sh, and when that is
 # missing it downloads Valve's x86 bootstrapper there, which cannot run on this machine. The image
-# ships Valve's arm64 one read-only (/usr/lib/retroforge/steamcmd, packages/steamcmd/prebuilt.pin).
-# steamcmd updates itself where it runs, so it needs a writable copy. retroforge-session runs this, as
-# the player, before every start of the shell:
-#   - installs it when there is no working arm64 copy: nothing there yet, an x86 one the plugin
+# ships no steamcmd (everything that can be downloaded is). It ships a stub,
+# /usr/lib/retroforge/steamcmd-stub: sitting at steamcmd.sh it stops the plugin's x86 download, and
+# the first time the plugin runs it, it downloads Valve's arm64 steamcmd
+# (/usr/share/retroforge/steam/steamcmd.pin) into that folder and replaces itself with it.
+# retroforge-session runs this, as the player, before every start of the shell:
+#   - places the stub when there is no working arm64 copy: nothing there yet, an x86 one the plugin
 #     downloaded, or a half-written one;
+#   - counts the image's stub, already in place, as fine and writes nothing (an ordinary boot
+#     touches nothing). A stub from an older image (the marker line, other bytes) is replaced;
 #   - never touches a working arm64 copy (linuxarm64/steamcmd, and a steamcmd.sh that knows
-#     linuxarm64): steamcmd has updated it past the image's copy, and the image's copy is only a
-#     bootstrapper anyway;
-#   - copies each file through a temporary file and a rename, steamcmd.sh LAST: the plugin skips
-#     its download as soon as steamcmd.sh exists, so steamcmd.sh is what marks the copy complete;
-#   - leaves everything else in the folder alone (the plugin's game installs, an x86 linux32/).
-# Exit 0 when a working copy is in place (installed or kept), 1 when the image's copy is missing or
-# the copy failed. Messages go to stderr (the session log); stdout stays empty.
+#     linuxarm64 and is not the stub): steamcmd keeps that one updated itself;
+#   - writes steamcmd.sh through a temporary file and a rename. The plugin runs whatever that name
+#     holds, so it never sees half a file. The stub is a whole program on its own, and it puts
+#     Valve's steamcmd.sh in only after the binary it starts, so steamcmd.sh never points at
+#     something that is not there;
+#   - leaves everything else in the folder alone (the plugin's game installs, an x86 linux32/, the
+#     files of a half-written copy, which the stub's download overwrites with Valve's);
+#   - leaves the folder alone while a stub is downloading into it (the stub holds a flock on the
+#     folder): this boot changes nothing, and the next one finds Valve's copy or the stub.
+# Exit 0 when the stub or a working copy is in place (or a stub is busy), 1 when the image's stub is
+# missing or the stub could not be written. Messages go to stderr (the session log); stdout stays
+# empty.
 #
-# TEST SEAMS (tests/test-steamcmd-install.sh): RETROFORGE_STEAMCMD_SRC, RETROFORGE_STEAMCMD_DIR.
+# TEST SEAMS (tests/test-steamcmd-install.sh): RETROFORGE_STEAMCMD_STUB, RETROFORGE_STEAMCMD_DIR.
+import fcntl
 import os
-import shutil
 import sys
 import tempfile
 
-SRC = os.environ.get("RETROFORGE_STEAMCMD_SRC", "/usr/lib/retroforge/steamcmd")
+STUB = os.environ.get("RETROFORGE_STEAMCMD_STUB", "/usr/lib/retroforge/steamcmd-stub")
 DST = os.environ.get("RETROFORGE_STEAMCMD_DIR", os.path.expanduser("~/.steam/steamcmd"))
 SCRIPT = "steamcmd.sh"
 BINARY = os.path.join("linuxarm64", "steamcmd")
+X86_BINARY = os.path.join("linux32", "steamcmd")
+MARKER = b"# RETROFORGE_STEAMCMD_STUB"   # a line of its own in the stub; see steamcmd-stub
 
 
 def log(msg):
     print(f"install-steamcmd: {msg}", file=sys.stderr)
 
 
-def is_arm64_copy(root):
-    """steamcmd.sh that picks linuxarm64 (Valve's x86 one only knows linux32) plus the binary."""
+def read(path):
     try:
-        with open(os.path.join(root, SCRIPT), encoding="utf-8", errors="replace") as f:
-            knows_arm64 = "linuxarm64" in f.read()
+        with open(path, "rb") as f:
+            return f.read()
     except OSError:
-        return False
-    return knows_arm64 and os.path.isfile(os.path.join(root, BINARY))
+        return None
 
 
-def files(root):
-    """Every file of the image's copy, relative to it, steamcmd.sh last."""
-    out = []
-    for dirpath, _, names in os.walk(root):
-        out += [os.path.relpath(os.path.join(dirpath, n), root) for n in names]
-    return sorted(out, key=lambda rel: (rel == SCRIPT, rel))
+def is_stub(data):
+    return data is not None and MARKER in data.splitlines()
 
 
-def copy(rel):
-    src, dst = os.path.join(SRC, rel), os.path.join(DST, rel)
-    os.makedirs(os.path.dirname(dst), exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(dst), prefix=f".{os.path.basename(rel)}.")
+def is_arm64_copy(script):
+    """Valve's steamcmd.sh that picks linuxarm64 (the x86 one runs linux32) plus the binary."""
+    return (script is not None and not is_stub(script) and b"linuxarm64" in script
+            and os.path.isfile(os.path.join(DST, BINARY)))
+
+
+def place(stub):
+    fd, tmp = tempfile.mkstemp(dir=DST, prefix=f".{SCRIPT}.")
     try:
-        with os.fdopen(fd, "wb") as out, open(src, "rb") as f:
-            shutil.copyfileobj(f, out)
-        os.chmod(tmp, os.stat(src).st_mode & 0o777)
-        os.replace(tmp, dst)
+        with os.fdopen(fd, "wb") as out:
+            out.write(stub)
+        os.chmod(tmp, 0o755)
+        os.replace(tmp, os.path.join(DST, SCRIPT))
     except OSError:
         if os.path.exists(tmp):
             os.unlink(tmp)
@@ -67,19 +76,40 @@ def copy(rel):
 
 
 def main():
-    if not is_arm64_copy(SRC):
-        log(f"no arm64 steamcmd in the image at {SRC}")
+    stub = read(STUB)
+    if not is_stub(stub):
+        log(f"no steamcmd stub in the image at {STUB}")
         return 1
-    if is_arm64_copy(DST):
-        return 0
-    had_x86 = os.path.isfile(os.path.join(DST, SCRIPT))
     try:
-        for rel in files(SRC):
-            copy(rel)
+        os.makedirs(DST, exist_ok=True)
+        lock = os.open(DST, os.O_RDONLY | os.O_DIRECTORY)
     except OSError as err:
-        log(f"could not install steamcmd: {err}")
+        log(f"could not set up {DST}: {err}")
         return 1
-    log("installed the arm64 steamcmd" + (" over an x86 one" if had_x86 else ""))
+    try:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            log("a steamcmd download is running in the folder; leaving it alone")
+            return 0
+        current = read(os.path.join(DST, SCRIPT))
+        if current == stub or is_arm64_copy(current):
+            return 0
+        if is_stub(current):
+            what = "updated the steamcmd stub"
+        elif current is None:
+            what = "placed the steamcmd stub"
+        elif os.path.isfile(os.path.join(DST, X86_BINARY)):
+            what = "placed the steamcmd stub over an x86 steamcmd"
+        else:
+            what = "placed the steamcmd stub over an incomplete steamcmd"
+        place(stub)
+    except OSError as err:
+        log(f"could not install the steamcmd stub: {err}")
+        return 1
+    finally:
+        os.close(lock)
+    log(f"{what}: Valve's arm64 steamcmd downloads the first time the Steam plugin runs it")
     return 0
 
 

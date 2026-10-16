@@ -1,0 +1,39 @@
+# Valve's arm64 steamcmd, for the OpenGamepadUI Steam plugin.
+#
+# Read by ~/.steam/steamcmd/steamcmd.sh while that is still RetroForge's stub
+# (/usr/lib/retroforge/steamcmd-stub, which /usr/lib/retroforge/install-steamcmd puts there before the
+# shell starts). The first time the plugin runs steamcmd, the stub downloads this, checks the sha256,
+# unpacks it over itself and runs it. From then on ~/.steam/steamcmd is Valve's own steamcmd, which
+# updates itself from Valve's manifest (media.steampowered.com/client/steam_cmd_linuxarm64).
+#
+# WHY. The plugin (ShadowBlip/OpenGamepadUI-steam, core/steam_client.gd) runs
+# ~/.steam/steamcmd/steamcmd.sh for the library, installs and updates. When that file is missing it
+# downloads Valve's x86 bootstrapper (steamcmd_linux.tar.gz: an i386 binary), which cannot run here.
+# It downloads only when steamcmd.sh is missing, so the stub sitting there stops it.
+#
+# Not in the image: everything that can be downloaded is. It is 4 MB the plugin only needs once a
+# player opens Steam, and the player's copy replaces itself with Valve's updates anyway.
+#
+# WHAT IS IN IT (checked 2026-10-15): steamcmd.sh + linuxarm64/{steamcmd, crashhandler.so,
+# steamerrorreporter}, all ELF64 aarch64, NEEDED only glibc (libc/libdl/libm/libpthread, GLIBC_2.30),
+# so no Steam Runtime. Valve's steamcmd.sh picks linuxarm64 on `uname -m` = aarch64 and linux32
+# otherwise. The stub refuses a tarball without steamcmd.sh and linuxarm64/steamcmd.
+#
+# ARMv8.0 (SM6115): NOT LSE-clean. steamcmd has ~300 unguarded LSE atomics (281 ldaddal, casal,
+# swpa, ...), crashhandler.so ~135, steamerrorreporter 5, with no outline-atomic helpers, which is the
+# same toolchain as Valve's arm64 client (docs/steam-arm64.md). The SM8250/SM8550/SM8650 boards run it
+# natively. The Air X needs kernel/patches/0025 (LSE emulation) or it SIGILLs as soon as steamcmd goes
+# multithreaded. It is Valve's binary, so this cannot be fixed with a rebuild.
+#
+# Same fields as runtime.pin and a packages/*/prebuilt.pin (the stub reads name/version/url/sha256).
+#
+# TO BUMP. The URL is unversioned and Valve replaces it in place, so a "sha256 mismatch" from the stub
+# means Valve republished the bootstrapper, not a corrupt download. Until this is bumped and the
+# update ships, a player who has not run steamcmd yet gets that error and no steamcmd; players who
+# have are not affected (their copy is Valve's, self-updating, and install-steamcmd never replaces a
+# working arm64 copy). Re-check the layout, the ELF arch and the LSE count of the new one, then set
+# version (its Last-Modified date) + sha256 together.
+name: steamcmd
+version: 20260727
+url: https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linuxarm64.tar.gz
+sha256: 32eef1a7c3fd98bed9e1bd0bf6bdc41a3c7c58583351a1d802f449e623f7a86c

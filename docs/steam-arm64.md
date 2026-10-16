@@ -84,10 +84,28 @@ anything on hardware.
 
 The OGUI Steam plugin uses `steamcmd` for the library, installs and updates, not the client. Valve
 publishes an arm64 build next to the x86 one (`steamcmd_linuxarm64.tar.gz`, update manifest
-`steam_cmd_linuxarm64`). The plugin only ever downloads the x86 one, so the image ships the arm64
-build (`packages/steamcmd/prebuilt.pin`), and `retroforge-session` puts it at
-`~/.steam/steamcmd/` before the shell starts (`/usr/lib/retroforge/install-steamcmd`). It is built
-like the client: ~300 unguarded LSE atomics in the bootstrapper alone, so the same `0025` applies.
+`steam_cmd_linuxarm64`). The plugin runs `~/.steam/steamcmd/steamcmd.sh`, and only when that file
+is missing does it download the x86 one there. Like the client, steamcmd is downloaded on demand,
+not shipped:
+
+- **Before the shell starts**, `retroforge-session` runs `/usr/lib/retroforge/install-steamcmd`. It
+  puts a stub (`/usr/lib/retroforge/steamcmd-stub`) at `~/.steam/steamcmd/steamcmd.sh`, which stops
+  the plugin's x86 download. It writes nothing when the stub or a working arm64 copy is already
+  there. It replaces an x86 copy, a half-written copy and a stub from an older image, and leaves the
+  rest of the folder alone.
+- **The first time the plugin runs steamcmd**, the stub downloads the tarball pinned in
+  `/usr/share/retroforge/steam/steamcmd.pin` (curl, sha256-checked) into its own folder. It renames
+  the files into place with Valve's `steamcmd.sh` last, so Valve's script replaces the stub, then
+  execs it with the plugin's arguments. steamcmd then updates itself there, as on x86. Copies that
+  start at the same time share one download (flock on the folder).
+- **Offline or on a checksum mismatch**, the stub says why on stderr, exits 1 and stays in place.
+  The plugin starts steamcmd once per start of the shell, so the next start tries again. The pinned
+  URL is unversioned, and Valve replaces the file at that URL in place. A mismatch on a good
+  connection therefore means the pin needs a bump. Players who already have steamcmd are not
+  affected.
+
+It is built like the client: ~300 unguarded LSE atomics in the bootstrapper alone, so the same
+`0025` applies.
 
 ## Open
 
