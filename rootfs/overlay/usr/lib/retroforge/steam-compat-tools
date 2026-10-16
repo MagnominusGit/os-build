@@ -1,0 +1,295 @@
+#!/usr/bin/env python3
+# steam-compat-tools — Proton-CachyOS's arm64 build as a Steam compatibility tool, with its DXVK-Sarek
+# turned on or off. Run by /usr/bin/retroforge-steam-sarek, which keeps the player's DXVK-Sarek setting.
+#
+#   steam-compat-tools on    install Proton-CachyOS (download if needed), Sarek on in it
+#   steam-compat-tools off   Sarek off in the installed one. Never downloads, never removes the tool.
+#
+# Every upstream DXVK needs multiViewport. Turnip gives the Adreno 610 (SM6115) that only under
+# TU_DEBUG=noconform (etc/retroforge/session.conf), and Mesa 26.3 removes noconform. DXVK-Sarek works
+# without it, and Proton-CachyOS ships it (as ARM64EC in its arm64 build), turned on by
+# PROTON_DXVK_SAREK=1. None of it is in the image (a 356 MB download, ~2.2 GB unpacked), so `on`
+# downloads it into the player's home:
+#   - the release /usr/share/retroforge/steam/proton-cachyos-arm64.pin pins, refused unless its
+#     sha256 matches;
+#   - unpacked under a temporary name in the Steam root, then renamed into
+#     <Steam root>/compatibilitytools.d/<dir>/ once it is all there, so Steam never lists half a tool;
+#   - with a .retroforge-pin in it. That is how this knows its own folders: one without it is the
+#     player's and is never touched, even under the pinned name;
+#   - older folders it installed under the same pin name are removed, but only by a later run than
+#     the one that downloaded the new version. A game still running on the old version during the
+#     download keeps its files, and a running Steam lists the new tool only after a restart anyway.
+# Once the tool is installed, `on` only checks it. One `on` at a time: a second one exits at once.
+#
+# Sarek on = a user_settings.py with PROTON_DXVK_SAREK=1 in the tool's folder, which Proton-CachyOS
+# applies to every game run with the tool. retroforge-steam-sarek also has /usr/bin/steam export
+# PROTON_DXVK_SAREK=1; the file is for a client that does not hand its environment on to games. A
+# game's own environment wins over the file, so `PROTON_DXVK_SAREK=0 %command%` in a game's launch
+# options turns Sarek off for that game. `off` deletes only a user_settings.py that is exactly the one
+# this writes: one the player edited is theirs.
+#
+# Steam is never told to use the tool (config.vdf is not edited). The player picks it per game
+# (Properties > Compatibility) or as the Steam Play default (docs/steam-arm64.md).
+#
+# Exit 0 (`on`: the tool's folder on stdout, or nothing when another run holds the lock), 1 when the
+# tool could not be installed (no network, a checksum mismatch, a tarball without the pinned folder),
+# 2 for a bad invocation.
+#
+# TEST SEAMS (tests/test-steam-compat-tools.sh): RETROFORGE_STEAM_ROOT (also set by /usr/bin/steam),
+# RETROFORGE_STEAM_COMPAT_PIN.
+import fcntl
+import hashlib
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+
+DATA = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+STEAM_ROOT = os.environ.get("RETROFORGE_STEAM_ROOT") or os.path.join(DATA, "Steam")
+PIN = os.environ.get("RETROFORGE_STEAM_COMPAT_PIN", "/usr/share/retroforge/steam/proton-cachyos-arm64.pin")
+TOOLS = os.path.join(STEAM_ROOT, "compatibilitytools.d")
+LOCK = os.path.join(STEAM_ROOT, ".retroforge-compat-tools.lock")
+TMP_PREFIX = ".retroforge-compat-tools-"
+MARKER = ".retroforge-pin"
+SETTINGS = "user_settings.py"
+# What Steam reads from a tool's folder, and the tool's entry point.
+TOOL_FILES = ("compatibilitytool.vdf", "toolmanifest.vdf", "proton")
+
+SAREK_SETTINGS = """\
+# Written by /usr/lib/retroforge/steam-compat-tools: the player's DXVK-Sarek setting is on
+# (retroforge-steam-sarek, Settings > General). DXVK-Sarek instead of DXVK for every game run with this
+# tool. A game's own environment wins: PROTON_DXVK_SAREK=0 %command% in its launch options turns it
+# off for that game. Deleted when the setting is turned off, unless it was edited.
+user_settings = {
+    "PROTON_DXVK_SAREK": "1",
+}
+"""
+
+
+class Failed(Exception):
+    pass
+
+
+def log(msg):
+    print(f"steam-compat-tools: {msg}", file=sys.stderr, flush=True)
+
+
+def fields(text, keys):
+    found = {}
+    for key in keys:
+        m = re.search(rf"^{key}:[ \t]*(\S+)", text, re.M)
+        found[key] = m.group(1) if m else None
+    return found
+
+
+def read_pin():
+    try:
+        with open(PIN, encoding="utf-8") as f:
+            pin = fields(f.read(), ("name", "version", "dir", "url", "sha256"))
+    except OSError as err:
+        raise Failed(f"no pin: {err}")
+    if not all(pin.values()):
+        raise Failed(f"{PIN}: needs name, version, dir, url and sha256")
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", pin["sha256"]):
+        raise Failed(f"{PIN}: sha256 is not 64 hex digits")
+    if "/" in pin["dir"] or pin["dir"].startswith("."):
+        raise Failed(f"{PIN}: dir must be a plain folder name")
+    return pin
+
+
+def marker(path):
+    """The name, version and sha256 in a folder this installed, or None for anyone else's."""
+    if os.path.islink(path) or not os.path.isdir(path):
+        return None
+    try:
+        with open(os.path.join(path, MARKER), encoding="utf-8") as f:
+            return fields(f.read(), ("name", "version", "sha256"))
+    except OSError:
+        return None
+
+
+def ours(path, pin):
+    """Whether path is a folder this installed for the pin's name."""
+    m = marker(path)
+    return m is not None and m["name"] == pin["name"]
+
+
+def complete(path):
+    return all(os.path.isfile(os.path.join(path, f)) for f in TOOL_FILES)
+
+
+def installed(pin):
+    """The pinned version's folder, when this installed it and it is whole; else None."""
+    path = os.path.join(TOOLS, pin["dir"])
+    m = marker(path)
+    if (m is not None and m["name"] == pin["name"] and (m["sha256"] or "").lower() == pin["sha256"].lower()
+            and complete(path)):
+        return path
+    return None
+
+
+def our_settings(path):
+    """Whether path is a user_settings.py this wrote, unchanged."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read() == SAREK_SETTINGS
+    except (OSError, UnicodeDecodeError):
+        return False
+
+
+def sarek_on(tool):
+    """Writes the Sarek user_settings.py into tool, unless the player has one of their own there."""
+    path = os.path.join(tool, SETTINGS)
+    if os.path.lexists(path):
+        if not our_settings(path):
+            log(f"{path} is the player's own; not writing PROTON_DXVK_SAREK into it")
+        return
+    tmp = path + ".part"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(SAREK_SETTINGS)
+    os.replace(tmp, path)
+
+
+def sarek_off(pin):
+    """Deletes the Sarek user_settings.py from every folder this installed. The tools stay."""
+    try:
+        names = sorted(os.listdir(TOOLS))
+    except FileNotFoundError:
+        return
+    for name in names:
+        tool = os.path.join(TOOLS, name)
+        path = os.path.join(tool, SETTINGS)
+        if not ours(tool, pin) or not os.path.lexists(path):
+            continue
+        if our_settings(path):
+            os.unlink(path)
+            log(f"DXVK-Sarek turned off in {name}")
+        else:
+            log(f"{path} is the player's own; leaving it (it may still turn DXVK-Sarek on)")
+
+
+def discard(path):
+    """Takes path out of Steam's sight in one rename, then deletes it."""
+    trash = tempfile.mkdtemp(dir=STEAM_ROOT, prefix=TMP_PREFIX)
+    os.rename(path, os.path.join(trash, "old"))
+    shutil.rmtree(trash, ignore_errors=True)
+
+
+def prune(pin):
+    """Removes older versions this installed under the pin's name. Nothing else."""
+    for name in sorted(os.listdir(TOOLS)):
+        path = os.path.join(TOOLS, name)
+        if name != pin["dir"] and ours(path, pin):
+            log(f"removing {name}, an older {pin['name']}")
+            discard(path)
+
+
+def sweep():
+    """Temporary folders left by a run that was killed. With the lock held, none is in use."""
+    for name in os.listdir(STEAM_ROOT):
+        path = os.path.join(STEAM_ROOT, name)
+        if name.startswith(TMP_PREFIX) and os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path, ignore_errors=True)
+
+
+def download(url, dest, sha256):
+    """url -> dest, refusing it unless its sha256 matches. Logs every 10%."""
+    digest = hashlib.sha256()
+    try:
+        with urllib.request.urlopen(url, timeout=60) as r, open(dest, "wb") as out:
+            total = int(r.headers.get("Content-Length") or 0)
+            done, next_pct = 0, 10
+            while chunk := r.read(1 << 20):
+                digest.update(chunk)
+                out.write(chunk)
+                done += len(chunk)
+                if total and done * 100 >= next_pct * total and next_pct < 100:
+                    log(f"{next_pct}% ({done // 1000000} of {total // 1000000} MB)")
+                    next_pct += 10
+    except OSError as err:
+        raise Failed(f"could not download {url}: {err}")
+    if digest.hexdigest() != sha256.lower():
+        raise Failed(f"sha256 mismatch for {url}: got {digest.hexdigest()}, want {sha256}")
+
+
+def install(pin):
+    """Downloads, checks and unpacks the pinned version, then renames it into compatibilitytools.d."""
+    log(f"downloading {pin['dir']} from {pin['url']}")
+    started = time.monotonic()
+    tmp = tempfile.mkdtemp(dir=STEAM_ROOT, prefix=TMP_PREFIX)
+    try:
+        archive = os.path.join(tmp, "tool.tar.xz")
+        download(pin["url"], archive, pin["sha256"])
+        tree = os.path.join(tmp, "tree")
+        os.mkdir(tree)
+        res = subprocess.run(["tar", "--no-same-owner", "-xJf", archive, "-C", tree],
+                             stderr=subprocess.PIPE, text=True)
+        os.unlink(archive)
+        if res.returncode != 0:
+            raise Failed(f"could not unpack {pin['url']}: {res.stderr.strip()}")
+        new = os.path.join(tree, pin["dir"])
+        if os.path.islink(new) or not os.path.isdir(new) or not complete(new):
+            raise Failed(f"{pin['url']} has no {pin['dir']}/ with {', '.join(TOOL_FILES)}")
+        with open(os.path.join(new, MARKER), "w", encoding="utf-8") as f:
+            f.write(f"name: {pin['name']}\nversion: {pin['version']}\nsha256: {pin['sha256']}\n")
+        sarek_on(new)
+        final = os.path.join(TOOLS, pin["dir"])
+        if os.path.lexists(final):
+            # Ours, but not whole or not this build. Checked again: the download took minutes.
+            if not ours(final, pin):
+                raise Failed(f"{final} appeared while downloading and is not ours; leaving it alone")
+            discard(final)
+        os.rename(new, final)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    log(f"installed {final} in {time.monotonic() - started:.0f} s. Steam lists it from its next start.")
+    return final
+
+
+def on(pin):
+    os.makedirs(TOOLS, exist_ok=True)
+    with open(LOCK, "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            log("another steam-compat-tools is already running; leaving it to that one")
+            return None
+        sweep()
+        path = installed(pin)
+        final = os.path.join(TOOLS, pin["dir"])
+        if path is not None:
+            sarek_on(path)
+            prune(pin)
+        elif os.path.lexists(final) and not ours(final, pin):
+            log(f"{final} is already there and was not installed by RetroForge; leaving it alone")
+            path = final
+            prune(pin)
+        else:
+            path = install(pin)
+    return path
+
+
+def main(argv):
+    if len(argv) != 2 or argv[1] not in ("on", "off"):
+        log("usage: steam-compat-tools on|off")
+        return 2
+    try:
+        pin = read_pin()
+        if argv[1] == "off":
+            sarek_off(pin)
+            return 0
+        path = on(pin)
+    except (Failed, OSError) as err:
+        log(str(err))
+        return 1
+    if path is not None:
+        print(path)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

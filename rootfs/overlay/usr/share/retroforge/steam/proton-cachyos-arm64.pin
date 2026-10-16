@@ -1,0 +1,35 @@
+# Proton-CachyOS, arm64 build: a Steam compatibility tool for the Adreno 610 (SM6115), for its
+# DXVK-Sarek.
+#
+# Read by /usr/lib/retroforge/steam-compat-tools, which runs in the background while the player's
+# DXVK-Sarek setting is on (retroforge-steam-sarek; on by default on the SM6115 only). It downloads
+# this into the player's home, checks the sha256, and installs it as
+# <Steam root>/compatibilitytools.d/<dir>/. Steam lists it from its next start on. Nothing selects it:
+# the player does, per game or as the Steam Play default (docs/steam-arm64.md).
+#
+# Why: every upstream DXVK (1.10.3, 2.x, 3.x) needs multiViewport, which Turnip does not give the A610.
+# Today it only gets it because session.conf sets TU_DEBUG=noconform there, which Mesa 26.3 removes
+# (and Mesa 82b86896 keeps multiViewport off on a6xx_gen1_low). Proton-CachyOS carries DXVK-Sarek, which
+# works without it, and its arm64 build has Sarek as ARM64EC. PROTON_DXVK_SAREK=1 turns it on. Its
+# maintainers call the arm64 build untested.
+#
+# Not in the image: the tarball is 356 MB and unpacks to ~2.2 GB, and a root slot is 2 GB.
+# Its toolmanifest.vdf requires tool appid 4185400 (Steam Linux Runtime 4.0, arm64), which Steam
+# downloads itself. A local scan of this build found nothing beyond ARMv8.0 except LSE atomics
+# (kernel/patches/0025 covers those), apart from libraries that pick their code path at run time.
+#
+# Fields: name is the family (the helper removes older folders it installed under the same name, never
+# anyone else's), version is the release tag, dir is the tarball's top folder, which is also the tool's
+# name in its compatibilitytool.vdf and the folder under compatibilitytools.d. The URL is the GitHub
+# release asset. The sha256 was computed on 2026-10-16 from a download that matched the release's own
+# .sha512sum (81ca1b66...b1c0fa); the asset is 356312716 bytes.
+#
+# TO BUMP: take the next release's *-slr-arm64.tar.xz from github.com/CachyOS/proton-cachyos/releases,
+# check it against its .sha512sum, and set version + dir + url + sha256 together. Players get it on
+# their next `steam`, and the old folder goes on the `steam` after that. The tool's name changes with
+# every release, so a game set to the old one has to be set to the new one.
+name: proton-cachyos-arm64
+version: cachyos-11.0-20261005-slr
+dir: proton-cachyos-11.0-20261005-slr-arm64
+url: https://github.com/CachyOS/proton-cachyos/releases/download/cachyos-11.0-20261005-slr/proton-cachyos-11.0-20261005-slr-arm64.tar.xz
+sha256: e59b646e73de4af21ff2f6c795b28e7b6c889214b3c6daf8e65a56634cd06c37

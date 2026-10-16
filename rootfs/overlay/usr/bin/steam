@@ -113,6 +113,16 @@ case "${DBUS_SESSION_BUS_ADDRESS-}" in
 esac
 unset STEAM_RUNTIME STEAM_RUNTIME_LIBRARY_PATH
 
+# DXVK-Sarek, the player's setting (Settings > General, on by default on the SM6115's Adreno 610,
+# where upstream DXVK stops working with Mesa 26.3). retroforge-steam-sarek applies it: when it is on,
+# Proton-CachyOS's arm64 build is installed or updated in the background, and PROTON_DXVK_SAREK=1 is
+# its switch for Sarek (Valve's Proton ignores it); when off, Sarek is turned off in an installed one.
+# docs/steam-arm64.md. TEST SEAM (tests/test-steam-compat-tools.sh): RETROFORGE_STEAM_SAREK_CLI.
+sarek_cli="${RETROFORGE_STEAM_SAREK_CLI:-/usr/bin/retroforge-steam-sarek}"
+if [ -x "$sarek_cli" ] && [ "$("$sarek_cli" apply)" = on ]; then
+  export PROTON_DXVK_SAREK="${PROTON_DXVK_SAREK:-1}"
+fi
+
 cd "$RETROFORGE_STEAM_ROOT" || exit 1
 child=""; stopping=""
 trap 'stopping=1; [ -n "$child" ] && kill -TERM "$child" 2>/dev/null' TERM INT HUP

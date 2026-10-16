@@ -41,6 +41,7 @@ var _scraper: RefCounted  # scraper_settings.gd
 var _psn: RefCounted  # psn_settings.gd
 var _art_fetch: RefCounted  # art_fetch.gd: new ROMs' art, fetched when their card asks for it
 var _os: Resource  # retroforge_os.gd, installed as OGUI's platform.os
+var _sarek: RefCounted  # steam_sarek.gd
 var _watch: RefCounted  # rom_watch.gd
 var _rescan_timer: Timer
 var _rescanning := false
@@ -90,6 +91,9 @@ func _ready() -> void:
 	_art_fetch.other = _scraper.runner
 	_art_fetch.allowed = _scraper.can_fetch
 	_install_os_platform()
+	_sarek = load(plugin_base.path_join("steam_sarek.gd")).new().setup(get_tree())
+	if not _sarek.attach():
+		logger.warn("OGUI general settings layout or retroforge-steam-sarek not found; no DXVK-Sarek toggle")
 	_setup_input_boost()
 
 
@@ -123,6 +127,8 @@ func unload() -> void:
 		_art_fetch.runner.cancel()
 	if _os:
 		_os.detach()
+	if _sarek:
+		_sarek.detach()
 	if is_instance_valid(_hardware_card):
 		var qb_card: Node = _hardware_card.find_parent("QuickBarCard*")
 		(qb_card if qb_card else _hardware_card).queue_free()

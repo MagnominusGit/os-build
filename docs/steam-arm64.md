@@ -295,6 +295,80 @@ Checked on 2026-10-16:
 Not yet seen: the FEX tool using this provider, an x86 game or Proton running, anything on
 hardware, and FEX on ARMv8.0.
 
+## DXVK-Sarek: Proton-CachyOS for the Adreno 610 (downloaded, not shipped)
+
+**Why the A610 needs it (2026-10-16).** Turnip in Mesa 26.2.5 (`packages/mesa`) gives the A610 only
+Vulkan 1.0. It reaches 1.3 because `etc/retroforge/session.conf` exports `TU_DEBUG=noconform` on the
+SM6115, and that also fakes `multiViewport`. Mesa 26.3 (final ~2026-11-04) removes noconform and keeps
+multiViewport off on a6xx_gen1_low (Mesa 82b86896). Every upstream DXVK (1.10.3, 2.x, 3.x) requires
+multiViewport, so after that bump DXVK-Sarek is the only DXVK that creates a device on the A610. The
+A650 (SM8250) runs Valve's Proton 11 (DXVK 2.7) but not DXVK 3.x (Proton Experimental,
+Proton-CachyOS), because it has no `storageBuffer8BitAccess`. The A740 and A750 run anything. So
+Sarek is on by default only on the SM6115.
+
+Proton-CachyOS publishes an arm64 build with an ARM64EC DXVK-Sarek (`files/lib/wine/dxvk-sarek/
+aarch64-windows/`), turned on by `PROTON_DXVK_SAREK=1`. Its `toolmanifest.vdf` requires tool appid
+4185400 (Steam Linux Runtime 4.0, arm64), which Steam downloads itself. Its maintainers call the arm64
+build untested. A local ISA scan of it found nothing beyond ARMv8.0 except LSE atomics (covered by
+`0025`), apart from libraries that pick their code path at run time. Its `proton` also turns Sarek on
+by itself when the GPU lacks Vulkan 1.3 with `descriptorIndexing`, but under noconform the A610
+reports 1.3, so that check does not pick Sarek today.
+
+**One setting.** `DXVK_SAREK=on|off` in `~/.config/retroforge/steam.conf`, kept by
+`/usr/bin/retroforge-steam-sarek`. The player changes it in Settings > General > "Steam: DXVK-Sarek
+(low-end GPUs)" (the RetroForge plugin), or with `retroforge-steam-sarek on|off|status` over SSH.
+Never set, it is on for SoC class SM6115 (device-env) and off elsewhere. A card moved to another board
+follows that board until the player chooses. `RETROFORGE_STEAM_SAREK=on|off` overrides it, for testing.
+
+- **On:** every `steam` start (and turning the toggle on) runs `/usr/lib/retroforge/steam-compat-tools
+  on` in the background, as the user unit `retroforge-steam-compat-tools` (with setsid when there is no
+  user manager). A user unit is not under OGUI's reaper, which stops everything under a game when the
+  game ends, and the first `steam` does not wait for the download. It fetches the release pinned in
+  `/usr/share/retroforge/steam/proton-cachyos-arm64.pin` (356 MB, sha256-checked), unpacks it (~2.2
+  GB) under a temporary name in the Steam root, and renames it into
+  `~/.local/share/Steam/compatibilitytools.d/proton-cachyos-11.0-20261005-slr-arm64/`, so Steam never
+  sees half a tool. It adds a `user_settings.py` with `PROTON_DXVK_SAREK=1`, which Proton-CachyOS
+  applies to every game run with it, and `/usr/bin/steam` exports `PROTON_DXVK_SAREK=1` as well
+  (Valve's Proton ignores it). Log: `~/.local/share/retroforge/steam-compat-tools.log`.
+- **Off:** nothing is downloaded or exported. Before the client starts, `steam-compat-tools off`
+  deletes that `user_settings.py` from the installed tool, which stays. Turning the toggle off also
+  stops a download in progress.
+
+**Using it.** Steam reads `compatibilitytools.d` only when it starts, so restart Steam once the log
+says "installed". Then select `proton-cachyos-11.0-20261005-slr-arm64` per game (Properties >
+Compatibility > Force the use of a specific Steam Play compatibility tool), or for every game
+(Settings > Compatibility > Default compatibility tool). Nothing edits Steam's `config.vdf`: choosing
+the tool is the player's. `PROTON_DXVK_SAREK=0 %command%` in a game's launch options turns Sarek off
+for that game.
+
+**What it never touches.** Each folder it installs carries `.retroforge-pin`. A folder without one is
+someone else's: other tools, and a Proton-CachyOS the player installed, even under the pinned name. A
+`user_settings.py` the player edited is theirs too.
+
+**Bumping the pin** (see the pin's header). The new version installs at the next `steam` start, and the
+old folder goes at the start after that, so a game still running on it keeps its files. The tool's
+name changes with every release, so a game set to the old one has to be set to the new one.
+
+**Removing it.** Turn the setting off, then delete the
+`~/.local/share/Steam/compatibilitytools.d/proton-cachyos-*-arm64/` folders that have a
+`.retroforge-pin`, and set games that used it back to another tool. Steam Linux Runtime 4.0 (arm64) can
+then be uninstalled from Steam's library like any tool.
+
+Checked in a linux/arm64 container on 2026-10-16: `steam-compat-tools on` installed the real tarball
+(through a `file://` pin to a copy that matched the release's `.sha512sum`) in 5 s: 2,191 MB, 1,972
+symlinks, none broken. `toolmanifest.vdf` and `compatibilitytool.vdf` are the release's (tool name
+`proton-cachyos-11.0-20261005-slr-arm64`, `from_oslist windows`, `to_oslist linux`, require 4185400),
+and `user_settings.py` imports as `{'PROTON_DXVK_SAREK': '1'}`. A second `on` touched nothing, and `off`
+then `on` removed and restored `user_settings.py`.
+
+Not yet seen:
+- Whether the arm64 client lists the tool. Its `compatibilitytool.vdf` says `to_oslist linux`, and
+  steamclient.so has "Ignoring tool %s as it's for a different target platform %s.".
+- Whether the client's environment reaches games: the client runs in the steamrt3c container, games
+  in Steam Linux Runtime 4.0. `user_settings.py` covers that either way.
+- Steam fetching 4185400 on arm64, a game run with the tool, Sarek on an A610, the plugin toggle on a
+  device, anything on hardware.
+
 ## Open
 
 - Boot the kernel with 0025 and drop the shim (0025 also removes the shim's one weakness: no
