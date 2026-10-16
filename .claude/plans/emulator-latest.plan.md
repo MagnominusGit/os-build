@@ -1,0 +1,129 @@
+# Emulators follow upstream's newest release — plan
+
+Status: DRAFT 2026-10-16, branch plan/emulator-latest. Nothing implemented. Decisions D1-D6 below
+need the user's yes before Phase 1.
+
+## Why, and what it reverses
+
+Today every emulator but Cemu installs ONE pinned tag from `catalog.json` (tag + sha256 + size),
+and a new version reaches players only when we bump the pin and ship the catalog in an image or OTA.
+Thirteen pins, several of them on upstreams that release weekly or per commit, is a maintenance
+cost that is not buying much: we HW-test a handful of them per bump at best.
+
+This REVERSES a decision in retroforge.plan.md (Phase 4, item 4, decided 2026-10-03): "No 'newest'
+mode (armada follows upstream's newest; an upstream change could break a seed or the launch args
+unnoticed)". That risk is real and this plan keeps it visible rather than pretending it away: the
+pin survives as the TESTED marker, the player sees when they run something newer, and going back
+is one button.
+
+The hosted catalog (retroforge.plan.md Phase 5, not started) is not needed for this and is not
+blocked by it: with "latest" as the default, the hosted catalog would only move tested markers.
+
+## Decisions to confirm
+
+- **D1 Default = latest.** Download and Update install the newest upstream release whose asset
+  matches; the pinned build is no longer what a player gets by default.
+- **D2 The pin stays, as "tested".** `tag` + `sha256` + `size` keep their meaning: the build
+  RetroForge checked. The page labels the installed build Tested / Newer than tested, and offers
+  "Install tested version" whenever it is not the installed one.
+- **D3 One-press rollback.** `activate()` already keeps the previous AppImage; the page offers
+  "Revert to <previous>" when one is on disk.
+- **D4 "Newest release" is per-emulator, by tag pattern, never by date alone.** Drafts and
+  prereleases are skipped; a release counts only when its tag matches the entry's `tag_pattern` AND
+  exactly one asset matches `asset`. Rolling tags that replace their asset in place (DuckStation's
+  `latest`) never match.
+- **D5 Cemu's nightly channel folds into this.** Same code path, `tag_pattern: ^nightly$`; its
+  `nightly-<id>` naming stays.
+- **D6 PortMaster unchanged.** `self_update` still means the pin is the first install only.
+
+## Risks this plan accepts, and what it does about each
+
+| Risk | Visible? | Mitigation in this plan |
+|---|---|---|
+| Config key renamed upstream: our seed/options silently ignored | NO | Phase 4 key-drift check in CI against the newest upstream source; "Newer than tested" label explains "my option does nothing" |
+| A launch workaround breaks (sigdefer for Snes9x, SDL_NO_SIGNAL_HANDLERS Exit, melonDS/Azahar dual-screen layout) | at launch | Revert button; the HW gate per tested-pin bump stays |
+| Broken build (ARMSX2/RPCS3 nightlies) | at launch | Revert button |
+| No arm64 asset in the newest release / asset renamed | loud (exit 4) | "newest" = newest release WITH exactly one matching asset; a rename fails the check, never installs |
+| Untrusted bytes (8/13 come from pkgforge-dev, a third-party repackager) | no | GitHub per-asset sha256 digest REQUIRED (exit 4 without), https-only, as the nightly path does today. Same trust as Cemu now; no human vetting of a given build |
+| "Which version are you on?" for bug reports | — | the installed tag is in `retroforge-emu list` and on the page |
+| GitHub API rate limit (60/h unauthenticated, per IP) | — | `check` caches for 1 h; a failed check never reads as "up to date" |
+
+## Phase 1 — retroforge-emu
+
+Catalog (schema stays 1; all additions optional, so an old image reading a new catalog still works
+off the pin):
+- `tag_pattern`: anchored regex over release tags. Present = the entry follows latest (D1); absent
+  = pinned-only, today's behaviour (kept for PortMaster and as a per-entry escape hatch).
+- `asset` becomes version-agnostic (today most embed the version, e.g.
+  `^Azahar-2126\.1\.2-anylinux-aarch64\.AppImage$` → `^Azahar-[0-9.]+-anylinux-aarch64\.AppImage$`).
+  The pinned tag must still match exactly one asset (test-catalog.sh).
+- `channel` is dropped once Cemu moves to `tag_pattern` (D5); `version_text()` keeps reading
+  `nightly-<id>`.
+
+Commands:
+- `retroforge-emu check [<emu>]` → JSON on stdout per emulator: `{"latest": tag|null,
+  "error": str|null}`. One `GET /repos/<o>/<r>/releases?per_page=30` per emulator, newest first,
+  first release that is not draft/prerelease, matches `tag_pattern`, and has exactly one asset
+  matching `asset`. Cached in `~/.cache/retroforge/emu-check.json` for 1 h; `--refresh` bypasses.
+- `retroforge-emu install <emu> [--tested]` → latest by default when the entry has `tag_pattern`;
+  `--tested` installs the pin with today's digest+size-equal-to-catalog check. A latest install
+  requires GitHub's `sha256:` digest and checks the bytes against it (the nightly path's code).
+  Same tag as `current`: nothing downloaded, stderr "already the latest".
+- `retroforge-emu rollback <emu>` → flip `current` to the kept previous AppImage (exit 2 if none).
+  After a rollback the "previous" is the build we left, so Revert toggles between the two.
+- `list` grows `tested` (= the pin), `previous` (tag of the kept AppImage or null) and
+  `follows_latest` (bool). `update` stays offline-only and means "installed != tested and the
+  entry is pinned-only"; for latest entries the page asks `check`.
+
+Tests (`tests/test-emu.sh`, fake curl serving a releases list): draft/prerelease skipped; tag
+not matching skipped; release with 0 or 2 matching assets skipped (not an error unless none
+qualifies); missing digest → exit 4; `--tested` path unchanged; rollback toggles; check cache
+honoured and `--refresh` bypasses it; a failed check is reported as `error`, never as "current".
+
+## Phase 2 — plugin (emulators_page.gd)
+
+Main row, installed:
+- `Version X · Tested` when installed == tested.
+- `Version X · Newer than RetroForge tested (Y)` otherwise; description says it came straight
+  from upstream.
+- Update button when `check` says latest != installed ("Update to Z, ~N MB").
+
+Extra rows, before Delete:
+- `Revert to <previous>` when `previous` is set.
+- `Install tested version (Y)` when installed != tested.
+
+`check` runs when the Emulators screen opens (async, the rows render first from `list` and
+update when it returns); offline shows no Update and no error noise. Credits keep showing the
+installed tag.
+
+## Phase 3 — catalog migration
+
+Per entry: `tag_pattern` + version-agnostic `asset`, pins untouched. Every pattern below must be
+verified against the live releases list before it lands (`RETROFORGE_NET_TEST=1
+tests/test-catalog.sh` gains a "latest resolves to exactly one asset" check):
+
+| Emulator | tag_pattern (to verify) | note |
+|---|---|---|
+| armsx2 | `^nightly-[0-9]{8}$` | asset must stay the 4K-pages build |
+| azahar, clownmdemu, dolphin, flycast, melonds, mgba, snes9x | `^[0-9][^@]*@[0-9-]+_[0-9]+$` | pkgforge-dev `<ver>@<date>_<id>`; check none of these repos also publish nightly tags |
+| cemu | `^nightly$` | replaces `channel` |
+| duckstation | `^v0\.1-[0-9]+$` | NEVER `latest` (asset replaced in place) |
+| ppsspp | `^v[0-9]+\.[0-9]+(\.[0-9]+)?$` | |
+| rpcs3 | `^build-[0-9a-f]{40}$` | a build per upstream commit |
+| xemu | `^v[0-9]+\.[0-9]+\.[0-9]+$` | |
+| portmaster | (none) | D6, pinned-only |
+
+## Phase 4 — CI (optional, but it is what covers the invisible risk)
+
+- **Key drift**: a weekly job resolves each emulator's latest tag, shallow-clones that tag of
+  the UPSTREAM source (not the pkgforge repackage), and greps every key our seeds and
+  `options.json` write. A key that disappeared files ONE issue (title = emulator + tag, the
+  upstream-watch dedupe) naming the key and the file. This is the only check for risk 1.
+- **Tested-pin bump PR** (later, maybe): moves `tag`/`sha256`/`size` to a newer build once it has
+  been HW-checked; until then pins move by hand as today.
+
+## HW gate before merge
+
+On one board per GPU generation: fresh install of every emulator through the page (latest),
+launch + Exit each; Revert and Install tested on two of them; an offline open of the Emulators
+screen shows no Update and no error.

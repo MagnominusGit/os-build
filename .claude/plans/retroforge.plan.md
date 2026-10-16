@@ -428,7 +428,9 @@ plus the ROM library that launches them)
    the RetroForge server; the copy bundled in the plugin is only the offline fallback) and pins one
    tested tag per emulator, so RetroForge alone decides when an update is offered: bumping a tag in the
    hosted catalog after testing is what makes the plugin offer it. No "newest" mode (armada follows
-   upstream's newest; an upstream change could break a seed or the launch args unnoticed). Rolling
+   upstream's newest; an upstream change could break a seed or the launch args unnoticed).
+   PROPOSED REVERSAL 2026-10-16 (not decided): emulator-latest.plan.md — latest by default, the
+   pin kept as the "tested" marker, one-press revert. Rolling
    tags are never pinned: DuckStation's `latest` (the 0.1-12070 build tested so far) replaces its
    asset in place, so its pin must be a numbered release (v0.1-11894 or newer), re-tested on HW.
    Install: fetch that tag's release, download over HTTPS only (refuse a
