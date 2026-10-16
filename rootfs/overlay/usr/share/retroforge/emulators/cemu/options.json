@@ -1,0 +1,248 @@
+{
+  "files": {
+    "main": {
+      "path": ".config/Cemu/settings.xml",
+      "format": "xml"
+    }
+  },
+  "options": [
+    {
+      "id": "renderer",
+      "label": "Graphics backend",
+      "description": "How Cemu draws the game. Vulkan is usually the fastest and supports asynchronous shader compiling; OpenGL is the fallback. Takes effect when the game starts.",
+      "choices": [
+        {
+          "value": "vulkan",
+          "label": "Vulkan",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphic",
+              "key": "api",
+              "value": "1"
+            }
+          ]
+        },
+        {
+          "value": "opengl",
+          "label": "OpenGL",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphic",
+              "key": "api",
+              "value": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aspect",
+      "label": "Aspect ratio",
+      "description": "The shape of the picture. Game's own keeps the game's shape (16:9 for most Wii U games) with black bars where it does not fill the screen; Stretch fills the whole screen.",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "Game's own",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphic",
+              "key": "FullscreenScaling",
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "value": "stretch",
+          "label": "Stretch to screen",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphic",
+              "key": "FullscreenScaling",
+              "value": "1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "smoothing",
+      "label": "Screen filter",
+      "description": "How the picture is scaled to the screen. Sharp keeps edges crisp; Smooth blends them; Bicubic and Hermite are softer, higher-quality blends. A graphic pack with its own output shader replaces this.",
+      "choices": [
+        {
+          "value": "sharp",
+          "label": "Sharp",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphic",
+              "key": "UpscaleFilter",
+              "value": "3"
+            },
+            {
+              "file": "main",
+              "section": "Graphic",
+              "key": "DownscaleFilter",
+              "value": "3"
+            }
+          ]
+        },
+        {
+          "value": "smooth",
+          "label": "Smooth",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphic",
+              "key": "UpscaleFilter",
+              "value": "0"
+            },
+            {
+              "file": "main",
+              "section": "Graphic",
+              "key": "DownscaleFilter",
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "value": "bicubic",
+          "label": "Bicubic",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphic",
+              "key": "UpscaleFilter",
+              "value": "1"
+            },
+            {
+              "file": "main",
+              "section": "Graphic",
+              "key": "DownscaleFilter",
+              "value": "1"
+            }
+          ]
+        },
+        {
+          "value": "hermite",
+          "label": "Hermite",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphic",
+              "key": "UpscaleFilter",
+              "value": "2"
+            },
+            {
+              "file": "main",
+              "section": "Graphic",
+              "key": "DownscaleFilter",
+              "value": "2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vsync",
+      "label": "VSync",
+      "description": "Waits for the screen's refresh to stop tearing. Can add a little input lag. Triple buffering (Vulkan) lowers that lag; with OpenGL it is the same as On.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphic",
+              "key": "VSync",
+              "value": "1"
+            }
+          ]
+        },
+        {
+          "value": "triple",
+          "label": "Triple buffering",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphic",
+              "key": "VSync",
+              "value": "2"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphic",
+              "key": "VSync",
+              "value": "0"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "show_fps",
+      "label": "Show FPS",
+      "description": "Shows the frame rate in the top-left corner of the screen.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphic/Overlay",
+              "key": "Position",
+              "value": "1"
+            },
+            {
+              "file": "main",
+              "section": "Graphic/Overlay",
+              "key": "FPS",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphic/Overlay",
+              "key": "Position",
+              "value": "0"
+            },
+            {
+              "file": "main",
+              "section": "Graphic/Overlay",
+              "key": "FPS",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Verified against cemu-project/Cemu a53cf0ece (2026-10-15), the commit of pkgforge-dev/Cemu-AppImage-Enhanced's newest nightly asset Cemu_Nightly-a53cf0ece-anylinux-aarch64.AppImage (release 'nightly', 2026-10-15). 'Enhanced' only builds upstream main with clang, LTO and optimisation flags (make-appimage.sh / get-dependencies.sh: git clone --depth 1, cmake, one sed of the .desktop Exec line): no source patch, nothing touches settings.",
+    "File: ~/.config/Cemu/settings.xml, root <content>; every key here is an element under <Graphic>. Read once at startup (GetConfigHandle().Load(), src/main.cpp:128; CemuConfig::Load, src/config/CemuConfig.cpp:124-183). Cemu writes the whole file again (CemuConfig::Save, src/config/CemuConfig.cpp:361-395, all known keys, unknown ones dropped) only on GUI actions (settings dialog, game list, menus: src/gui/wxgui/MainWindow.cpp, wxGameList.cpp, GeneralSettings2.cpp); launching with -g does not save (MainWindow.cpp:577 only adds the recent file in memory). SIGTERM (OpenGamepadUI's Exit) is _Exit(0) with nothing saved (src/Common/ExceptionHandler/ExceptionHandler_posix.cpp:147,158), so the restore after a game run sees exactly what we wrote.",
+    "Values are written as Cemu writes them: integers and enums as their number, booleans as fmt's 'true'/'false' (XMLConfigParser::set, src/config/XMLConfig.h:220-233); bools are read with tinyxml2 BoolText (XMLConfig.h:37-38).",
+    "renderer = Graphic/api, enum GraphicAPI 0 OpenGL, 1 Vulkan, 2 Metal (Apple only) (src/config/CemuConfig.h:68-74; read CemuConfig.cpp:126, written :363). Linux builds have both OpenGL (ENABLE_OPENGL default ON off Apple, CMakeLists.txt:111-119) and Vulkan; the GUI offers the same two (src/gui/wxgui/GeneralSettings2.cpp:362-372). Chosen when the game starts (ActiveSettings::GetGraphicsAPI, src/config/ActiveSettings.cpp:109-111): a player's own gameProfiles/<titleid>.ini graphics_api outranks it (src/Cafe/GameProfile/GameProfile.cpp:224-226; none of Cemu's bundled gameProfiles sets it), and Cemu falls back to OpenGL when Vulkan is unavailable. The seed sets api 1.",
+    "aspect = Graphic/FullscreenScaling, enum FullscreenScaling 0 kKeepAspectRatio, 1 kStretch (CemuConfig.h:99-103; read CemuConfig.cpp:144, written :378; GUI 'Keep aspect ratio'/'Stretch', GeneralSettings2.cpp:498). Keep fits the game's output image (its TV resolution) into the window with bars (src/Cafe/HW/Latte/Core/LatteRenderTarget.cpp:840-855). Read live every frame. No forced 4:3/16:9: the game's own aspect and internal resolution come only from graphic packs (<GraphicPack><Entry> presets, CemuConfig.cpp:89-121, packs must be downloaded): resolution and widescreen_hack are left out until graphic packs are supported.",
+    "smoothing = Graphic/UpscaleFilter and Graphic/DownscaleFilter together (Cemu uses the first when the game image is smaller than the window, the second when it is bigger; GUI tooltips GeneralSettings2.cpp:481-494). Enum UpscalingFilter 0 Linear ('Bilinear' in the GUI), 1 Bicubic, 2 BicubicHermite ('Hermite'), 3 NearestNeighbor (CemuConfig.h:91-97; read CemuConfig.cpp:142-143, written :376-377; applied in LatteRenderTarget.cpp:924-962, read live). Sharp = 3 (nearest), Smooth = 0 (bilinear); Bicubic and Hermite are Cemu's other two, shown per D5. Defaults when the key is missing: Upscale Hermite, Downscale Linear (CemuConfig.cpp:142-143). A graphic pack with an output shader overrides both (LatteRenderTarget.cpp:895-920).",
+    "vsync = Graphic/VSync, int (CemuConfig.h:445; read CemuConfig.cpp:133, written :367). Vulkan: 0 Immediate (Off), 1 FIFO (GUI 'Double buffering', our On), 2 Mailbox ('Triple buffering', falls back to FIFO if the driver lacks mailbox) (src/Cafe/HW/Latte/Renderer/Vulkan/SwapchainInfoVk.h:8-15, SwapchainInfoVk.cpp:340-370; GUI GeneralSettings2.cpp:1781-1783). OpenGL: any value > 0 is On (src/gui/wxgui/canvas/OpenGLCanvas.cpp:119-122). Value 3 'Match emulated display' is left out: the GUI offers it on Windows only (GeneralSettings2.cpp:1784-1786) and its VsyncDriver is unimplemented elsewhere (src/Cafe/HW/Latte/Renderer/Vulkan/VsyncDriver.cpp:203-208, cemu_assert_unimplemented).",
+    "show_fps = Graphic/Overlay/Position plus Graphic/Overlay/FPS. Position is enum ScreenPosition 0 Disabled, 1 TopLeft ... 6 BottomRight (CemuConfig.h:105-114); it shows or hides the whole overlay (src/Cafe/HW/Latte/Core/LatteOverlay.cpp:520-552). FPS is the overlay's FPS line (default true). On = TopLeft + FPS true, Off = Disabled + FPS false; the other overlay lines (draw calls, CPU, RAM...) keep the player's choice. Notifications (also top-left by default) stack below the overlay at the same position (LatteOverlay.cpp:557-560). Cemu reads <Overlay> only when the element exists (CemuConfig.cpp:151-170, else the legacy Graphic/OverlayPosition keys); the seed has neither, so the patch creates <Overlay> with just these two and every other overlay key keeps its default. Written back by Save (CemuConfig.cpp:382-392).",
+    "Left out: resolution, widescreen_hack (graphic packs only, see aspect, later phase); integer_scale (Cemu has no integer scaling; FullscreenScaling is keep/stretch only); 4:3 and 16:9 aspect (graphic packs). AsyncCompile (Graphic/AsyncCompile, Vulkan only) is not in the D1 common set."
+  ]
+}

@@ -167,6 +167,15 @@ out = eo.xml_set(XML, "Graphic/Overlay", "Position", "1")
 check("add nested elements", eo.xml_get(out, "Graphic/Overlay", "Position"), "1")
 check("the sibling is kept", eo.xml_get(out, "Graphic", "api"), "1")
 check("remove", eo.xml_get(eo.xml_set(XML, "Graphic", "api", None), "Graphic", "api"), None)
+check("the comment before the root survives (Cemu's seed)",
+      eo.xml_set(XML, "Graphic", "api", "0").startswith('<?xml version="1.0" encoding="UTF-8"?>\n<!-- RetroForge -->\n<content>'), True)
+check("a file with no declaration gets one", eo.xml_set("<content/>", "Graphic", "api", "1").startswith("<?xml"), True)
+added = eo.xml_set(XML, "Graphic/Overlay", "Position", "1")
+check("removing the only child of a parent it needed removes the parent too",
+      eo.xml_set(added, "Graphic/Overlay", "Position", None), eo.xml_set(XML, "Graphic", "api", "1"))
+check("...but a parent with other children stays",
+      eo.xml_get(eo.xml_set(eo.xml_set(added, "Graphic/Overlay", "FPS", "true"), "Graphic/Overlay", "Position", None),
+                 "Graphic/Overlay", "FPS"), "true")
 
 # ================================================================================================
 CASE = "options.json"
@@ -220,6 +229,11 @@ refused("a choice value with a space", lambda d: d["options"][0]["choices"][0].u
 refused("a choice with nothing to do", lambda d: d["options"][0]["choices"][0].update(set=[]))
 refused("choices writing different settings",
         lambda d: d["options"][0]["choices"][1]["set"].append({"file": "main", "section": "Display", "key": "Other", "value": "1"}))
+PER_SYSTEM = json.loads(json.dumps(GOOD))
+PER_SYSTEM["files"]["main"]["path"] = ".config/fake/{system}/settings.ini"
+check("a '{system}' settings folder loads", load(PER_SYSTEM)["files"]["main"]["path"], ".config/fake/{system}/settings.ini")
+refused("another placeholder in a path", lambda d: d["files"]["main"].update(path=".config/{rom}/settings.ini"))
+refused("'{system}' then '..'", lambda d: d["files"]["main"].update(path=".config/{system}/../../x.ini"))
 for emu in sorted(os.listdir(DATA)):
     if os.path.exists(os.path.join(DATA, emu, "options.json")):
         try:
@@ -235,6 +249,25 @@ CASE = "image options.json against its seeds"
 # byte for byte.
 import tomllib
 import xml.etree.ElementTree as ET
+def same_files(got, want, opts, paths):
+    """Byte for byte, except XML: the patcher re-serialises the root (re-indented, as Cemu itself does
+    on every save), so XML compares as the canonical document, comments included, plus what precedes
+    the root (the seed's comment there must survive)."""
+    fmt = {p: opts["files"][n]["format"] for n in paths for p in paths[n]}
+    def canon(p, text):
+        if fmt[p] != "xml":
+            return text
+        root = ET.tostring(eo._xml_parse(text), encoding="unicode")
+        return (eo.XML_PROLOG.match(text).group(0).strip(),
+                ET.canonicalize(root, with_comments=True, strip_text=True))
+    return {p: canon(p, t) for p, t in got.items()} == {p: canon(p, t) for p, t in want.items()}
+
+
+LAUNCH = {}  # launch.conf as {system: emulator}, as retroforge-launch reads it
+for line in read(os.path.join(DATA, "..", "..", "..", "..", "etc", "retroforge", "launch.conf")).splitlines():
+    if "=" in line and not line.lstrip().startswith("#"):
+        s, e = line.split("=", 1)
+        LAUNCH[s.strip()] = e.strip()
 for emu in sorted(os.listdir(DATA)):
     opts_path = os.path.join(DATA, emu, "options.json")
     if not os.path.exists(opts_path):
@@ -246,28 +279,35 @@ for emu in sorted(os.listdir(DATA)):
     with open(os.path.join(DATA, emu, "emulator.json")) as f:
         seeds = {s["to"]: s["file"] for s in json.load(f).get("seed", [])}
     home = f"{T}/seedhome-{emu}"
+    # A "{system}" file is the run's system's: the game level is applied for the first one.
+    systems = sorted(s for s, e in LAUNCH.items() if e == emu)
+    system = systems[0] if systems else None
+    paths = {n: eo.expand_path(f["path"], [system] if system else []) for n, f in opts["files"].items()}
     for option in opts["options"]:
         for choice in option["choices"]:
             for name, fdef in opts["files"].items():
-                src = os.path.join(DATA, emu, seeds[fdef["path"]]) if fdef["path"] in seeds else None
-                write(os.path.join(home, fdef["path"]), read(src) if src else "")
-            originals = {n: read(os.path.join(home, f["path"])) for n, f in opts["files"].items()}
+                for path in eo.expand_path(fdef["path"], systems):
+                    src = os.path.join(DATA, emu, seeds[path]) if path in seeds else None
+                    write(os.path.join(home, path), read(src) if src else "")
+            originals = {p: read(os.path.join(home, p)) for n in paths for p in paths[n]}
             got = []
-            eo.apply(opts, home, f"{home}/state", emu, {}, {option["id"]: choice["value"]}, got.append)
+            eo.apply(opts, home, f"{home}/state", emu, {}, {option["id"]: choice["value"]}, got.append,
+                     systems=systems, system=system)
             where = f"{emu} {option['id']}={choice['value']}"
-            ok = not got
+            ok = not got and all(paths.values())
             for a in (a for a in choice["set"] if "file" in a):
                 fdef = opts["files"][a["file"]]
-                text = read(os.path.join(home, fdef["path"]))
-                ok = ok and eo.get_setting(fdef["format"], text, a["section"], a["key"]) == a["value"]
-                if fdef["format"] == "toml":
-                    tomllib.loads(text)
-                if fdef["format"] == "xml":
-                    ET.fromstring(text)
+                for path in paths[a["file"]]:
+                    text = read(os.path.join(home, path))
+                    ok = ok and eo.get_setting(fdef["format"], text, a["section"], a["key"]) == a["value"]
+                    if fdef["format"] == "toml":
+                        tomllib.loads(text)
+                    if fdef["format"] == "xml":
+                        ET.fromstring(text)
             check(f"{where}: written as declared, file still valid", (ok, got), (True, []))
             eo.restore(home, f"{home}/state", emu, got.append)
-            back = {n: read(os.path.join(home, f["path"])) for n, f in opts["files"].items()}
-            check(f"{where}: restored to the seed exactly", back == originals, True)
+            back = {p: read(os.path.join(home, p)) for n in paths for p in paths[n]}
+            check(f"{where}: restored to the seed exactly", same_files(back, originals, opts, paths), True)
 
 # ================================================================================================
 CASE = "apply and restore"
@@ -390,6 +430,34 @@ for what, entry in (("a path outside home", {"path": "/etc/passwd"}),
     eo.restore(HOME, STATE, "x", warn)
     check(f"a journal entry with {what}: the journal is dropped, nothing written",
           (read(SETTINGS), os.path.exists(JOURNAL), bool(warnings)), (BASE, False, True))
+
+# ================================================================================================
+CASE = "per-system settings folders"
+# ClownMDEmu: -u ~/.config/clownmdemu/<system>, one configuration.ini per system.
+PS = load(PER_SYSTEM)
+MD, CD = (f"{HOME}/.config/fake/{s}/settings.ini" for s in ("md", "segacd"))
+for p in (MD, CD):
+    write(p, BASE)
+warnings.clear()
+eo.apply(PS, HOME, STATE, "x", {"aspect": "4:3"}, {}, warn, systems=["md", "segacd"], system="md")
+check("emulator level: written in every system's folder",
+      [eo.ini_get(read(p), "Display", "AspectRatio") for p in (MD, CD)], ["4:3", "4:3"])
+eo.apply(PS, HOME, STATE, "x", {"aspect": "16:9"}, {}, warn, systems=["md", "segacd"], system=None)
+check("Open (no system): the emulator level still reaches every folder",
+      [eo.ini_get(read(p), "Display", "AspectRatio") for p in (MD, CD)], ["16:9", "16:9"])
+eo.apply(PS, HOME, STATE, "x", {"aspect": "4:3"}, {"aspect": "16:9"}, warn, systems=["md", "segacd"], system="segacd")
+check("game level: only the run's system", [eo.ini_get(read(p), "Display", "AspectRatio") for p in (MD, CD)],
+      ["4:3", "16:9"])
+eo.restore(HOME, STATE, "x", warn)
+check("...restored to the emulator level after", [eo.ini_get(read(p), "Display", "AspectRatio") for p in (MD, CD)],
+      ["4:3", "4:3"])
+before = [read(p) for p in (MD, CD)]
+eo.apply(PS, HOME, STATE, "x", {}, {"aspect": "16:9"}, warn, systems=[], system=None)
+check("no system known at all: nothing written, no journal", ([read(p) for p in (MD, CD)], os.path.exists(JOURNAL)),
+      (before, False))
+check("a system that is not an id never becomes a path", eo.expand_path("a/{system}/b", ["md", "../x", "a/b"]), ["a/md/b"])
+check("a path without '{system}' is itself", eo.expand_path("a/b", ["md"]), ["a/b"])
+check("no warnings", warnings, [])
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

@@ -1,0 +1,458 @@
+{
+  "files": {
+    "main": {
+      "path": ".local/share/duckstation/settings.ini",
+      "format": "ini",
+      "separator": " = "
+    }
+  },
+  "options": [
+    {
+      "id": "renderer",
+      "label": "Graphics backend",
+      "description": "How DuckStation draws the game. Vulkan is usually fastest; OpenGL is the fallback. Software is the most accurate but ignores the internal resolution and the widescreen hack.",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "Automatic",
+          "set": [
+            {
+              "file": "main",
+              "section": "GPU",
+              "key": "Renderer",
+              "value": "Automatic"
+            }
+          ]
+        },
+        {
+          "value": "vulkan",
+          "label": "Vulkan",
+          "set": [
+            {
+              "file": "main",
+              "section": "GPU",
+              "key": "Renderer",
+              "value": "Vulkan"
+            }
+          ]
+        },
+        {
+          "value": "opengl",
+          "label": "OpenGL",
+          "set": [
+            {
+              "file": "main",
+              "section": "GPU",
+              "key": "Renderer",
+              "value": "OpenGL"
+            }
+          ]
+        },
+        {
+          "value": "software",
+          "label": "Software",
+          "set": [
+            {
+              "file": "main",
+              "section": "GPU",
+              "key": "Renderer",
+              "value": "Software"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "resolution",
+      "label": "Internal resolution",
+      "description": "Draws the 3D picture at a higher resolution for a sharper image. Higher settings cost speed. Automatic picks the step that fits the screen.",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "Automatic (fit the screen)",
+          "set": [
+            {
+              "file": "main",
+              "section": "GPU",
+              "key": "ResolutionScale",
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "value": "1x",
+          "label": "Native",
+          "set": [
+            {
+              "file": "main",
+              "section": "GPU",
+              "key": "ResolutionScale",
+              "value": "1"
+            }
+          ]
+        },
+        {
+          "value": "2x",
+          "label": "2x (480p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "GPU",
+              "key": "ResolutionScale",
+              "value": "2"
+            }
+          ]
+        },
+        {
+          "value": "3x",
+          "label": "3x (720p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "GPU",
+              "key": "ResolutionScale",
+              "value": "3"
+            }
+          ]
+        },
+        {
+          "value": "4x",
+          "label": "4x (960p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "GPU",
+              "key": "ResolutionScale",
+              "value": "4"
+            }
+          ]
+        },
+        {
+          "value": "5x",
+          "label": "5x (1080p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "GPU",
+              "key": "ResolutionScale",
+              "value": "5"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aspect",
+      "label": "Aspect ratio",
+      "description": "The shape of the picture. Game's own is the PlayStation's 4:3; pick 16:9 (or wider) with the widescreen hack to draw a wide scene, or Stretch to fill the screen.",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "Game's own",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "AspectRatio",
+              "value": "Auto (Game Native)"
+            }
+          ]
+        },
+        {
+          "value": "4:3",
+          "label": "4:3",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "AspectRatio",
+              "value": "4:3"
+            }
+          ]
+        },
+        {
+          "value": "16:9",
+          "label": "16:9",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "AspectRatio",
+              "value": "16:9"
+            }
+          ]
+        },
+        {
+          "value": "16:10",
+          "label": "16:10",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "AspectRatio",
+              "value": "16:10"
+            }
+          ]
+        },
+        {
+          "value": "19:9",
+          "label": "19:9",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "AspectRatio",
+              "value": "19:9"
+            }
+          ]
+        },
+        {
+          "value": "20:9",
+          "label": "20:9",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "AspectRatio",
+              "value": "20:9"
+            }
+          ]
+        },
+        {
+          "value": "21:9",
+          "label": "21:9",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "AspectRatio",
+              "value": "21:9"
+            }
+          ]
+        },
+        {
+          "value": "stretch",
+          "label": "Stretch to fill",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "AspectRatio",
+              "value": "Stretch To Fill"
+            }
+          ]
+        },
+        {
+          "value": "par",
+          "label": "Square pixels (PAR 1:1)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "AspectRatio",
+              "value": "PAR 1:1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "smoothing",
+      "label": "Screen filter",
+      "description": "How the picture is enlarged to the screen. Sharp keeps pixels crisp, Smooth blends them; the 'whole steps' choices only enlarge by whole multiples (integer scaling), leaving borders.",
+      "choices": [
+        {
+          "value": "sharp",
+          "label": "Sharp (nearest)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "Scaling",
+              "value": "Nearest"
+            }
+          ]
+        },
+        {
+          "value": "sharp_integer",
+          "label": "Sharp, whole steps (integer)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "Scaling",
+              "value": "NearestInteger"
+            }
+          ]
+        },
+        {
+          "value": "smooth",
+          "label": "Smooth (bilinear)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "Scaling",
+              "value": "BilinearSmooth"
+            }
+          ]
+        },
+        {
+          "value": "smooth_hybrid",
+          "label": "Smooth, hybrid",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "Scaling",
+              "value": "BilinearHybrid"
+            }
+          ]
+        },
+        {
+          "value": "smooth_sharp",
+          "label": "Smooth, sharp edges",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "Scaling",
+              "value": "BilinearSharp"
+            }
+          ]
+        },
+        {
+          "value": "smooth_integer",
+          "label": "Smooth, whole steps (integer)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "Scaling",
+              "value": "BilinearInteger"
+            }
+          ]
+        },
+        {
+          "value": "lanczos",
+          "label": "Lanczos (sharp)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "Scaling",
+              "value": "Lanczos"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "widescreen_hack",
+      "label": "Widescreen hack",
+      "description": "Draws more of the 3D scene on the sides to fill a wide screen. Only has an effect with a wide aspect ratio (16:9 or wider, or Stretch). Some games show glitches at the edges; DuckStation turns it off for games known to break.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "GPU",
+              "key": "WidescreenHack",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "GPU",
+              "key": "WidescreenHack",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vsync",
+      "label": "VSync",
+      "description": "Syncs frames with the screen to avoid tearing. Turning it off can help a slow game but may tear.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "VSync",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "VSync",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "show_fps",
+      "label": "Show FPS",
+      "description": "Shows the frames per second on screen while you play.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "ShowFPS",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "ShowFPS",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Verified against stenzek/duckstation tag v0.1-11894 (c66b269). Every key below is read from ~/.local/share/duckstation/settings.ini (the base layer) by Settings::Load (src/core/settings.cpp) when DuckStation starts; with -batch every game is a fresh process, so a patch before launch is always seen. A per-game ~/.local/share/duckstation/gamesettings/<serial>.ini, when the player made one in DuckStation, is a layer above it and wins for any key it holds (System::GetGameSettingsPath, src/core/system.cpp:1391-1397).",
+    "DuckStation saves settings.ini only when a setting changes in its UI (QtHost::QueueSettingsSave/SaveSettings, src/duckstation-qt/qthost.cpp:3217-3255; INISettingsInterface saves only when dirty, src/util/ini_settings_interface.cpp:28-32, 380-414); it does not rewrite the file at exit and never writes its defaults into it. When it does save it re-serialises the whole file as 'key = value' (src/util/ini_settings_interface.cpp:279), quoting only values with # or ; (:255-258), hence separator ' = ' and unquoted values here.",
+    "Booleans are written true/false (StringUtil::ToChars<bool>, src/common/string_util.cpp:396-400) and read as true/yes/on/1/enabled or false/no/off/0/disabled (:376-394).",
+    "renderer: [GPU] Renderer (src/core/settings.cpp:303-304) is a name from s_gpu_renderer_names (:1574-1589): Automatic, Vulkan, OpenGL, Software on Linux (ENABLE_OPENGL and ENABLE_VULKAN default ON, CMakeModules/DuckStationBuildOptions.cmake:8-9; only the macOS build turns OpenGL off). Automatic picks Vulkan unless the Vulkan driver is a software one, then OpenGL (src/util/gpu_device.cpp:323-325). An unknown name falls back to Automatic (settings.cpp:304). The seed sets Vulkan. Gamedb trait ForceSoftwareRenderer overrides it for some games (src/core/game_database.cpp:663-669).",
+    "resolution: [GPU] ResolutionScale is an integer multiple of native, 0 = automatic from the window size (src/core/settings.cpp:306-307, src/core/system.cpp:1058); max MAX_RESOLUTION_SCALE = 32 (src/core/gpu.h:34), limited by the GPU's texture size in the UI (src/duckstation-qt/graphicssettingswidget.cpp:830-864, whose labels name 3x for 720p and 5x for 1080p). We offer Automatic and 1x-5x (5x already covers a 1080p panel); 6x and above stay reachable in DuckStation's own menu. The hardware renderers only: Software ignores it. Gamedb trait DisableUpscaling forces 1x (game_database.cpp:751-763).",
+    "aspect: [Display] AspectRatio is a string parsed by Settings::ParseDisplayAspectRatio (src/core/settings.cpp:2043-2073, read at :373-374): the special names 'Auto (Game Native)', 'Stretch To Fill' (Linux; Android writes 'Auto (Match Window)'), 'PAR 1:1', else 'N:D'. All of DuckStation's predefined ratios are offered (Settings::GetPredefinedDisplayAspectRatios, :2109-2116). Default Auto (src/core/settings.h:240).",
+    "widescreen_hack: [GPU] WidescreenHack (src/core/settings.cpp:357, written back from gpu_widescreen_rendering at :747) makes the GTE widen the 3D projection to the display aspect ratio (System::UpdateGTEAspectRatio, src/core/system.cpp:6261-6290): with aspect 'Game's own' or 'Square pixels' there is no correction, so the hack only does something with 16:9 (or another wide ratio, or Stretch). The two options stay independent (each writes its own key); the plugin description says to pair them. DuckStation's own hotkey toggle swaps both at once (system.cpp:6163-6194) but only for the running session. Gamedb trait DisableWidescreen and cheat metadata turn it off for known-broken games (src/core/game_database.cpp:799-806, src/core/cheats.cpp:264-267).",
+    "smoothing: [Display] Scaling (src/core/settings.cpp:387-389) is one enum that holds both the filter and integer scaling: Nearest, NearestInteger, BilinearSmooth (default, src/core/settings.h:244), BilinearHybrid, BilinearSharp, BilinearInteger, Lanczos (s_display_scaling_names, settings.cpp:2221-2223); the *Integer modes turn on integer scaling (Settings::IsUsingIntegerDisplayScaling, settings.h:219-223; src/core/video_presenter.cpp:609). All seven are offered.",
+    "integer_scale left out as a separate option: DuckStation has no integer-scaling key of its own, it is part of [Display] Scaling, so an integer_scale option would write the same key as smoothing and the two would overwrite each other. The integer choices are in the Screen filter list instead ('whole steps'). [Display] Scaling24Bit (FMV scaling, settings.cpp:390-392, used for 24-bit video frames at video_presenter.cpp:915) is left alone: FMVs keep DuckStation's own setting (default Bilinear Smooth).",
+    "vsync: [Display] VSync, default false (src/core/settings.cpp:419). show_fps: [Display] ShowFPS, default false (settings.cpp:429), DuckStation's own on-screen counter.",
+    "[Main] DisableAllEnhancements = true (settings.cpp:281) overrides resolution (forced 1x) and the widescreen hack (forced off) whatever these options say (Settings::ApplySettingRestrictions, src/core/settings.cpp:1137-1161). RetroForge does not set it; a player who turned it on in DuckStation gets native resolution and no widescreen.",
+    "Settings are only read from the file: DuckStation has no per-run command-line override for them, and an unknown command-line flag makes it print an error and quit, so every option here is a file patch."
+  ]
+}

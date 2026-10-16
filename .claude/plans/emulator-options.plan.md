@@ -2,8 +2,8 @@
 
 Status: phases 2 (framework) and 3 (plugin pages) implemented on branch feat/emulator-options (2026-10-15).
 Phase 4 (wave 1: options.json for mGBA, Flycast, Dolphin, xemu, ARMSX2, RPCS3) written and offline-tested,
-NOT yet tried on hardware. Next: HW check of wave 1, then phase 5 (DuckStation, PPSSPP, Azahar, melonDS,
-Snes9x, ClownMDEmu, Cemu). See "As built" below for where the implementation departs from the design.
+Wave 1 HW-checked on the Pocket ACE 2026-10-16 (mGBA, Flycast, Dolphin, ARMSX2; one plugin bug fixed:
+OGUI dropdown placeholder item). Wave 2 written offline 2026-10-16, not HW-tested. See "As built" below for where the implementation departs from the design.
 Sources: each emulator's source at the pinned version (catalog.json); file:line references were taken from
 those trees (shallow clones, scratchpad of session 8826cb34, not kept).
 
@@ -197,7 +197,19 @@ game-level values, the same pattern as `retroforge-emu list`. GDScript never par
    run when a renderer is chosen (WarnAboutUnsafeSettings would hide every warning: not set).
    test-emuopts.sh applies every choice of every image options.json to its seed and checks an exact restore;
    test-plugin.sh checks the pages offer every image option.
-5. **Adapters, wave 2 (patch + restore)**: DuckStation, PPSSPP, Azahar, melonDS, Snes9x, ClownMDEmu, Cemu.
+5. **Wave 2** (DONE offline, 2026-10-16): options.json for DuckStation, PPSSPP, Azahar, melonDS, Snes9x,
+   ClownMDEmu, Cemu; no adapter code was needed. Framework changes it brought:
+   - `{system}` in a file path (ClownMDEmu's per-system `-u` folder): the emulator level is written for every
+     system launch.conf gives the emulator (Open included), the game level for the run's system only;
+   - the XML patcher keeps what precedes the root (Cemu's seed comment) and drops parents a restore leaves
+     empty (Cemu's `<Overlay>`); the seed test compares XML canonically (Cemu re-indents on save anyway);
+   - melonDS seeds carry `[3D] Renderer = 0`: a `[3D.GL]` written before melonDS's first run would leave
+     `[3D]` implicit, and toml11 then fails melonDS's save after truncating the file.
+   Where integer scaling is one value of another setting (DuckStation Scaling, Snes9x AspectRatio,
+   ClownMDEmu screen-scaling) it is a choice of that option, not its own option. Azahar's arm64 build has
+   no OpenGL (ENABLE_OPENGL off upstream on Linux aarch64): Vulkan/Software only. PPSSPP show_fps writes the
+   whole iShowStatusFlags mask (FPS only). Appendix A's melonDS `Screen.Filter` is wrong: the key is
+   `[Instance0.Window0] ScreenFilter`.
 6. **HW validation** per option on SM6115 / SM8250 / SM8550:
    - every renderer choice on each SoC (e.g. Flycast Vulkan resets the A610, see memory
      flycast-a610-reset). Per D5 the schema gets no `soc` filter: problems found

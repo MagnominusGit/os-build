@@ -1,0 +1,258 @@
+{
+  "files": {
+    "main": {
+      "path": ".config/clownmdemu/{system}/configuration.ini",
+      "format": "ini",
+      "separator": " = "
+    }
+  },
+  "options": [
+    {
+      "id": "aspect",
+      "label": "Screen scaling",
+      "description": "How the picture fills the screen. Fit keeps the console's shape with black bars; Fill crops the edges to cover the whole screen (pairs well with the widescreen hack); Pixel-perfect enlarges by whole steps with square pixels, sharpest but with wider borders.",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "Fit (black bars)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "screen-scaling",
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "value": "fill",
+          "label": "Fill (crops edges)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "screen-scaling",
+              "value": "1"
+            }
+          ]
+        },
+        {
+          "value": "integer",
+          "label": "Pixel-perfect",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "screen-scaling",
+              "value": "2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "widescreen_hack",
+      "label": "Widescreen hack",
+      "description": "Shows more of the level on the left and right. Works well with some games, badly with others (glitches at the edges). Around 14 extra columns gives a 16:9 picture.",
+      "choices": [
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "widescreen-tiles",
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "value": "1",
+          "label": "2 extra columns",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "widescreen-tiles",
+              "value": "1"
+            }
+          ]
+        },
+        {
+          "value": "2",
+          "label": "4 extra columns",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "widescreen-tiles",
+              "value": "2"
+            }
+          ]
+        },
+        {
+          "value": "3",
+          "label": "6 extra columns",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "widescreen-tiles",
+              "value": "3"
+            }
+          ]
+        },
+        {
+          "value": "4",
+          "label": "8 extra columns",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "widescreen-tiles",
+              "value": "4"
+            }
+          ]
+        },
+        {
+          "value": "5",
+          "label": "10 extra columns",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "widescreen-tiles",
+              "value": "5"
+            }
+          ]
+        },
+        {
+          "value": "6",
+          "label": "12 extra columns",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "widescreen-tiles",
+              "value": "6"
+            }
+          ]
+        },
+        {
+          "value": "7",
+          "label": "14 extra columns (about 16:9)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "widescreen-tiles",
+              "value": "7"
+            }
+          ]
+        },
+        {
+          "value": "8",
+          "label": "16 extra columns",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "widescreen-tiles",
+              "value": "8"
+            }
+          ]
+        },
+        {
+          "value": "9",
+          "label": "18 extra columns",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "widescreen-tiles",
+              "value": "9"
+            }
+          ]
+        },
+        {
+          "value": "10",
+          "label": "20 extra columns",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "widescreen-tiles",
+              "value": "10"
+            }
+          ]
+        },
+        {
+          "value": "11",
+          "label": "22 extra columns",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "widescreen-tiles",
+              "value": "11"
+            }
+          ]
+        },
+        {
+          "value": "12",
+          "label": "24 extra columns",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "widescreen-tiles",
+              "value": "12"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vsync",
+      "label": "VSync",
+      "description": "Waits for the screen's refresh to avoid tearing. Off can lower input lag a little.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "vsync",
+              "value": "on"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "Miscellaneous",
+              "key": "vsync",
+              "value": "off"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Upstream: Clownacy/clownmdemu-frontend v1.6.12 (8f0f254), core clownmdemu 099ab25 via common 2a1afe8. pkgforge-dev/ClownMDEmu-AppImage-Enhanced applies no patches: get-dependencies.sh clones the tag and builds it with stock CMake options (FREETYPE=ON), make-appimage.sh only runs quick-sharun (DEPLOY_OPENGL=1).",
+    "One file per system: the launcher passes -u ~/.config/clownmdemu/<system>, the frontend reads <that dir>/configuration.ini (source/frontend.cpp:870), hence the {system} placeholder in the path. md and segacd each get their own patch and restore.",
+    "Format: the parser splits a line on the exact string ' = ' and takes '[...]' lines as sections, no trimming (INI::ProcessFile, source/frontend.cpp:1006-1053), so the separator is ' = '. Booleans: 'on' or 'true' is true, anything else false (source/frontend.cpp:1140); written back as on/off (source/frontend.cpp:1346-1354). Integers via StringToInteger<unsigned int> (source/frontend.cpp:1141).",
+    "Read once, at startup, before the ROM given on the command line is loaded (LoadConfiguration in the Frontend constructor, source/frontend.cpp:1576; applied at source/frontend.cpp:1310-1325). Rewritten whole on exit (WriteSaveData -> SaveConfiguration, source/frontend.cpp:1629, 1641, 1327-1373): only the known keys, [Miscellaneous] first, then [Keyboard Bindings], recent files, window states. Unknown keys are dropped, so a patch + restore of a known key is safe and nothing else of ours can live in this file.",
+    "aspect -> [Miscellaneous] screen-scaling: enum ScreenScaling FIT=0, FILL=1, PIXEL_PERFECT=2 (source/frontend.cpp:66-71; default FIT, :1070; read :1152-1153; saved :1370). Fit letterboxes, Fill crops to cover the window, Pixel-perfect scales by the largest whole factor and skips the H32 width correction, i.e. square pixels (source/frontend.cpp:2391-2447). Integer scaling only exists as this third value, so it is a choice of this option, not a separate integer_scale option (two options may not write the same key).",
+    "widescreen_hack -> [Miscellaneous] widescreen-tiles: 0 = off, 1..VDP_MAX_WIDESCREEN_TILES extra tiles per side (default 0, source/frontend.cpp:1073; read :1158-1159; applied :1316; saved :1373). VDP_MAX_WIDESCREEN_TILES = (32 - 20) / 2 pairs * 2 = 12 (common/core/source/vdp.h:21-28). The settings slider offers 0..12, labelled '{n*2} Extra Columns' (source/frontend.cpp:245-253); every step is offered. A file value is not clamped on load, so only 0..12 is written. 7 tiles = 432 px wide, about 16:9 on a 4:3 display of the 320 px H40 mode.",
+    "vsync -> [Miscellaneous] vsync on/off (read source/frontend.cpp:1150-1151; applied :1315 via Window::SetVSync, adaptive first then regular, source/windows/common/window.h:51-62; saved from SDL_GetRenderVSync, :1369). Without the key the default is on when the display refresh is a multiple of 60 Hz (source/frontend.cpp:1088-1108).",
+    "Left out: renderer: the frontend creates its renderer with SDL_CreateWindowAndRenderer and no driver name (source/windows/common/window.cpp:105), so SDL3 would honour SDL_RENDER_DRIVER, but a driver that fails to start makes that call fail and the frontend throws (window.cpp:106, no fallback), and which SDL render drivers work in the sharun AppImage (DEPLOY_OPENGL only) is not verified; not exposed until tested on hardware. resolution: none, the 2D framebuffer is drawn at native size and scaled at present. smoothing: none, the framebuffer is always drawn with SDL_SCALEMODE_PIXELART (source/frontend.cpp:2463; source/windows/common/window-with-framebuffer.cpp:9). show_fps: the frontend has no FPS display. integer_scale: see aspect."
+  ]
+}

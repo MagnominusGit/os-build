@@ -1,0 +1,345 @@
+{
+  "files": {
+    "main": {
+      "path": ".config/snes9x/snes9x.conf",
+      "format": "ini",
+      "separator": " = "
+    }
+  },
+  "options": [
+    {
+      "id": "renderer",
+      "label": "Graphics backend",
+      "description": "How Snes9x draws the picture. Vulkan and OpenGL use the GPU; Software works everywhere but is slower. XVideo is an old X11 video overlay. If a backend cannot start, Snes9x shows an error box and falls back to Software.",
+      "choices": [
+        {
+          "value": "vulkan",
+          "label": "Vulkan",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "HardwareAcceleration",
+              "value": "vulkan"
+            }
+          ]
+        },
+        {
+          "value": "opengl",
+          "label": "OpenGL",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "HardwareAcceleration",
+              "value": "opengl"
+            }
+          ]
+        },
+        {
+          "value": "software",
+          "label": "Software",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "HardwareAcceleration",
+              "value": "none"
+            }
+          ]
+        },
+        {
+          "value": "xv",
+          "label": "XVideo",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "HardwareAcceleration",
+              "value": "xv"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aspect",
+      "label": "Aspect ratio",
+      "description": "The picture's shape. 4:3 is how games looked on a TV. Pixel-perfect versions only enlarge by whole steps, so every pixel has the same size, and leave borders around the picture.",
+      "choices": [
+        {
+          "value": "4:3",
+          "label": "4:3 (TV)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "ScaleToFit",
+              "value": "true"
+            },
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "MaintainAspectRatio",
+              "value": "true"
+            },
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "AspectRatio",
+              "value": "2"
+            }
+          ]
+        },
+        {
+          "value": "4:3-integer",
+          "label": "4:3, pixel-perfect",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "ScaleToFit",
+              "value": "true"
+            },
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "MaintainAspectRatio",
+              "value": "true"
+            },
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "AspectRatio",
+              "value": "3"
+            }
+          ]
+        },
+        {
+          "value": "8:7",
+          "label": "Square pixels (8:7)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "ScaleToFit",
+              "value": "true"
+            },
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "MaintainAspectRatio",
+              "value": "true"
+            },
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "AspectRatio",
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "value": "8:7-integer",
+          "label": "Square pixels, pixel-perfect",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "ScaleToFit",
+              "value": "true"
+            },
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "MaintainAspectRatio",
+              "value": "true"
+            },
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "AspectRatio",
+              "value": "1"
+            }
+          ]
+        },
+        {
+          "value": "64:49",
+          "label": "NTSC pixel shape (64:49)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "ScaleToFit",
+              "value": "true"
+            },
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "MaintainAspectRatio",
+              "value": "true"
+            },
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "AspectRatio",
+              "value": "4"
+            }
+          ]
+        },
+        {
+          "value": "64:49-integer",
+          "label": "NTSC pixel shape, pixel-perfect",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "ScaleToFit",
+              "value": "true"
+            },
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "MaintainAspectRatio",
+              "value": "true"
+            },
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "AspectRatio",
+              "value": "5"
+            }
+          ]
+        },
+        {
+          "value": "stretch",
+          "label": "Stretch to screen",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "ScaleToFit",
+              "value": "true"
+            },
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "MaintainAspectRatio",
+              "value": "false"
+            },
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "AspectRatio",
+              "value": "2"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "smoothing",
+      "label": "Screen filter",
+      "description": "Sharp keeps crisp square pixels; Smooth blurs them slightly when the picture is enlarged.",
+      "choices": [
+        {
+          "value": "sharp",
+          "label": "Sharp",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "BilinearFilter",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "smooth",
+          "label": "Smooth",
+          "set": [
+            {
+              "file": "main",
+              "section": "Display",
+              "key": "BilinearFilter",
+              "value": "true"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vsync",
+      "label": "VSync",
+      "description": "Wait for the screen before showing each frame: no tearing, may add a little input lag. Vulkan and OpenGL only.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "OpenGL",
+              "key": "VSync",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "OpenGL",
+              "key": "VSync",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "show_fps",
+      "label": "Show FPS",
+      "description": "Draw the frame rate on the picture.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "Emulation",
+              "key": "DisplayFrameRate",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "Emulation",
+              "key": "DisplayFrameRate",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Source: snes9xgit/snes9x tag 1.63 (921f9f7b83660eb44ad263022a57a4a029057c37), the GTK frontend packaged by pkgforge-dev/Snes9x-AppImage 1.63-1. Every key is in ~/.config/snes9x/snes9x.conf.",
+    "The file: Snes9x reads it once at startup (gui_config->load_config_file(), gtk/src/gtk_s9x.cpp:77) and REWRITES IT WHOLE on exit (save_config_file() from S9xExit, gtk/src/gtk_s9x.cpp:568): every known key with its current value, aligned, with '  # comment' after some values; unknown keys and our comments are dropped (gtk/src/gtk_config.cpp:205-394, conffile.cpp:124-220). The game-level restore runs after that exit, so it puts the pre-game value back into the rewritten file; the patcher's key regex takes the aligned leading spaces and the trailing comment as part of the line, and Snes9x's own parser strips the comment again (ConfigEntry::trimCommented, conffile.cpp:111). Separator ' = ' as Snes9x writes it (conffile.cpp:200, 202).",
+    "Sections and keys: section::key pairs in save_config_file/load_config_file (Display: gtk/src/gtk_config.cpp:222-241 and 448-466; OpenGL: 256-257 and 482-483; Emulation: 316-319 and 539-542). Booleans: written true/false (SetBool with \"true\", \"false\", gtk/src/gtk_config.cpp:210-211); read as true/1/yes/on and false/0/no/off, anything else keeps the default (conffile.cpp:368-378).",
+    "renderer: [Display] HardwareAcceleration, a string: none, opengl, xv, vulkan (comment at gtk/src/gtk_config.cpp:237; read 462; default opengl, 93). S9xInitDriver picks the driver once at startup: opengl, vulkan (USE_SLANG), xv (USE_XV + X11), anything else = the GTK/cairo software driver 'none' (gtk/src/gtk_display.cpp:911-940). If init fails it falls back to 'none' with a modal 'Couldn't load display driver' box (gtk_display.cpp:942-951). On a Wayland display everything but vulkan is forced to opengl (gtk_display.cpp:912-919), but RetroForge runs games on gamescope's Xwayland without WAYLAND_DISPLAY (rootfs/overlay/usr/bin/retroforge-session), so Software and XVideo are real. The pinned AppImage has XVideo built in (XvQueryAdaptors/XvShmPutImage in shared/bin/snes9x-gtk, libXv bundled) and the image's Xwayland has the XVideo extension; Snes9x lists xv only when an Xv adaptor is found (S9xXVDisplayDriver::query_availability, gtk_display.cpp:790-794): NOT HW-verified under gamescope (no adaptor = the error box, then Software).",
+    "aspect: three [Display] keys, all written by every choice. AspectRatio 0..5 (comment at gtk/src/gtk_config.cpp:232; default 2, 86): 0/1 square pixels (256:224 = 8:7, 256:239 with ShowOverscanArea), 2/3 that x 7/6 = 4:3, 4/5 that x 8/7 = 64:49 'NTSC/PAL'; odd values = integer scale (S9xGetAspect and 'integer = aspect_ratio & 1', gtk/src/gtk_display.cpp:98-133). The ratio and the integer bit share one key, so integer scaling is folded into the aspect choices rather than a separate integer_scale option (two options cannot write one key). MaintainAspectRatio (default true, gtk_config.cpp:85) = false is the stretch: the image fills the window whatever AspectRatio says (S9xApplyAspect, gtk_display.cpp:136-196), so 'stretch' writes AspectRatio = 2 (the default) only to keep the same key set. ScaleToFit (default true, gtk_config.cpp:84) = false draws the game unscaled in the middle, which would make every choice here meaningless, so every choice writes ScaleToFit = true. Every driver goes through S9xApplyAspect (vulkan :204, opengl :87/:122, gtk :24, xv :121). Read at startup, applied on every frame.",
+    "smoothing: [Display] BilinearFilter (default false, gtk/src/gtk_config.cpp:133; read 463). Used by OpenGL (GL_LINEAR/GL_NEAREST, gtk/src/gtk_display_driver_opengl.cpp:113), Vulkan (simple_output->set_filter, gtk/src/gtk_display_driver_vulkan.cpp:213; not when a custom shader is on, [OpenGL] EnableCustomShaders) and Software (cairo filter, gtk/src/gtk_display_driver_gtk.cpp:63-67). XVideo ignores it (the preferences dialog hides it for xv, gtk/src/gtk_preferences.cpp:191).",
+    "vsync: [OpenGL] VSync (sync_to_vblank, default true, gtk/src/gtk_config.cpp:152; written 257, read 483). There is NO separate Vulkan key: the Vulkan driver uses the same sync_to_vblank (swapchain->set_vsync, gtk/src/gtk_display_driver_vulkan.cpp:89 and :225), OpenGL its swap interval (gtk/src/gtk_display_driver_opengl.cpp:362, :438). Software and XVideo do not use it. [Display] AutoVRR (default false, gtk_config.cpp:97) forces it on in fullscreen (gtk/src/gtk_s9xwindow.cpp:1211-1222); not touched.",
+    "show_fps: [Emulation] DisplayFrameRate (Settings.DisplayFrameRate, default false, gtk/src/gtk_config.cpp:167; written 319, read 542). Drawn by the ImGui OSD on Vulkan/OpenGL (external/imgui/snes9x_imgui.cpp:199) and into the emulated image otherwise (S9xDisplayMessages, gfx.cpp:2095-2096).",
+    "Left out: resolution (the SNES picture is 2D at native size; [Display] SoftwareScaleFilter is a 2x/xBRZ/HQ filter, a later 'shader'-like option, not an internal resolution), widescreen_hack (Snes9x has none), integer_scale (folded into aspect, above), frameskip (never: [Emulation] SpeedControlMethod is the pacing method and is not touched)."
+  ]
+}

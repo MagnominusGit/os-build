@@ -1,0 +1,391 @@
+{
+  "files": {
+    "main": {
+      "path": ".config/ppsspp/PSP/SYSTEM/ppsspp.ini",
+      "format": "ini",
+      "separator": " = "
+    }
+  },
+  "options": [
+    {
+      "id": "renderer",
+      "label": "Graphics backend",
+      "description": "How PPSSPP draws the game. Vulkan is usually the fastest; Software is the most accurate but very slow.",
+      "choices": [
+        {
+          "value": "vulkan",
+          "label": "Vulkan",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "GraphicsBackend",
+              "value": "3 (VULKAN)"
+            },
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "SoftwareRenderer",
+              "value": "False"
+            }
+          ]
+        },
+        {
+          "value": "opengl",
+          "label": "OpenGL",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "GraphicsBackend",
+              "value": "0 (OPENGL)"
+            },
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "SoftwareRenderer",
+              "value": "False"
+            }
+          ]
+        },
+        {
+          "value": "software",
+          "label": "Software",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "GraphicsBackend",
+              "value": "3 (VULKAN)"
+            },
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "SoftwareRenderer",
+              "value": "True"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "resolution",
+      "label": "Internal resolution",
+      "description": "Draws the game's 3D at a multiple of the PSP's 480x272 for a sharper picture. Higher costs speed. Not used by the Software backend.",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "Auto (match the screen)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "InternalResolution",
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "value": "1x",
+          "label": "Native (272p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "InternalResolution",
+              "value": "1"
+            }
+          ]
+        },
+        {
+          "value": "2x",
+          "label": "2x (544p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "InternalResolution",
+              "value": "2"
+            }
+          ]
+        },
+        {
+          "value": "3x",
+          "label": "3x (816p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "InternalResolution",
+              "value": "3"
+            }
+          ]
+        },
+        {
+          "value": "4x",
+          "label": "4x (1088p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "InternalResolution",
+              "value": "4"
+            }
+          ]
+        },
+        {
+          "value": "5x",
+          "label": "5x (1360p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "InternalResolution",
+              "value": "5"
+            }
+          ]
+        },
+        {
+          "value": "6x",
+          "label": "6x (1632p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "InternalResolution",
+              "value": "6"
+            }
+          ]
+        },
+        {
+          "value": "7x",
+          "label": "7x (1904p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "InternalResolution",
+              "value": "7"
+            }
+          ]
+        },
+        {
+          "value": "8x",
+          "label": "8x (2176p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "InternalResolution",
+              "value": "8"
+            }
+          ]
+        },
+        {
+          "value": "9x",
+          "label": "9x (2448p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "InternalResolution",
+              "value": "9"
+            }
+          ]
+        },
+        {
+          "value": "10x",
+          "label": "10x (2720p)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "InternalResolution",
+              "value": "10"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "aspect",
+      "label": "Aspect ratio",
+      "description": "The shape of the picture. PSP's own keeps the PSP's wide picture with black bars where it does not fit; Stretch fills the screen. Integer scaling turns Stretch off.",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "PSP's own",
+          "set": [
+            {
+              "file": "main",
+              "section": "DisplayLayout.Landscape",
+              "key": "DisplayStretch",
+              "value": "False"
+            },
+            {
+              "file": "main",
+              "section": "DisplayLayout.Landscape",
+              "key": "DisplayAspectRatio",
+              "value": "1.000000"
+            }
+          ]
+        },
+        {
+          "value": "stretch",
+          "label": "Stretch to screen",
+          "set": [
+            {
+              "file": "main",
+              "section": "DisplayLayout.Landscape",
+              "key": "DisplayStretch",
+              "value": "True"
+            },
+            {
+              "file": "main",
+              "section": "DisplayLayout.Landscape",
+              "key": "DisplayAspectRatio",
+              "value": "1.000000"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "integer_scale",
+      "label": "Integer scaling",
+      "description": "Scales the picture by whole steps only, so every PSP pixel is the same size. Leaves black borders; wins over Stretch.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "DisplayLayout.Landscape",
+              "key": "DisplayIntegerScale",
+              "value": "True"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "DisplayLayout.Landscape",
+              "key": "DisplayIntegerScale",
+              "value": "False"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "smoothing",
+      "label": "Screen filter",
+      "description": "How the picture is scaled up to the screen. Sharp keeps edges crisp; Smooth blends them.",
+      "choices": [
+        {
+          "value": "sharp",
+          "label": "Sharp",
+          "set": [
+            {
+              "file": "main",
+              "section": "DisplayLayout.Landscape",
+              "key": "BufferFiltering",
+              "value": "2"
+            }
+          ]
+        },
+        {
+          "value": "smooth",
+          "label": "Smooth",
+          "set": [
+            {
+              "file": "main",
+              "section": "DisplayLayout.Landscape",
+              "key": "BufferFiltering",
+              "value": "1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vsync",
+      "label": "VSync",
+      "description": "Waits for the screen's refresh to stop tearing. Can add a little input lag.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "VerticalSync",
+              "value": "True"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "VerticalSync",
+              "value": "False"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "show_fps",
+      "label": "Show FPS",
+      "description": "Shows the frame rate in a corner of the screen. Either choice also turns off PPSSPP's speed and battery counters.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "iShowStatusFlags",
+              "value": "2"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "Graphics",
+              "key": "iShowStatusFlags",
+              "value": "0"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Verified against hrydgard/ppsspp tag v1.20.4 (fa50bb1). PPSSPP reads ppsspp.ini once at startup (Config::Load, Core/Config.cpp:1315; ReadAllSettings :1282-1303) and rewrites it on exit (g_Config.Save(\"NativeShutdown\"), UI/NativeApp.cpp:1493; Config::Save, Core/Config.cpp:1443): it re-loads the file and sets every setting it knows, so our values are what it saves back. Lines are written 'key = value' (ParsedIniLine::Reconstruct, Common/Data/Format/IniFile.cpp:184), hence the ' = ' separator; booleans as True/False (Section::Set(bool), Common/Data/Format/IniFile.h:82-84; TryParse accepts 1/0/true/false, Common/Data/Text/Parsers.cpp:152-161), floats with %f (IniFile.cpp:232-237).",
+    "Game-specific configs: a <DISCID>_ppsspp.ini the player made in PPSSPP (Game settings > Create game config) is loaded over ppsspp.ini for that game (Config::LoadGameConfig, Core/Config.cpp:1885) and wins for every PER_GAME key below; GraphicsBackend is not PER_GAME (Core/Config.cpp:705), so it always comes from ppsspp.ini. While a game config is active, PER_GAME keys are saved to the game ini, not ppsspp.ini (Core/Config.cpp:1453-1456).",
+    "renderer: [Graphics] GraphicsBackend (Core/Config.cpp:705) is written by PPSSPP as 'N (NAME)' (ConfigTranslator::To, Core/Config.cpp:615-627): 0 (OPENGL), 3 (VULKAN); it reads the leading int or the name (GPUBackendFromString, :88-96). 2 = Direct3D 11 is Windows-only. Software rendering is a separate PER_GAME switch, [Graphics] SoftwareRenderer (Core/Config.cpp:722; 'Software Rendering (slow)', UI/GameSettingsScreen.cpp:355, disabled while a game runs, so it is a boot setting); it still presents through a backend, so Software writes Vulkan with it, and every choice writes both keys.",
+    "resolution: [Graphics] InternalResolution int (Core/Config.cpp:728): 0 = Auto (1:1 with the window), 1..10 = 1x..10x PSP (480x272) (UI/GameSettingsScreen.cpp:339). The SDL build's default when the key is missing is 2 on a screen whose longest side is >= 1000 px, else 1 (DefaultInternalResolution, Core/Config.cpp:412-427). Ignored by the software renderer (UI/GameSettingsScreen.cpp:349).",
+    "Display layout keys live in [DisplayLayout.Landscape] (g_sectionMeta, Core/Config.cpp:1176; keys :665-671). PPSSPP picks Landscape unless the window is taller than 1.1x its width (DisplayProperties::GetDeviceOrientation, Common/System/Display.cpp:9-11); [DisplayLayout.Portrait] is not touched. When the Landscape section is missing PPSSPP reads the old keys from [Graphics] instead (fallback, Core/Config.cpp:1288-1292); once our patch creates the section that fallback is no longer used, and the keys it does not hold take their struct defaults (Core/Config.h:77-87), which is what PPSSPP itself writes into the section on its first exit anyway.",
+    "aspect: DisplayStretch bool (Core/Config.cpp:666) fills the screen; DisplayAspectRatio float (:671) is a free 0.1-2.0 slider relative to the PSP's own 480:272 ratio, 1.0 = PSP's own (Core/Config.h:84; UI/DisplayLayoutScreen.cpp:268). Both choices write DisplayAspectRatio = 1.000000 so a slider value left by the player does not distort 'PSP's own'. Stretch only applies with integer scale off (GPU/Common/PresentationCommon.cpp:101) and multiplies nothing else (:111-121). Fixed 4:3 and 16:9 are left out: the PSP picture is already ~16:9 (16:9 would be 1.007407, the same picture), and 4:3 (0.755556) would only squash it.",
+    "integer_scale: [DisplayLayout.Landscape] DisplayIntegerScale bool (Core/Config.cpp:670; 'Integer scale factor', UI/DisplayLayoutScreen.cpp:276); it disables Stretch and the aspect slider (UI/DisplayLayoutScreen.cpp:264, 270-272; PresentationCommon.cpp:101).",
+    "smoothing: [DisplayLayout.Landscape] BufferFiltering int (Core/Config.cpp:665) = iDisplayFilter, 1 = SCALE_LINEAR, 2 = SCALE_NEAREST (Core/ConfigValues.h:121-122; 'Screen Scaling Filter' Linear/Nearest, UI/DisplayLayoutScreen.cpp:343-344; used at GPU/Common/FramebufferManagerCommon.cpp:1550 and GPU/Software/SoftGpu.cpp:563).",
+    "vsync: [Graphics] VerticalSync bool, default True (Core/Config.cpp:771). Off asks for the IMMEDIATE present mode; where the driver has none PPSSPP forces VSync back on (Core/FrameTiming.cpp:101-111), and its settings page only shows the checkbox when IMMEDIATE exists (UI/GameSettingsScreen.cpp:433-436).",
+    "show_fps: [Graphics] iShowStatusFlags (Core/Config.cpp:704) is a bitmask: 2 FPS_COUNTER, 4 SPEED_COUNTER, 8 BATTERY_PERCENT (Core/ConfigValues.h:211-215; three checkboxes, UI/GameSettingsScreen.cpp:646-649; drawn in UI/DebugOverlay.cpp:477-488). A file action sets the whole value, so On = 2 (FPS only) and Off = 0 (no counters): choosing either clears the speed and battery bits a player ticked in PPSSPP. 'Emulator's setting' leaves the mask alone.",
+    "widescreen_hack: left out, PPSSPP has no such setting (the PSP is already widescreen). Frame skip, SkipBufferEffects and post-processing shaders ([PostShaderList]) are outside the v1 set."
+  ]
+}

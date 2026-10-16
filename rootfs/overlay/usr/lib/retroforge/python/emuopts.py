@@ -26,6 +26,10 @@
 # header), a YAML mapping path ("Video/Performance Overlay"), an XML element path under the root
 # ("Graphic/Overlay"). The value is the file's text, verbatim (TOML quotes included).
 #
+# A path may hold "{system}" when the emulator keeps one settings folder per system (ClownMDEmu: -u
+# ~/.config/clownmdemu/<system>). The emulator level is written for every system launch.conf gives the
+# emulator, so each folder (and Open's) shows it; the game level only for the system of the run.
+#
 # An emulator-level value is written into the emulator's file at every launch (Open included) and stays
 # there: as if the player had set it in the emulator, which RetroForge keeps enforcing. A game-level value
 # lasts for that run only: what the file held before is recorded in a restore journal
@@ -51,6 +55,7 @@ FILE_NAME = re.compile(r"[a-z][a-z0-9_]*")
 VAR_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 CHOICE_VALUE = re.compile(r"[A-Za-z0-9_.:+-]+")
 CPUS_VALUES = ("big", "all")
+SYSTEM = "{system}"  # in a file path: the system's own settings folder
 JOURNAL_VERSION = 1
 # What a settings file can throw at a patch: unreadable, not text, not XML, or TOML we would break.
 FILE_ERRORS = (OSError, UnicodeError, ET.ParseError, tomllib.TOMLDecodeError)
@@ -132,8 +137,10 @@ def _check_files(files, path):
         where = f"{path}: files.{name}"
         if not (FILE_NAME.fullmatch(name) and isinstance(f, dict) and set(f) <= {"path", "format", "separator"}):
             raise OptionsError(f"{where}: must be {{path, format[, separator]}}")
-        if not _safe_relative(f.get("path")):
-            raise OptionsError(f"{where}: path must be relative to $HOME, without '..'")
+        # "{system}" stands for one path component (a system id: no '/', never '..').
+        if not (_str(f.get("path")) and _safe_relative(f["path"].replace(SYSTEM, "s"))
+                and not re.search(r"[{}]", f["path"].replace(SYSTEM, ""))):
+            raise OptionsError(f"{where}: path must be relative to $HOME, without '..' ('{SYSTEM}' allowed)")
         if f.get("format") not in FORMATS:
             raise OptionsError(f"{where}: format must be one of {', '.join(FORMATS)}")
         if "separator" in f and not (f["format"] in LINE_FORMATS and _one_line(f["separator"])
@@ -406,30 +413,42 @@ def xml_get(text, section, key):
     return None if node is None else (node.text or "")
 
 
+# What comes before the root element: the declaration, comments, a doctype.
+XML_PROLOG = re.compile(r"\A(?:\s*(?:<\?.*?\?>|<!--.*?-->|<!DOCTYPE[^>]*>))*\s*", re.DOTALL)
+
+
 def xml_set(text, section, key, value):
     """text with the element at section/key (under the root) holding value; None removes it. The
-    document is re-serialised, comments kept: Cemu rewrites its settings.xml whole anyway."""
+    root is re-serialised (comments inside it kept, re-indented: Cemu rewrites its settings.xml whole
+    anyway); what precedes it is kept as it was."""
     root = _xml_parse(text)
     *parents, leaf = _xml_names(section, key)
-    parent = root
+    chain = [root]
     for name in parents:
-        child = parent.find(name)
+        child = chain[-1].find(name)
         if child is None:
             if value is None:
                 return text
-            child = ET.SubElement(parent, name)
-        parent = child
+            child = ET.SubElement(chain[-1], name)
+        chain.append(child)
+    parent = chain[-1]
     node = parent.find(leaf)
     if value is None:
         if node is None:
             return text
         parent.remove(node)
+        # Parents left empty go too (the restore of a setting that needed new parents: Cemu's Overlay).
+        for up, down in zip(reversed(chain[:-1]), reversed(chain[1:])):
+            if len(down) or (down.text or "").strip() or down.attrib:
+                break
+            up.remove(down)
     else:
         if node is None:
             node = ET.SubElement(parent, leaf)
         node.text = value
     ET.indent(root, "    ")
-    return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(root, encoding="unicode") + "\n"
+    prolog = XML_PROLOG.match(text).group(0).rstrip()
+    return (prolog or '<?xml version="1.0" encoding="UTF-8"?>') + "\n" + ET.tostring(root, encoding="unicode") + "\n"
 
 
 def get_setting(fmt, text, section, key):
@@ -512,21 +531,34 @@ def unknown_values(options, conf):
     return [(k, v) for k, v in conf.items() if k in known and v not in known[k]]
 
 
-def plan(options, home, chosen):
+def expand_path(path, systems):
+    """A file path for each of `systems` when it holds "{system}" (none when there is no system),
+    else the path itself. A system is a launch.conf id: never a '/' or '..'."""
+    if SYSTEM not in path:
+        return [path]
+    return [path.replace(SYSTEM, s) for s in systems if re.fullmatch(r"[a-z0-9_]+", s)]
+
+
+def plan(options, home, chosen, systems=(), system=None):
     """-> (args, env, {"emulator"|"game": {path: (format, separator, [(section, key, value)])}}).
     The arguments and environment are the winning choice's (the game's); file settings are written
     for both levels: the emulator's stay, the game's go over them for the run. Every choice of an
     option writes the same settings (load_options checks it), so nothing of the emulator's choice is
-    left active under the game's."""
+    left active under the game's. A "{system}" path is written for every one of `systems` at the
+    emulator level (the run's `system` included), and for the run's `system` only at the game level."""
     args, env, files = [], {}, {"emulator": {}, "game": {}}
+    level_systems = {"emulator": list(systems) + ([system] if system and system not in systems else []),
+                     "game": [system] if system else []}
     for emu, game in chosen:
         for level, choice in (("emulator", emu), ("game", game)):
             if choice is None:
                 continue
             for action in choice["set"]:
-                if "file" in action:
-                    f = options["files"][action["file"]]
-                    entry = files[level].setdefault(os.path.join(home, f["path"]),
+                if "file" not in action:
+                    continue
+                f = options["files"][action["file"]]
+                for path in expand_path(f["path"], level_systems[level]):
+                    entry = files[level].setdefault(os.path.join(home, path),
                                                     (f["format"], f.get("separator", "="), []))
                     entry[2].append((action["section"], action["key"], action["value"]))
         for action in (game or emu)["set"]:
@@ -583,14 +615,15 @@ def _apply_game_level(files, journal, home, warn):
             warn(f"could not write {path}: {err}")
 
 
-def apply(options, home, state_dir, emulator, emulator_conf, game_conf, warn):
+def apply(options, home, state_dir, emulator, emulator_conf, game_conf, warn, systems=(), system=None):
     """Write the chosen values; -> (args, env) for the emulator. Emulator-level values first (kept),
     then game-level ones, journalled before they are written. A file that cannot be patched is a
-    warning: the game still starts."""
+    warning: the game still starts. `systems`: the emulator's systems, `system`: the run's (None for
+    Open), for "{system}" paths."""
     for level, conf in (("game", game_conf), ("emulator", emulator_conf)):
         for oid, value in unknown_values(options, conf):
             warn(f"{level} setting {oid}={value} is not one of {emulator}'s choices: ignored")
-    args, env, files = plan(options, home, resolve(options, emulator_conf, game_conf))
+    args, env, files = plan(options, home, resolve(options, emulator_conf, game_conf), systems, system)
     _apply_emulator_level(files["emulator"], warn)
     if files["game"]:
         _apply_game_level(files["game"], journal_path(state_dir, emulator), home, warn)

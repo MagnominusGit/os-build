@@ -239,20 +239,30 @@ def parse_args(argv):
     return system, rom, None
 
 
-def emulator_for(system):
-    """The last `<system>=<emulator>` line of launch.conf."""
-    found = None
+def launch_map():
+    """launch.conf as {system: emulator}; the last `<system>=<emulator>` line of a system wins."""
+    found = {}
     try:
         with open(LAUNCH_CONF, errors="replace") as f:
             for line in f:
-                m = re.fullmatch(rf"{system}=([a-z0-9_-]*)\s*", line.rstrip("\n"))
+                m = re.fullmatch(r"([a-z0-9_]+)=([a-z0-9_-]*)\s*", line.rstrip("\n"))
                 if m:
-                    found = m.group(1)
+                    found[m.group(1)] = m.group(2)
     except OSError:
         pass
+    return found
+
+
+def emulator_for(system):
+    found = launch_map().get(system)
     if not found:
         raise Exit(2, f"no emulator for system '{system}' in {LAUNCH_CONF}")
     return found
+
+
+def systems_of(emulator):
+    """The systems launch.conf gives an emulator, sorted (its "{system}" settings folders)."""
+    return sorted(s for s, e in launch_map().items() if e == emulator)
 
 
 # ---------------------------------------------------------------------------------- definition --
@@ -909,12 +919,14 @@ def options_warning(emulator):
     return lambda msg: log(f"warning: {emulator}: {msg}")
 
 
-def apply_options(emulator, options, confs):
-    """Restore a journal a killed run left, then apply this run's choices: -> (args, env)."""
+def apply_options(emulator, options, confs, system):
+    """Restore a journal a killed run left, then apply this run's choices: -> (args, env).
+    `system` is None for --gui."""
     emuopts.restore(HOME, STATE_DIR, emulator, options_warning(emulator))
     if options is None:
         return [], {}
-    return emuopts.apply(options, HOME, STATE_DIR, emulator, *confs, options_warning(emulator))
+    return emuopts.apply(options, HOME, STATE_DIR, emulator, *confs, options_warning(emulator),
+                         systems=systems_of(emulator), system=system)
 
 
 def run(argv):
@@ -949,7 +961,7 @@ def run(argv):
     package = FORMATS[definition["format"]](emulator, image)
     try:
         # Before the mount: the restore in `finally` must cover every way out from here on.
-        opt_args, opt_env = apply_options(emulator, options, confs)
+        opt_args, opt_env = apply_options(emulator, options, confs, system)
         args = opt_args + args
         try:
             root = package.prepare()

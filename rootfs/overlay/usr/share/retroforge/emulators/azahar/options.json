@@ -1,0 +1,544 @@
+{
+  "files": {
+    "main": {
+      "path": ".config/azahar-emu/qt-config.ini",
+      "format": "ini"
+    }
+  },
+  "options": [
+    {
+      "id": "renderer",
+      "label": "Graphics backend",
+      "description": "How Azahar draws the game. Vulkan is the fast one; Software is far too slow to play and is only for checking graphics bugs.",
+      "choices": [
+        {
+          "value": "vulkan",
+          "label": "Vulkan",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "graphics_api",
+              "value": "2"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "graphics_api\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "software",
+          "label": "Software",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "graphics_api",
+              "value": "0"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "graphics_api\\default",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "resolution",
+      "label": "Internal resolution",
+      "description": "Draws the game's 3D at a multiple of the 3DS's resolution for a sharper picture. Higher costs speed. Screen size picks the multiple that fits the screen.",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "Screen size",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "0"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "1x",
+          "label": "Native (400x240)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "1"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "2x",
+          "label": "2x (800x480)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "2"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "3x",
+          "label": "3x (1200x720)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "3"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "4x",
+          "label": "4x (1600x960)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "4"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "5x",
+          "label": "5x (2000x1200)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "5"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "6x",
+          "label": "6x (2400x1440)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "6"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "7x",
+          "label": "7x (2800x1680)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "7"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "8x",
+          "label": "8x (3200x1920)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "8"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "9x",
+          "label": "9x (3600x2160)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "9"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "10x",
+          "label": "10x (4000x2400)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "10"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "11x",
+          "label": "11x (4400x2640)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "11"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "12x",
+          "label": "12x (4800x2880)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "12"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "13x",
+          "label": "13x (5200x3120)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "13"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "14x",
+          "label": "14x (5600x3360)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "14"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "15x",
+          "label": "15x (6000x3600)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "15"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "16x",
+          "label": "16x (6400x3840)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "16"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "17x",
+          "label": "17x (6800x4080)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "17"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "18x",
+          "label": "18x (7200x4320)",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor",
+              "value": "18"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "resolution_factor\\default",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "integer_scale",
+      "label": "Integer scaling",
+      "description": "Scales the large screen only by whole multiples of the 3DS's 240 lines: no uneven pixels, but black borders.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "use_integer_scaling",
+              "value": "true"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "use_integer_scaling\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "use_integer_scaling",
+              "value": "false"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "use_integer_scaling\\default",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "smoothing",
+      "label": "Screen filter",
+      "description": "How the picture is scaled up to the screen. Sharp keeps edges crisp; Smooth blends them.",
+      "choices": [
+        {
+          "value": "sharp",
+          "label": "Sharp",
+          "set": [
+            {
+              "file": "main",
+              "section": "Layout",
+              "key": "filter_mode",
+              "value": "false"
+            },
+            {
+              "file": "main",
+              "section": "Layout",
+              "key": "filter_mode\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "smooth",
+          "label": "Smooth",
+          "set": [
+            {
+              "file": "main",
+              "section": "Layout",
+              "key": "filter_mode",
+              "value": "true"
+            },
+            {
+              "file": "main",
+              "section": "Layout",
+              "key": "filter_mode\\default",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vsync",
+      "label": "VSync",
+      "description": "Waits for the screen's refresh to stop tearing. Can add a little input lag.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "use_vsync",
+              "value": "true"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "use_vsync\\default",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "use_vsync",
+              "value": "false"
+            },
+            {
+              "file": "main",
+              "section": "Renderer",
+              "key": "use_vsync\\default",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Verified against azahar-emu/azahar tag 2126.1.2 (9e6f523), the source pkgforge-dev/Azahar-AppImage 2126.1.2 builds with no renderer flags (get-dependencies.sh cmake line).",
+    "qt-config.ini is a QSettings IniFormat file (src/citra_qt/configuration/config.cpp:120-121). QSettings writes key=value with no spaces, booleans as true/false, enums and numbers as their integer; a '/' in a key is written as '\\' in the file, so the companion of resolution_factor is the line 'resolution_factor\\default=...' under [Renderer], matched literally by the ini patcher.",
+    "Every key needs its 'key\\default=false' companion: ReadBasicSetting loads the built-in default instead of the key whenever key\\default is true (config.cpp:133-140, 172-188), and Azahar writes key\\default=(value == default) for every setting at each save (config.cpp:203-255). After a run where the player had the default, the file holds key\\default=true and a patch of the key alone would be ignored. A missing companion reads as false (config.cpp:176), which is why the seed's graphics_api=2 works without one. Every choice therefore writes the key and key\\default=false.",
+    "When the file is read and rewritten: QtConfig::Reload reads every value then saves the whole file back at startup (config.cpp:1485-1489); BootGame saves again after loading the game (src/citra_qt/citra_qt.cpp:1543), closeEvent saves at exit (citra_qt.cpp:4050). Values are read once at startup; the restore journal puts both lines back after exit.",
+    "Azahar's own per-game file custom/<TITLE ID>.ini (citra_qt.cpp:1515-1520, config.cpp:109-117) outranks these keys where the player set use_global=false there (config.cpp:192-199). Note: SwitchableSetting::GetValue returns the per-game value (src/common/settings.h:389-394) and the global save at boot (citra_qt.cpp:1543) writes it, so a per-game Azahar setting leaks into qt-config.ini; the restore journal undoes that for keys we override at the game level.",
+    "renderer: [Renderer] graphics_api, GraphicsAPI enum 0 Software, 1 OpenGL, 2 Vulkan (src/common/settings.h:22-26, 515-528; read at config.cpp:711). OpenGL is left out: CMakeLists.txt:100-106 turns ENABLE_OPENGL off by default on Linux aarch64 and the pkgforge build does not turn it on (the image's binary has no renderer_opengl objects); graphics_api=1 then hits 'Unknown or unsupported graphics API ... falling back' (src/video_core/video_core.cpp:28-51) and the Qt dialog greys OpenGL out (src/citra_qt/configuration/configure_graphics.cpp:43-47). The software renderer is compiled in (CMakeLists.txt:140).",
+    "resolution: [Renderer] resolution_factor u32 0..18, default 1 (settings.h:551; config.cpp:723). 0 is 'Auto (Window Size)', n is n x 400x240: labels from src/citra_qt/configuration/configure_enhancements.ui:52-142.",
+    "integer_scale: [Renderer] use_integer_scaling bool, default false (settings.h:552; config.cpp:724); applied to the large screen (src/core/frontend/framebuffer_layout.cpp:100-110) and the whole hybrid layout (:184-185).",
+    "smoothing: [Layout] filter_mode bool, default true = linear (settings.h:625; read in the Layout group, config.cpp:545); the presentation sampler is linear or nearest from it (src/video_core/renderer_vulkan/renderer_vulkan.cpp:189, 316-321; vk_present_window.cpp:470). filter_mode is not a layout key: [Layout] layout_option and the other screen keys the dual-screen seed and the board switch use are never touched. texture_filter/texture_sampling (settings.h:117-130, 555-557) are texture enhancements, not the output filter: left for the shader phase.",
+    "vsync: [Renderer] use_vsync bool, default true off Android (settings.h:543-547; config.cpp:720); the Vulkan present window follows it (src/video_core/renderer_vulkan/vk_present_window.cpp:108, 388-393).",
+    "Left out: aspect -- settings.h:589 has aspect_ratio but the Qt frontend never reads or writes it (absent from config.cpp; 'Default' is 'the only option on desktop', framebuffer_layout.cpp:103-106). widescreen_hack -- Azahar has none. show_fps -- the FPS is only a status-bar label (citra_qt.cpp:609-621), hidden in fullscreen (citra_qt.cpp:2724-2728), and we start it with -f: use MangoHud."
+  ]
+}
