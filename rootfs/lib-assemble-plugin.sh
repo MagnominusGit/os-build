@@ -9,7 +9,7 @@
 # Reads the assembler's globals rather than taking arguments -- $stage (the staged tree), $ROOT
 # (repo root), $OUT (build outputs).
 
-# STAGE ogui-plugin — the RetroForge OpenGamepadUI plugin (ROM library, Settings > Emulators), read-only
+# STAGE ogui-plugin — the RetroForge OpenGamepadUI plugin (ROM library, Main menu > Emulators), read-only
 # in the image. OGUI only loads plugins from the player's home, so retroforge-session copies it there
 # at every start when it is missing or older (/usr/lib/retroforge/install-ogui-plugin): a fresh card
 # works offline, and a newer copy from the RetroForge plugin store is never downgraded.

@@ -60,7 +60,7 @@ def read(path):
 
 # ================================================================================================
 CASE = "player confs"
-write(f"{T}/c/a.conf", "# set by Settings > Emulators\nCPUS=all\naspect=4:3\nCPUS=big\n$(touch x)\nnoequals\n")
+write(f"{T}/c/a.conf", "# set by Main menu > Emulators\nCPUS=all\naspect=4:3\nCPUS=big\n$(touch x)\nnoequals\n")
 check("last line of a key wins, comments and lines without '=' skipped", eo.read_conf(f"{T}/c/a.conf"),
       {"CPUS": "big", "aspect": "4:3"})
 check("a missing conf is empty", eo.read_conf(f"{T}/c/none.conf"), {})

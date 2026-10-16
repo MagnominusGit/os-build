@@ -50,7 +50,7 @@ func _ready() -> void:
 ## When a ROM's launch fails because its emulator is not installed (or its AppImage did not
 ## mount), tell the player. OGUI never sees retroforge-launch's exit code (games run through its
 ## reaper), so retroforge-launch leaves the reason in a status file this EXIT hook reads. The launch
-## itself is never held back: downloads happen in Settings > Emulators, not on a card.
+## itself is never held back: downloads happen in Main menu > Emulators, not on a card.
 func get_app_lifecycle_hooks() -> Array[AppLifecycleHook]:
 	var hooks: Array[AppLifecycleHook] = [LaunchFailure.new()]
 	return hooks
@@ -164,7 +164,7 @@ func emulator_of(item: LibraryLaunchItem) -> String:
 	return LaunchArgs.emulator_for(item.metadata["system"], LaunchArgs.read_text(LaunchArgs.LAUNCH_CONF))
 
 
-## Whether the emulator this game runs in defaults to the fast cores (Settings > Emulators).
+## Whether the emulator this game runs in defaults to the fast cores (Main menu > Emulators).
 func emulator_fast_cores(item: LibraryLaunchItem) -> bool:
 	var emulator := emulator_of(item)
 	return emulator != "" and LaunchArgs.emulator_fast_cores(emulator)
@@ -205,9 +205,9 @@ class LaunchFailure extends AppLifecycleHook:
 		var msg: String
 		match words[0]:
 			"not-installed":
-				msg = "%s is not installed.\nDownload it in Settings > Emulators first." % name
+				msg = "%s is not installed.\nDownload it from Emulators in the main menu first." % name
 			"mount-failed":
-				msg = "%s could not be started.\nDelete it and download it again in Settings > Emulators." % name
+				msg = "%s could not be started.\nDelete it and download it again from Emulators in the main menu." % name
 			"missing-file":
 				# retroforge-launch: `missing-file <emulator> <path under the player's home>`
 				if words.size() != 3:

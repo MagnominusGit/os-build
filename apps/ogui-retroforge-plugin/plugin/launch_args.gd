@@ -6,7 +6,7 @@ extends RefCounted
 ##
 ## The player's choices live in two confs of `KEY=value` lines (the last line of a key wins), read
 ## by retroforge-launch at each start (emuopts):
-##   - per emulator, Settings > Emulators: ~/.config/retroforge/emulators/<emu>.conf (Open included);
+##   - per emulator, Main menu > Emulators: ~/.config/retroforge/emulators/<emu>.conf (Open included);
 ##   - per game, Game settings > RetroForge: ~/.config/retroforge/games/<system>/<rom file>.conf.
 ## "Run on fast cores" is CPUS=big|all in either; no line in the game's conf = the emulator's default.
 

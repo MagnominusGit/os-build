@@ -1,8 +1,9 @@
 extends ScrollContainer
 
-## Settings > Emulators: the RetroForge emulator store (plan Phase 4, part 3).
+## The right side of the Emulators screen (emulators_screen.gd): ONE catalog emulator at a time,
+## the one focused in the screen's list (show_emulator).
 ##
-## One block per catalog emulator: its name, who made it (author, homepage, licence and its link:
+## Its block: who made it (author, homepage, licence and its link:
 ## the attribution every emulator's licence asks for), installed vs pinned version and size, and
 ## a button that is Download, Update or Open (the emulator's own UI, `retroforge-launch --gui`), plus
 ## Delete once installed (a nightly entry -- catalog "channel": "nightly", Cemu -- adds an Update
@@ -14,7 +15,7 @@ extends ScrollContainer
 ##
 ## Built in code on the pattern of OGUI's own settings pages (library_settings_menu.tscn): a
 ## StateWatcher on this page's State hands focus to the page's FocusGroup, and Back pops the
-## settings state machine to return to the button list.
+## screen's state machine to return to the list.
 
 const EMU_TOOL := "/usr/bin/retroforge-emu"
 const LAUNCHER := "/usr/bin/retroforge-launch"
@@ -22,14 +23,12 @@ const LaunchArgs := preload("launch_args.gd")
 const Credits := preload("credits.gd")
 const EmuOptions := preload("emu_options.gd")
 const PROGRESS_POLL := 0.5  # s between download progress samples
-const BLOCK_GAP := 24  # px between two emulators' blocks
 const EXIT_TEXT := {
 	3: "Download failed: check the network connection.",
 	4: "The download did not match the version RetroForge tested; nothing was changed.",
 	5: "Not enough free space, or the emulators folder is not writable.",
 }
 
-var settings_state_machine := load("res://assets/state/state_machines/settings_state_machine.tres") as StateMachine
 var launch_manager := load("res://core/global/launch_manager.tres") as LaunchManager
 var notification_manager := load("res://core/global/notification_manager.tres")
 var section_scene := load("res://core/ui/components/section_label.tscn") as PackedScene
@@ -42,16 +41,21 @@ var state_updater_scene := load("res://core/systems/state/state_updater.tscn") a
 var state_watcher_scene := load("res://core/systems/state/state_watcher.tscn") as PackedScene
 var focus_group_setter_script := load("res://core/systems/input/focus_group_setter.gd") as GDScript
 
-## The settings state this page owns; the plugin's Emulators button pushes it.
+## The state this page owns on the screen's state machine; A on a list entry pushes it.
 var state: State
+## `retroforge-emu list`'s emulators (id -> entry), read by load_catalog().
+var catalog := {}
+## The emulator shown ("" = none yet).
+var emulator_id := ""
 var logger := Log.get_logger("RetroForgeEmulators", Log.LEVEL.INFO)
 var _rows: VBoxContainer
 var _focus_group: FocusGroup
 var _busy := {}  # emulator id -> true while an install or remove runs
 var _inside := false  # this page's state is the current one (it has the focus)
+var _generation := 0  # refresh() calls: only the latest one builds rows
 
 
-func setup(page_state: State) -> void:
+func setup(page_state: State, state_machine: StateMachine) -> void:
 	state = page_state
 	name = "RetroForgeEmulatorsMenu"
 	follow_focus = true
@@ -59,17 +63,25 @@ func setup(page_state: State) -> void:
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 
-	# Back returns to the settings button list.
+	# Back returns to the list, unless the screen handles Back itself (state_machine null).
+	if state_machine:
+		_add_back(state_machine)
+	_build_rows()
+
+
+func _add_back(state_machine: StateMachine) -> void:
 	var back = input_watcher_scene.instantiate()
 	back.stop_propagation = true
 	back.action = "ogui_east"
 	var pop = state_updater_scene.instantiate()
-	pop.state_machine = settings_state_machine
+	pop.state_machine = state_machine
 	pop.action = 2  # StateUpdater.ACTION.POP
 	pop.on_signal = "input_released"
 	back.add_child(pop)
 	add_child(back)
 
+
+func _build_rows() -> void:
 	var margin := MarginContainer.new()
 	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	margin.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -95,30 +107,54 @@ func setup(page_state: State) -> void:
 	watcher.state_entered.connect(func(): _inside = true)
 	watcher.state_exited.connect(func(): _inside = false)
 	watcher.state_removed.connect(func(): _inside = false)
-	# Fill the page whenever it is shown (focusing the Emulators button shows it).
-	visibility_changed.connect(func():
-		if is_visible_in_tree():
-			refresh())
 
 
-## Rebuild the rows from `retroforge-emu list`.
+## Read the catalog again (`retroforge-emu list`): installed versions, updates.
+func load_catalog() -> void:
+	catalog = _list()
+
+
+## Show one emulator (focusing its entry in the list).
+func show_emulator(id: String) -> void:
+	emulator_id = id
+	refresh()
+
+
+## Rebuild the rows of the shown emulator from the catalog last read.
 func refresh() -> void:
+	_generation += 1
+	var generation := _generation
 	for child in _rows.get_children():
 		if child != _focus_group:
 			child.queue_free()
 	await get_tree().process_frame
-	var emus := _list()
-	if emus.is_empty():
+	if generation != _generation:  # a newer refresh (the list moved on) builds the rows
+		return
+	if catalog.is_empty():
 		_add_label("No emulator catalog found")
-	var ids := emus.keys()
-	ids.sort()
-	for id in ids:
-		_add_emulator(id, emus[id])
+	elif catalog.has(emulator_id):
+		_add_emulator(emulator_id, catalog[emulator_id])
 	_focus_group.current_focus = null
 	_focus_group.recalculate_focus()
+	_confine_focus()
 	if _inside:
 		_focus_group.grab_focus()
-	logger.info("Emulators page: %d emulator(s)" % emus.size())
+
+
+## CardButtonSetting hands its focus to an inner button that has none of the neighbours FocusGroup
+## set on the row, so Up from the first row (or Left) went to the nearest control on screen: an
+## entry of the Emulators list, which swaps the page. Give the inner button the row's neighbours.
+## (Dropdown forwards them itself.)
+func _confine_focus() -> void:
+	for row in _rows.get_children():
+		var inner = row.get("card_button")
+		if not (row is Control and inner is Control):
+			continue
+		for side in ["focus_neighbor_top", "focus_neighbor_bottom", "focus_neighbor_left",
+				"focus_neighbor_right", "focus_next", "focus_previous"]:
+			var path: NodePath = row.get(side)
+			var target := row.get_node_or_null(path) if not path.is_empty() else null
+			inner.set(side, target.get_path() if target else inner.get_path())
 
 
 func _list() -> Dictionary:
@@ -150,19 +186,12 @@ func _add_credit(emu: Dictionary) -> void:
 	_rows.add_child(label)
 
 
-## One block per emulator: its name once (heading), who made it, then its rows -- the version with
-## Download / Update / Open, one dropdown per option, the fast-cores default, and Delete once
+## The emulator's block (its name is the screen's title): who made it, then its rows -- the version
+## with Download / Update / Open, one dropdown per option, the fast-cores default, and Delete once
 ## installed. Options show before the download too: a choice made then applies from the first
-## launch. Only the last
-## row draws a separator, so a line marks where one emulator ends (OGUI's toggle draws one by
-## default, which used to split a block in two), and a gap opens before the next heading.
+## launch. Only the last row draws a separator (OGUI's toggle draws one by default).
 func _add_emulator(id: String, emu: Dictionary) -> void:
 	var name_text := str(emu.get("name", id))
-	if _rows.get_child_count() > 1:  # the FocusGroup is always there
-		var gap := Control.new()
-		gap.custom_minimum_size = Vector2(0, BLOCK_GAP)
-		_rows.add_child(gap)
-	_add_label(name_text)
 	_add_credit(emu)
 	var size := int(emu.get("size", 0))
 	var pinned := Credits.version_text(str(emu.get("pinned", "?")))
@@ -244,7 +273,7 @@ func _install(id: String, name_text: String, tag: String, size: int, row: Contro
 	if cmd.execute() != OK:
 		_busy.erase(id)
 		_notify("Could not start the download of " + name_text)
-		refresh()
+		_reload()
 		return
 	# Progress from the size of retroforge-emu's hidden .part file.
 	var part := OS.get_environment("HOME").path_join("emulators/%s/.%s.AppImage.part" % [id, tag])
@@ -263,7 +292,7 @@ func _install(id: String, name_text: String, tag: String, size: int, row: Contro
 	else:
 		logger.warn("retroforge-emu install %s exited %d: %s" % [id, code, cmd.stderr])
 		_notify(EXIT_TEXT.get(code, "Installing %s failed." % name_text))
-	refresh()
+	_reload()
 
 
 ## The build `retroforge-emu list` reports as installed for `id`, or null.
@@ -294,6 +323,11 @@ func _remove(id: String, name_text: String, row: Control) -> void:
 		code = await cmd.finished as int
 	_busy.erase(id)
 	_notify(name_text + (" deleted" if code == 0 else " could not be deleted"))
+	_reload()
+
+
+func _reload() -> void:
+	load_catalog()
 	refresh()
 
 

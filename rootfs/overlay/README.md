@@ -88,7 +88,7 @@ this image `/etc/passwd` and `/var` are *build products* rather than device stat
 
 **PortMaster's `/roms` — `roms -> /home/player/roms`**
 The only top-level symlink in the tree. PortMaster (downloaded into the player's home from
-Settings > Emulators) and every port script it installs locate themselves through hardcoded
+Main menu > Emulators) and every port script it installs locate themselves through hardcoded
 `/roms/ports/...` paths (PortMaster's generic default when the system is not one of its known
 handheld firmwares). The link points them at the player's `~/roms`, so PortMaster lives in
 `~/roms/ports/PortMaster` and its ports in `~/roms/ports` with no change to PortMaster's own files,

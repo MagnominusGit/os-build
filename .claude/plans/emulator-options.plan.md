@@ -173,6 +173,13 @@ game-level values, the same pattern as `retroforge-emu list`. GDScript never par
 - `--cpus` is gone from retroforge-launch. The plugin writes `CPUS=` in the game conf and cards are just
   `<system> <rom>`. Choices players had saved in OGUI's `retroforge.cpus` section are dropped (no migration).
 
+- **Emulators screen** (2026-10-16, HW-checked on the ACE): Settings > Emulators grew too long with the
+  options, so the plugin adds an Emulators entry to OGUI's main menu (after Library) that opens a
+  full-screen menu built like Settings: every emulator on the left, the focused one's page on the right.
+  Gotchas found on the device: a StateMachine made in code keeps one state (`minimum_states` 1) so the
+  page never popped; CardButtonSetting's inner button has none of FocusGroup's neighbours, so Up left the
+  page for the nearest list entry (the page copies them over).
+
 ## Phases
 
 1. **Decisions** D1–D5: done (below).

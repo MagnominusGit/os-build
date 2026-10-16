@@ -1,7 +1,7 @@
 extends ScrollContainer
 
 ## Game settings > RetroForge: per-ROM options, in the screen the gear on OGUI's launch menu opens.
-## "Run on fast cores": the emulator's default (Settings > Emulators), On or Off for this game
+## "Run on fast cores": the emulator's default (Main menu > Emulators), On or Off for this game
 ## (CPUS=big / all in the game's conf, which retroforge-launch reads; launch_args.gd). Then one
 ## dropdown per option of the game's emulator (options.json, emu_options.gd): "Emulator default
 ## (<its choice>)" or a value for this game only, rebuilt at each visit (another game may run in
@@ -100,7 +100,7 @@ func _build_page() -> void:
 
 	_fast_cores = dropdown_scene.instantiate()
 	_fast_cores.title = "Run on fast cores"
-	_fast_cores.description = "Keep the emulator on the fast CPU cores. Helps demanding systems (PS2, PS3, Wii U); PS1 does not need it. The default is set per emulator in Settings > Emulators."
+	_fast_cores.description = "Keep the emulator on the fast CPU cores. Helps demanding systems (PS2, PS3, Wii U); PS1 does not need it. The default is set per emulator in Emulators, in the main menu."
 	_fast_cores.item_selected.connect(_on_fast_cores_selected)
 	_focus_group = focus_group_scene.instantiate() as FocusGroup
 	_focus_group.focus_stack = focus_stack

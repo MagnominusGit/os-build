@@ -997,7 +997,7 @@ grep -qs 'CPUS\|taskset' "$SEED_DIR"/*/emulator.json && bad "an emulator definit
 
 # =================================================================================================
 CASE="player's emulator default (CPUS=)"
-# Settings > Emulators writes ~/.config/retroforge/emulators/<emu>.conf; the game's conf overrides it
+# Main menu > Emulators writes ~/.config/retroforge/emulators/<emu>.conf; the game's conf overrides it
 # (Game settings > RetroForge: emulator default = no line / on = CPUS=big / off = CPUS=all).
 PCONF="$HOME/.config/retroforge/emulators/duckstation.conf"
 cpus_run() {  # one launch with the given arguments and the fake topology; prints the taskset list or "none"
@@ -1013,7 +1013,7 @@ rm -f "$PCONF"
 [ "$(cpus_run psx "$ROM")" = none ] && ok "no player conf: not pinned" || bad "pinned with no player conf"
 echo "CPUS=all" > "$PCONF"
 [ "$(cpus_run psx "$ROM")" = none ] && ok "CPUS=all: not pinned" || bad "pinned with CPUS=all"
-printf '# set by Settings > Emulators\nCPUS=big\n' > "$PCONF"
+printf '# set by Main menu > Emulators\nCPUS=big\n' > "$PCONF"
 [ "$(cpus_run psx "$ROM")" = "4,5,6,7" ] && ok "CPUS=big: a game with no override is pinned" || bad "CPUS=big did not pin a ROM launch"
 [ "$(cpus_run --gui duckstation)" = "4,5,6,7" ] && ok "CPUS=big: Open (--gui) is pinned too" || bad "CPUS=big did not pin --gui"
 echo "CPUS=all" > "$GCONF"
@@ -1036,7 +1036,7 @@ rm -f "$PCONF"
 
 # =================================================================================================
 CASE="per-emulator options (options.json)"
-# Settings > Emulators and Game settings > RetroForge write option lines into the same confs as CPUS;
+# Main menu > Emulators and Game settings > RetroForge write option lines into the same confs as CPUS;
 # options.json says what each value does. The emulator's choice is written into its settings and stays;
 # the game's is put back when the emulator exits, and by the next launch after a double Exit.
 OPTD="$T/data-options"; mkdir -p "$OPTD/duckstation"; cp "$DS_DEF" "$DS_SEED" "$OPTD/duckstation/"

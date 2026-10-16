@@ -333,7 +333,7 @@ stop_session() {
 }
 trap stop_session HUP INT TERM
 
-# The RetroForge OpenGamepadUI plugin (ROM library, Settings > Emulators) ships read-only in the image;
+# The RetroForge OpenGamepadUI plugin (ROM library, Main menu > Emulators) ships read-only in the image;
 # OGUI only loads plugins from the player's folder, so copy it there when missing or older. Never a
 # reason not to start the shell.
 : "${RETROFORGE_PLUGIN_INSTALLER:=/usr/lib/retroforge/install-ogui-plugin}"

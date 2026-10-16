@@ -25,7 +25,7 @@ var roms  # our Library subclass; untyped so roms.SYSTEMS resolves at runtime
 ## system -> {"tab": ScrollContainer, "grid": HFlowContainer}
 var _tabs := {}
 var _emulators_button: Control
-var _emulators_page: Control
+var _emulators_screen: Control
 var _game_settings_page: Control
 var _hardware_card: Control
 var _fan_test_card: Control
@@ -58,7 +58,7 @@ func _ready() -> void:
 	_rescan_timer.start()
 	# The settings menu is not ready yet when plugins initialise: add our page a frame later.
 	await get_tree().process_frame
-	_add_emulators_page()
+	_add_emulators_screen()
 	_add_game_settings_page()
 	_add_hardware_card()
 	_apply_render_mode()
@@ -80,7 +80,7 @@ func unload() -> void:
 	for system in _tabs.keys():
 		tabs_state.remove_tab(_tab_text(system))
 	_tabs.clear()
-	for node in [_emulators_button, _emulators_page]:
+	for node in [_emulators_button, _emulators_screen]:
 		if is_instance_valid(node):
 			node.queue_free()
 	if is_instance_valid(_game_settings_page):
@@ -113,48 +113,40 @@ func _add_game_settings_page() -> void:
 	logger.info("Game settings > RetroForge added")
 
 
-## Settings > Emulators: a button in OGUI's settings list (after Library) and its page, wired
-## like the built-in ones in settings_menu.tscn -- pressing the button replaces the settings
-## state with the page's own (focus moves into the page), focusing it shows the page's tab and
-## sets the section title.
-func _add_emulators_page() -> void:
+## Main menu > Emulators: an entry after Library, wired like OGUI's own (main_menu.tscn): it pushes
+## the screen's state on the menu state machine and the menu state on the global one, and clears
+## the popup machine, which closes the main menu. The screen (emulators_screen.gd) sits beside
+## Settings in card_ui.tscn's AboveContextBarMargin.
+func _add_emulators_screen() -> void:
+	var main_menu: Node = get_tree().root.find_child("MainMenu", true, false)
+	var buttons: Node = main_menu.find_child("ButtonContainer", true, false) if main_menu else null
 	var settings: Node = get_tree().get_first_node_in_group("settings_menu")
-	if not settings:
-		logger.warn("OGUI settings menu not found; no Emulators page")
-		return
-	var buttons: Node = settings.find_child("SettingButtonsContainer", true, false)
-	var tabs: TabContainer = settings.find_child("TabContainer", true, false) as TabContainer
-	var title_box: Node = settings.find_child("TitleContainer", true, false)
-	var title: Label = title_box.find_child("SectionLabel", true, false) as Label if title_box else null
-	if not (buttons and tabs and title):
-		logger.warn("OGUI settings menu layout not found; no Emulators page")
+	var holder: Node = settings.get_parent() if settings else null
+	if not (buttons and holder):
+		logger.warn("OGUI main menu layout not found; no Emulators screen")
 		return
 
-	var page_state := State.new()
-	page_state.name = "settings_retroforge_emulators"
-	_emulators_page = load(plugin_base.path_join("emulators_page.gd")).new()
-	_emulators_page.setup(page_state)
-	tabs.add_child(_emulators_page)
+	var screen_state := State.new()
+	screen_state.name = "retroforge_emulators"
+	_emulators_screen = load(plugin_base.path_join("emulators_screen.gd")).new()
+	_emulators_screen.setup(screen_state, load(plugin_base.path_join("emulators_page.gd")))
+	holder.add_child(_emulators_screen)
 
 	_emulators_button = load("res://core/ui/components/card_button.tscn").instantiate()
 	_emulators_button.name = "RetroForgeEmulatorsButton"
 	_emulators_button.text = "Emulators"
-	var push = load("res://core/systems/state/state_updater.tscn").instantiate()
-	push.state_machine = load("res://assets/state/state_machines/settings_state_machine.tres")
-	push.state = page_state
-	push.action = 3  # StateUpdater.ACTION.REPLACE, as the built-in buttons
-	push.on_signal = "button_up"
-	_emulators_button.add_child(push)
-	var tab_setter := TabSetter.new()
-	tab_setter.target = tabs
-	tab_setter.tab_number = _emulators_page.get_index()
-	tab_setter.on_signal = "focus_entered"
-	_emulators_button.add_child(tab_setter)
-	var text_setter := TextSetter.new()
-	text_setter.target = title
-	text_setter.text = "Emulators"
-	text_setter.on_signal = "focus_entered"
-	_emulators_button.add_child(text_setter)
+	_emulators_button.click_focuses = false
+	for step in [
+		[menu_state_machine, screen_state, 0],  # PUSH
+		[load("res://assets/state/state_machines/global_state_machine.tres"), load("res://assets/state/states/menu.tres"), 0],
+		[load("res://assets/state/state_machines/popup_state_machine.tres"), null, 6],  # CLEAR
+	]:
+		var updater = load("res://core/systems/state/state_updater.tscn").instantiate()
+		updater.state_machine = step[0]
+		updater.state = step[1]
+		updater.action = step[2]
+		updater.on_signal = "button_up"
+		_emulators_button.add_child(updater)
 
 	var library_button := buttons.find_child("LibraryButton", false, false)
 	buttons.add_child(_emulators_button)
@@ -163,7 +155,7 @@ func _add_emulators_page() -> void:
 	var focus_group := buttons.find_child("FocusGroup", false, false)
 	if focus_group:
 		focus_group.recalculate_focus()
-	logger.info("Settings > Emulators added")
+	logger.info("Main menu > Emulators added")
 
 
 ## Automatic rescan: reload our library once ~/roms changed and settled (rom_watch.gd). Never

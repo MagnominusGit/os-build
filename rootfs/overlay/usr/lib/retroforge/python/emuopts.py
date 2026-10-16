@@ -2,7 +2,7 @@
 #
 # The player picks display options (renderer, resolution, aspect...) at two levels:
 #
-#   emulator  ~/.config/retroforge/emulators/<emulator>.conf      Settings > Emulators
+#   emulator  ~/.config/retroforge/emulators/<emulator>.conf      Main menu > Emulators
 #   game      ~/.config/retroforge/games/<system>/<rom file>.conf  Game settings > RetroForge
 #
 # Both are `key=value` lines (the last one of a key wins), read and never sourced: CPUS=big|all (fast

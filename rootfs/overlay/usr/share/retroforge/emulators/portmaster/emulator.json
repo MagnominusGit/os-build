@@ -1,7 +1,7 @@
 {
   "notes": [
     "PortMaster (ports: native Linux games and engines packaged for handhelds): not an AppImage. retroforge-emu unpacks PortMaster.zip into ~/roms/ports/PortMaster, PortMaster's own generic default through the image's /roms -> /home/player/roms link, and it updates itself from there (user decision 2026-10-11).",
-    "gui_args: PortMaster's own UI (browse, install, update ports), from Settings > Emulators > Open.",
+    "gui_args: PortMaster's own UI (browse, install, update ports), from Main menu > Emulators > Open.",
     "args: a Ports card's ROM is the port's own launch script, which PortMaster installed as ~/roms/ports/<Name>.sh; retroforge-launch runs it with bash. It sources PortMaster's control.txt and mod_RetroForge.txt (plan Phase 4b, part E).",
     "sync: RetroForge's hook files for ports, copied into PortMaster's folder at every launch (an image update reaches existing installs): mod_RetroForge.txt puts /usr/lib/retroforge/portmaster/bin (mount/umount stand-ins: squashfuse runtimes without root) first on PATH and sets the Godot options; libgl_RetroForge.txt keeps ports on Mesa's desktop GL (gl4es only without one, never on KMS)."
   ],

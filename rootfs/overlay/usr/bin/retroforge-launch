@@ -4,7 +4,7 @@
 #   retroforge-launch <system> <rom>
 #   retroforge-launch --gui <emulator>
 #
-# --gui starts the emulator's own UI with no ROM: Settings > Emulators > Open, for the settings OGUI
+# --gui starts the emulator's own UI with no ROM: Main menu > Emulators > Open, for the settings OGUI
 # does not expose. It runs exactly like a ROM (prepare, seed, own session, exit handling below),
 # with the definition's gui_args in place of args.
 #

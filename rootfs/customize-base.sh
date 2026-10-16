@@ -154,7 +154,7 @@ BOOTSTRAP_PKGS=(base)
 #                       smb.service). Already pulled in as a dependency; listed because the image
 #                       now ENABLES avahi-daemon (60-retroforge-shares.preset), which must not depend on
 #                       some other package keeping it around.
-#   PortMaster's needs (Settings > Emulators downloads it into ~/roms/ports/PortMaster; plan Phase
+#   PortMaster's needs (Main menu > Emulators downloads it into ~/roms/ports/PortMaster; plan Phase
 #   4b). Its GUI is python + pysdl2 on the system SDL2 libraries:
 #   sdl2_ttf/sdl2_image  its text and images. sdl2_image's JPEG XL support brings libjxl + highway
 #                       + gperftools (~17 MiB), measured 2026-10-11.

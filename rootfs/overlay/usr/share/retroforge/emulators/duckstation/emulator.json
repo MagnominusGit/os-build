@@ -2,7 +2,7 @@
   "notes": [
     "DuckStation (PlayStation): the upstream AppImage, mounted; its real binary is run, never AppRun.",
     "-batch quits when the game closes, so OpenGamepadUI gets the panel back instead of DuckStation's own UI; -- ends options in case a ROM name starts with '-'.",
-    "gui_args (Settings > Emulators > Open): Big Picture is the pad-driven UI (the desktop one needs a mouse); no -batch, which would quit at once with no game."
+    "gui_args (Main menu > Emulators > Open): Big Picture is the pad-driven UI (the desktop one needs a mouse); no -batch, which would quit at once with no game."
   ],
   "format": "appimage",
   "binary": "usr/bin/duckstation-qt",
