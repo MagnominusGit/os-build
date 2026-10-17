@@ -55,7 +55,7 @@ hwstage_init() {  # <repo-root>
 #   <repo> <package-filename> <sha256> <member-inside-the-package> <subdir/local-name>
 hwstage_pin() {  # <name>
   case "$1" in
-    sgdisk)    echo "extra gptfdisk-1.0.10-1-aarch64.pkg.tar.zst 6512d21ab6b504d36f45bec0c4b0f692179ff4a916707e0f050a1c56f4181704 usr/bin/sgdisk bin/sgdisk" ;;
+    sgdisk)    echo "extra gptfdisk-1.0.10-2-aarch64.pkg.tar.zst 089b0e85c42ec462fe14f8bc956350ec5f7bc61d73d2d32aef77c985cbcce1a3 usr/bin/sgdisk bin/sgdisk" ;;
     # mtools is a MULTI-CALL binary that dispatches on argv[0], and `mdir` ships as a symlink to it.
     # A symlink is not a file scp can carry on its own, so the dispatch target is copied under the
     # name we want it answered by.
