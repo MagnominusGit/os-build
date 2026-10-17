@@ -6,7 +6,10 @@ D4 corrected (prerelease flag is not a filter, newest by published_at). Phase 2 
 2026-10-17 offline (emu_state.gd tests in Godot 4.7.1; page compile-checked against OGUI stubs), not on
 HW. Phase 3 (catalog) DONE 2026-10-17: every entry has a tag_pattern, verified live
 (`RETROFORGE_NET_TEST=1 tests/test-catalog.sh`, 246 ok); `channel` removed from catalog and
-retroforge-emu. Next: Phase 4 (CI key drift), then the HW gate.
+retroforge-emu. Phase 4 (key drift) DONE 2026-10-17: .github/workflows/emu-key-drift.yml (weekly) +
+.github/emu-key-drift.py + .github/emu-sources.json, tests/test-key-drift.sh; first local run over
+all 13 newest sources: 0 missing after composed-key rules (digits, '/' segments, printf formats).
+Issue title = emulator + missing keys (not the build: RPCS3 builds per commit). Next: the HW gate.
 
 ## Why, and what it reverses
 

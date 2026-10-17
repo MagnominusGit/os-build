@@ -85,6 +85,7 @@
 # online catalog (plan emulator-latest D7): an OTA bundle is how tested pins and tag patterns change.
 #
 # TEST SEAMS (tests/test-emu.sh runs this file): RETROFORGE_CURL, RETROFORGE_EMU_DIR, RETROFORGE_CATALOG.
+# RETROFORGE_GITHUB_TOKEN (CI only): sent to the GitHub API, for runners that share an IP.
 import fcntl
 import hashlib
 import json
@@ -104,6 +105,7 @@ CURL = os.environ.get("RETROFORGE_CURL", "curl")
 EMU_DIR = os.environ.get("RETROFORGE_EMU_DIR", "/home/player/emulators")
 CATALOGS = [os.environ.get("RETROFORGE_CATALOG", ""), "/usr/share/retroforge/catalog.json"]
 GITHUB_API = "https://api.github.com"
+TOKEN = os.environ.get("RETROFORGE_GITHUB_TOKEN", "")
 EMU_ID = re.compile(r"[a-z0-9_-]+")
 # A tag names a file (<tag>.AppImage) and a URL path segment: no '/', nothing a shell or URL reads
 # specially. '@' is allowed: pkgforge-dev's AppImage repos tag releases as <version>@<date>_<id>.
@@ -201,6 +203,8 @@ def github(path, missing_ok=False):
     # rate limit (403/429).
     cmd = [a for a in curl_base() if a != "--fail"] + [
         "--max-time", "60", "-H", "Accept: application/vnd.github+json", "-w", r"\n%{http_code}", url]
+    if TOKEN:  # CI only (emu-key-drift.yml, shared runner IPs); never set on a device
+        cmd[-1:-1] = ["-H", f"Authorization: Bearer {TOKEN}"]
     try:
         out = subprocess.run(cmd, capture_output=True, check=True, timeout=90).stdout
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as err:

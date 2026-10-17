@@ -1,0 +1,106 @@
+# Weekly: does each emulator's NEWEST upstream source still know every settings key RetroForge
+# writes for it (first-run seeds + options.json)? Emulators install upstream's newest release by
+# default (plan emulator-latest), and a key renamed upstream makes a seed or an option silently do
+# nothing on players' devices. Nothing is bumped or changed: a key that disappeared files ONE issue.
+#
+# Per emulator: `retroforge-emu check` resolves the newest build exactly as a device would; the
+# build's tag maps to the upstream SOURCE ref (.github/emu-sources.json: pkgforge-dev repackages,
+# the source is the emulator's own repo); a depth-1 fetch of that commit; .github/emu-key-drift.py
+# looks for every key (rules and limits in its header). A key that is fine but cannot be found by
+# its text goes in emu-sources.json's "ignore", with why.
+#
+# Issue title = emulator + the missing keys, never the build: RPCS3 publishes a build per commit,
+# and the same drift must not file a new issue every week. Searched across open AND closed, as in
+# upstream-watch.yml: a closed issue is answered (fixed, or the key added to "ignore").
+# The job FAILS when an emulator cannot be checked at all: a watcher that cannot see goes red.
+name: emu-key-drift
+
+on:
+  schedule:
+    - cron: "41 5 * * 1"
+  workflow_dispatch: {}
+
+permissions:
+  issues: write
+  contents: read
+
+env:
+  ASSIGNEE: loki666
+  LABEL: upstream
+
+jobs:
+  key-drift:
+    name: emulator settings keys
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check every emulator's newest upstream source
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Runners share IPs: retroforge-emu's unauthenticated 60 requests/hour would not last.
+          RETROFORGE_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          data=rootfs/overlay/usr/share/retroforge/emulators
+          drift=.github/emu-key-drift.py
+          sources=.github/emu-sources.json
+          newest="$(HOME="$RUNNER_TEMP/home" RETROFORGE_EMU_DIR="$RUNNER_TEMP/emus" \
+            RETROFORGE_CATALOG=rootfs/overlay/usr/share/retroforge/catalog.json \
+            python3 rootfs/overlay/usr/bin/retroforge-emu check --refresh)"
+
+          file_issue() {
+            local title="$1" body="$2"
+            if [ "$(gh issue list --state all --search "in:title \"$title\"" --json number --jq length)" -gt 0 ]; then
+              echo "issue already filed: $title"; return 0
+            fi
+            gh issue create --title "$title" --assignee "$ASSIGNEE" --label "$LABEL" --body "$body"
+          }
+
+          failed=0
+          for emu in $(jq -r 'keys[]' "$sources"); do
+            echo "::group::$emu"
+            tag="$(jq -r --arg e "$emu" '.emulators[$e].latest // empty' <<<"$newest")"
+            if [ -z "$tag" ]; then
+              echo "::error::$emu: no newest build: $(jq -r --arg e "$emu" '.emulators[$e].error // "not in the catalog"' <<<"$newest")"
+              failed=1; echo "::endgroup::"; continue
+            fi
+            if ! where="$(python3 "$drift" ref "$sources" "$emu" "$tag")"; then
+              echo "::error::$emu: build $tag maps to no upstream ref (emu-sources.json)"
+              failed=1; echo "::endgroup::"; continue
+            fi
+            read -r repo ref <<<"$where"
+            dir="$RUNNER_TEMP/src/$emu"
+            if ! sha="$(gh api "repos/$repo/commits/$ref" --jq .sha)" \
+                || ! git init -q "$dir" || ! git -C "$dir" fetch -q --depth 1 "https://github.com/$repo" "$sha" \
+                || ! git -C "$dir" -c advice.detachedHead=false checkout -q FETCH_HEAD; then
+              echo "::error::$emu: cannot fetch $repo $ref"
+              failed=1; echo "::endgroup::"; continue
+            fi
+            if ! result="$(python3 "$drift" check "$data/$emu" "$dir" "$sources" "$emu")"; then
+              echo "::error::$emu: the check could not run on $repo@${sha:0:12}"
+              failed=1; echo "::endgroup::"; continue
+            fi
+            rm -rf "$dir"
+            echo "$emu $tag ($repo@${sha:0:12}): $(jq -r '"\(.checked) keys, \(.missing | length) missing"' <<<"$result")"
+            keys="$(jq -r '[.missing[].key] | join(", ")' <<<"$result")"
+            if [ -n "$keys" ]; then
+              echo "::warning::$emu: upstream no longer has: $keys"
+              file_issue "emu-key-drift: $emu: $keys" "$(cat <<EOF
+          RetroForge writes settings keys that the newest **$emu** build's source no longer contains.
+          On a device that installed it, these settings silently do nothing.
+
+          - newest build: \`$tag\`
+          - source checked: https://github.com/$repo/tree/$sha
+
+          | key | written by |
+          |---|---|
+          $(jq -r '.missing[] | "| `\(.key)` | \(.files | join(", ")) |"' <<<"$result")
+
+          Fix the seed or \`options.json\` in \`$data/$emu/\` (and the tested pin once HW-checked), or, if the
+          key is fine but spelled differently in the source, add it to \`ignore\` in \`$sources\` with why.
+          EOF
+          )"
+            fi
+            echo "::endgroup::"
+          done
+          exit "$failed"
