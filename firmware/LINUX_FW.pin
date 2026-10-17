@@ -156,6 +156,7 @@ qcom/a630_sqe.fw           qcom/a630_sqe.fw           1c21b527d9183487cc550dabbb
 # aDSP (remoteproc, QCOM_Q6V5_PAS=m, loaded from the mounted root). The one DSP image the MANGMI
 # boards still boot from the QRB4210 dev-board set.
 qcom/qrb4210/adsp.mbn      qcom/qrb4210/adsp.mbn      10949c8c18e3afa99d33440fab5174b570e39668d964bdf1163d75602ae27948
-# Venus 6.0 video firmware. VIDEO_QCOM_VENUS is off (kernel/kernel.config, SM6115 block); pinned
-# so turning it on is a one-line kernel change, not a firmware hunt.
+# Venus 6.0 video firmware, for VIDEO_QCOM_VENUS=m (kernel/kernel.config; on since 2026-10-16), which
+# loads it at probe. Qualcomm-signed for QCM2290: whether MANGMI's loader accepts it is a dmesg line on
+# the first boot, not yet seen. If it is refused, the vendor's venus.mbn goes in qcom-firmwares.
 qcom/venus-6.0/venus.mbn   qcom/venus-6.0/venus.mbn   602d18992dbc11c7141472d4c68778d49277491ca7452ebf6115be0e6119572a
