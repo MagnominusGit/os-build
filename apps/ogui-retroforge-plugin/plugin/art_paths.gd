@@ -19,11 +19,7 @@ const EXTS := ["png", "jpg"]
 ## any other shape left part of the card empty (a SNES box filled its top third, ACE 2026-10-17).
 ## 1.5x the card, for sharpness on the larger panels.
 const CARD_SIZE := Vector2i(300, 450)
-## The darkened backdrop behind the box: brightness, contrast, saturation (Image.adjust_bcs).
-const BACKDROP_BCS := Vector3(0.45, 1.0, 0.8)
 const CARD_JPG_QUALITY := 0.85
-## The backdrop's blur: shrunk to 1/BLUR of its size, then scaled back up (cheap, smooth).
-const BLUR := 16
 
 
 ## retroforge-scrape's media folder (its RETROFORGE_MEDIA_DIR default).
@@ -53,32 +49,15 @@ static func load_image(path: String) -> Image:
 	return image if err == OK and not image.is_empty() else null
 
 
-## A CARD_SIZE card from a box of any shape: the whole box, scaled to fit and centred, over a
-## blurred, darkened copy of it scaled to cover the card.
+## A CARD_SIZE card from a box of any shape: the box scaled to cover the card and its centre cut
+## out (user decision 2026-10-17, preferred over the whole box fitted on a blurred backdrop; a wide
+## box loses its sides). retroforge-scrape asks boxes 450 high, so this rarely scales up.
 static func card_image(box: Image) -> Image:
 	var src := box.duplicate() as Image
 	src.convert(Image.FORMAT_RGBA8)
-	var w := CARD_SIZE.x
-	var h := CARD_SIZE.y
-	var cover := maxf(float(w) / src.get_width(), float(h) / src.get_height())
-	var back := src.duplicate() as Image
-	var full := Vector2i(Vector2(src.get_size()) * cover)
-	# Halve down to ~1/BLUR of the size (each halving averages 2x2, so every pixel counts; one big
-	# shrink samples a few and looks blocky), then double back up and land on the exact size.
-	var halvings := 0
-	while back.get_width() > maxi(1, full.x / BLUR) and back.get_height() > maxi(1, full.y / BLUR):
-		back.resize(maxi(1, back.get_width() / 2), maxi(1, back.get_height() / 2), Image.INTERPOLATE_BILINEAR)
-		halvings += 1
-	for i in maxi(0, halvings - 1):
-		back.resize(back.get_width() * 2, back.get_height() * 2, Image.INTERPOLATE_BILINEAR)
-	back.resize(full.x, full.y, Image.INTERPOLATE_BILINEAR)
-	var card := back.get_region(Rect2i((back.get_width() - w) / 2, (back.get_height() - h) / 2, w, h))
-	card.adjust_bcs(BACKDROP_BCS.x, BACKDROP_BCS.y, BACKDROP_BCS.z)
-	var fit := minf(float(w) / src.get_width(), float(h) / src.get_height())
-	var front := src.duplicate() as Image
-	front.resize(maxi(1, roundi(src.get_width() * fit)), maxi(1, roundi(src.get_height() * fit)), Image.INTERPOLATE_LANCZOS)
-	card.blend_rect(front, Rect2i(Vector2i.ZERO, front.get_size()), (CARD_SIZE - front.get_size()) / 2)
-	return card
+	var scale := maxf(float(CARD_SIZE.x) / src.get_width(), float(CARD_SIZE.y) / src.get_height())
+	src.resize(maxi(CARD_SIZE.x, roundi(src.get_width() * scale)), maxi(CARD_SIZE.y, roundi(src.get_height() * scale)), Image.INTERPOLATE_LANCZOS)
+	return src.get_region(Rect2i((src.get_size() - CARD_SIZE) / 2, CARD_SIZE))
 
 
 ## A ROM's cached card image path.

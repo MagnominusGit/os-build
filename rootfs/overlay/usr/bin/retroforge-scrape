@@ -18,7 +18,8 @@
 # this build. A `run` that stops early (SIGTERM included) still writes its cache and prints its
 # summary line before exiting. Only those stop a run: a problem with ONE ROM (an unreadable zip, a
 # name the file system or the API cannot take, an answer that is not JSON, an image that does not
-# download) is logged, counted as "failed" in the summary, not cached, and the run goes on.
+# download, a lookup the network lost twice) is logged, counted as "failed" in the summary, not
+# cached, and the run goes on -- until NET_FAILS_MAX ROMs in a row lost their lookup (exit 3).
 #
 # SECRETS. Every request carries RetroForge's developer id and password, and the player's when
 # saved. curl reads its URL from stdin (-K -), so neither shows in argv; ScreenScraper echoes the
@@ -39,7 +40,7 @@
 #
 # WHAT IS KEPT: per ROM, one image per KIND, chosen by kind first (KINDS' chains, ES-next's
 # getRipList), then by region: the player's region, the file name's (USA) / (Europe)... tags,
-# then wor, us, eu, jp, ss, then any. Resized by ScreenScraper (maxwidth). Written to
+# then wor, us, eu, jp, ss, then any. Resized by ScreenScraper (KINDS' size). Written to
 # MEDIA_DIR/<system>/<rom file or folder name>-<kind>.<png|jpg> through a .part file and a rename;
 # an answer that is not an image (ScreenScraper's NOMEDIA text) is dropped, and so is a media URL
 # that is not https://*.screenscraper.fr, or whose redirects end anywhere else. ROM folders are the plugin's (library_roms.gd SYSTEMS,
@@ -92,18 +93,22 @@ RETRY_AFTER_MAX = 60  # s waited on a 429
 # without --all asks for that ROM again.
 TRANSIENT = {6, 7, 28, 35, 52, 55, 56}
 RETRY_NET = 3
+# A ROM whose lookup still fails after its retry is counted "failed" and the run goes on (the ACE
+# lost one in 4 lookups this way on 2026-10-17); this many failed ROMs in a row means the network is
+# gone: the run stops (exit 3).
+NET_FAILS_MAX = 3
 CONNECT_TIMEOUT = 8  # s; a connect to ScreenScraper takes ~25 ms, a dropped one never ends
 REGIONS = ("auto", "wor", "us", "eu", "jp")
 FALLBACK_REGIONS = ("wor", "us", "eu", "jp", "ss")
-# kind -> (ScreenScraper media types, best first; width asked for). Boxes only ever fill a 200x300
-# card (the plugin composes a 300x450 card image from them): 320 px halves the decode of 640 px
-# (ACE, 2026-10-17: 4.4 vs 8.9 ms a card).
+# kind -> (ScreenScraper media types, best first; the size ScreenScraper resizes it to). A box only
+# ever becomes a 300x450 card image (the plugin crops its centre, user decision 2026-10-17), so it
+# is asked 450 high: a wide box is not blown up by the crop, and none is larger than needed.
 KINDS = {
-    "box": (("box-2D", "box-3D"), 320),
-    "screen": (("ss", "sstitle"), 640),
-    "fanart": (("fanart",), 1280),
+    "box": (("box-2D", "box-3D"), {"maxheight": 450}),
+    "screen": (("ss", "sstitle"), {"maxwidth": 640}),
+    "fanart": (("fanart",), {"maxwidth": 1280}),
     "wheel": (("wheel", "wheel-hd", "wheel-steel", "wheel-carbon", "screenmarqueesmall",
-               "screenmarquee"), 640),
+               "screenmarquee"), {"maxwidth": 640}),
 }
 # No-Intro / Redump file name tags -> ScreenScraper region codes
 TAG_REGIONS = {"usa": "us", "europe": "eu", "japan": "jp", "world": "wor", "korea": "kr",
@@ -433,10 +438,10 @@ def media_files(system, key):
     return [os.path.join(MEDIA_DIR, system, f"{key}-{kind}.{ext}") for kind in KINDS for ext in ("png", "jpg")]
 
 
-def fetch(media, width, dest):
+def fetch(media, size, dest):
     """Download one image to dest.<png|jpg>: True; False (nothing written) when the answer is not
     an image; None when the download failed (worth asking again on a later run)."""
-    url = media["url"] + "&" + urllib.parse.urlencode({"maxwidth": width})
+    url = media["url"] + "&" + urllib.parse.urlencode(size)
     part = f"{dest}.part"
     name = os.path.basename(dest)
     if len(os.fsencode(os.path.basename(part))) > NAME_MAX:
@@ -486,9 +491,9 @@ def save_art(system, key, game, regions):
         log(f"warning: {key}: skipped {len(medias) - len(safe)} media outside https://*.screenscraper.fr")
     os.makedirs(os.path.join(MEDIA_DIR, system), exist_ok=True)
     got = failed = 0
-    for kind, (types, width) in KINDS.items():
+    for kind, (types, size) in KINDS.items():
         m = pick(safe, types, regions)
-        done = fetch(m, width, os.path.join(MEDIA_DIR, system, f"{key}-{kind}")) if m else False
+        done = fetch(m, size, os.path.join(MEDIA_DIR, system, f"{key}-{kind}")) if m else False
         got += done is True
         failed += done is None
     return got, failed
@@ -593,6 +598,7 @@ def cmd_run(args):
     cache = read_cache()
     counts = {"scraped": 0, "not_found": 0, "skipped": 0, "failed": 0}
     shown = -1
+    net_fails = 0  # ROMs in a row whose lookup the network lost
     try:
         for done, (system, path) in enumerate(work, 1):
             key = os.path.basename(path)
@@ -603,6 +609,13 @@ def cmd_run(args):
                     counts["scraped"] += 1
                 else:
                     counts["not_found"] += 1
+                net_fails = 0
+            except NetFail as f:
+                counts["failed"] += 1
+                net_fails += 1
+                log(f"warning: {system}/{key}: skipped: {f}")
+                if net_fails >= NET_FAILS_MAX:
+                    raise Fail(EXIT_NET, f"ScreenScraper unreachable for {net_fails} ROMs in a row: is the network up?")
             except Fail:
                 raise
             except Exception as err:  # one ROM's problem (Skip, or a surprise): the run goes on

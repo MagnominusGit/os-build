@@ -13,7 +13,7 @@
 #   - every transfer is https only, redirects included, and only to *.screenscraper.fr;
 #   - a ROM is identified the way ScreenScraper matches best (CRC + MD5 up to 128 MiB, the single
 #     file inside a zip, the first disc of an .m3u, name + size otherwise);
-#   - art is picked by ES-next's fallback chains, then by region, at a server-side width (box 320);
+#   - art is picked by ES-next's fallback chains, then by region, at a server-side size (box: 450 high);
 #   - quota and refusals stop the run with their own exit code, before more requests are wasted;
 #   - a second run asks again only for what is missing; nothing half-written is left behind;
 #   - stdout is a contract: `N%` lines then one JSON summary line, or the plugin misreads it.
@@ -46,7 +46,8 @@ SRV="$W/srv"
 #                        else 404 with ScreenScraper's French text; $SRV/status (or status-once) forces
 #                        a code, with $SRV/status-body as its text
 #   ssuserInfos.php   -> 200 with an ssuser block for the good player, else 403 (user login text)
-#   mediaJeu.php      -> PNG / JPEG magic, then "IMG <media> <maxwidth>" (fanart is the JPEG);
+#   mediaJeu.php      -> PNG / JPEG magic, then "IMG <media> <size asked>" (fanart is the JPEG); the
+#                        size is maxwidth, or h<maxheight>;
 #                        $SRV/badmedia-<media> serves text/html "NOMEDIA" instead, $SRV/redirect-<media>
 #                        reports a redirect that ended on https://evil.example/ (curl's url_effective)
 #   $SRV/slow           -> every jeuInfos answer takes 5 s (to cancel a run mid-request)
@@ -143,7 +144,8 @@ elif u.path == "/api2/mediaJeu.php":
         jpeg = media.startswith("fanart")
         ctype = "image/jpeg" if jpeg or os.path.exists(f"{SRV}/mislabel-{media}") else "image/png"
         magic = b"\xff\xd8\xff\xe0\n" if jpeg else b"\x89PNG\r\n\x1a\n"
-        body = magic + f"IMG {media} {q.get('maxwidth', '')}".encode()
+        size = q["maxwidth"] if "maxwidth" in q else "h" + q.get("maxheight", "")
+        body = magic + f"IMG {media} {size}".encode()
 else:
     text(404, "?")
 if out:
@@ -319,10 +321,10 @@ rom md/"Usa (USA).md" "usa";       mkgame "crc-$(crc "$ROMS/md/Usa (USA).md")" 2
 rom md/"Kr.md" "kr";               mkgame "crc-$(crc "$ROMS/md/Kr.md")" 23 box-2D:kr
 run run
 img() { tail -n1 "$MEDIA/md/$1" 2>/dev/null; }  # the text after the magic bytes
-check "filename region wins: (Europe) -> box-2D(eu)" '[ "$(img "Euro (Europe).md-box.png")" = "IMG box-2D(eu) 320" ]'
-check "(Japan) -> box-2D(jp)" '[ "$(img "Jap (Japan).md-box.png")" = "IMG box-2D(jp) 320" ]'
-check "kind before region: a box-2D of another region beats a box-3D of ours" '[ "$(img "Usa (USA).md-box.png")" = "IMG box-2D(jp) 320" ]'
-check "any region beats nothing: box-2D(kr)" '[ "$(img "Kr.md-box.png")" = "IMG box-2D(kr) 320" ]'
+check "filename region wins: (Europe) -> box-2D(eu)" '[ "$(img "Euro (Europe).md-box.png")" = "IMG box-2D(eu) h450" ]'
+check "(Japan) -> box-2D(jp)" '[ "$(img "Jap (Japan).md-box.png")" = "IMG box-2D(jp) h450" ]'
+check "kind before region: a box-2D of another region beats a box-3D of ours" '[ "$(img "Usa (USA).md-box.png")" = "IMG box-2D(jp) h450" ]'
+check "any region beats nothing: box-2D(kr)" '[ "$(img "Kr.md-box.png")" = "IMG box-2D(kr) h450" ]'
 check "screen: ss" '[ "$(img "Euro (Europe).md-screen.png")" = "IMG ss(wor) 640" ]'
 check "screen falls back to sstitle" '[ "$(img "Jap (Japan).md-screen.png")" = "IMG sstitle(wor) 640" ]'
 check "fanart (no region) at 1280, as .jpg" '[ "$(img "Euro (Europe).md-fanart.jpg")" = "IMG fanart 1280" ]'
@@ -335,13 +337,13 @@ check "no .part left" '! find "$MEDIA" -name "*.part" | grep -q .'
 reset
 rom md/b3d.md "b3d"; mkgame "crc-$(crc "$ROMS/md/b3d.md")" 24 box-3D:us
 run run
-check "no box-2D at all -> box-3D" '[ "$(tail -n1 "$MEDIA/md/b3d.md-box.png")" = "IMG box-3D(us) 320" ]'
+check "no box-2D at all -> box-3D" '[ "$(tail -n1 "$MEDIA/md/b3d.md-box.png")" = "IMG box-3D(us) h450" ]'
 
 reset
 rom md/"P (Europe).md" "pref"; mkgame "crc-$(crc "$ROMS/md/P (Europe).md")" 25 box-2D:eu box-2D:jp
 run region jp; check "region jp saved" '[ "$RC" = 0 ]'
 run run
-check "the player's region beats the filename's" '[ "$(tail -n1 "$MEDIA/md/P (Europe).md-box.png")" = "IMG box-2D(jp) 320" ]'
+check "the player's region beats the filename's" '[ "$(tail -n1 "$MEDIA/md/P (Europe).md-box.png")" = "IMG box-2D(jp) h450" ]'
 
 # =================================================================================================
 CASE="media refused"
@@ -383,7 +385,7 @@ rm -f "$W/queries.log"; run run
 check "a not-found older than 7 days is asked again" '[ "$(nqueries)" = 1 ] && [ "$(query 1 romnom)" = n.md ]'
 printf 'changed' > "$ROMS/md/f.md"; mkgame "crc-$(crc "$ROMS/md/f.md")" 41 box-2D:eu
 rm -f "$W/queries.log"; run run
-check "a changed file (size/mtime) is asked again" '[ "$(nqueries)" = 1 ] && [ "$(tail -n1 "$MEDIA/md/f.md-box.png")" = "IMG box-2D(eu) 320" ]'
+check "a changed file (size/mtime) is asked again" '[ "$(nqueries)" = 1 ] && [ "$(tail -n1 "$MEDIA/md/f.md-box.png")" = "IMG box-2D(eu) h450" ]'
 rm -f "$MEDIA/md/f.md-box.png" "$W/queries.log"; run run
 check "found but its art deleted: asked again" '[ "$(nqueries)" = 1 ]'
 rm -f "$W/queries.log"; run run --all
@@ -420,9 +422,21 @@ reset; rom md/a.md "a"; mkgame "crc-$(crc "$ROMS/md/a.md")" 55 box-2D:us
 touch "$SRV/timeout-once"
 run run
 check "a lookup that times out once (Wi-Fi) is retried, then scrapes" '[ "$RC" = 0 ] && [ "$(summary scraped)" = 1 ] && [ -f "$MEDIA/md/a.md-box.png" ]'
-reset; rom md/a.md "a"; rom md/b.md "b"; touch "$SRV/timeout"
+reset; for r in a b c d e; do rom "md/$r.md" "$r"; done; touch "$SRV/timeout"
 run run
-check "no network at all: exit 3 after the first ROM's retry, summary printed" '[ "$RC" = 3 ] && [ "$(grep -c jeuInfos "$W/url.log")" = 2 ] && contract'
+check "no network at all: exit 3 after 3 ROMs in a row failed (each retried once), summary printed" '[ "$RC" = 3 ] && [ "$(grep -c jeuInfos "$W/url.log")" = 6 ] && [ "$(summary failed)" = 3 ] && contract'
+reset; rom md/a.md "a"; rom md/b.md "b"; mkgame "crc-$(crc "$ROMS/md/b.md")" 58 box-2D:us
+python3 - "$W/bin/curl" <<'PYSTUB'
+import sys
+p = sys.argv[1]; s = open(p).read()
+s = s.replace('if os.path.exists(f"{SRV}/timeout"):', 'if os.path.exists(f"{SRV}/timeout") or (os.path.exists(f"{SRV}/timeout-a") and "romnom=a.md" in (url or "")):', 1)
+open(p, "w").write(s)
+PYSTUB
+touch "$SRV/timeout-a"
+run run
+check "one ROM whose lookup keeps failing: counted failed, the run goes on" '[ "$RC" = 0 ] && [ "$(summary failed)" = 1 ] && [ "$(summary scraped)" = 1 ]'
+rm -f "$SRV/timeout-a"; rm -f "$W/queries.log"; run run
+check "...and it is asked again next run (not cached)" '[ "$(nqueries)" = 1 ] && [ "$(query 1 romnom)" = a.md ]'
 
 reset; rom md/a.md "a"; mkgame "crc-$(crc "$ROMS/md/a.md")" 56 box-2D:us ss:wor
 touch "$SRV/timeout-media-once"

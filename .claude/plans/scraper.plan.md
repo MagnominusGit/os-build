@@ -2,14 +2,22 @@
 
 Status: decisions D1-D3 AGREED 2026-10-17; the user already has a ScreenScraper dev account.
 Phase 2 DONE 2026-10-17, HW-OK on the Pocket ACE (plugin 0.1.47; user: "looks right"). HW findings
-fixed: cards are 2:3 card images composed by the plugin (box fitted over its blurred, darkened copy;
-OGUI's card draws a texture whole from the top-left, so a SNES box filled a third of it), cached as
-300x450 JPEGs in ~/.cache/retroforge/cards; boxes asked at 320 px; every decode on a worker thread and
+fixed: cards are 2:3 card images composed by the plugin (OGUI's card draws a texture whole from
+the top-left, so a SNES box filled a third of it): the box's centre crop (user decision 2026-10-17,
+after comparing it on the ACE with the whole box fitted over a blurred copy, and with fan art + logo
+"posters"; a wide box loses its sides), cached as 300x450 JPEGs in ~/.cache/retroforge/cards; boxes
+asked 450 high (maxheight) so the crop never scales up (plugin 0.1.48); every decode on a worker thread and
 our tabs do not await card art (301-card tab: 2,690 ms frozen -> 126 ms, = no art; 301 card images
 composed in parallel within 12 s of a session restart; ~50 KB a card). Scraper on HW: Wi-Fi connects
 to ScreenScraper sometimes never answer (1 in 5 once, 0 in 30 later; Wi-Fi power save on, not
 investigated): lookups and images retried once, images that still fail are fetched next run
-("incomplete"), connect timeout 8 s. Phase 1 DONE 2026-10-17 on branch feat/scraper: `retroforge-scrape` + systems.json +
+("incomplete"), connect timeout 8 s; a lookup still lost after its retry makes that ROM "failed"
+and the run goes on, 3 such ROMs in a row stop it (exit 3).
+Player ScreenScraper account: optional (more threads/quota, access when ScreenScraper closes to
+non-members at peak hours); `retroforge-scrape login` exists, its UI is Phase 3.
+Other card sources looked at (2026-10-17), not taken: ScreenScraper steamgrid is 460x215 landscape
+(fits GRID_LANDSCAPE, not cards); SteamGridDB has 600x900 grids (API key, name search only); IGDB
+covers ~3:4 (Twitch credentials, name only); fan art + logo posters (not every game has fan art). Phase 1 DONE 2026-10-17 on branch feat/scraper: `retroforge-scrape` + systems.json +
 tests/test-scrape.sh (98 ok, in `make test`; python-reviewer findings fixed: one bad ROM is
 "failed" not fatal, stale quota, redirect host check, no answer bodies on disk, cancel); live run on 4 ROMs (2 CHDs > 128 MiB by name + size,
 a single-file zip, a Mega Drive .bin): 4/4 found, 15 images, 8 s, second run 0 requests.

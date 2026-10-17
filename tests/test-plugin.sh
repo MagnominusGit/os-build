@@ -190,21 +190,34 @@ func _init() -> void:
 	quit(1 if failed else 0)
 
 ## OGUI's card is 2:3 and draws its texture whole, top-left: a SNES box (wider than tall) left two
-## thirds of the card empty (ACE, 2026-10-17). A card image is the whole box, centred, over a
-## blurred and darkened copy of it filling the card; cached as a small JPEG until the box changes.
+## thirds of the card empty (ACE, 2026-10-17). A card image is the box scaled to cover the card,
+## its centre cut out (user decision 2026-10-17, over a fitted box on a blurred backdrop); cached
+## as a small JPEG until the box changes.
 func test_card_images(media: String) -> void:
+	# A wide box in thirds, red | blue | green: the card keeps the middle, cut at both sides.
 	var wide := Image.create(640, 468, false, Image.FORMAT_RGBA8)
-	wide.fill(Color(1, 0, 0))
+	wide.fill_rect(Rect2i(0, 0, 214, 468), Color(1, 0, 0))
+	wide.fill_rect(Rect2i(214, 0, 213, 468), Color(0, 0, 1))
+	wide.fill_rect(Rect2i(427, 0, 213, 468), Color(0, 1, 0))
 	var card := ArtPaths.card_image(wide)
 	check("card: a wide box becomes a 300x450 card", card.get_size(), Vector2i(300, 450))
-	check("card: the box sits in the middle, whole", card.get_pixel(150, 225).r > 0.9 and card.get_pixel(2, 225).r > 0.9, true)
-	var top := card.get_pixel(150, 5)
-	check("card: above the box is its darkened copy, not empty", top.a > 0.99 and top.r > 0.05 and top.r < 0.8, true)
+	var mid := card.get_pixel(150, 225)
+	var left := card.get_pixel(1, 225)
+	var right := card.get_pixel(298, 225)
+	check("card: the box's centre, full height, cut at both sides",
+		[mid.b > 0.9, left.r > 0.9, right.g > 0.9, card.get_pixel(150, 1).b > 0.9, card.get_pixel(150, 448).b > 0.9],
+		[true, true, true, true, true])
+	# A tall box: top and bottom bands, cut; the middle row fills the card's width.
 	var tall := Image.create(200, 600, false, Image.FORMAT_RGB8)
-	tall.fill(Color(0, 0, 1))
+	tall.fill(Color(0, 1, 0))
+	tall.fill_rect(Rect2i(0, 200, 200, 200), Color(0, 0, 1))
 	var card2 := ArtPaths.card_image(tall)
-	var side := card2.get_pixel(3, 225)
-	check("card: beside a tall box is its darkened copy", [card2.get_size(), side.a > 0.99 and side.b > 0.05 and side.b < 0.8, card2.get_pixel(150, 225).b > 0.9], [Vector2i(300, 450), true, true])
+	check("card: a tall box fills the width, its middle kept",
+		[card2.get_size(), card2.get_pixel(1, 225).b > 0.9, card2.get_pixel(298, 225).b > 0.9, card2.get_pixel(150, 1).g > 0.9],
+		[Vector2i(300, 450), true, true, true])
+	var exact := Image.create(600, 900, false, Image.FORMAT_RGB8)
+	exact.fill(Color(1, 1, 0))
+	check("card: a 2:3 box is only scaled", ArtPaths.card_image(exact).get_pixel(0, 0).is_equal_approx(Color(1, 1, 0)), true)
 	var box_path := media + "/snes/Wide.zip-box.png"
 	DirAccess.make_dir_recursive_absolute(box_path.get_base_dir())
 	wide.save_png(box_path)
