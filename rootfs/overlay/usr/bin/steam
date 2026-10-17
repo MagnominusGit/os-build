@@ -76,12 +76,14 @@ done
 # ---- x86 games: the FEX guest ----------------------------------------------------------------------
 # Valve's FEX tool runs x86 games and x86 Protons, but needs an x86_64 + i386 graphics provider (ld.so,
 # glibc, x86 Mesa, graphics_provider.json at its root), and the image ships none.
-# /usr/lib/retroforge/steam-x86-guest keeps FEX's ArchLinux RootFS (x86-guest.pin, 1.4 GB) in the
-# player's home and mounts it with squashfuse on $RETROFORGE_STEAM_X86_GUEST_DIR/root. `start`:
-#   - mounts it when it is downloaded and not mounted yet (never twice; a dead mount is replaced);
-#   - when it is not downloaded yet, starts the download DETACHED in the background, logging to this
-#     stderr, and returns: this `steam` goes on without it. If it finishes while Steam runs, it is
-#     mounted right then and the next game has it;
+# /usr/lib/retroforge/steam-x86-guest keeps FEX's ArchLinux RootFS (1.4 GB) in the player's home and
+# mounts it with squashfuse on $RETROFORGE_STEAM_X86_GUEST_DIR/root. x86-guest.pin names a channel
+# (FEX's RootFS_links.json): whatever FEX publishes now, not a fixed version. `start`:
+#   - mounts the installed image when nothing is mounted yet (never twice; a dead mount is replaced);
+#   - starts a fetch DETACHED in the background, logging to this stderr, and returns: this `steam`
+#     never waits for the network. The fetch checks the channel and downloads a newer image; it
+#     becomes the installed one only once complete and checked. If nothing was mounted, it is mounted
+#     right then and the next game has it; an older image a game may be using stays until Steam exits;
 #   - leaves a holder outside this process tree that waits for this script's PID ($$) to exit, however
 #     it ends, and then releases the mount unless another `steam` still runs.
 # STEAM_COMPAT_GRAPHICS_PROVIDER is set before the download is done too: the client's environment is

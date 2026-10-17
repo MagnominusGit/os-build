@@ -194,43 +194,71 @@ tool also honours `STEAM_COMPAT_GRAPHICS_PROVIDER=/abs/path/graphics_provider.js
 parent directory then becomes both pressure-vessel's graphics provider and FEX's RootFS. Symlinks
 from that tree into another one reportedly do not work, so it has to be a real tree.
 
-**The guest:** FEX's own ArchLinux RootFS, pinned in
-`/usr/share/retroforge/steam/x86-guest.pin` to the dated URL
-`rootfs.fex-emu.gg/ArchLinux/2026-08-11/ArchLinux.sqsh` (from `RootFS_links.json`; 1,359,826,944
-bytes, sha256 `5d0c1a38...5f5f2a`). Checked with `unsquashfs` on 2026-10-16:
+**The guest:** FEX's own ArchLinux RootFS. `/usr/share/retroforge/steam/x86-guest.pin` pins a
+**channel**, not a version: FEX's `https://rootfs.fex-emu.gg/RootFS_links.json` (the file
+`FEXRootFSFetcher` reads) and the entry with `DistroMatch: arch` and `Type: squashfs`, "ArchLinux
+(SquashFS)". FEX lists one entry per rolling distro and type, its newest, so the device takes
+whatever FEX publishes there now. Two matching entries are refused rather than guessed between.
+
+Each entry has a `URL` (a dated directory, `.../ArchLinux/2026-08-11/ArchLinux.sqsh`) and a `Hash`.
+That hash is FEX's XXH3-64 (`XXH3_64bits`, seed 0), in hex without leading zeros, not a sha256. The
+image checks it with `xxhsum -H3`, from the `xxhash` package (`rsync` already pulls it in; it is in
+`PKGS` so the check does not depend on that). XXH3 is not a cryptographic hash: it catches a broken
+or wrong download, and the trust is in reading the links file over HTTPS from rootfs.fex-emu.gg. So
+an entry has to name an https URL (or one with the channel's own scheme, which the tests use).
+
+What FEX published on 2026-10-16, checked by hand: `2026-08-11/ArchLinux.sqsh`, Hash
+`23350f949fc1413d`, 1,359,826,944 bytes. The image's own `xxhsum` (xxhash 0.8.3-1, the package
+`rootfs/manifest.lock` names) gives `XXH3_23350f949fc1413d` for it. With `unsquashfs`:
 - It is squashfs 4.0, zstd.
 - `graphics_provider.json` is at its root: x86_64 from `/usr/lib`, i386 from `/usr/lib32`.
 - `freedreno_icd.x86_64.json` and `freedreno_icd.i686.json` point at
   `/usr/lib{,32}/libvulkan_freedreno.so`, Mesa 26.2.0.
 - Both arches have glibc and `ld.so`.
 
+A later image FEX publishes is used without that check, so x86 games keep working only as long as FEX
+keeps those paths. The pin also takes a **fixed** image (`version`, `url`, `sha256` instead of
+`channel`, `distro`, `type`), for an image of our own: then the sha256 is checked, and a new version
+downloads when the pin changes.
+
 The squashfs is the smaller build (the EroFS one is ~2.18 GB), and the image already ships
 squashfuse. Thunks stay off, as Steam leaves them (`ThunksDB_GL:0,ThunksDB_Vulkan:0`).
 
-**How it gets there** (`/usr/lib/retroforge/steam-x86-guest`, separate from `steam-bootstrap`). The
-first `steam` doesn't wait for the download:
-- `steam` runs `steam-x86-guest start $$` before the client. When the pinned image is missing, that
-  starts `fetch` detached in its own session, logging to steam's stderr, and returns at once.
-- `fetch` downloads to `~/.local/share/retroforge/fex-guest/.<name>-<version>.sqsh.part`. It
-  resumes a cut-off download with a Range request, checks the sha256 and renames the file to
-  `<name>-<version>.sqsh`.
-- An older version stays, and is mounted, until the new one is in place. It is removed then.
+**How it gets there** (`/usr/lib/retroforge/steam-x86-guest`, separate from `steam-bootstrap`). No
+`steam` waits for the network:
+- `steam` runs `steam-x86-guest start $$` before the client. That mounts what is installed and
+  starts `fetch` detached in its own session, logging to steam's stderr, and returns at once. With a
+  channel it does this at every start; with a fixed pin only while its image is missing.
+- `fetch` reads the links file (one ~5 kB GET, 15 s at most) and picks the entry. When that image is
+  not there yet, it downloads it to `~/.local/share/retroforge/fex-guest/.<name>-<version>.sqsh.part`,
+  resuming a cut-off download with a Range request. It checks the XXH3 (or a fixed pin's sha256) and
+  renames the file to `<name>-<version>.sqsh`. For a channel the version is the dated directory and
+  the hash: `fex-rootfs-archlinux-2026-08-11-23350f949fc1413d.sqsh`.
+- Only then does `fex-guest/current` point at it. Until then the image `current` names is the one
+  mounted, so a channel move never leaves Steam without a guest.
+- An older image is removed once it is neither current nor mounted: right away, or when the last
+  `steam` that has it mounted exits.
+- Offline, or a links file that is not JSON, has no such entry, or has two: `fetch` exits 1, logs
+  it, and changes nothing. A hash mismatch removes the download. Without `xxhsum` nothing is
+  installed; the download is kept and checked at the next start.
 - Only one fetch runs at a time, and it refuses to start without ~1.6 GB free.
 
 **The mount.** squashfuse mounts the image on `~/.local/share/retroforge/fex-guest/root`, as the
 player. `steam` always exports `STEAM_COMPAT_GRAPHICS_PROVIDER=<that>/graphics_provider.json`,
 because the client's environment is fixed when it starts.
-- **Mounted** by `start` when the image is there and nothing is mounted yet. A mount is never made
-  twice. A dead one (squashfuse killed: `ENOTCONN`) is released and replaced.
+- **Mounted** by `start` when an image is there and nothing is mounted yet: a fixed pin's own image,
+  else the current one. A mount is never made twice. A dead one (squashfuse killed: `ENOTCONN`) is
+  released and replaced. `fex-guest/.mounted` records which image it is.
 - **Download finishes while Steam runs:** it is mounted right then, so the next game has it. If an
-  older image is already mounted for a running game, it is left alone, and the next start mounts
-  the new one.
+  older image is already mounted for a running game, it is left alone, and the first start after
+  the last `steam` exits mounts the new one.
 - **Released** when the last `steam` exits. `start` leaves a holder process outside steam's process
   tree, so OGUI's Exit cannot reap it, with TERM, INT and HUP ignored. It holds
   `fex-guest/.users.lock` shared, watches steam's PID through a pidfd, and when that PID is gone
   (SIGKILL included) it lets go and unmounts with `fusermount3 -u -z`. It skips the unmount if
   another steam still holds the lock. The client does not inherit the lock, so its leftover
-  children cannot keep the mount. Mount and unmount run under `fex-guest/.mount.lock`.
+  children cannot keep the mount. Mounting, unmounting and removing images run under
+  `fex-guest/.mount.lock`.
 - squashfuse starts with TERM and INT ignored, like PortMaster's runtimes.
 
 `steam` also links `~/.steam/sdk64` to `<Steam root>/linux64` and `~/.steam/sdk32` to
@@ -240,11 +268,22 @@ because the client's environment is fixed when it starts.
 top of the client's ~3 GB.
 
 Checked on 2026-10-16:
-- `tests/test-steam-x86-guest.sh`, with stub squashfuse and fusermount3 and a local HTTP server:
-  60/60.
+- `tests/test-steam-x86-guest.sh`, with stub squashfuse and fusermount3, a local HTTP server and
+  links files shaped like FEX's (over HTTP and `file://`): 100/100. It covers the channel picking
+  its one entry, a move while Steam runs and with nothing mounted, a wrong XXH3, a hash without
+  leading zeros, offline, nine kinds of bad links file, no `xxhsum`, and the fixed pin.
+- In a linux/arm64 container, the helper with the real pin read the live `RootFS_links.json`,
+  picked `ArchLinux/2026-08-11/ArchLinux.sqsh` and `23350f949fc1413d`, took the real image left as
+  its part (FEX's server answered the Range request with 416), checked it with the image's own
+  `xxhsum` and installed it. With one byte changed, it was refused and removed.
+- With real FUSE, as a non-root player, a channel move from a small image to the real one served
+  locally: the old image stayed mounted while the fake `steam` ran, was removed after it was
+  SIGKILLed, and the next start mounted the real tree (ICDs, `libvulkan_freedreno.so` and `ld.so`
+  for both arches readable).
 - In a linux/arm64 container with `/dev/fuse` (Debian's squashfuse 0.5.2 and fuse3 3.17.2; the
   image ships 0.6.1), as a non-root player, with the real helper and wrapper:
-  - `fetch` took the real image from a local server and matched the pin's sha256.
+  - `fetch` took the real image from a local server and matched the then-fixed pin's sha256
+    (`5d0c1a38...5f5f2a`).
   - squashfuse mounted it, and `graphics_provider.json`, both ICDs, both `libvulkan_freedreno.so`
     and both `ld.so` were readable.
   - In Valve's arm64 Steam Runtime (`run --`, pressure-vessel, "Steam Runtime 3c"), the FUSE mount

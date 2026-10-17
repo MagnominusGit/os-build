@@ -8,24 +8,34 @@
 # none, because a root slot is 2 GB and rootfs/guard-rootfs.sh section 9 keeps x86 out of it. The tool
 # also takes STEAM_COMPAT_GRAPHICS_PROVIDER=<dir>/graphics_provider.json, and <dir> then becomes both
 # pressure-vessel's graphics provider and FEX's RootFS. It has to be a real tree (symlinks into another
-# tree do not work). So: FEX's own ArchLinux RootFS, a squashfs image pinned in
-# /usr/share/retroforge/steam/x86-guest.pin, kept as one file in ~/.local/share/retroforge/fex-guest/
-# and mounted with squashfuse on fex-guest/root while Steam runs.
+# tree do not work). So: a squashfs image, kept as one file in ~/.local/share/retroforge/fex-guest/ and
+# mounted with squashfuse on fex-guest/root while Steam runs.
+#
+# Which image: /usr/share/retroforge/steam/x86-guest.pin names either
+#   a CHANNEL  (channel: + distro: + type:) -- FEX's RootFS_links.json and which of its entries, e.g. its
+#              ArchLinux SquashFS. Each `fetch` reads the links file (one small GET) and takes whatever
+#              the entry names NOW, checked against the entry's XXH3-64 with xxhsum; or
+#   a FIXED image (version: + url: + sha256:), checked against the sha256.
+# fex-guest/current points at the image to mount: the last one fetched and checked. A new one becomes
+# current only once it is complete and checked; until then the old one is used and mounted.
 #
 #   steam-x86-guest start <pid>  what /usr/bin/steam (<pid>) runs before the client: hold the guest for as
-#                                long as <pid> runs (below), mount it, and when the pinned image is not
-#                                downloaded yet, start `fetch` detached and return at once, so the first
-#                                `steam` never waits 1.4 GB for it.
-#   steam-x86-guest fetch        download the pinned image unless it is there. It is sha256-checked,
-#                                resumed when an earlier download was cut short, and renamed into place;
-#                                older versions are removed after that. One fetch at a time: another one
-#                                exits 0 at once. When a `steam` is running and nothing is mounted, the new
-#                                image is mounted as soon as it is in place, so the next game has it.
-#   steam-x86-guest mount        mount the image on fex-guest/root unless a working mount is there. A
-#                                dead one (squashfuse killed) is released first. The pinned image, or
-#                                while it is still downloading, the newest older one. Exit 2 when the
-#                                pinned image is not downloaded yet, whether or not an older one got mounted.
-#   steam-x86-guest release      unmount fex-guest/root, unless a `steam` is still running.
+#                                long as <pid> runs (below), mount it, and start `fetch` detached: for a
+#                                channel at every start (it checks the channel), for a fixed image while it
+#                                is not downloaded yet. It never waits for the network.
+#   steam-x86-guest fetch        find the image the pin wants and download it unless it is there. It is
+#                                checked, resumed when an earlier download was cut short, renamed into place
+#                                and made current. Older images are removed once they are neither current
+#                                nor mounted. Offline, or a links file it cannot use: exit 1, nothing changes.
+#                                One fetch at a time: another one exits 0 at once. When a `steam` is running
+#                                and nothing is mounted, the new image is mounted as soon as it is in place.
+#   steam-x86-guest mount        mount an image on fex-guest/root unless a working mount is there. A dead one
+#                                (squashfuse killed) is released first. A fixed pin's image when it is
+#                                downloaded, else the current one. Exit 2 when the fixed pin's image is not
+#                                downloaded yet (whether or not an older one got mounted), or a channel has
+#                                none yet.
+#   steam-x86-guest release      unmount fex-guest/root, unless a `steam` is still running; then remove the
+#                                images that were kept only because they were mounted.
 #
 # Who uses the mount: for each running /usr/bin/steam, a holder process holds fex-guest/.users.lock
 # SHARED. `start` forks it before mounting, outside the steam's process tree (OGUI's Exit reaps that
@@ -33,8 +43,9 @@
 # it, SIGKILL included, then lets go of the lock and releases. `release` and `fetch` try the lock
 # EXCLUSIVE without waiting: getting it means no steam runs. So the last steam to exit releases the
 # mount, and a second `steam steam://...` never releases what the first one is using. The client does
-# not inherit the lock, so its leftover children cannot keep the mount. Mounting and unmounting happen
-# under fex-guest/.mount.lock, so they never race.
+# not inherit the lock, so its leftover children cannot keep the mount. Mounting, unmounting and removing
+# images happen under fex-guest/.mount.lock, so they never race; fex-guest/.mounted says which image is
+# mounted.
 #
 # squashfuse starts with TERM and INT ignored, as PortMaster's runtimes do (portmaster/bin/mount), so
 # OGUI's Exit cannot pull the tree out from under a game that is still shutting down. It ends with a
@@ -46,11 +57,12 @@
 #
 # TEST SEAMS (tests/test-steam-x86-guest.sh): RETROFORGE_STEAM_X86_GUEST_DIR (also set by
 # /usr/bin/steam), RETROFORGE_STEAM_X86_GUEST_PIN, RETROFORGE_MOUNTS, RETROFORGE_SQUASHFUSE,
-# RETROFORGE_FUSERMOUNT.
+# RETROFORGE_FUSERMOUNT, RETROFORGE_XXHSUM.
 import fcntl
 import glob
 import hashlib
 import http.client
+import json
 import os
 import re
 import select
@@ -60,6 +72,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 DATA = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
@@ -69,13 +82,20 @@ PIN = os.environ.get("RETROFORGE_STEAM_X86_GUEST_PIN", "/usr/share/retroforge/st
 MOUNTS = os.environ.get("RETROFORGE_MOUNTS", "/proc/self/mounts")
 SQUASHFUSE = os.environ.get("RETROFORGE_SQUASHFUSE", "squashfuse")
 FUSERMOUNT = os.environ.get("RETROFORGE_FUSERMOUNT", "fusermount3")
+XXHSUM = os.environ.get("RETROFORGE_XXHSUM", "xxhsum")
 ROOT = os.path.join(GUEST, "root")
 PROVIDER = os.path.join(ROOT, "graphics_provider.json")
+CURRENT = os.path.join(GUEST, "current")
+MOUNTED = os.path.join(GUEST, ".mounted")
 USERS = os.path.join(GUEST, ".users.lock")
 MOUNT_LOCK = os.path.join(GUEST, ".mount.lock")
 FETCH_LOCK = os.path.join(GUEST, ".fetch.lock")
 SPARE = 256 << 20  # left free in /home after the download
 MOUNT_WAIT = 5.0
+CHANNEL_WAIT = 15.0  # seconds for the links file; the fetch runs detached, so this never delays a steam
+LINKS_MAX = 1 << 20  # FEX's is 5 kB
+FIXED = ("version", "url", "sha256")
+CHANNEL = ("channel", "distro", "type")
 
 
 class Failed(Exception):
@@ -90,23 +110,84 @@ def log(msg):
 
 
 def pinned():
-    """(name, version, url, sha256) from the pin."""
+    """The pin's fields: name, and either channel + distro + type, or version + url + sha256."""
     try:
         with open(PIN, encoding="utf-8") as f:
             text = f.read()
     except OSError as err:
         raise Failed(f"no x86 guest pin: {err}")
-    fields = []
-    for key in ("name", "version", "url", "sha256"):
+    pin = {}
+    for key in ("name",) + CHANNEL + FIXED:
         m = re.search(rf"^{key}:[ \t]*(\S+)", text, re.M)
-        if not m:
-            raise Failed(f"{PIN}: needs name, version, url and sha256")
-        fields.append(m.group(1))
-    return tuple(fields)
+        if m:
+            pin[key] = m.group(1)
+    need = CHANNEL if "channel" in pin else FIXED
+    if "name" not in pin or not all(k in pin for k in need) or ("channel" in pin and any(k in pin for k in FIXED)):
+        raise Failed(f"{PIN}: needs name, and either channel, distro and type or version, url and sha256")
+    return pin
+
+
+def wanted(pin):
+    """(version, url, algo, digest) of the image the pin wants. For a channel, read its links file now."""
+    if "channel" not in pin:
+        return pin["version"], pin["url"], "sha256", pin["sha256"].lower()
+    channel = pin["channel"]
+    try:
+        with urllib.request.urlopen(channel, timeout=CHANNEL_WAIT) as response:
+            raw = response.read(LINKS_MAX + 1)
+    except (OSError, ValueError, http.client.HTTPException) as err:
+        raise Failed(f"could not read the x86 guest channel {channel}: {err}")
+    try:
+        if len(raw) > LINKS_MAX:
+            raise ValueError("over 1 MB")
+        # {"v1": {"ArchLinux (SquashFS)": {"DistroMatch": "arch", "Type": "squashfs", "URL": ..., "Hash": ...}}}
+        found = [e for e in json.loads(raw)["v1"].values()
+                 if isinstance(e, dict) and e.get("DistroMatch") == pin["distro"] and e.get("Type") == pin["type"]]
+        if len(found) != 1:
+            raise ValueError(f"{len(found)} entries for {pin['distro']} {pin['type']}, not one")
+        url, xxh3 = found[0].get("URL"), found[0].get("Hash")
+        # The Hash is FEX's XXH3-64 in hex, without leading zeros (FEX reads it with stoul(Hash, 16)).
+        if not (isinstance(url, str) and isinstance(xxh3, str) and re.fullmatch(r"[0-9A-Fa-f]{1,16}", xxh3)):
+            raise ValueError(f"no URL and Hash in {found[0]!r}")
+        scheme = urllib.parse.urlsplit(url).scheme
+        if scheme != "https" and scheme != urllib.parse.urlsplit(channel).scheme:
+            raise ValueError(f"{url} is neither https nor from where the channel is")
+    except (ValueError, KeyError, TypeError, AttributeError) as err:
+        raise Failed(f"the x86 guest channel {channel} is not a links file this can use: {err}")
+    digest = f"{int(xxh3, 16):016x}"
+    # The version names the file: FEX's dated directory (".../ArchLinux/2026-08-11/ArchLinux.sqsh") and the
+    # hash, so the same bytes are never fetched twice and different ones never pass for them.
+    path = urllib.parse.urlsplit(url).path.split("/")
+    dated = path[-2] if len(path) > 2 else ""
+    version = f"{dated}-{digest}" if re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z._-]{0,63}", dated) else digest
+    return version, url, "xxh3", digest
 
 
 def image_path(name, version):
     return os.path.join(GUEST, f"{name}-{version}.sqsh")
+
+
+def images():
+    return glob.glob(os.path.join(glob.escape(GUEST), "*.sqsh"))
+
+
+def current():
+    """The image fex-guest/current points at, when it is there."""
+    try:
+        path = os.path.join(GUEST, os.path.basename(os.readlink(CURRENT)))
+    except OSError:
+        return None
+    return path if os.path.isfile(path) else None
+
+
+def set_current(image):
+    new = os.path.join(GUEST, ".current.new")
+    try:
+        os.unlink(new)
+    except FileNotFoundError:
+        pass
+    os.symlink(os.path.basename(image), new)
+    os.replace(new, CURRENT)
 
 
 def lock(path, mode):
@@ -140,6 +221,17 @@ def mounted():
             return any(len(fl) > 1 and unescape(fl[1]) == ROOT for fl in (line.split() for line in f))
     except OSError:
         return False
+
+
+def mounted_image():
+    """The image on ROOT, as do_mount noted it; None when nothing is mounted."""
+    if not mounted():
+        return None
+    try:
+        with open(MOUNTED, encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
 
 
 def working():
@@ -189,18 +281,47 @@ def do_mount(image):
                 log(f"{image} did not mount on {ROOT}")
             return False
         time.sleep(0.05)
+    with open(MOUNTED, "w", encoding="utf-8") as f:
+        f.write(image + "\n")
     log(f"mounted {os.path.basename(image)} on {ROOT}")
     return True
 
 
-def cmd_mount():
-    name, version, _, _ = pinned()
-    image = image_path(name, version)
-    have = os.path.isfile(image)
-    if not have:
-        older = sorted(glob.glob(os.path.join(GUEST, f"{glob.escape(name)}-*.sqsh")), key=os.path.getmtime)
-        image = older[-1] if older else None
+def remove(paths):
+    for path in paths:
+        log(f"removing {os.path.basename(path)}")
+        try:
+            os.unlink(path)
+        except OSError as err:
+            log(f"could not remove {path}: {err}")
+
+
+def tidy():
+    """Remove every image but the current one, the mounted one and a fixed pin's own. The caller holds
+    MOUNT_LOCK and FETCH_LOCK. Nothing goes while no image is current or the pin cannot be read."""
+    cur = current()
+    if cur is None:
+        return
+    try:
+        pin = pinned()
+    except Failed:
+        return
+    keep = {cur, mounted_image()}
+    if "channel" not in pin:
+        keep.add(image_path(pin["name"], pin["version"]))
+    remove(p for p in images() if p not in keep)
+
+
+def cmd_mount(pin=None):
+    pin = pin or pinned()
     with lock(MOUNT_LOCK, fcntl.LOCK_EX):
+        image = current()
+        have = image is not None
+        if "channel" not in pin:
+            want = image_path(pin["name"], pin["version"])
+            have = os.path.isfile(want)
+            if have:
+                image = want
         if image:
             if not do_mount(image):
                 return 1
@@ -218,6 +339,11 @@ def cmd_release():
         if mounted():
             log(f"could not release {ROOT}")
             return 1
+        # An older image kept because it was mounted can go now. A fetch that is at it tidies up itself.
+        fetching = lock(FETCH_LOCK, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if fetching is not None:
+            with fetching:
+                tidy()
     return 0
 
 
@@ -261,6 +387,7 @@ def hold(pid, ready):
 
 
 def cmd_start(pid):
+    pin = pinned()
     # The holder first: a steam exiting between our mount and our lock would release our mount.
     r, w = os.pipe()
     child = os.fork()
@@ -280,8 +407,8 @@ def cmd_start(pid):
     if not held:
         log("could not hold the x86 guest for this steam; not mounting it")
         return 1
-    code = cmd_mount()
-    if code == 2:
+    code = cmd_mount(pin)
+    if code == 2 or "channel" in pin:
         try:
             subprocess.Popen([sys.executable, os.path.abspath(sys.argv[0]), "fetch"], stdin=subprocess.DEVNULL,
                              stdout=subprocess.DEVNULL, start_new_session=True)
@@ -291,8 +418,28 @@ def cmd_start(pid):
     return 1 if code == 1 else 0
 
 
-def download(url, part, sha256):
-    """url -> part, continuing a part an earlier download left; removed unless its sha256 matches."""
+def digest_of(path, algo):
+    """path's sha256, or its XXH3-64 (FEX's links file has only that) from xxhsum, in lowercase hex. Failed
+    when it cannot be computed: the file is left for the next fetch to check again."""
+    if algo == "sha256":
+        digest = hashlib.sha256()
+        with open(path, "rb") as f:
+            while chunk := f.read(1 << 20):
+                digest.update(chunk)
+        return digest.hexdigest()
+    try:
+        with open(path, "rb") as f:
+            res = subprocess.run([XXHSUM, "-H3"], stdin=f, capture_output=True, text=True)
+    except OSError as err:
+        raise Failed(f"could not check {os.path.basename(path)}: {err}")
+    m = re.match(r"(?:XXH3_)?([0-9a-fA-F]{1,16})\s", res.stdout)  # "XXH3_23350f949fc1413d  stdin"
+    if res.returncode != 0 or not m:
+        raise Failed(f"could not check {os.path.basename(path)} with {XXHSUM}: {(res.stderr or res.stdout).strip()}")
+    return f"{int(m.group(1), 16):016x}"
+
+
+def download(url, part, algo, digest):
+    """url -> part, continuing a part an earlier download left; removed unless its digest matches."""
     have = on_disk = os.path.getsize(part) if os.path.isfile(part) else 0
     req = urllib.request.Request(url, headers={"Range": f"bytes={have}-"} if have else {})
     response = None
@@ -326,47 +473,41 @@ def download(url, part, sha256):
             # http.client ends a body the server cut off without an error; the part stays for next time.
             if todo and done < todo:
                 raise Failed(f"download of {url} cut short at {(have + done) >> 20} MB of {(have + todo) >> 20} MB")
-    digest = hashlib.sha256()
-    with open(part, "rb") as f:
-        while chunk := f.read(1 << 20):
-            digest.update(chunk)
-    if digest.hexdigest() != sha256.lower():
+    got = digest_of(part, algo)
+    if got != digest:
         os.unlink(part)
-        raise Failed(f"sha256 mismatch for {url}: got {digest.hexdigest()}, want {sha256}")
-
-
-def prune(keep):
-    """Remove every image and partial download but `keep` (a mounted one stays readable until unmounted)."""
-    for path in glob.glob(os.path.join(GUEST, "*.sqsh")) + glob.glob(os.path.join(GUEST, ".*.sqsh.part")):
-        if path not in keep:
-            log(f"removing {os.path.basename(path)}")
-            try:
-                os.unlink(path)
-            except OSError as err:
-                log(f"could not remove {path}: {err}")
+        raise Failed(f"{algo} mismatch for {url}: got {got}, want {digest}")
 
 
 def cmd_fetch():
-    name, version, url, sha = pinned()
-    image = image_path(name, version)
-    part = os.path.join(GUEST, f".{name}-{version}.sqsh.part")
+    pin = pinned()
     busy = lock(FETCH_LOCK, fcntl.LOCK_EX | fcntl.LOCK_NB)
     if busy is None:
         return 0  # another fetch is at it
     with busy:
+        try:
+            version, url, algo, digest = wanted(pin)
+        except Failed as err:
+            cur = current()
+            raise Failed(f"{err}; keeping {os.path.basename(cur)}" if cur else str(err))
+        name = pin["name"]
+        image = image_path(name, version)
         if not os.path.isfile(image):
-            # Older images stay until this one is in place (`mount` falls back to them); older parts go now.
-            prune({part} | set(glob.glob(os.path.join(GUEST, "*.sqsh"))))
-            log(f"downloading the x86 guest for Steam's FEX ({name} {version}) in the background")
-            download(url, part, sha)
+            part = os.path.join(GUEST, f".{name}-{version}.sqsh.part")
+            # Images stay until this one is in place (`mount` uses the current one); other parts go now.
+            remove(p for p in glob.glob(os.path.join(glob.escape(GUEST), ".*.sqsh.part")) if p != part)
+            log(f"downloading the x86 guest for Steam's FEX ({name} {version}) in the background: {url}")
+            download(url, part, algo, digest)
             os.rename(part, image)
             log(f"the x86 guest is in place: {image}")
-        prune({image})
-    with lock(MOUNT_LOCK, fcntl.LOCK_EX):
-        # A steam that started before this finished gets it now, unless an older image is mounted for it
-        # (a game may be running from that one): then the next steam start does.
-        if not (mounted() and working()) and steam_running():
-            do_mount(image)
+        set_current(image)
+        with lock(MOUNT_LOCK, fcntl.LOCK_EX):
+            tidy()
+            busy.close()  # before .mount.lock goes, so a release that comes next can tidy too
+            # A steam that started before this finished gets it now, unless an older image is mounted for it
+            # (a game may be running from that one): then a start after the last steam exits does.
+            if not (mounted() and working()) and steam_running():
+                do_mount(image)
     return 0
 
 

@@ -7,10 +7,19 @@
 # WHY THIS EXISTS. None of it runs before a player picks an x86 game, and each rule below fails as a
 # game with no GPU driver, a 1.4 GB download that never finishes, a dead mount in the home, or a
 # `steam` that waits minutes before the client starts:
-#   helper:
+#   helper, a fixed pin (version + url + sha256):
 #   - downloads the pinned image, refuses it unless the sha256 matches, renames it into place, and
 #     resumes a download that was cut short (Range) instead of starting over;
-#   - one fetch at a time; a bump keeps the old image (and mounts it) until the new one is in place;
+#   - one fetch at a time; a bump keeps the old image (and mounts it) until the new one is in place,
+#     and removes it only once it is not mounted either;
+#   helper, a channel (FEX's RootFS_links.json + distro + type):
+#   - takes the entry the pin selects, and only that one, from a links file shaped like FEX's;
+#     refuses it unless its XXH3-64 (xxhsum) matches, a hash without leading zeros included;
+#   - a channel move: the new image becomes current once it is in place and checked; a mounted old
+#     one stays mounted and on disk until the last steam is gone;
+#   - offline, or a links file it cannot use: nothing changes, the installed image is still mounted;
+#   - without xxhsum nothing is installed unchecked; the part is kept and checked next time;
+#   both:
 #   - mounts with squashfuse, TERM and INT ignored, never twice; replaces a dead mount;
 #   - releases only when no `steam` holds the users lock, and an inherited copy of that lock in the
 #     helper itself does not count;
@@ -19,11 +28,13 @@
 #   - a download that finishes while Steam runs is mounted then, and not when Steam is gone.
 #   wrapper:
 #   - the client starts without waiting for the download, which goes on detached after `steam` exits;
+#   - with a channel, every start checks it in the background; a move is mounted once no steam has the old one;
 #   - STEAM_COMPAT_GRAPHICS_PROVIDER and ~/.steam/sdk32, sdk64 are set up;
 #   - mounted before the client starts, released when the last `steam` exits, never by a second one;
 #   - RETROFORGE_STEAM_X86_GUEST=0 turns all of it off.
 # squashfuse and fusermount3 are stubs that edit a fake mount table, as in test-portmaster.sh. FEX's
-# server is a local HTTP server that honours Range and can be slowed down or cut off.
+# server is a local HTTP server that honours Range and can be slowed down or cut off. xxhsum is the
+# real one (Debian/Arch package xxhash; the image has it) when installed, else a stand-in.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -32,9 +43,10 @@ WRAP="$ROOT/rootfs/overlay/usr/bin/steam"
 PIN_REAL="$ROOT/rootfs/overlay/usr/share/retroforge/steam/x86-guest.pin"
 for f in "$HELPER" "$WRAP" "$PIN_REAL"; do [ -f "$f" ] || { echo "missing: $f" >&2; exit 1; }; done
 
-PASS=0; FAIL=0; CASE=""
-ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
-bad() { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
+PASS=0; FAIL=0; SKIP=0; CASE=""
+ok()   { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
+bad()  { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
+skip() { SKIP=$((SKIP+1)); printf '  skip %s -- %s\n' "$CASE" "$1"; }
 
 T="$(mktemp -d)" && [ -d "$T" ] || { echo "mktemp -d failed" >&2; exit 1; }
 cleanup() {
@@ -74,6 +86,19 @@ EOF
 chmod +x "$T/stub/"*
 : >"$T/mounts"
 export RETROFORGE_MOUNTS="$T/mounts" RETROFORGE_SQUASHFUSE="$T/stub/squashfuse" RETROFORGE_FUSERMOUNT="$T/stub/fusermount"
+
+# ---- xxhsum: the real one when installed; else a stand-in with its output and another 64-bit hash --
+if XXHSUM_REAL="$(command -v xxhsum)"; then
+  export RETROFORGE_XXHSUM="$XXHSUM_REAL"
+else
+  cat >"$T/stub/xxhsum" <<'EOF'
+#!/bin/bash
+echo "XXH3_$(python3 -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:16])')  stdin"
+EOF
+  chmod +x "$T/stub/xxhsum"
+  export RETROFORGE_XXHSUM="$T/stub/xxhsum"
+fi
+xxh3() { "$RETROFORGE_XXHSUM" -H3 <"$1" | sed -E 's/^XXH3_//; s/[[:space:]].*//'; }
 
 # ---- FEX's server: Range, and $SRV/.delay (seconds, mid-body) / $SRV/.mode (range|full|cut) ---------
 SRV="$T/srv"; mkdir -p "$SRV"
@@ -165,17 +190,24 @@ unlock() { kill "$LOCKPID"; wait "$LOCKPID" 2>/dev/null; }
 
 # ================================================================================================
 CASE="the real pin"
-python3 - "$PIN_REAL" <<'PY' && ok "name, version, a dated rootfs.fex-emu.gg url naming it, and a sha256" || bad "the image's x86-guest.pin is malformed"
+python3 - "$PIN_REAL" <<'PY' && ok "a channel: FEX's RootFS_links.json, its arch squashfs entry, no fixed version" || bad "the image's x86-guest.pin is malformed"
 import re, sys
 t = open(sys.argv[1]).read()
-f = {k: re.search(rf"^{k}:[ \t]*(\S+)", t, re.M) for k in ("name", "version", "url", "sha256")}
-assert all(f.values())
-n, v, u, s = (m.group(1) for m in f.values())
-assert n == "fex-rootfs-archlinux", n
-assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", v), v
-assert re.fullmatch(r"[0-9a-f]{64}", s)
-assert u == f"https://rootfs.fex-emu.gg/ArchLinux/{v}/ArchLinux.sqsh", u
+f = {k: (m.group(1) if (m := re.search(rf"^{k}:[ \t]*(\S+)", t, re.M)) else None)
+     for k in ("name", "channel", "distro", "type", "version", "url", "sha256")}
+assert f["name"] == "fex-rootfs-archlinux", f
+assert f["channel"] == "https://rootfs.fex-emu.gg/RootFS_links.json", f
+assert (f["distro"], f["type"]) == ("arch", "squashfs"), f
+assert not (f["version"] or f["url"] or f["sha256"]), f
 PY
+# The image checks FEX's hash with xxhsum, so the package that has it must stay on the image.
+grep -qE '^PKGS=\(.* xxhash[ )]' "$ROOT/rootfs/customize-base.sh" && grep -q '^xxhash ' "$ROOT/rootfs/manifest.lock" \
+  && ok "xxhash (xxhsum) is in PKGS and in manifest.lock" || bad "xxhash is not declared in PKGS, or not locked"
+if [ -n "$XXHSUM_REAL" ]; then
+  [ "$(printf '' | xxh3 /dev/stdin)" = 2d06800538d394c2 ] && ok "xxhsum -H3 is XXH3-64 (the empty input's published value)" || bad "xxhsum -H3: $(printf '' | xxh3 /dev/stdin)"
+else
+  skip "xxhsum is not installed: the channel cases use a stand-in hash"
+fi
 
 CASE="mount, nothing downloaded"
 mkimage "$SRV/v1.sqsh" one; mkpin 2026-01-01 v1.sqsh; reset_calls
@@ -233,8 +265,9 @@ sleep 600 & FAKESTEAM=$!; reset_calls
 helper start "$FAKESTEAM"
 [ "$RC" = 0 ] && is_mounted && ok "mounted for the caller" || bad "rc=$RC err=$ERR"
 HOLD="$(pgrep -f "steam-x86-guest start $FAKESTEAM")"
+# As a container's PID 1 (docker run ... bash -c '...; bash tests/...' execs into it), every orphan is ours.
 [ -n "$HOLD" ] && [ "$(ps -o sid= -p "$HOLD" | tr -d ' ')" != "$(ps -o sid= -p $$ | tr -d ' ')" ] \
-  && [ "$(ps -o ppid= -p "$HOLD" | tr -d ' ')" != $$ ] && ok "a holder is left, in its own session, not our child" || bad "holder: '$HOLD' $(ps -o pid,ppid,sid,args -p "${HOLD:-1}")"
+  && { [ $$ = 1 ] || [ "$(ps -o ppid= -p "$HOLD" | tr -d ' ')" != $$ ]; } && ok "a holder is left, in its own session, not our child" || bad "holder: '$HOLD' $(ps -o pid,ppid,sid,args -p "${HOLD:-1}")"
 kill -TERM $HOLD 2>/dev/null; sleep 0.3
 [ -n "$HOLD" ] && kill -0 $HOLD 2>/dev/null && is_mounted && ok "it ignores TERM (OGUI's Exit), the mount stays" || bad "the holder died of TERM"
 holdlock "$GUEST/.users.lock" sh   # a second steam
@@ -271,10 +304,13 @@ echo range >"$SRV/.mode"; reset_calls
 helper fetch
 IMG2="$GUEST/fex-rootfs-archlinux-2026-02-01.sqsh"
 grep -q "range=bytes=150000-" "$T/requests" && ok "asks for the rest only (Range: bytes=150000-)" || bad "requests: $(cat "$T/requests")"
-[ "$RC" = 0 ] && cmp -s "$IMG2" "$SRV/v2.sqsh" && ok "the joined image is in place" || bad "rc=$RC err=$ERR"
-[ ! -e "$IMG1" ] && [ -z "$(leftovers)" ] && ok "the old image is removed once the new one is in place" || bad "$(ls -A "$GUEST")"
-is_mounted && ok "a mount of the old image is left to the last steam to release" || bad "unmounted under a running game"
+[ "$RC" = 0 ] && cmp -s "$IMG2" "$SRV/v2.sqsh" && [ "$(readlink "$GUEST/current")" = "$(basename "$IMG2")" ] \
+  && ok "the joined image is in place, and current" || bad "rc=$RC err=$ERR current=$(readlink "$GUEST/current")"
+[ -z "$(leftovers)" ] && ok "no partial download left" || bad "$(leftovers)"
+is_mounted && grep -qxF "$IMG1" "$MNT/.image" && [ -f "$IMG1" ] \
+  && ok "the old image stays mounted, and on disk, for the last steam to release" || bad "unmounted or removed under a running game: $(ls -A "$GUEST")"
 helper release
+not_mounted && [ ! -e "$IMG1" ] && [ -f "$IMG2" ] && ok "released: then the old image is removed" || bad "rc=$RC err=$ERR $(ls -A "$GUEST")"
 
 CASE="server without Range"
 mkimage "$SRV/v3.sqsh" three; mkpin 2026-03-01 v3.sqsh
@@ -313,6 +349,154 @@ helper fetch
 settle
 
 # ================================================================================================
+# A channel: FEX's RootFS_links.json (here on the same server, or a file://), of which the pin's
+# distro and type select one entry. Its Hash is an XXH3-64, checked with xxhsum.
+LINKS="$SRV/RootFS_links.json"
+mklinks() {  # mklinks <links file> <url of the ArchLinux SquashFS> <hash>: shaped like FEX's, with neighbours
+  python3 - "$@" <<'PY'
+import json, sys
+out, url, h = sys.argv[1:4]
+e = lambda m, v, u, h, t: {"DistroMatch": m, "DistroVersion": v, "URL": u, "Hash": h, "Type": t}
+links = {"v1": {
+    "Fedora 44 (SquashFS)": e("fedora", "44", url.replace("ArchLinux", "Fedora_44"), "fda4aaeab0fa69ba", "squashfs"),
+    "ArchLinux (EroFS)": e("arch", "rolling", url.rsplit(".", 1)[0] + ".ero", "82c0c5f15edf59d2", "erofs"),
+    "ArchLinux (SquashFS)": e("arch", "rolling", url, h, "squashfs"),
+}}
+with open(out + ".new", "w") as f:
+    json.dump(links, f, indent=4)
+PY
+  mv "$1.new" "$1"
+}
+mkchan() {  # mkchan <links file url>: a channel pin
+  printf 'name: fex-rootfs-archlinux\nchannel: %s\ndistro: arch\ntype: squashfs\n' "$1" >"$PIN"
+}
+publish() {  # publish <date> <seed>: FEX publishes a new ArchLinux SquashFS; SQ, H, and CIMG (its name here)
+  mkdir -p "$SRV/ArchLinux/$1"; SQ="$SRV/ArchLinux/$1/ArchLinux.sqsh"
+  mkimage "$SQ" "$2"; H="$(xxh3 "$SQ")"
+  mklinks "$LINKS" "$URL/ArchLinux/$1/ArchLinux.sqsh" "$H"
+  CIMG="$GUEST/fex-rootfs-archlinux-$1-$H.sqsh"
+}
+cur() { readlink "$GUEST/current"; }
+FIXED_IMG="$GUEST/fex-rootfs-archlinux-2026-05-01.sqsh"   # the fixed pin's, from above
+
+CASE="channel: the switch from a fixed pin"
+publish 2026-09-01 c1; C1="$CIMG"; mkchan "$URL/RootFS_links.json"; reset_calls
+helper mount
+[ "$RC" = 0 ] && grep -qxF "$FIXED_IMG" "$MNT/.image" && [ ! -s "$T/requests" ] \
+  && ok "mount never asks the network: the image fetched last (the fixed pin's) is mounted" || bad "rc=$RC err=$ERR requests: $(cat "$T/requests")"
+helper release
+
+CASE="channel: resolution"
+reset_calls
+helper fetch
+[ "$RC" = 0 ] && cmp -s "$C1" "$SQ" && ok "the arch squashfs entry, downloaded as <name>-<dated directory>-<xxh3>.sqsh" || bad "rc=$RC err=$ERR $(ls -A "$GUEST")"
+grep -q "^GET /RootFS_links.json " "$T/requests" && ! grep -qE '\.ero |Fedora' "$T/requests" \
+  && ok "it read the links file, and took neither the EroFS nor the Fedora entry" || bad "requests: $(cat "$T/requests")"
+[ "$(cur)" = "$(basename "$C1")" ] && [ ! -e "$FIXED_IMG" ] && [ -z "$(leftovers)" ] \
+  && ok "it is current; the fixed pin's image, not mounted, is removed" || bad "current=$(cur) $(ls -A "$GUEST")"
+
+CASE="channel: unchanged"
+reset_calls
+helper fetch
+[ "$RC" = 0 ] && [ "$(grep -c . "$T/requests")" = 1 ] && grep -q "^GET /RootFS_links.json " "$T/requests" && [ -z "$ERR" ] \
+  && ok "only the links file is read, quietly" || bad "rc=$RC err=$ERR requests: $(cat "$T/requests")"
+
+CASE="channel: start"
+sleep 600 & FAKESTEAM=$!; reset_calls
+helper start "$FAKESTEAM"
+[ "$RC" = 0 ] && is_mounted && grep -qxF "$C1" "$MNT/.image" && ok "the installed image is mounted at once" || bad "rc=$RC err=$ERR"
+until_true 50 grep -q "^GET /RootFS_links.json " "$T/requests" && ok "and the channel is checked in the background" || bad "requests: $(cat "$T/requests")"
+until_true 50 sh -c "! pgrep -f '$HELPER fetch' >/dev/null"
+
+CASE="channel: it moves while steam runs"
+publish 2026-10-01 c2; C2="$CIMG"; reset_calls
+helper fetch
+[ "$RC" = 0 ] && cmp -s "$C2" "$SQ" && [ "$(cur)" = "$(basename "$C2")" ] && ok "the new image is downloaded, checked and made current" || bad "rc=$RC err=$ERR current=$(cur)"
+grep -qxF "$C1" "$MNT/.image" && [ -f "$C1" ] && ok "the old one stays mounted, and on disk, while steam runs" || bad "$(ls -A "$GUEST") image: $(cat "$MNT/.image" 2>&1)"
+kill -KILL "$FAKESTEAM"; wait "$FAKESTEAM" 2>/dev/null
+until_true 50 not_mounted && until_true 20 test ! -e "$C1" && [ -f "$C2" ] && ok "steam gone: released, then the old image is removed" || bad "mounts: $(cat "$T/mounts") $(ls -A "$GUEST")"
+helper mount
+[ "$RC" = 0 ] && grep -qxF "$C2" "$MNT/.image" && ok "the next start mounts the new one" || bad "rc=$RC err=$ERR"
+helper release
+
+CASE="channel: it moves, nothing mounted"
+publish 2026-11-01 c3; C3="$CIMG"
+helper fetch
+[ "$RC" = 0 ] && [ -f "$C3" ] && [ ! -e "$C2" ] && [ "$(cur)" = "$(basename "$C3")" ] && ok "the old image is removed as soon as the new one is in place" || bad "rc=$RC err=$ERR $(ls -A "$GUEST")"
+
+CASE="channel: hash mismatch"
+publish 2026-12-01 c4; mklinks "$LINKS" "$URL/ArchLinux/2026-12-01/ArchLinux.sqsh" 123456789abcdef0
+helper fetch
+[ "$RC" = 1 ] && grep -q "xxh3 mismatch" <<<"$ERR" && ok "refused (exit 1)" || bad "rc=$RC err=$ERR"
+! ls "$GUEST"/*2026-12-01* >/dev/null 2>&1 && [ -z "$(leftovers)" ] && [ "$(cur)" = "$(basename "$C3")" ] && [ -f "$C3" ] \
+  && ok "nothing of it is kept; the installed image stays current" || bad "current=$(cur) $(ls -A "$GUEST")"
+
+CASE="channel: offline"
+DEAD="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+mkchan "http://127.0.0.1:$DEAD/RootFS_links.json"
+helper fetch
+[ "$RC" = 1 ] && grep -q "could not read the x86 guest channel" <<<"$ERR" && grep -qF "keeping $(basename "$C3")" <<<"$ERR" \
+  && ok "exit 1: says so, and that it keeps what is installed" || bad "rc=$RC err=$ERR"
+[ "$(cur)" = "$(basename "$C3")" ] && [ "$(cd "$GUEST" && ls -- *.sqsh)" = "$(basename "$C3")" ] && ok "nothing removed, nothing changed" || bad "$(ls -A "$GUEST")"
+helper mount
+[ "$RC" = 0 ] && grep -qxF "$C3" "$MNT/.image" && ok "and a steam still gets it mounted" || bad "rc=$RC err=$ERR"
+helper release
+
+CASE="channel: a links file it cannot use"
+mkchan "$URL/RootFS_links.json"
+bad_links() {  # bad_links <what> <links file content>
+  printf '%s' "$2" >"$LINKS"; reset_calls
+  helper fetch
+  [ "$RC" = 1 ] && grep -q "is not a links file this can use" <<<"$ERR" && [ "$(cur)" = "$(basename "$C3")" ] \
+    && [ "$(grep -c . "$T/requests")" = 1 ] && ok "$1: refused, nothing downloaded or changed" || bad "$1: rc=$RC err=$ERR requests: $(cat "$T/requests")"
+}
+ARCH='"DistroMatch": "arch", "Type": "squashfs"'
+GOOD="\"URL\": \"$URL/ArchLinux/2026-11-01/ArchLinux.sqsh\""
+bad_links "not JSON" '<html>503 Service Unavailable</html>'
+bad_links "no v1" '{"v2": {}}'
+bad_links "v1 a list" '{"v1": []}'
+bad_links "no arch squashfs entry" "{\"v1\": {\"ArchLinux (EroFS)\": {\"DistroMatch\": \"arch\", \"Type\": \"erofs\", $GOOD, \"Hash\": \"1\"}}}"
+bad_links "two arch squashfs entries" "{\"v1\": {\"a\": {$ARCH, $GOOD, \"Hash\": \"1\"}, \"b\": {$ARCH, $GOOD, \"Hash\": \"2\"}}}"
+bad_links "a Hash that is not hex" "{\"v1\": {\"a\": {$ARCH, $GOOD, \"Hash\": \"xyz\"}}}"
+bad_links "a Hash over 64 bits" "{\"v1\": {\"a\": {$ARCH, $GOOD, \"Hash\": \"123456789abcdef01\"}}}"
+bad_links "no URL" "{\"v1\": {\"a\": {$ARCH, \"Hash\": \"1\"}}}"
+bad_links "a URL neither https nor the channel's scheme" "{\"v1\": {\"a\": {$ARCH, \"URL\": \"file://$SRV/v1.sqsh\", \"Hash\": \"1\"}}}"
+
+CASE="channel: a hash without leading zeros"
+mkdir -p "$SRV/ArchLinux/2027-01-01"; SQ="$SRV/ArchLinux/2027-01-01/ArchLinux.sqsh"
+for i in $(seq 300); do mkimage "$SQ" "zero$i"; H="$(xxh3 "$SQ")"; [ "${H:0:1}" = 0 ] && break; done
+mklinks "$LINKS" "$URL/ArchLinux/2027-01-01/ArchLinux.sqsh" "${H#"${H%%[!0]*}"}"
+Z="$GUEST/fex-rootfs-archlinux-2027-01-01-$H.sqsh"
+helper fetch
+[ "${H:0:1}" = 0 ] && [ "$RC" = 0 ] && cmp -s "$Z" "$SQ" \
+  && ok "accepted: $H written as ${H#"${H%%[!0]*}"}, as FEX writes them; the file is named with all 16 digits" || bad "rc=$RC err=$ERR hash=$H"
+
+CASE="channel: no xxhsum"
+publish 2027-02-01 c5; C5="$CIMG"; P5="$GUEST/.$(basename "$C5").part"; reset_calls
+RETROFORGE_XXHSUM="$T/nowhere/xxhsum" helper fetch
+[ "$RC" = 1 ] && grep -q "could not check" <<<"$ERR" && [ ! -e "$C5" ] && [ "$(cur)" = "$(basename "$Z")" ] \
+  && ok "exit 1: nothing is installed unchecked" || bad "rc=$RC err=$ERR current=$(cur) $(ls -A "$GUEST")"
+cmp -s "$P5" "$SQ" && ok "the downloaded part is kept" || bad "part: $(ls -la "$P5" 2>&1)"
+reset_calls
+helper fetch
+grep -q "range=bytes=300000-" "$T/requests" && [ "$RC" = 0 ] && cmp -s "$C5" "$SQ" && [ "$(cur)" = "$(basename "$C5")" ] \
+  && ok "the next fetch checks it without downloading it again (416), and installs it" || bad "rc=$RC err=$ERR requests: $(cat "$T/requests")"
+
+CASE="channel: file:// links file and image"
+mkdir -p "$T/mirror/ArchLinux/2027-03-01"; SQ="$T/mirror/ArchLinux/2027-03-01/ArchLinux.sqsh"
+mkimage "$SQ" c6; H="$(xxh3 "$SQ")"
+mklinks "$T/mirror/RootFS_links.json" "file://$SQ" "$H"; mkchan "file://$T/mirror/RootFS_links.json"; reset_calls
+helper fetch
+[ "$RC" = 0 ] && cmp -s "$GUEST/fex-rootfs-archlinux-2027-03-01-$H.sqsh" "$SQ" && [ ! -s "$T/requests" ] \
+  && ok "a file:// channel may name file:// images" || bad "rc=$RC err=$ERR"
+
+CASE="a pin with both a channel and a url"
+echo "url: $URL/v1.sqsh" >>"$PIN"
+helper fetch
+[ "$RC" = 1 ] && grep -q "either channel, distro and type or version, url and sha256" <<<"$ERR" && ok "refused" || bad "rc=$RC err=$ERR"
+settle
+
+# ================================================================================================
 # The wrapper, with the bootstrap stubbed and the real helper: a fake runtime `run` records how the
 # client was started.
 W="$T/w"; mkdir -p "$W/rt"
@@ -324,6 +508,7 @@ n=\$(( \$(cat "$W/count" 2>/dev/null || echo 0) + 1 )); echo "\$n" >"$W/count"
   echo "provider: \${STEAM_COMPAT_GRAPHICS_PROVIDER-unset}"
   [ -f "$WGUEST/root/graphics_provider.json" ] && echo "mounted: yes" || echo "mounted: no"
   ls "$WGUEST"/*.sqsh >/dev/null 2>&1 && echo "image: yes" || echo "image: no"
+  echo "mounted image: \$(cat "$WGUEST/root/.image" 2>/dev/null)"
 } >"$W/call\$n"
 codes=(\$(cat "$W/codes")); c="\${codes[\$((n-1))]:-0}"
 if [ "\$c" = S ]; then
@@ -417,6 +602,22 @@ grep -qx "mounted: yes" "$W/call1" && [ "$(calls squashfuse)" = 1 ] && ok "repla
 until_true 50 w_unmounted && ok "and released after" || bad "mounts: $(cat "$T/mounts")"
 settle
 
+CASE="wrapper: a channel"
+WOLD="$WGUEST/fex-rootfs-archlinux-2026-08-01.sqsh"   # the fixed pin's, from above: current, not mounted
+mkdir -p "$SRV/ArchLinux/2027-04-01"; SQ="$SRV/ArchLinux/2027-04-01/ArchLinux.sqsh"; mkimage "$SQ" wrapper3; H="$(xxh3 "$SQ")"
+mklinks "$LINKS" "$URL/ArchLinux/2027-04-01/ArchLinux.sqsh" "$H"; mkchan "$URL/RootFS_links.json"
+WNEW="$WGUEST/fex-rootfs-archlinux-2027-04-01-$H.sqsh"; reset_calls
+start_bg
+grep -qx "mounted image: $WOLD" "$W/call1" && ok "steam starts at once, with the installed image mounted" || bad "$(cat "$W/call1" 2>&1) $(cat "$W/err")"
+until_true 100 test -f "$WNEW" && ok "the channel's newer image arrives in the background while steam runs" || bad "$(ls -A "$WGUEST") err: $(cat "$W/err")"
+grep -qxF "$WOLD" "$WGUEST/root/.image" && [ -f "$WOLD" ] && ok "the running steam keeps the old one" || bad "$(cat "$WGUEST/root/.image" 2>&1) $(ls -A "$WGUEST")"
+kill -TERM "$WPID"; wait "$WPID"
+until_true 50 w_unmounted && until_true 20 test ! -e "$WOLD" && ok "steam gone: released, then the old image is removed" || bad "mounts: $(cat "$T/mounts") $(ls -A "$WGUEST")"
+settle
+wrap 0 steam://rungameid/3
+grep -qx "mounted image: $WNEW" "$W/call1" && ok "the next steam has the new one" || bad "$(cat "$W/call1" 2>&1) $WERR"
+settle
+
 CASE="wrapper: opted out"
 rm -rf "$WGUEST" "$WHOME/.steam"; reset_calls
 echo 0 >"$W/codes"; rm -f "$W/count" "$W"/call*
@@ -433,5 +634,5 @@ wrap 0
 settle
 
 echo
-echo "$PASS passed, $FAIL failed"
+echo "$PASS passed, $FAIL failed, $SKIP skipped"
 [ "$FAIL" -eq 0 ]
