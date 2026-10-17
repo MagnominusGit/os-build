@@ -38,6 +38,10 @@ VERIFY_INSTALL = os.environ.get(
 RELEASE_INFO = os.environ.get("RETROFORGE_RELEASE_INFO", "/usr/lib/retroforge/install/release-info")
 BUNDLE = os.environ.get("RETROFORGE_INSTALL_BUNDLE", "")
 
+# Where disk_facts() reads model and size. Overridable for the suite only: the build container's
+# /sys/block is the build host's disks.
+SYS_BLOCK = os.environ.get("RETROFORGE_SYS_BLOCK", "/sys/block")
+
 UD_GIB_DEFAULT = int(os.environ.get("RETROFORGE_UD_GIB", "16"))
 UD_GIB_MIN = 4          # carve.sh has its own ANDROID_FLOOR_GIB; this is the UI's coarse guard
 UD_GIB_STEP = 4
@@ -88,16 +92,23 @@ def kv(text):
 
 
 def disk_facts(dev):
-    """Model and size straight out of sysfs. Both are decoration; neither may stop a run."""
-    base = os.path.basename(dev)
+    """Model and size straight out of sysfs. Both are decoration; neither may stop a run.
+
+    A UFS LUN (or any SCSI disk) carries device/model; an eMMC has no model attribute and names
+    itself in device/name instead, the CID product name -- "MMC64G" on the MANGMI Air X."""
+    blk = os.path.join(SYS_BLOCK, os.path.basename(dev))
     facts = {"model": "unknown", "size_gib": "unknown"}
+    for attr in ("model", "name"):
+        try:
+            with open(os.path.join(blk, "device", attr)) as f:
+                model = f.read().strip()
+        except OSError:
+            continue
+        if model:
+            facts["model"] = model
+            break
     try:
-        with open("/sys/block/%s/device/model" % base) as f:
-            facts["model"] = f.read().strip() or "unknown"
-    except OSError:
-        pass
-    try:
-        with open("/sys/block/%s/size" % base) as f:
+        with open(os.path.join(blk, "size")) as f:
             facts["size_gib"] = str(int(f.read().strip()) * 512 // (1024 ** 3))
     except (OSError, ValueError):
         pass

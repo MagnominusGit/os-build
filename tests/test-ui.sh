@@ -1016,6 +1016,20 @@ print("%s|%s" % (d["DETAIL"], d["NAME"]))')"
 [ "$kvcheck" = "the installer can reach https://x|AYANEO Pocket S2" ] \
   && ok "and a value with spaces survives whole, from either producer" \
   || bad "kv() mangled a value: $kvcheck"
+# THE eMMC NAME. A UFS LUN carries device/model; an eMMC has none and names itself in device/name
+# (the CID product name) -- the MANGMI Air X's target rendered as "unknown" (2026-10-17).
+mkdir -p "$T/sysblock/sda/device" "$T/sysblock/mmcblk1/device"
+printf 'KM8V8001JM-B813  \n' >"$T/sysblock/sda/device/model"
+printf 'MMC64G\n'            >"$T/sysblock/mmcblk1/device/name"
+echo 250069680 >"$T/sysblock/sda/size"; echo 122142720 >"$T/sysblock/mmcblk1/size"
+factscheck="$(RETROFORGE_SYS_BLOCK="$T/sysblock" python3 -c '
+import os, sys
+sys.path.insert(0, os.path.join(os.environ["ROOT"], "installer"))
+import uiflow
+print("|".join(uiflow.disk_facts(d)["model"] for d in ("/dev/sda", "/dev/mmcblk1", "/dev/sdz")))')"
+[ "$factscheck" = "KM8V8001JM-B813|MMC64G|unknown" ] \
+  && ok "the target's model is read for UFS and eMMC alike, and unknown only when sysfs has neither" \
+  || bad "disk_facts() model: $factscheck"
 printf '%s' "$out" | grep -q '/dev/sda' \
   && ok "and the target is the one select-target.sh chose" \
   || bad "the target is not what select-target returned"
