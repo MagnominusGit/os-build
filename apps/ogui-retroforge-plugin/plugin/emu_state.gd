@@ -6,12 +6,14 @@ extends RefCounted
 ##
 ## rows() -> {"main": row, "extra": [row...]}; a row is {"text", "description", "button",
 ## "args"}: the retroforge-emu arguments its button runs (["install", id], ["install", id,
-## "--tested"], ["rollback", id]), or [] for Open. Extra rows go before Delete.
+## "--tested"], ["rollback", id], ["check", id, "--refresh"]), or [] for Open. Extra rows go before
+## Delete.
 ##
 ## Tested = the catalog's pin ("tested" in list), the build RetroForge checked. An entry that
 ## follows upstream ("follows_latest") installs upstream's newest by default; the page says when the
-## installed build is not the tested one, and offers it back. A failed or missing check offers no
-## Update and shows no error: offline is not a fault.
+## installed build is not the tested one, and offers it back. Whether upstream has a newer build is
+## asked only when the player presses "Check for a newer version" (each ask costs two of the 60
+## GitHub requests an hour this network gets); a failed or missing check offers no Update.
 
 const Credits := preload("credits.gd")
 
@@ -64,6 +66,12 @@ static func rows(id: String, emu: Dictionary, check: Dictionary) -> Dictionary:
 			main.description = "Installed."
 
 	var extra := []
+	if installed != null and follows and not self_update and main.button != "Update":
+		var checked: bool = latest != null and latest == installed
+		extra.append({"text": "Check for a newer version", "button": "Check",
+			"description": ("Up to date: %s is the newest from upstream." % _v(installed)) if checked
+				else "Asks upstream whether a newer version is out.",
+			"args": ["check", id, "--refresh"]})
 	if installed != null and emu.get("previous") != null:
 		extra.append({"text": "Revert to " + _v(emu["previous"]), "button": "Revert",
 			"description": "Goes back to the version installed before, kept on this device.",

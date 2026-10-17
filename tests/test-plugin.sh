@@ -249,23 +249,30 @@ func test_emu_state() -> void:
 		"Version v3, the newest from upstream, about 50 MB. RetroForge tested v1.")
 	var inst := follows.merged({"installed": "v1"}, true)
 	r = EmuState.rows("x", inst, {"latest": "v1", "error": null})
-	check("state: the tested build installed and newest: Open, Tested, no extra rows",
-		[r.main.text, r.main.button, r.main.args, r.extra], ["Version v1 · Tested", "Open", [], []])
+	check("state: the tested build installed and newest: Open, Tested, Check says up to date",
+		[r.main.text, r.main.button, r.main.args, r.extra.map(func(e): return [e.args, e.description])],
+		["Version v1 · Tested", "Open", [], [[["check", "x", "--refresh"], "Up to date: v1 is the newest from upstream."]]])
+	r = EmuState.rows("x", inst, {})
+	check("state: installed, never checked: no Update, a Check row that asks upstream on demand",
+		[r.main.button, r.extra.map(func(e): return [e.button, e.description])],
+		["Open", [["Check", "Asks upstream whether a newer version is out."]]])
 	r = EmuState.rows("x", inst, {"latest": "v3", "error": null})
-	check("state: a newer build upstream: Update to it",
+	check("state: a newer build upstream: Update to it (and no Check row)",
 		[r.main.text, r.main.button, r.main.args, r.main.description],
 		["Version v1 · Tested", "Update", ["install", "x"], "Update to v3 available, about 50 MB."])
+	check("state: ... with no Check row beside the Update", r.extra.map(func(e): return e.button), [])
 	r = EmuState.rows("x", inst, {"latest": null, "error": "GitHub answered HTTP 403"})
-	check("state: a failed check (offline, rate limit): no Update, no error shown",
-		[r.main.button, r.main.description], ["Open", "Installed."])
+	check("state: a failed check (offline, rate limit): no Update, Check stays offered",
+		[r.main.button, r.main.description, r.extra.map(func(e): return e.button)], ["Open", "Installed.", ["Check"]])
 	var newer := follows.merged({"installed": "v3", "previous": "v1"}, true)
 	r = EmuState.rows("x", newer, {"latest": "v3", "error": null})
 	check("state: an untested build installed: says so, Revert and Install tested before Delete",
 		[r.main.text, r.main.description, r.extra.map(func(e): return e.args)],
-		["Version v3", "Installed straight from upstream. RetroForge tested v1.", [["rollback", "x"], ["install", "x", "--tested"]]])
+		["Version v3", "Installed straight from upstream. RetroForge tested v1.",
+			[["check", "x", "--refresh"], ["rollback", "x"], ["install", "x", "--tested"]]])
 	var cemu := {"tested": null, "follows_latest": true, "installed": "nightly-abc", "previous": "nightly-def", "size": mb}
 	r = EmuState.rows("x", cemu, {"latest": "nightly-123", "error": null})
-	check("state: a nightly-only entry: Update to the newer nightly, Revert, never Install tested",
+	check("state: a nightly-only entry: Update to the newer nightly (no Check beside it), Revert, never Install tested",
 		[r.main.text, r.main.button, r.extra.map(func(e): return e.text)],
 		["Nightly abc", "Update", ["Revert to Nightly def"]])
 	var pinned := {"tested": "v2", "follows_latest": false, "installed": "v1", "update": true, "previous": null, "size": mb}
@@ -422,6 +429,10 @@ GD
   PASS=$((PASS + n_ok)); FAIL=$((FAIL + n_bad))
   if [ "$rc" -ne 0 ] && [ "$n_bad" -eq 0 ]; then
     bad "Godot failed: $(printf '%s\n' "$out" | grep -E 'ERROR|error' | head -3)"
+  fi
+  # Godot exits 0 when a preloaded script does not compile: the checks using it just never run.
+  if printf '%s\n' "$out" | grep -q 'SCRIPT ERROR'; then
+    bad "a script did not compile: $(printf '%s\n' "$out" | grep 'SCRIPT ERROR' | head -3)"
   fi
 fi
 

@@ -10,8 +10,8 @@ extends ScrollContainer
 ## player's choice for each of the emulator's options (options.json: renderer, resolution, aspect...;
 ## see emu_options.gd), the player's "Run on fast cores" default for that emulator (every launch of
 ## it, Open included, unless a game overrides it), and Delete once installed. Whether upstream has a
-## newer build is only known online: `retroforge-emu check` runs in the background when the player
-## opens the page, and the rows are rebuilt when it answers (offline: no Update, no error). Everything
+## newer build is only known online, and only asked when the player presses "Check for a newer
+## version" (`retroforge-emu check --refresh`); the rows are rebuilt with its answer. Everything
 ## else goes through /usr/bin/retroforge-emu (list / check / install / rollback / remove); the page
 ## never downloads or verifies anything itself.
 ##
@@ -111,9 +111,7 @@ func _build_rows() -> void:
 	add_child(watcher)
 	# Rows are rebuilt after every install / delete, which frees the focused one; while the page
 	# is entered, refresh() hands the focus back.
-	watcher.state_entered.connect(func():
-		_inside = true
-		_check(emulator_id))
+	watcher.state_entered.connect(func(): _inside = true)
 	watcher.state_exited.connect(func(): _inside = false)
 	watcher.state_removed.connect(func(): _inside = false)
 
@@ -129,15 +127,16 @@ func show_emulator(id: String) -> void:
 	refresh()
 
 
-## Ask upstream for the emulator's newest build in the background, when the player opens its page
-## (A on its entry), never while the focus only passes over the list: each check costs two of the
-## 60 GitHub requests an hour this network gets (retroforge-emu caches the answer for an hour).
-## The rows are rebuilt if it is still the one shown.
-func _check(id: String) -> void:
-	if _checking.has(id) or not catalog.get(id, {}).get("follows_latest", false):
+## "Check for a newer version": ask upstream now (`check --refresh`; never on its own: each ask
+## costs two of the 60 GitHub requests an hour this network gets), say what it found, and rebuild
+## the rows (an Update replaces Open when there is a newer build).
+func _check(id: String, name_text: String, row: Control) -> void:
+	if _checking.has(id) or _busy.has(id):
 		return
 	_checking[id] = true
-	var cmd := Command.create(EMU_TOOL, ["check", id])
+	row.disabled = true
+	row.description = "Asking upstream..."
+	var cmd := Command.create(EMU_TOOL, ["check", id, "--refresh"])
 	cmd.timeout = CHECK_TIMEOUT
 	var code := -1
 	if cmd.execute() == OK:
@@ -147,11 +146,18 @@ func _check(id: String) -> void:
 	var answer = parsed.get("emulators", {}).get(id) if parsed is Dictionary else null
 	if not answer is Dictionary:
 		logger.warn("retroforge-emu check %s exited %d: %s" % [id, code, cmd.stderr])
-		return
-	if answer.get("error") != null:
+		_notify("Could not check %s for a newer version" % name_text)
+	elif answer.get("error") != null:
 		logger.info("%s: no newest build known: %s" % [id, answer["error"]])
-	_checks[id] = answer
-	if id == emulator_id and not _busy.has(id):
+		var error := str(answer["error"])
+		_notify(_failure_text(6, error, name_text) if "requests an hour" in error
+			else "Could not reach upstream to check %s: check the network connection." % name_text)
+	else:
+		_checks[id] = answer
+		var installed = catalog.get(id, {}).get("installed")
+		_notify("%s is up to date" % name_text if answer.get("latest") == installed
+			else "%s %s is available" % [name_text, Credits.version_text(str(answer.get("latest")))])
+	if id == emulator_id:
 		refresh()
 
 
@@ -270,6 +276,8 @@ func _add_action_row(id: String, name_text: String, emu: Dictionary, spec: Dicti
 		row.button_up.connect(_open.bind(id, name_text))
 	elif args[0] == "rollback":
 		row.button_up.connect(_rollback.bind(id, name_text, row))
+	elif args[0] == "check":
+		row.button_up.connect(_check.bind(id, name_text, row))
 	else:
 		row.button_up.connect(_install.bind(id, name_text, args, emu, row))
 	_rows.add_child(row)
