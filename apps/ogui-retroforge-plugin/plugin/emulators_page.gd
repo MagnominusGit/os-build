@@ -31,6 +31,7 @@ const EXIT_TEXT := {
 	3: "Download failed: check the network connection.",
 	4: "The download could not be verified; nothing was changed.",
 	5: "Not enough free space, or the emulators folder is not writable.",
+	6: "GitHub limits downloads from this network to 60 requests an hour. Try again in %s.",
 }
 
 var launch_manager := load("res://core/global/launch_manager.tres") as LaunchManager
@@ -308,7 +309,7 @@ func _install(id: String, name_text: String, args: Array, emu: Dictionary, row: 
 		_notify(name_text + " installed")
 	else:
 		logger.warn("retroforge-emu %s exited %d: %s" % [" ".join(args), code, cmd.stderr])
-		_notify(EXIT_TEXT.get(code, "Installing %s failed." % name_text))
+		_notify(_failure_text(code, cmd.stderr, name_text))
 	_reload()
 
 
@@ -329,6 +330,17 @@ func _rollback(id: String, name_text: String, row: Control) -> void:
 		logger.warn("retroforge-emu rollback %s exited %d: %s" % [id, code, cmd.stderr])
 		_notify(name_text + " could not be reverted")
 	_reload()
+
+
+## What a failed install says. A rate limit (exit 6) names the wait retroforge-emu read from
+## GitHub ("try again in N min" on its stderr).
+func _failure_text(code: int, stderr: String, name_text: String) -> String:
+	var text: String = EXIT_TEXT.get(code, "Installing %s failed." % name_text)
+	if code != 6:
+		return text
+	var found := RegEx.create_from_string("try again in ([0-9]+) min").search(stderr)
+	var minutes := int(found.get_string(1)) if found else 60
+	return text % ("1 minute" if minutes == 1 else "%d minutes" % minutes)
 
 
 ## The build `retroforge-emu list` reports as installed for `id`, or null.

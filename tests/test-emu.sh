@@ -65,8 +65,9 @@ EOF
 }
 
 # The curl stub: logs its argv; an API URL gets its JSON and, with -w, "\n<HTTP status>" after it
-# (404 when the file is missing, 403 for everything while $W/srv/ratelimit exists), as retroforge-emu
-# reads the status from -w; a download URL gets the asset of the tag in its path (or $W/srv/override
+# and GitHub's x-ratelimit-remaining / -reset (404 when the file is missing; while $W/srv/ratelimit
+# exists 403 with none remaining, reset in 10 min; while $W/srv/forbidden exists 403 with some left),
+# as retroforge-emu reads them from -w; a download URL gets the asset of the tag in its path (or $W/srv/override
 # when it exists, to serve wrong bytes). Exit 22 on anything else.
 #   releases/tags/<tag>       -> $W/srv/api-<tag>.json
 #   releases/latest           -> $W/srv/rel-latest.json
@@ -84,11 +85,12 @@ while [ \$# -gt 0 ]; do
   esac
 done
 api() {  # api <file>: serve it with its status, as curl without --fail does
-  local code=200
-  if [ -f "$W/srv/ratelimit" ]; then code=403; set -- /dev/null
+  local code=200 left=59 reset=\$((\$(date +%s) + 600))
+  if [ -f "$W/srv/ratelimit" ]; then code=403 left=0; set -- /dev/null
+  elif [ -f "$W/srv/forbidden" ]; then code=403; set -- /dev/null
   elif [ ! -f "\$1" ]; then code=404; set -- /dev/null; fi
   cat "\$1"
-  [ -n "\$wout" ] && printf '\n%s' "\$code"
+  [ -n "\$wout" ] && printf '\n%s %s %s' "\$code" "\$left" "\$reset"
   [ -n "\$wout" ] || [ "\$code" = 200 ] || exit 22
 }
 case \$url in
@@ -120,7 +122,7 @@ run() {  # run <args...>: sets OUT, ERR, RC
   RC=$?
   ERR="$(cat "$W/err")"
 }
-reset() { rm -rf "$D" "$W/home" "$W/curl.log" "$W/srv/rel-latest.json" "$W/srv/rel-list.json" "$W/srv/ratelimit" "$W/srv/override" "$W/srv/fail-download" "$W/srv/fail-data"; mkdir -p "$D" "$W/home"; }
+reset() { rm -rf "$D" "$W/home" "$W/curl.log" "$W/srv/rel-latest.json" "$W/srv/rel-list.json" "$W/srv/ratelimit" "$W/srv/forbidden" "$W/srv/override" "$W/srv/fail-download" "$W/srv/fail-data"; mkdir -p "$D" "$W/home"; }
 pct_only() {  # every stdout line is N% and they never go down, ending at 100
   awk 'BEGIN{last=-1} !/^[0-9]+%$/ {exit 1} {v=$0+0; if (v < last) exit 1; last=v} END{exit last != 100}' <<<"$OUT"
 }
@@ -548,7 +550,10 @@ reset; latest_catalog; releases - "v3:03-01:nodigest" "v2:02-01"; run install du
 reset; latest_catalog; releases - "v3:03-01"; cp "$W/srv/v1.AppImage" "$W/srv/override"; run install dummy
 [ "$RC" = 4 ] && [ -z "$(find "$D" -type f)" ] && ok "bytes that do not hash to GitHub's digest: exit 4, nothing left" || bad "rc=$RC left: $(find "$D" -type f)"
 reset; latest_catalog; releases - "v3:03-01"; touch "$W/srv/ratelimit"; run install dummy
-[ "$RC" = 3 ] && grep -q "rate limited" <<<"$ERR" && ok "GitHub's rate limit (403): exit 3, says so" || bad "rc=$RC $ERR"
+[ "$RC" = 6 ] && grep -Eq "try again in (9|10) min" <<<"$ERR" \
+  && ok "GitHub's rate limit used up (403, none remaining): exit 6, not a network fault, says when" || bad "rc=$RC $ERR"
+reset; latest_catalog; releases - "v3:03-01"; touch "$W/srv/forbidden"; run install dummy
+[ "$RC" = 3 ] && ok "a 403 with requests remaining is not the rate limit: exit 3" || bad "rc=$RC $ERR"
 reset; latest_catalog; set_field dummy tag_pattern '"(["'; run install dummy
 [ "$RC" = 4 ] && [ ! -e "$W/curl.log" ] && ok "a bad tag_pattern is refused before any network" || bad "rc=$RC"
 
@@ -612,7 +617,7 @@ reset; latest_catalog; run check
 releases - "v3:03-01"; : > "$W/curl.log"; run check
 [ "$(calls)" -gt 0 ] && [ "$(cfield latest)" = '"v3"' ] && ok "a failure is not cached: the next check asks again" || bad "latest=$(cfield latest) calls=$(calls)"
 reset; latest_catalog; releases - "v3:03-01"; touch "$W/srv/ratelimit"; run check
-[ "$(cfield latest)" = null ] && grep -q "rate limited" <<<"$(cfield error)" && ok "rate limited: reported as the error, never as a version" || bad "out=$OUT"
+[ "$(cfield latest)" = null ] && grep -q "try again in" <<<"$(cfield error)" && ok "rate limited: reported as the error, never as a version" || bad "out=$OUT"
 reset; catalog v2; run check
 [ "$(cfield latest)" = '"v2"' ] && [ ! -e "$W/curl.log" ] && ok "a pinned-only entry: its pin, no network" || bad "out=$OUT"
 run check nosuch; [ "$RC" = 2 ] && ok "an emulator not in the catalog: exit 2" || bad "rc=$RC"

@@ -10,7 +10,8 @@
 # THE CALLER IS THE RETROFORGE OGUI PLUGIN, which parses stdout: progress lines and JSON only;
 # everything else goes to stderr. Exit status: 0 ok, 2 bad invocation or unknown emulator,
 # 3 network (GitHub API or download failed), 4 verification (the release or the bytes are not the
-# ones expected; nothing changes on disk), 5 local (no space, file system).
+# ones expected; nothing changes on disk), 5 local (no space, file system), 6 GitHub's rate limit
+# (60 API requests an hour per IP, unauthenticated: stderr says "try again in N min"; not a network fault).
 #
 # Emulators are upstream AppImages, never mirrored.
 # LATEST BY DEFAULT (catalog "tag_pattern", plan emulator-latest D1-D4): an entry with a tag pattern
@@ -99,7 +100,7 @@ import time
 import zlib
 import zipfile
 
-EXIT_OK, EXIT_USAGE, EXIT_NET, EXIT_VERIFY, EXIT_LOCAL = 0, 2, 3, 4, 5
+EXIT_OK, EXIT_USAGE, EXIT_NET, EXIT_VERIFY, EXIT_LOCAL, EXIT_RATE = 0, 2, 3, 4, 5, 6
 
 CURL = os.environ.get("RETROFORGE_CURL", "curl")
 EMU_DIR = os.environ.get("RETROFORGE_EMU_DIR", "/home/player/emulators")
@@ -199,22 +200,27 @@ def github(path, missing_ok=False):
     """GET api.github.com<path> as JSON; None for a 404 when `missing_ok` (a repo without a
     non-prerelease release has no /releases/latest)."""
     url = f"{GITHUB_API}{path}"
-    # No --fail: the status is read from -w (curl expands its \n), so a 404 is told apart from a
-    # rate limit (403/429).
+    # No --fail: the status is read from -w (curl expands its \n), with the rate limit's headers,
+    # so a 404 is told apart from a used-up rate limit (403/429 with none remaining).
     cmd = [a for a in curl_base() if a != "--fail"] + [
-        "--max-time", "60", "-H", "Accept: application/vnd.github+json", "-w", r"\n%{http_code}", url]
+        "--max-time", "60", "-H", "Accept: application/vnd.github+json",
+        "-w", r"\n%{http_code} %header{x-ratelimit-remaining} %header{x-ratelimit-reset}", url]
     if TOKEN:  # CI only (emu-key-drift.yml, shared runner IPs); never set on a device
         cmd[-1:-1] = ["-H", f"Authorization: Bearer {TOKEN}"]
     try:
         out = subprocess.run(cmd, capture_output=True, check=True, timeout=90).stdout
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as err:
         raise Fail(EXIT_NET, f"GitHub {path} not readable: {err}")
-    body, _, code = out.rpartition(b"\n")
-    if code == b"404" and missing_ok:
+    body, _, status = out.rpartition(b"\n")
+    code, remaining, reset = (status.decode(errors="replace").split() + ["", ""])[:3]
+    if code == "404" and missing_ok:
         return None
-    if code != b"200":
-        raise Fail(EXIT_NET, f"GitHub {path} answered HTTP {code.decode(errors='replace')}"
-                             + (" (rate limited: try again in an hour)" if code in (b"403", b"429") else ""))
+    if code == "429" or (code == "403" and remaining == "0"):
+        wait = (max(1, -(-(int(reset) - int(time.time())) // 60)) if reset.isdigit() else 60)
+        raise Fail(EXIT_RATE, f"GitHub's limit of 60 requests an hour from this network is used up: "
+                              f"try again in {wait} min")
+    if code != "200":
+        raise Fail(EXIT_NET, f"GitHub {path} answered HTTP {code}")
     try:
         return json.loads(body)
     except ValueError as err:
