@@ -214,6 +214,10 @@ jobs:
         env:
           RAUC_CERT_PEM: ${{ secrets.RAUC_CERT_PEM }}
           RAUC_KEY_PEM: ${{ secrets.RAUC_KEY_PEM }}
+          # RetroForge's ScreenScraper developer login (rootfs/lib-assemble-scraper.sh). Repository
+          # secrets; without them the image builds but cannot scrape ROM art.
+          RETROFORGE_SS_DEVID: ${{ secrets.RETROFORGE_SS_DEVID }}
+          RETROFORGE_SS_DEVPASSWORD: ${{ secrets.RETROFORGE_SS_DEVPASSWORD }}
         run: |
           set -euo pipefail
           # `rootfs` STOPS BEFORE SIGNING, and that is its entire reason to exist: it is the half of

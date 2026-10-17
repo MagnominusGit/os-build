@@ -45,7 +45,7 @@ fi
 # Env flags must precede the image name, so spell this docker run out rather than reuse DK.
 ctr run --rm -v "$ROOT":/src -w /src \
   -e RETROFORGE_DEV -e RETROFORGE_WIFI -e RETROFORGE_WIFI_SSID -e RETROFORGE_WIFI_PSK -e RETROFORGE_SSH_PUBKEY \
-  -e RETROFORGE_DEBUG \
+  -e RETROFORGE_SS_DEVID -e RETROFORGE_SS_DEVPASSWORD -e RETROFORGE_DEBUG \
   retroforge-build rootfs/assemble-rootfs.sh "$BASE_CTR"
 
 cat <<EOF

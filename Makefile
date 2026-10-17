@@ -131,6 +131,13 @@ GENBUNDLE = $(DOCKER) $(PKI_MOUNT) -e RAUC_CERT="$(RAUC_CERT)" -e RAUC_KEY="$(RA
 # Dev-only credential env, forwarded into the rootfs assembler (no-op unless RETROFORGE_DEV=1).
 DEV_ENV := -e RETROFORGE_DEV -e RETROFORGE_WIFI -e RETROFORGE_WIFI_SSID -e RETROFORGE_WIFI_PSK -e RETROFORGE_SSH_PUBKEY
 
+# RetroForge's ScreenScraper developer login, for EVERY build (rootfs/lib-assemble-scraper.sh): from
+# dev.env.local on a host, repository secrets in CI. Without it the image cannot scrape ROM art.
+# SCRAPER_STAMP re-assembles the root when it appears or goes (presence only, like DEV_WIFI: a
+# secret's value never names a file).
+SCRAPER_ENV   := -e RETROFORGE_SS_DEVID -e RETROFORGE_SS_DEVPASSWORD
+SCRAPER_STAMP := work/.rootfs-scraper-$(if $(RETROFORGE_SS_DEVID),$(if $(RETROFORGE_SS_DEVPASSWORD),on,off),off)
+
 # Per-build identity, stamped into /etc/retroforge-release by rootfs/assemble-rootfs.sh so a flashed
 # device can name the release it came from. RETROFORGE_VERSION is set by CI from the release tag and
 # is empty for a local build, which assemble-rootfs.sh renders as `dev`. The git sha is resolved on
@@ -765,6 +772,11 @@ $(MODE_STAMP):
 	@mkdir -p $(@D) && rm -f work/.rootfs-mode-* && touch $@
 	@echo "[retroforge] rootfs mode: $(ROOTFS_MODE)"
 
+# Same shape for the scraper login (see SCRAPER_STAMP).
+$(SCRAPER_STAMP):
+	@mkdir -p $(@D) && rm -f work/.rootfs-scraper-* && touch $@
+	@echo "[retroforge] ScreenScraper login: $(if $(findstring -on,$@),in the image,NONE (no ROM art scraping))"
+
 # Same shape, same reason, for RETROFORGE_VERSION (see its definition): one marker at a time, and
 # changing the version re-creates it newer than the rootfs, which re-assembles.
 $(VERSION_STAMP):
@@ -776,8 +788,8 @@ $(VERSION_STAMP):
 # /usr/lib/retroforge/boot mirror the RAUC hook refreshes the ESP and the slot's efi partition FROM.
 # That is what makes "this root and the software that boots it came from one build" true by
 # construction. No cycle: the initramfs is built from work/base, never from the assembled root.
-$(ROOTFS): $(KERNEL) $(INITRAMFS) $(STEAMCL) $(GRUB) $(BASE_STAMP) $(FW_LINUX) $(FW_QCOM) $(PLUGIN_ZIP) $(SIGDEFER_LIB) $(GPTK_LIB) $(HIDEMENU_LIB) $(ASSEMBLE_SRC) $(MODE_STAMP) $(VERSION_STAMP) | $(BUILD_STAMP)
-	$(DOCKER) $(DEV_ENV) $(ID_ENV) -e RETROFORGE_DEBUG $(BUILD_IMG) \
+$(ROOTFS): $(KERNEL) $(INITRAMFS) $(STEAMCL) $(GRUB) $(BASE_STAMP) $(FW_LINUX) $(FW_QCOM) $(PLUGIN_ZIP) $(SIGDEFER_LIB) $(GPTK_LIB) $(HIDEMENU_LIB) $(ASSEMBLE_SRC) $(MODE_STAMP) $(VERSION_STAMP) $(SCRAPER_STAMP) | $(BUILD_STAMP)
+	$(DOCKER) $(DEV_ENV) $(SCRAPER_ENV) $(ID_ENV) -e RETROFORGE_DEBUG $(BUILD_IMG) \
 	  $(ROOTFS_DIR)/assemble-rootfs.sh /src/work/base
 
 # ==============================================================================

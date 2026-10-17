@@ -521,6 +521,7 @@ declare -A STAGE_EXPECTED=(
   [dev-ota-channel]="DEV-ONLY OTA channel pin"
   [boot-splash]="the splash drawer + its asset, in the sealed root"
   [ogui-plugin]="the RetroForge OGUI plugin zip, copied to the player's home by the session (not on the installer medium: it runs no OGUI)"
+  [scraper-login]="RetroForge's ScreenScraper developer login, when the build had it (not on the installer medium: it scrapes nothing)"
   [sigdefer-shim]="the LD_PRELOAD shim Snes9x's definition names (not on the installer medium: it runs no emulator)"
   [gptk-interpose]="the LD_PRELOAD library PortMaster's gptokeyb2 gets from mod_RetroForge.txt (not on the installer medium: it runs no port)"
   [hidemenu-shim]="the LD_PRELOAD shim melonDS's definition names (not on the installer medium: it runs no emulator)"

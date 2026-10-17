@@ -240,6 +240,9 @@ fi
 # ogui-plugin runs on EVERY build.
 . "$ROOT/rootfs/lib-assemble-plugin.sh"
 
+# scraper-login runs on EVERY build (and writes nothing without the login in the environment).
+. "$ROOT/rootfs/lib-assemble-scraper.sh"
+
 # sigdefer-shim runs on EVERY build.
 . "$ROOT/rootfs/lib-assemble-sigdefer.sh"
 
