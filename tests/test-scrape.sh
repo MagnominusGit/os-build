@@ -13,7 +13,7 @@
 #   - every transfer is https only, redirects included, and only to *.screenscraper.fr;
 #   - a ROM is identified the way ScreenScraper matches best (CRC + MD5 up to 128 MiB, the single
 #     file inside a zip, the first disc of an .m3u, name + size otherwise);
-#   - art is picked by ES-next's fallback chains, then by region, at a server-side 640 px width;
+#   - art is picked by ES-next's fallback chains, then by region, at a server-side width (box 320);
 #   - quota and refusals stop the run with their own exit code, before more requests are wasted;
 #   - a second run asks again only for what is missing; nothing half-written is left behind;
 #   - stdout is a contract: `N%` lines then one JSON summary line, or the plugin misreads it.
@@ -50,6 +50,8 @@ SRV="$W/srv"
 #                        $SRV/badmedia-<media> serves text/html "NOMEDIA" instead, $SRV/redirect-<media>
 #                        reports a redirect that ended on https://evil.example/ (curl's url_effective)
 #   $SRV/slow           -> every jeuInfos answer takes 5 s (to cancel a run mid-request)
+#   $SRV/timeout-once   -> the next request fails as curl's timeout (exit 28), $SRV/timeout always;
+#                        $SRV/timeout-media-once / timeout-media: the same for image downloads only
 #   $SRV/games/<key>.json may hold any JSON, e.g. a list (an answer of the wrong shape)
 # A wrong developer login gets 403 with the developer text. Every URL goes to $W/url.log, every
 # argv to $W/argv.log, every jeuInfos query (as JSON) to $W/queries.log.
@@ -85,6 +87,17 @@ if u.scheme != "https":
     sys.exit(1)
 if u.hostname not in ("api.screenscraper.fr", "neoclone.screenscraper.fr"):
     sys.exit(6)
+if os.path.exists(f"{SRV}/timeout-once"):
+    os.remove(f"{SRV}/timeout-once")
+    sys.exit(28)
+if os.path.exists(f"{SRV}/timeout"):
+    sys.exit(28)
+if u.path == "/api2/mediaJeu.php":
+    if os.path.exists(f"{SRV}/timeout-media-once"):
+        os.remove(f"{SRV}/timeout-media-once")
+        sys.exit(28)
+    if os.path.exists(f"{SRV}/timeout-media"):
+        sys.exit(28)
 q = dict(urllib.parse.parse_qsl(u.query))
 code, ctype, body, retry, final = 200, "application/json; charset=utf-8", b"", "", url
 def text(c, t):
@@ -187,7 +200,7 @@ run() {  # run <args...> [< stdin]: sets OUT, ERR, RC
   ERR="$(cat "$W/err")"
 }
 reset() {
-  rm -rf "$ROMS" "$MEDIA" "$W/home" "$SRV/games" "$W"/*.log "$SRV"/status* "$SRV"/badmedia-* "$SRV"/mislabel-* "$SRV"/redirect-* "$SRV"/slow
+  rm -rf "$ROMS" "$MEDIA" "$W/home" "$SRV/games" "$W"/*.log "$SRV"/status* "$SRV"/badmedia-* "$SRV"/mislabel-* "$SRV"/redirect-* "$SRV"/slow "$SRV"/timeout*
   mkdir -p "$ROMS" "$W/home" "$SRV/games"
 }
 rom() {  # rom <system>/<file> <content>
@@ -306,10 +319,10 @@ rom md/"Usa (USA).md" "usa";       mkgame "crc-$(crc "$ROMS/md/Usa (USA).md")" 2
 rom md/"Kr.md" "kr";               mkgame "crc-$(crc "$ROMS/md/Kr.md")" 23 box-2D:kr
 run run
 img() { tail -n1 "$MEDIA/md/$1" 2>/dev/null; }  # the text after the magic bytes
-check "filename region wins: (Europe) -> box-2D(eu)" '[ "$(img "Euro (Europe).md-box.png")" = "IMG box-2D(eu) 640" ]'
-check "(Japan) -> box-2D(jp)" '[ "$(img "Jap (Japan).md-box.png")" = "IMG box-2D(jp) 640" ]'
-check "kind before region: a box-2D of another region beats a box-3D of ours" '[ "$(img "Usa (USA).md-box.png")" = "IMG box-2D(jp) 640" ]'
-check "any region beats nothing: box-2D(kr)" '[ "$(img "Kr.md-box.png")" = "IMG box-2D(kr) 640" ]'
+check "filename region wins: (Europe) -> box-2D(eu)" '[ "$(img "Euro (Europe).md-box.png")" = "IMG box-2D(eu) 320" ]'
+check "(Japan) -> box-2D(jp)" '[ "$(img "Jap (Japan).md-box.png")" = "IMG box-2D(jp) 320" ]'
+check "kind before region: a box-2D of another region beats a box-3D of ours" '[ "$(img "Usa (USA).md-box.png")" = "IMG box-2D(jp) 320" ]'
+check "any region beats nothing: box-2D(kr)" '[ "$(img "Kr.md-box.png")" = "IMG box-2D(kr) 320" ]'
 check "screen: ss" '[ "$(img "Euro (Europe).md-screen.png")" = "IMG ss(wor) 640" ]'
 check "screen falls back to sstitle" '[ "$(img "Jap (Japan).md-screen.png")" = "IMG sstitle(wor) 640" ]'
 check "fanart (no region) at 1280, as .jpg" '[ "$(img "Euro (Europe).md-fanart.jpg")" = "IMG fanart 1280" ]'
@@ -322,13 +335,13 @@ check "no .part left" '! find "$MEDIA" -name "*.part" | grep -q .'
 reset
 rom md/b3d.md "b3d"; mkgame "crc-$(crc "$ROMS/md/b3d.md")" 24 box-3D:us
 run run
-check "no box-2D at all -> box-3D" '[ "$(tail -n1 "$MEDIA/md/b3d.md-box.png")" = "IMG box-3D(us) 640" ]'
+check "no box-2D at all -> box-3D" '[ "$(tail -n1 "$MEDIA/md/b3d.md-box.png")" = "IMG box-3D(us) 320" ]'
 
 reset
 rom md/"P (Europe).md" "pref"; mkgame "crc-$(crc "$ROMS/md/P (Europe).md")" 25 box-2D:eu box-2D:jp
 run region jp; check "region jp saved" '[ "$RC" = 0 ]'
 run run
-check "the player's region beats the filename's" '[ "$(tail -n1 "$MEDIA/md/P (Europe).md-box.png")" = "IMG box-2D(jp) 640" ]'
+check "the player's region beats the filename's" '[ "$(tail -n1 "$MEDIA/md/P (Europe).md-box.png")" = "IMG box-2D(jp) 320" ]'
 
 # =================================================================================================
 CASE="media refused"
@@ -370,7 +383,7 @@ rm -f "$W/queries.log"; run run
 check "a not-found older than 7 days is asked again" '[ "$(nqueries)" = 1 ] && [ "$(query 1 romnom)" = n.md ]'
 printf 'changed' > "$ROMS/md/f.md"; mkgame "crc-$(crc "$ROMS/md/f.md")" 41 box-2D:eu
 rm -f "$W/queries.log"; run run
-check "a changed file (size/mtime) is asked again" '[ "$(nqueries)" = 1 ] && [ "$(tail -n1 "$MEDIA/md/f.md-box.png")" = "IMG box-2D(eu) 640" ]'
+check "a changed file (size/mtime) is asked again" '[ "$(nqueries)" = 1 ] && [ "$(tail -n1 "$MEDIA/md/f.md-box.png")" = "IMG box-2D(eu) 320" ]'
 rm -f "$MEDIA/md/f.md-box.png" "$W/queries.log"; run run
 check "found but its art deleted: asked again" '[ "$(nqueries)" = 1 ]'
 rm -f "$W/queries.log"; run run --all
@@ -402,6 +415,28 @@ printf '429' > "$SRV/status-once"
 run run
 check "429 once: waits and retries, then scrapes" '[ "$RC" = 0 ] && [ "$(nqueries)" = 2 ] && [ -f "$MEDIA/md/a.md-box.png" ]'
 check "429: the wait is the Retry-After ScreenScraper sent (2 s)" 'grep -q "waiting 2 s" <<<"$ERR"'
+
+reset; rom md/a.md "a"; mkgame "crc-$(crc "$ROMS/md/a.md")" 55 box-2D:us
+touch "$SRV/timeout-once"
+run run
+check "a lookup that times out once (Wi-Fi) is retried, then scrapes" '[ "$RC" = 0 ] && [ "$(summary scraped)" = 1 ] && [ -f "$MEDIA/md/a.md-box.png" ]'
+reset; rom md/a.md "a"; rom md/b.md "b"; touch "$SRV/timeout"
+run run
+check "no network at all: exit 3 after the first ROM's retry, summary printed" '[ "$RC" = 3 ] && [ "$(grep -c jeuInfos "$W/url.log")" = 2 ] && contract'
+
+reset; rom md/a.md "a"; mkgame "crc-$(crc "$ROMS/md/a.md")" 56 box-2D:us ss:wor
+touch "$SRV/timeout-media-once"
+run run
+check "an image download that times out once is retried" '[ "$RC" = 0 ] && [ -f "$MEDIA/md/a.md-box.png" ] && [ -f "$MEDIA/md/a.md-screen.png" ]'
+reset; rom md/a.md "a"; mkgame "crc-$(crc "$ROMS/md/a.md")" 57 box-2D:us ss:wor wheel:us
+touch "$SRV/timeout-media"
+run run
+check "images that keep failing: the ROM still counts as found, the run goes on" '[ "$RC" = 0 ] && [ "$(summary scraped)" = 1 ]'
+rm -f "$SRV/timeout-media" "$W/queries.log"; run run
+check "...and the next run asks for it again and gets the images" '[ "$(nqueries)" = 1 ] && [ -f "$MEDIA/md/a.md-box.png" ] && [ -f "$MEDIA/md/a.md-wheel.png" ]'
+rm -f "$W/queries.log"; run run
+check "...after which it is complete: not asked again" '[ "$(nqueries)" = 0 ]'
+check "curl gives up connecting after 8 s, not 20" 'grep -q -- "--connect-timeout 8 " "$W/argv.log" && ! grep -q -- "--connect-timeout 20" "$W/argv.log"'
 
 reset; rom md/a.md "a"; rom md/b.md "b"
 REQ_TODAY=10000 REQ_MAX=10000 mkgame "crc-$(crc "$ROMS/md/a.md")" 51 box-2D:us

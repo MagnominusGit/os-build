@@ -47,8 +47,9 @@
 #
 # QUOTA. Every jeuInfos answer carries the account's counters; the run stops (exit 6) once
 # requeststoday reaches maxrequestsperday rather than collect refusals -- counters this run read
-# only, never yesterday's. 429: waits Retry-After (at most RETRY_AFTER_MAX s) once; curl itself
-# never retries (a retried request costs quota too). Without a player login ScreenScraper allows 1 thread and
+# only, never yesterday's. 429: waits Retry-After (at most RETRY_AFTER_MAX s) once; a connection
+# that fails or drops (TRANSIENT) is tried once more; curl itself never retries (a request it
+# re-sent after an answer would cost quota too). Without a player login ScreenScraper allows 1 thread and
 # 10,000 requests (1,000 not found) a day (seen 2026-10-17); requests go one at a time.
 #
 # TEST SEAMS (tests/test-scrape.sh runs this file): RETROFORGE_CURL, RETROFORGE_ROMS_DIR,
@@ -83,11 +84,22 @@ SOFTNAME = "RetroForge"
 HASH_MAX = 128 << 20  # bytes: larger files are asked by name + size (ES-next's limit)
 RETRY_NOT_FOUND = 7 * 86400  # s before a ROM the database did not know is asked again
 RETRY_AFTER_MAX = 60  # s waited on a 429
+# curl exits for a connection that failed or dropped (resolve, connect, timeout, TLS, empty reply,
+# send, receive): handheld Wi-Fi does this (1 connect in 5 never answered on the ACE, 2026-10-17,
+# while the wired host saw none). An API request or an image download is retried once after
+# RETRY_NET s; curl's own --retry is not used, it would also re-send requests ScreenScraper
+# answered and counted. An image that still fails marks the ROM's art incomplete: the next run
+# without --all asks for that ROM again.
+TRANSIENT = {6, 7, 28, 35, 52, 55, 56}
+RETRY_NET = 3
+CONNECT_TIMEOUT = 8  # s; a connect to ScreenScraper takes ~25 ms, a dropped one never ends
 REGIONS = ("auto", "wor", "us", "eu", "jp")
 FALLBACK_REGIONS = ("wor", "us", "eu", "jp", "ss")
-# kind -> (ScreenScraper media types, best first; width asked for)
+# kind -> (ScreenScraper media types, best first; width asked for). Boxes only ever fill a 200x300
+# card (the plugin composes a 300x450 card image from them): 320 px halves the decode of 640 px
+# (ACE, 2026-10-17: 4.4 vs 8.9 ms a card).
 KINDS = {
-    "box": (("box-2D", "box-3D"), 640),
+    "box": (("box-2D", "box-3D"), 320),
     "screen": (("ss", "sstitle"), 640),
     "fanart": (("fanart",), 1280),
     "wheel": (("wheel", "wheel-hd", "wheel-steel", "wheel-carbon", "screenmarqueesmall",
@@ -110,6 +122,12 @@ class Fail(Exception):
     def __init__(self, code, msg):
         super().__init__(msg)
         self.code = code
+
+
+class NetFail(Fail):
+    def __init__(self, curl_exit):
+        super().__init__(EXIT_NET, f"ScreenScraper unreachable (curl exit {curl_exit})")
+        self.curl_exit = curl_exit
 
 
 class Skip(Exception):
@@ -199,7 +217,7 @@ def curl(url, out=None):
     if any(c in url for c in '"\\\n\r'):
         raise Fail(EXIT_NET, "refusing a URL with quotes or line breaks")
     cmd = [CURL, "--silent", "--location", "--proto", "=https", "--proto-redir", "=https",
-           "--connect-timeout", "20", "--max-time", "120", "-K", "-", "-w", W_FORMAT]
+           "--connect-timeout", str(CONNECT_TIMEOUT), "--max-time", "120", "-K", "-", "-w", W_FORMAT]
     if out:
         cmd += ["-o", out]
     try:
@@ -209,7 +227,7 @@ def curl(url, out=None):
     if p.returncode == 23:
         raise Fail(EXIT_LOCAL, "cannot write a download (no space?)")
     if p.returncode != 0:
-        raise Fail(EXIT_NET, f"ScreenScraper unreachable (curl exit {p.returncode})")
+        raise NetFail(p.returncode)
     body, _, trailer = p.stdout.rpartition(W_MARK.encode())
     code, retry, final, ctype = (trailer.decode(errors="replace").split("\t", 3) + [""] * 4)[:4]
     return (None if out else body), code, retry.strip(), final, ctype.split(";")[0].strip().lower()
@@ -222,7 +240,14 @@ def api(endpoint, params, dev):
     except UnicodeEncodeError:
         raise Skip("a name the API cannot take (not UTF-8)")
     for attempt in (1, 2):
-        body, code, retry, _, _ = curl(url)
+        try:
+            body, code, retry, _, _ = curl(url)
+        except NetFail as f:
+            if attempt == 2 or f.curl_exit not in TRANSIENT:
+                raise
+            log(f"ScreenScraper did not answer (curl exit {f.curl_exit}): trying again in {RETRY_NET} s")
+            time.sleep(RETRY_NET)
+            continue
         if code != "429" or attempt == 2:
             break
         wait = min(int(retry), RETRY_AFTER_MAX) if retry.isdigit() else 5
@@ -409,20 +434,25 @@ def media_files(system, key):
 
 
 def fetch(media, width, dest):
-    """Download one image to dest.<png|jpg>; False (and nothing written) when it is not one."""
+    """Download one image to dest.<png|jpg>: True; False (nothing written) when the answer is not
+    an image; None when the download failed (worth asking again on a later run)."""
     url = media["url"] + "&" + urllib.parse.urlencode({"maxwidth": width})
     part = f"{dest}.part"
     name = os.path.basename(dest)
     if len(os.fsencode(os.path.basename(part))) > NAME_MAX:
         raise Skip("its name is too long for an art file name")
     try:
-        try:
-            _, code, _, final, ctype = curl(url, part)
-        except Fail as f:
-            if f.code != EXIT_NET:
-                raise
-            log(f"warning: {name}: download failed ({f})")
-            return False
+        for attempt in (1, 2):
+            try:
+                _, code, _, final, ctype = curl(url, part)
+                break
+            except Fail as f:
+                if f.code != EXIT_NET:
+                    raise
+                if attempt == 2 or getattr(f, "curl_exit", None) not in TRANSIENT:
+                    log(f"warning: {name}: download failed ({f}), asked again next run")
+                    return None
+                time.sleep(RETRY_NET)
         if not media_url_ok(final):
             log(f"warning: {name}: redirected away from https://*.screenscraper.fr, dropped")
             return False
@@ -455,12 +485,13 @@ def save_art(system, key, game, regions):
     if len(safe) < len(medias):
         log(f"warning: {key}: skipped {len(medias) - len(safe)} media outside https://*.screenscraper.fr")
     os.makedirs(os.path.join(MEDIA_DIR, system), exist_ok=True)
-    got = 0
+    got = failed = 0
     for kind, (types, width) in KINDS.items():
         m = pick(safe, types, regions)
-        if m and fetch(m, width, os.path.join(MEDIA_DIR, system, f"{key}-{kind}")):
-            got += 1
-    return got
+        done = fetch(m, width, os.path.join(MEDIA_DIR, system, f"{key}-{kind}")) if m else False
+        got += done is True
+        failed += done is None
+    return got, failed
 
 
 # --- commands -------------------------------------------------------------------------------------
@@ -485,6 +516,8 @@ def up_to_date(entry, path, system, key):
         return False
     recent = isinstance(entry.get("checked"), (int, float)) and time.time() - entry["checked"] < RETRY_NOT_FOUND
     if entry.get("status") == "found":
+        if entry.get("incomplete"):  # an image failed to download: ask again
+            return False
         # art deleted: ask again; ScreenScraper had none for it: like not found, once a week
         return any(os.path.exists(f) for f in media_files(system, key)) or (entry.get("art") == 0 and recent)
     return entry.get("status") == "not_found" and recent
@@ -507,7 +540,9 @@ def scrape_one(system, spec, path, dev, user, region, cache):
              "status": "found" if found else "not_found"}
     if found:
         entry["game"] = str(game.get("id", ""))
-        entry["art"] = save_art(system, key, game, region_order(key, region))
+        entry["art"], failed = save_art(system, key, game, region_order(key, region))
+        if failed:
+            entry["incomplete"] = True
     cache["roms"][f"{system}/{key}"] = entry
     return found
 

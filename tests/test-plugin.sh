@@ -189,6 +189,42 @@ func _init() -> void:
 	test_art_paths()
 	quit(1 if failed else 0)
 
+## OGUI's card is 2:3 and draws its texture whole, top-left: a SNES box (wider than tall) left two
+## thirds of the card empty (ACE, 2026-10-17). A card image is the whole box, centred, over a
+## blurred and darkened copy of it filling the card; cached as a small JPEG until the box changes.
+func test_card_images(media: String) -> void:
+	var wide := Image.create(640, 468, false, Image.FORMAT_RGBA8)
+	wide.fill(Color(1, 0, 0))
+	var card := ArtPaths.card_image(wide)
+	check("card: a wide box becomes a 300x450 card", card.get_size(), Vector2i(300, 450))
+	check("card: the box sits in the middle, whole", card.get_pixel(150, 225).r > 0.9 and card.get_pixel(2, 225).r > 0.9, true)
+	var top := card.get_pixel(150, 5)
+	check("card: above the box is its darkened copy, not empty", top.a > 0.99 and top.r > 0.05 and top.r < 0.8, true)
+	var tall := Image.create(200, 600, false, Image.FORMAT_RGB8)
+	tall.fill(Color(0, 0, 1))
+	var card2 := ArtPaths.card_image(tall)
+	var side := card2.get_pixel(3, 225)
+	check("card: beside a tall box is its darkened copy", [card2.get_size(), side.a > 0.99 and side.b > 0.05 and side.b < 0.8, card2.get_pixel(150, 225).b > 0.9], [Vector2i(300, 450), true, true])
+	var box_path := media + "/snes/Wide.zip-box.png"
+	DirAccess.make_dir_recursive_absolute(box_path.get_base_dir())
+	wide.save_png(box_path)
+	var cache := ArtPaths.card_cache_path("$T/art/cards", "snes", "/r/snes/Wide.zip")
+	check("card cache: under <cards>/<system>/<rom>.jpg", cache, "$T/art/cards/snes/Wide.zip.jpg")
+	check("card cache: nothing cached yet", ArtPaths.cached_card(cache, box_path), null)
+	var made: Image = ArtPaths.make_card(box_path, cache)
+	check("card cache: made and saved", [made.get_size() if made else null, FileAccess.file_exists(cache)], [Vector2i(300, 450), true])
+	var again: Image = ArtPaths.cached_card(cache, box_path)
+	check("card cache: read back (a JPEG, by its bytes)", again.get_size() if again else null, Vector2i(300, 450))
+	var webp := Image.create(5, 4, false, Image.FORMAT_RGBA8)
+	webp.save_webp(media + "/psx/Webp-named.png")
+	var w: Image = ArtPaths.load_image(media + "/psx/Webp-named.png")
+	check("art: a WebP loads too, by its bytes", w.get_size() if w else null, Vector2i(5, 4))
+	OS.delay_msec(1100)  # file times are in seconds
+	wide.save_png(box_path)
+	check("card cache: a newer box makes it stale", ArtPaths.cached_card(cache, box_path), null)
+	check("card cache: no box -> no card", ArtPaths.make_card(media + "/snes/None.zip-box.png", cache + ".x"), null)
+
+
 ## Art retroforge-scrape fetched, per OGUI layout (0 portrait, 1 landscape, 2 banner, 3 logo).
 ## Keyed by the ROM's file (or folder) name, so Game.cue and Game.chd never share art.
 func test_art_paths() -> void:
@@ -221,6 +257,7 @@ func test_art_paths() -> void:
 	check("art: a PNG named .jpg and a JPEG named .png both load", [a.get_size() if a else null, b.get_size() if b else null], [Vector2i(4, 3), Vector2i(4, 3)])
 	check("art: not an image, or no file -> null",
 		[ArtPaths.load_image(media + "/psx/Game.chd-box.png"), ArtPaths.load_image(media + "/nothing.png")], [null, null])
+	test_card_images(media)
 	check("art: no system or ROM, or an unknown layout -> no path",
 		[ArtPaths.path_for(media, "", rom, 0), ArtPaths.path_for(media, "psx", "", 0), ArtPaths.path_for(media, "psx", rom, 9)],
 		["", "", ""])

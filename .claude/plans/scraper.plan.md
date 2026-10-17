@@ -1,7 +1,15 @@
 # ROM artwork scraper — plan
 
 Status: decisions D1-D3 AGREED 2026-10-17; the user already has a ScreenScraper dev account.
-Phase 2 DONE 2026-10-17 offline (plugin 0.1.44; NOT on HW yet). Phase 1 DONE 2026-10-17 on branch feat/scraper: `retroforge-scrape` + systems.json +
+Phase 2 DONE 2026-10-17, HW-OK on the Pocket ACE (plugin 0.1.47; user: "looks right"). HW findings
+fixed: cards are 2:3 card images composed by the plugin (box fitted over its blurred, darkened copy;
+OGUI's card draws a texture whole from the top-left, so a SNES box filled a third of it), cached as
+300x450 JPEGs in ~/.cache/retroforge/cards; boxes asked at 320 px; every decode on a worker thread and
+our tabs do not await card art (301-card tab: 2,690 ms frozen -> 126 ms, = no art; 301 card images
+composed in parallel within 12 s of a session restart; ~50 KB a card). Scraper on HW: Wi-Fi connects
+to ScreenScraper sometimes never answer (1 in 5 once, 0 in 30 later; Wi-Fi power save on, not
+investigated): lookups and images retried once, images that still fail are fetched next run
+("incomplete"), connect timeout 8 s. Phase 1 DONE 2026-10-17 on branch feat/scraper: `retroforge-scrape` + systems.json +
 tests/test-scrape.sh (98 ok, in `make test`; python-reviewer findings fixed: one bad ROM is
 "failed" not fatal, stale quota, redirect host check, no answer bodies on disk, cancel); live run on 4 ROMs (2 CHDs > 128 MiB by name + size,
 a single-file zip, a Mega Drive .bin): 4/4 found, 15 images, 8 s, second run 0 requests.

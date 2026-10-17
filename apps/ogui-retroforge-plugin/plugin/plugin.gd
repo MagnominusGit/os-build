@@ -206,7 +206,7 @@ func _refresh_system(system: String) -> void:
 	for child in grid.get_children():
 		child.queue_free()
 	for item in items:
-		grid.add_child(await _build_card(item))
+		grid.add_child(_build_card(item))
 	logger.info("%s tab: %d game(s), cards built in %d ms" % [_tab_text(system), items.size(), Time.get_ticks_msec() - started])
 
 
@@ -237,10 +237,13 @@ func _make_tab() -> Dictionary:
 	return {"tab": tab, "grid": grid}
 
 
-## As library_menu.gd's _build_card: pressing the card opens OGUI's game launch menu.
+## As library_menu.gd's _build_card: pressing the card opens OGUI's game launch menu. Its art is
+## not awaited: the card goes in the grid at once and its texture lands when ready, so cards whose
+## card image must be composed (boxart_retroforge.gd, on worker threads) build in parallel instead
+## of one after another (300 new cards: 15.9 s one by one on the ACE, 2026-10-17).
 func _build_card(item: LibraryItem) -> Control:
 	var card = card_scene.instantiate()
-	await card.set_library_item(item)
+	card.set_library_item(item)
 	var on_button_up := func():
 		launcher_state.data = {"item": item}
 		menu_state_machine.push_state(launcher_state)
