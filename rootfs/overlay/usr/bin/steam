@@ -5,7 +5,12 @@
 # The image ships no Steam (Holo's aarch64 repo has none, and the client is ~560 MB with its runtime),
 # so this:
 #   1. has /usr/lib/retroforge/steam-bootstrap download Valve's arm64 client and Steam Runtime into
-#      the player's home the first time (a ~160 MB download), and get the runtime's `run`;
+#      the player's home the first time, and get the runtime's `run`. Both come from the CHANNELS
+#      /usr/share/retroforge/steam/steam.pin names, not from pinned versions. The client channel is
+#      a steamdeck_ line because the plugin passes -steamdeck: the client repoints a line that does
+#      not match its flag, at the cost of a ~631 MB download (steam.pin). On every later start the
+#      bootstrap checks the runtime channel (one small GET) and installs a new snapshot before Steam
+#      starts when the channel moved (~52 MB); offline it uses the installed one;
 #   2. points ~/.steam/steam and ~/.steam/root at the client ("Steam data link does not exist,
 #      client is misconfigured" otherwise);
 #   3. drops a D-Bus session address that belongs to another user, because pressure-vessel's bwrap
@@ -24,9 +29,15 @@
 # A TERM/INT/HUP sent to this script is passed on to the client, so it is never left running
 # without its wrapper.
 #
-# First start, measured in a linux/arm64 container on 2026-10-15: the bootstrap took 9 s (runtime 222 MB,
-# client binaries 324 MB unpacked), then the client updated itself from Valve's manifest (667 MB
-# download) to ~3 GB, because the linuxarm64 manifest also carries the x86 client and runtimes.
+# While this script runs, it holds a shared lock (flock) on the folder of the runtime snapshot the
+# client runs in, and the client inherits it. A second `steam` whose bootstrap finds the runtime
+# channel moved installs the new snapshot, but cannot remove this one from under the running client;
+# a later start does.
+#
+# First start, measured in a linux/arm64 container: the bootstrap took 6 s (2026-10-16; runtime
+# 222 MB, client binaries 325 MB unpacked). On 2026-10-15 the client then updated itself from Valve's
+# manifest (667 MB download) to ~3 GB, because the linuxarm64 manifest also carries the x86 client
+# and runtimes.
 #
 # ARMv8.0 (SM6115): Valve builds the client with unguarded LSE atomics, so on a CPU without them it
 # dies of SIGILL unless the kernel emulates them (kernel/patches/0025). See docs/steam-arm64.md.
@@ -45,6 +56,12 @@ if [ $? -ne 0 ] || [ ! -x "$run" ]; then
   log "Valve's arm64 Steam client could not be set up (see above)"
   exit 1
 fi
+# <runtime home>/<snapshot>/<dir>/run -> <runtime home>/<snapshot>. Not fatal if it fails: the lock
+# only keeps a runtime update from removing the snapshot early.
+snapshot="${run%/*/run}"
+exec {held}<"$snapshot" && flock -s "$held" || log "could not lock $snapshot"
+# Gone between the bootstrap and the lock: another `steam` moved to a newer snapshot just then.
+[ -x "$run" ] || { log "the Steam Runtime changed while starting; start steam again"; exit 1; }
 
 mkdir -p "$HOME/.steam"
 for link in steam root; do

@@ -54,22 +54,55 @@ Test install on the Air X: `/home/player/steamtest/` (client, runtime, `lse_shim
 
 ## In the image: `/usr/bin/steam`
 
-The OGUI Steam plugin launches games with `steam -gamepadui ... steam://rungameid/<appid>`. The
-image now has that `steam`, which does the five things above. Neither the client nor the runtime
-ships in the image, because a root slot is 2 GB and the two unpack to ~560 MB. The first `steam`
-downloads them into the player's home (`/usr/lib/retroforge/steam-bootstrap`):
+The OGUI Steam plugin launches games with
+`steam -gamepadui -steamos3 -steampal -steamdeck ... steam://rungameid/<appid>`. The image now has
+that `steam`, which does the five things above. Neither the client nor the runtime ships in the
+image, because a root slot is 2 GB and the two unpack to ~560 MB. `steam` downloads them into the
+player's home (`/usr/lib/retroforge/steam-bootstrap`).
 
-- **Runtime:** pinned in `/usr/share/retroforge/steam/runtime.pin` to Valve's versioned image
-  directory, sha256-checked, unpacked to `~/.local/share/retroforge/steam-runtime/<version>/`.
-- **Client:** only its arm64 binaries (`bins_linuxarm64_linuxarm64`, where `steamrtarm64/` comes
-  from). Its file name and sha256 come from Valve's current `steam_client_linuxarm64` manifest,
-  because a pinned one would stop existing at the next client release. It goes into
-  `~/.local/share/Steam`, and the client updates itself from there.
+No version of either is pinned. `/usr/share/retroforge/steam/steam.pin` names Valve's CHANNELS, and
+the bootstrap installs whatever Valve publishes on them when it downloads. Every download is still
+checked against a sha256 Valve publishes next to it. A fixed version went stale on its own: the
+client's package files are replaced on every release, and Valve prunes old runtime snapshots (the
+oldest left on 2026-10-15 was 3c.0.20260526).
+
+- **Client** (`client_channel: steamdeck_stable`): only its arm64 binaries
+  (`bins_linuxarm64_linuxarm64`, where `steamrtarm64/` comes from), with the file name and sha256
+  from the channel's manifest `steam_client_steamdeck_stable_linuxarm64`. They go into
+  `~/.local/share/Steam`, only when missing; the client updates itself from there. The bootstrap
+  writes the channel to `package/beta` when it installs the client, and when the file is missing,
+  and otherwise leaves it alone. The client owns that file and repoints it to match its launch
+  flag. `-steamdeck` keeps either `steamdeck_` line, but a line it does not accept gets repointed,
+  which costs a ~631 MB client download on the device. That is why the channel is a `steamdeck_`
+  line, and never the gated `-deckard` one (`steam.pin` has the details).
+- **Runtime** (`runtime_base: https://repo.steampowered.com/steamrt3c/images`,
+  `runtime_channel: latest-public-stable`): on every start, one small GET of
+  `<base>/latest-public-stable.txt` (5 s timeout) gives a snapshot id. If that snapshot is not
+  installed, its sha256 comes from `<base>/<id>/SHA256SUMS`, and
+  `<base>/<id>/steam-runtime-steamrt-arm64.tar.xz` (~52 MB) is downloaded, checked and unpacked to
+  `~/.local/share/retroforge/steam-runtime/<id>/` before Steam starts. The older snapshot is
+  removed after that, unless a running Steam still holds it (the wrapper keeps a shared `flock` on
+  its snapshot's folder); then a later start removes it. Offline, or when the update fails, the
+  newest installed snapshot is used and one line says so; with none installed, `steam` exits 1.
+  `RETROFORGE_STEAM_RUNTIME_SNAPSHOT=<id>`, or `runtime_snapshot:` in the pin, pins one snapshot.
+
+Measured on 2026-10-16: `steam_client_steamdeck_stable_linuxarm64` and Valve's default line
+`steam_client_linuxarm64` (which the bootstrap read before) both serve build 1791918634
+(`steamdeck_publicbeta`: 1792192922). `latest-public-stable` and
+`latest-steam-client-general-availability` both point at runtime 3c.0.20260824.257593.
 
 Valve's manifest has no arm64 bootstrapper: its one `IsBootstrapperPackage`, `steam_linuxarm64`,
 holds the i386 `ubuntu12_32/steam`. That is why the bootstrap starts from the binaries package.
 
-Checked in a linux/arm64 container on 2026-10-15:
+The channel bootstrap against Valve's servers, as a non-root user in a linux/arm64 container on
+2026-10-16: on a fresh home it resolved `latest-public-stable` to 3c.0.20260824.257593, checked
+the tarball against that snapshot's SHA256SUMS and the client zip against the `steamdeck_stable`
+manifest, installed both (runtime 222 MB, client 325 MB) and wrote `package/beta` =
+`steamdeck_stable`, in 6 s. The next start, with the channel unchanged, took 160 ms and said
+nothing. It left a repointed `package/beta` alone. With Valve unreachable it started with the
+installed snapshot and logged one line.
+
+Checked in a linux/arm64 container on 2026-10-15, before the channel pins:
 - The bootstrap took 9 s.
 - In the runtime's container, `steam` and `steamclient.so` resolve every library.
 - The client then updated itself headless: a 667 MB download, ~3 GB on disk, because the
@@ -78,7 +111,10 @@ Checked in a linux/arm64 container on 2026-10-15:
 - On the second start it verified every executable checksum and found nothing to update.
 
 Not yet seen: the client signed in, a game launched by OGUI, the 42 restart from a real client,
-anything on hardware.
+anything on hardware. Nor, here, the client's self-update after the channel bootstrap: that
+`-steamdeck` keeps `package/beta` on `steamdeck_stable` was measured upstream, not on this tree. A
+real move of `latest-public-stable` has only been exercised with file:// stand-ins
+(tests/test-steam.sh).
 
 ## steamcmd
 
