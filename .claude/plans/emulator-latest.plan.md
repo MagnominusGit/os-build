@@ -1,7 +1,8 @@
 # Emulators follow upstream's newest release — plan
 
-Status: decisions D1-D6 + Phase 4 AGREED 2026-10-16 (branch plan/emulator-latest). Nothing
-implemented yet; next is Phase 1.
+Status: decisions D1-D7 + Phase 4 AGREED 2026-10-16 (branch plan/emulator-latest). Phase 1
+(retroforge-emu) DONE 2026-10-17, offline tests + a live `check` of rpcs3/duckstation/armsx2/xemu/cemu;
+D4 corrected (prerelease flag is not a filter, newest by published_at). Next is Phase 2.
 
 ## Why, and what it reverses
 
@@ -29,10 +30,15 @@ catalog (D7).
   "Install tested version" whenever it is not the installed one.
 - **D3 One-press rollback.** `activate()` already keeps the previous AppImage; the page offers
   "Revert to <previous>" when one is on disk.
-- **D4 "Newest release" is per-emulator, by tag pattern, never by date alone.** Drafts and
-  prereleases are skipped; a release counts only when its tag matches the entry's `tag_pattern` AND
-  exactly one asset matches `asset`. Rolling tags that replace their asset in place (DuckStation's
-  `latest`) never match.
+- **D4 "Newest release" is per-emulator, by tag pattern, never by date alone.** Drafts are
+  skipped; a release counts only when its tag matches the entry's `tag_pattern` AND exactly one
+  asset matches `asset`. Rolling tags that replace their asset in place (DuckStation's `latest`)
+  never match. CORRECTED 2026-10-17 (live API): the prerelease flag is NOT a filter -- Cemu's
+  `nightly` and every ARMSX2 nightly carry it, so skipping it would leave both with nothing; the
+  pattern alone decides (DuckStation `preview`, xemu `pre-release` are kept out by theirs). And
+  "newest" = by `published_at` over `/releases/latest` + the first page of `/releases`: RPCS3's
+  list is sorted by tag name (every release has the same `created_at`), its newest build is only
+  in `/releases/latest`.
 - **D5 Cemu's nightly channel folds into this.** Same code path, `tag_pattern: ^nightly$`; its
   `nightly-<id>` naming stays.
 - **D6 PortMaster: latest FIRST install, then it updates itself.** The first install takes the
@@ -73,9 +79,12 @@ Catalog (schema stays 1; all additions optional, so an entry without them keeps 
 
 Commands:
 - `retroforge-emu check [<emu>]` → JSON on stdout per emulator: `{"latest": tag|null,
-  "error": str|null}`. One `GET /repos/<o>/<r>/releases?per_page=30` per emulator, newest first,
-  first release that is not draft/prerelease, matches `tag_pattern`, and has exactly one asset
-  matching `asset`. Cached in `~/.cache/retroforge/emu-check.json` for 1 h; `--refresh` bypasses.
+  "error": str|null}` (a pinned-only entry: its pin, no network). `GET .../releases/latest` (a 404
+  is fine) + `GET .../releases?per_page=30` per emulator, sorted by `published_at`, first release
+  that is not a draft, matches `tag_pattern`, and has exactly one asset matching `asset` (D4).
+  Cached in `~/.cache/retroforge/emu-check.json` for 1 h, keyed by github+tag_pattern+asset (an
+  OTA catalog change asks again); `--refresh` bypasses; failures are not cached; exit 0 always
+  (a rate limit is that emulator's `error`).
 - `retroforge-emu install <emu> [--tested]` → latest by default when the entry has `tag_pattern`;
   `--tested` installs the pin with today's digest+size-equal-to-catalog check. A latest install
   requires GitHub's `sha256:` digest and checks the bytes against it (the nightly path's code).
@@ -86,7 +95,7 @@ Commands:
   `follows_latest` (bool). `update` stays offline-only and means "installed != tested and the
   entry is pinned-only"; for latest entries the page asks `check`.
 
-Tests (`tests/test-emu.sh`, fake curl serving a releases list): draft/prerelease skipped; tag
+Tests (`tests/test-emu.sh`, fake curl serving a releases list): draft skipped, prerelease kept; tag
 not matching skipped; release with 0 or 2 matching assets skipped (not an error unless none
 qualifies); missing digest → exit 4; `--tested` path unchanged; rollback toggles; check cache
 honoured and `--refresh` bypasses it; a failed check is reported as `error`, never as "current".

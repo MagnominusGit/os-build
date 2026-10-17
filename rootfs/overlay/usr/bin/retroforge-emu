@@ -1,17 +1,33 @@
 #!/usr/bin/env python3
 # retroforge-emu — installs, updates and removes the emulators ROM cards run (plan Phase 4, part 2).
 #
-#     retroforge-emu list                 -> JSON on stdout: every catalog emulator, pinned vs installed
-#     retroforge-emu install <emulator>   -> `N%` lines on stdout, forward-only, ending at 100%
+#     retroforge-emu list                     -> JSON on stdout: every catalog emulator, tested vs installed
+#     retroforge-emu check [<emulator>] [--refresh]  -> JSON on stdout: upstream's newest build, per emulator
+#     retroforge-emu install <emulator> [--tested]   -> `N%` lines on stdout, forward-only, ending at 100%
+#     retroforge-emu rollback <emulator>      -> back to the AppImage kept from before the last switch
 #     retroforge-emu remove <emulator>
 #
 # THE CALLER IS THE RETROFORGE OGUI PLUGIN, which parses stdout: progress lines and JSON only;
 # everything else goes to stderr. Exit status: 0 ok, 2 bad invocation or unknown emulator,
 # 3 network (GitHub API or download failed), 4 verification (the release or the bytes are not the
-# ones RetroForge tested; nothing changes on disk), 5 local (no space, file system).
+# ones expected; nothing changes on disk), 5 local (no space, file system).
 #
-# Emulators are upstream AppImages, never mirrored. The catalog pins, per emulator, one tested
-# release tag and the sha256 + size of its arm64 asset. An install:
+# Emulators are upstream AppImages, never mirrored.
+# LATEST BY DEFAULT (catalog "tag_pattern", plan emulator-latest D1-D4): an entry with a tag pattern
+# installs upstream's newest release, not the pin. Newest = among GET /releases/latest and the first
+# page of GET /releases, by published_at (RPCS3's list is sorted by tag name, not by date), the first
+# release that is not a draft, whose tag fully matches `tag_pattern`, and that has exactly one asset
+# matching `asset`. The tag pattern alone decides: GitHub's prerelease flag is NOT a filter (Cemu's
+# and ARMSX2's nightlies carry it), and a rolling tag that replaces its asset in place
+# (DuckStation's `latest`) is kept out by the pattern. A newest build REQUIRES GitHub's per-asset
+# sha256 digest (exit 4 without one) and the bytes must hash to it; nobody at RetroForge tested it,
+# and `list` says so (installed != tested). `check` resolves it without installing, cached in
+# ~/.cache/retroforge/emu-check.json for CHECK_TTL (GitHub allows 60 unauthenticated requests an
+# hour per IP); a failed check is reported as its error, never as a version.
+# The pin ("tag" + "sha256" + "size", the arm64 asset's) stays as the TESTED build: `install
+# --tested` installs it. An entry without "tag_pattern" is pinned-only: its install is --tested.
+#
+# A TESTED install:
 #   1. asks the GitHub API for that tag and picks the asset the catalog's pattern matches;
 #   2. refuses (exit 4) unless GitHub's per-asset digest and size equal the catalog's -- an upstream
 #      that re-uploads under the same tag must not reach players untested -- and unless the
@@ -19,17 +35,18 @@
 #   3. downloads with curl locked to https, redirects included, into a hidden .part file;
 #   4. checks the bytes' sha256 and size against the catalog again (exit 4, .part deleted);
 #   5. renames it to <tag>.AppImage and flips `current` atomically (symlink + rename), keeping the
-#      previous AppImage for a rollback and deleting older ones.
+#      previous AppImage for `rollback` and deleting older ones. `rollback` flips `current` to that
+#      previous one, so the build left behind becomes the previous: Revert toggles between the two.
 # A failure at any step leaves the working install as it was.
 #
+# ROLLING TAGS (a newest release whose tag is in ROLLING, e.g. Cemu's `nightly`): the tag names no
+# build, so the build is installed as <tag>-<id>, <id> = the asset pattern's first capture group
+# (the commit in pkgforge-dev's file names), else the digest's first 12 hex digits. Same build as
+# `current`, rolling or not: nothing is downloaded and stderr says "already the latest".
 # NIGHTLY CHANNEL (catalog "channel": "nightly", no "sha256"; "size" is only an estimate for the
-# page): the entry follows an upstream's rolling release instead of a pin -- Cemu, whose only
-# aarch64 release (2.6) predates its AArch64 recompiler and dies with SIGILL (user decision
-# 2026-10-07). Every install asks GitHub for the release's current asset and REQUIRES its per-asset
-# sha256 digest (exit 4 without one); the bytes must hash to it. The build is installed as
-# nightly-<id>, <id> = the asset pattern's first capture group (the commit in pkgforge-dev's file
-# names), else the digest's first 12 hex digits. Same build as `current`: nothing is downloaded and
-# stderr says "already the latest". Nobody at RetroForge tested that build: the page says "Nightly".
+# page): the older spelling of tag_pattern "^<tag>$" -- Cemu, whose only aarch64 release (2.6)
+# predates its AArch64 recompiler and dies with SIGILL (user decision 2026-10-07). It has no tested
+# build: --tested is refused. The page says "Nightly".
 #
 # DATA FILES (catalog "data": [{"url": "https://...", "to": "<path under $HOME>"}], optional): files
 # an emulator needs but never fetches the way RetroForge runs it -- RPCS3 downloads its per-game config
@@ -47,7 +64,7 @@
 # it unpacks on top instead, as PortMaster's own updater does, so what the tool added (its runtimes,
 # its config) stays. Refused (exit 4, nothing written): a member outside the top folder ('..', an
 # absolute path), a symlink or special file, more than one top folder, or a version file that is not
-# the pinned tag. Executable bits are kept, setuid/setgid/sticky never. The installed version is the
+# the tag being installed. Executable bits are kept, setuid/setgid/sticky never. The installed version is the
 # folder's own version file. A MARKER (.retroforge-emu, naming the emulator) is written into the folder,
 # and remove deletes the folder only when the marker is there: a catalog `to` pointing at a folder
 # retroforge-emu never unpacked can never delete it. A folder that was already there (a PortMaster the
@@ -57,16 +74,16 @@
 # still reports the old version.
 # "self_update": true (only with "unpack"): the tool updates itself after the first install
 # (PortMaster asks the player, then unzips its new release over its folder -- user decision
-# 2026-10-11). The pin is then the FIRST install only: no update is ever offered, and install on an
-# existing install downloads nothing.
+# 2026-10-11). The first install (newest, or the pin) is then the only one: no update is ever
+# offered, and install on an existing install downloads nothing. No rollback either: an unpacked
+# folder keeps no previous version.
 #
 # Layout (what retroforge-launch runs): /home/player/emulators/<emulator>/{<tag>.AppImage, current}, or
 # for an unpacked archive the catalog's `to` (/home/player/emulators/<emulator>/ then only holds the
 # install lock and the download in progress).
 #
-# CATALOG: $RETROFORGE_CATALOG, else the plugin's copy of the hosted catalog
-# (~/.cache/retroforge/catalog.json), else the image's (/usr/share/retroforge/catalog.json, the offline
-# fallback). retroforge-emu never fetches the catalog itself; the plugin does.
+# CATALOG: $RETROFORGE_CATALOG, else the image's (/usr/share/retroforge/catalog.json). There is no
+# online catalog (plan emulator-latest D7): an OTA bundle is how tested pins and tag patterns change.
 #
 # TEST SEAMS (tests/test-emu.sh runs this file): RETROFORGE_CURL, RETROFORGE_EMU_DIR, RETROFORGE_CATALOG.
 import fcntl
@@ -86,20 +103,20 @@ EXIT_OK, EXIT_USAGE, EXIT_NET, EXIT_VERIFY, EXIT_LOCAL = 0, 2, 3, 4, 5
 
 CURL = os.environ.get("RETROFORGE_CURL", "curl")
 EMU_DIR = os.environ.get("RETROFORGE_EMU_DIR", "/home/player/emulators")
-CATALOGS = [
-    os.environ.get("RETROFORGE_CATALOG", ""),
-    os.path.join(os.path.expanduser("~"), ".cache/retroforge/catalog.json"),
-    "/usr/share/retroforge/catalog.json",
-]
+CATALOGS = [os.environ.get("RETROFORGE_CATALOG", ""), "/usr/share/retroforge/catalog.json"]
 GITHUB_API = "https://api.github.com"
 EMU_ID = re.compile(r"[a-z0-9_-]+")
 # A tag names a file (<tag>.AppImage) and a URL path segment: no '/', nothing a shell or URL reads
 # specially. '@' is allowed: pkgforge-dev's AppImage repos tag releases as <version>@<date>_<id>.
 SAFE_TAG = re.compile(r"[A-Za-z0-9._@-]+")
 CHANNELS = {"nightly"}
+# Tags an upstream moves from build to build: a build under one is named <tag>-<id> (ROLLING TAGS).
+ROLLING = {"latest", "preview", "nightly", "continuous", "dev", "master", "main"}
 SPACE_MARGIN = 16 << 20  # bytes kept free beyond the AppImage itself
 DATA_MAX = 16 << 20  # bytes, per data file
 HOME = os.path.expanduser("~")
+CHECK_CACHE = os.path.join(HOME, ".cache/retroforge/emu-check.json")
+CHECK_TTL = 3600  # s a resolved newest build is trusted for, per emulator
 POLL = 0.25  # s between progress samples
 MARKER = ".retroforge-emu"  # in an unpacked folder: names the emulator that unpacked it
 
@@ -178,46 +195,138 @@ def curl_base():
             "--retry", "3", "--retry-all-errors", "--retry-delay", "2"]
 
 
-def release_asset(e):
-    """The asset to fetch: {"url", "tag" (local name), "sha256", "size"}."""
-    url = f"{GITHUB_API}/repos/{e['github']}/releases/tags/{e['tag']}"
+def github(path, missing_ok=False):
+    """GET api.github.com<path> as JSON; None for a 404 when `missing_ok` (a repo without a
+    non-prerelease release has no /releases/latest)."""
+    url = f"{GITHUB_API}{path}"
+    # No --fail: the status is read from -w (curl expands its \n), so a 404 is told apart from a
+    # rate limit (403/429).
+    cmd = [a for a in curl_base() if a != "--fail"] + [
+        "--max-time", "60", "-H", "Accept: application/vnd.github+json", "-w", r"\n%{http_code}", url]
     try:
-        out = subprocess.run(curl_base() + ["--max-time", "60",
-                                            "-H", "Accept: application/vnd.github+json", url],
-                             capture_output=True, check=True, timeout=90).stdout
-        rel = json.loads(out)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError, ValueError) as err:
-        raise Fail(EXIT_NET, f"GitHub release {e['github']} {e['tag']} not readable: {err}")
-    pattern = re.compile(e["asset"])
-    assets = [a for a in rel.get("assets", []) if pattern.fullmatch(str(a.get("name", "")))]
-    if len(assets) != 1:
-        raise Fail(EXIT_VERIFY, f"{e['tag']}: the asset pattern matches {len(assets)} assets, not 1")
-    a = assets[0]
+        out = subprocess.run(cmd, capture_output=True, check=True, timeout=90).stdout
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as err:
+        raise Fail(EXIT_NET, f"GitHub {path} not readable: {err}")
+    body, _, code = out.rpartition(b"\n")
+    if code == b"404" and missing_ok:
+        return None
+    if code != b"200":
+        raise Fail(EXIT_NET, f"GitHub {path} answered HTTP {code.decode(errors='replace')}"
+                             + (" (rate limited: try again in an hour)" if code in (b"403", b"429") else ""))
+    try:
+        return json.loads(body)
+    except ValueError as err:
+        raise Fail(EXIT_NET, f"GitHub {path} is not JSON: {err}")
+
+
+def matching_assets(rel, pattern):
+    return [a for a in rel.get("assets", []) if pattern.fullmatch(str(a.get("name", "")))]
+
+
+def https_url(a):
     url = str(a.get("browser_download_url", ""))
     if not url.startswith("https://"):
         raise Fail(EXIT_VERIFY, f"refusing a non-https download URL: {url}")
-    if "channel" not in e:
-        if a.get("digest") != f"sha256:{e['sha256']}" or a.get("size") != e["size"]:
-            raise Fail(EXIT_VERIFY, f"{e['tag']}/{a.get('name')} on GitHub is not the build RetroForge pinned "
-                                    f"(digest {a.get('digest')}, size {a.get('size')})")
-        return {"url": url, "tag": e["tag"], "sha256": e["sha256"], "size": e["size"]}
-    return nightly_build(e, pattern, a, url)
+    return url
 
 
-def nightly_build(e, pattern, a, url):
-    """A rolling release's asset, named nightly-<id> and checked against GitHub's own digest."""
+def tested_build(e):
+    """The pinned asset to fetch: {"url", "tag" (local name), "sha256", "size"}."""
+    rel = github(f"/repos/{e['github']}/releases/tags/{e['tag']}")
+    assets = matching_assets(rel, re.compile(e["asset"]))
+    if len(assets) != 1:
+        raise Fail(EXIT_VERIFY, f"{e['tag']}: the asset pattern matches {len(assets)} assets, not 1")
+    a = assets[0]
+    url = https_url(a)
+    if a.get("digest") != f"sha256:{e['sha256']}" or a.get("size") != e["size"]:
+        raise Fail(EXIT_VERIFY, f"{e['tag']}/{a.get('name')} on GitHub is not the build RetroForge pinned "
+                                f"(digest {a.get('digest')}, size {a.get('size')})")
+    return {"url": url, "tag": e["tag"], "sha256": e["sha256"], "size": e["size"]}
+
+
+def tag_pattern(e):
+    """The entry's tag pattern (a "channel" entry's is its own rolling tag), or None: pinned-only."""
+    if "tag_pattern" in e:
+        src = e["tag_pattern"]
+    elif "channel" in e:
+        src = f"^{re.escape(e['tag'])}$"
+    else:
+        return None
+    try:
+        return re.compile(src)
+    except (re.error, TypeError) as err:
+        raise Fail(EXIT_VERIFY, f"bad tag_pattern {src!r} in the catalog: {err}")
+
+
+def newest_build(e):
+    """Upstream's newest release that qualifies (LATEST BY DEFAULT above), as a build to fetch."""
+    tags, pattern = tag_pattern(e), re.compile(e["asset"])
+    repo = f"/repos/{e['github']}/releases"
+    latest = github(f"{repo}/latest", missing_ok=True)
+    listed = github(f"{repo}?per_page=30")
+    if not isinstance(listed, list):
+        raise Fail(EXIT_NET, f"GitHub {repo} is not a list of releases")
+    releases = ([latest] if isinstance(latest, dict) else []) + [r for r in listed if isinstance(r, dict)]
+    releases.sort(key=lambda r: str(r.get("published_at") or ""), reverse=True)
+    for rel in releases:
+        tag = str(rel.get("tag_name", ""))
+        if rel.get("draft") or not tags.fullmatch(tag):
+            continue
+        assets = matching_assets(rel, pattern)
+        if len(assets) == 1:
+            return digest_build(tag, pattern, assets[0])
+        log(f"note: {e['github']} {tag}: {len(assets)} assets match, skipped")
+    raise Fail(EXIT_VERIFY, f"no release of {e['github']} has a tag matching {tags.pattern!r} "
+                            f"and exactly one asset matching {pattern.pattern!r}")
+
+
+def digest_build(tag, pattern, a):
+    """A build nobody pinned, checked against GitHub's own digest; under a rolling tag it is named
+    <tag>-<id> (ROLLING TAGS above)."""
+    url = https_url(a)
     digest = str(a.get("digest") or "")
     size = a.get("size")
     if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest) or not isinstance(size, int) or size <= 0:
         raise Fail(EXIT_VERIFY, f"{a.get('name')}: GitHub gives no sha256 digest and size to check "
-                                f"the nightly against (digest {digest!r}, size {size!r})")
+                                f"the build against (digest {digest!r}, size {size!r})")
     sha = digest[len("sha256:"):]
-    m = pattern.fullmatch(str(a["name"]))
-    build = m.group(1) if m.groups() and m.group(1) else sha[:12]
-    tag = f"{e['channel']}-{build}"
+    if tag in ROLLING:
+        m = pattern.fullmatch(str(a["name"]))
+        tag = f"{tag}-{m.group(1) if m.groups() and m.group(1) else sha[:12]}"
     if not SAFE_TAG.fullmatch(tag):
         raise Fail(EXIT_VERIFY, f"unsafe build name from {a.get('name')!r}: {tag!r}")
     return {"url": url, "tag": tag, "sha256": sha, "size": size}
+
+
+def check_key(e):
+    """What a cached check answered for: a catalog (OTA) that changes any of it asks again."""
+    return json.dumps([e.get("github"), e.get("tag_pattern", e.get("channel")), e.get("asset")])
+
+
+def read_check_cache():
+    try:
+        with open(CHECK_CACHE) as f:
+            cache = json.load(f)
+        return cache if isinstance(cache, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_check_cache(cache):
+    tmp = f"{CHECK_CACHE}.{os.getpid()}.tmp"  # check and an install may write at once
+    try:
+        os.makedirs(os.path.dirname(CHECK_CACHE), exist_ok=True)
+        with open(tmp, "w") as f:
+            json.dump(cache, f, sort_keys=True)
+        os.replace(tmp, CHECK_CACHE)
+    except OSError as err:
+        log(f"warning: cannot write {CHECK_CACHE}: {err}")
+
+
+def remember_newest(emu, e, tag):
+    cache = read_check_cache()
+    cache[emu] = {"key": check_key(e), "at": time.time(), "latest": tag}
+    write_check_cache(cache)
 
 
 def download(url, part, size):
@@ -292,7 +401,8 @@ def unpack(emu, archive, dest, version, tag):
         with open(os.path.join(stage, version)) as f:
             found = f.read(256).strip()
         if found != tag:
-            raise Fail(EXIT_VERIFY, f"the archive says it is version {found!r}, the catalog pinned {tag!r}")
+            raise Fail(EXIT_VERIFY, f"the archive says it is version {found!r}, "
+                                    f"retroforge-emu is installing {tag!r}")
         with open(os.path.join(stage, MARKER), "w") as f:
             f.write(f"{emu}\n")
         if over:
@@ -376,41 +486,62 @@ def fetch_data(emu, e):
                 os.unlink(part)
 
 
-def cmd_install(emu):
-    e = entry(load_catalog(), emu)
-    tag = e["tag"]
-    if not SAFE_TAG.fullmatch(tag):
-        raise Fail(EXIT_VERIFY, f"unsafe tag in the catalog: {tag!r}")
+def checked_entry(emu, e):
+    """Refuse a catalog entry retroforge-emu cannot install safely (exit 4, before any download)."""
+    if not SAFE_TAG.fullmatch(str(e.get("tag", ""))):
+        raise Fail(EXIT_VERIFY, f"unsafe tag in the catalog: {e.get('tag')!r}")
     channel = e.get("channel")
     if channel is not None and channel not in CHANNELS:
         raise Fail(EXIT_VERIFY, f"unknown channel in the catalog: {channel!r}")
-    if channel is None and "sha256" not in e:
+    if tag_pattern(e) is None and "sha256" not in e:
         raise Fail(EXIT_VERIFY, f"{emu}: a pinned catalog entry needs a sha256")
+    return e
+
+
+def tested_tag(e):
+    """The build RetroForge tested (the pin), or None: a "channel" entry has none."""
+    return e.get("tag") if "sha256" in e else None
+
+
+def lock_dir(d):
+    """Hold the emulator's folder lock (one install or rollback per emulator at a time)."""
+    try:
+        os.makedirs(d, exist_ok=True)
+        lock = os.open(d, os.O_RDONLY)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return lock
+    except OSError as err:
+        raise Fail(EXIT_LOCAL, f"cannot use {d}: {err}")
+
+
+def cmd_install(emu, tested=False):
+    e = checked_entry(emu, entry(load_catalog(), emu))
+    if tested and tested_tag(e) is None:
+        raise Fail(EXIT_USAGE, f"{emu} has no tested build: it follows {e['tag']}")
+    newest = tag_pattern(e) is not None and not tested
     spec = unpack_spec(emu, e)
     inst = installed_tag(emu, e)
     if inst is not None and e.get("self_update"):
         print("100%", flush=True)
         log(f"{emu} {inst} is installed and updates itself")
         return EXIT_OK
-    if channel is None and inst == tag:
+    if not newest and inst == e["tag"]:
         print("100%", flush=True)
         return EXIT_OK
     d = os.path.join(EMU_DIR, emu)
+    lock = lock_dir(d)
+    # Named after the catalog tag, so the plugin can follow its size for a newest build too (and for
+    # an archive: the plugin follows this one name whatever the download is).
+    part = os.path.join(d, f".{e['tag']}.AppImage.part")
+    tag = e["tag"]
     try:
-        os.makedirs(d, exist_ok=True)
-        lock = os.open(d, os.O_RDONLY)
-        fcntl.flock(lock, fcntl.LOCK_EX)  # one install per emulator at a time
-    except OSError as err:
-        raise Fail(EXIT_LOCAL, f"cannot use {d}: {err}")
-    # Named after the catalog tag, so the plugin can follow its size for a nightly too (and for an
-    # archive: the plugin follows this one name whatever the download is).
-    part = os.path.join(d, f".{tag}.AppImage.part")
-    try:
-        build = release_asset(e)
+        build = newest_build(e) if newest else tested_build(e)
         tag = build["tag"]
-        if channel is not None and installed_tag(emu, e) == tag:
+        if newest:
+            remember_newest(emu, e, tag)
+        if newest and installed_tag(emu, e) == tag:
             print("100%", flush=True)
-            log(f"{emu} {tag} is already the latest {channel}")
+            log(f"{emu} {tag} is already the latest")
             return EXIT_OK
         if shutil.disk_usage(d).free < build["size"] + SPACE_MARGIN:
             raise Fail(EXIT_LOCAL, f"not enough free space in {d} for {build['size']} bytes")
@@ -444,14 +575,18 @@ def cmd_list():
         except Fail as f:
             log(f"warning: {f}")
             continue
+        follows = "tag_pattern" in e or "channel" in e
         out[emu] = {
             "name": e.get("name", emu),
             "systems": e.get("systems", []),
             "pinned": e.get("tag"),
+            "tested": tested_tag(e),
             "channel": e.get("channel"),
+            "follows_latest": follows,
             "installed": inst,
-            # A nightly's newest build is only known online: install checks it.
-            "update": (inst is not None and "channel" not in e and not e.get("self_update")
+            "previous": previous_tag(emu) if e.get("unpack") is None else None,
+            # Offline, and only for a pinned-only entry: a newest build is known online (`check`).
+            "update": (inst is not None and not follows and not e.get("self_update")
                        and inst != e.get("tag")),
             "self_update": bool(e.get("self_update")),
             "size": e.get("size"),
@@ -460,6 +595,75 @@ def cmd_list():
             "licence": e.get("licence"),
         }
     print(json.dumps({"emulators": out}, sort_keys=True))
+    return EXIT_OK
+
+
+def previous_tag(emu):
+    """The tag of the AppImage kept beside `current` (activate() keeps at most one), or None."""
+    d = os.path.join(EMU_DIR, emu)
+    current = os.path.join(d, "current")
+    target = os.readlink(current) if os.path.islink(current) else None
+    try:
+        names = [n for n in os.listdir(d) if n.endswith(".AppImage") and n != target
+                 and not n.startswith(".") and os.path.isfile(os.path.join(d, n))]
+    except OSError:
+        return None
+    if target is None or not names:
+        return None
+    newest = max(names, key=lambda n: os.path.getmtime(os.path.join(d, n)))
+    return newest[: -len(".AppImage")]
+
+
+def cmd_check(only, refresh):
+    """Upstream's newest build per emulator (see LATEST BY DEFAULT); a pinned-only entry's is its
+    pin, without asking. Exit 0 whatever GitHub said: a failure is that emulator's "error"."""
+    emus = load_catalog()
+    names = [only] if only is not None else sorted(n for n in emus if EMU_ID.fullmatch(n))
+    if only is not None:
+        entry(emus, only)
+    cache, now, out = read_check_cache(), time.time(), {}
+    for emu in names:
+        e = emus[emu]
+        try:
+            checked_entry(emu, e)
+            if tag_pattern(e) is None:
+                out[emu] = {"latest": e["tag"], "error": None}
+                continue
+            hit = cache.get(emu)
+            if (not refresh and isinstance(hit, dict) and hit.get("key") == check_key(e)
+                    and isinstance(hit.get("at"), (int, float)) and 0 <= now - hit["at"] < CHECK_TTL):
+                out[emu] = {"latest": hit.get("latest"), "error": None}
+                continue
+            tag = newest_build(e)["tag"]
+            cache[emu] = {"key": check_key(e), "at": now, "latest": tag}
+            out[emu] = {"latest": tag, "error": None}
+        except Fail as f:
+            out[emu] = {"latest": None, "error": str(f)}
+        except (KeyError, TypeError, re.error) as err:  # one bad entry must not hide the others
+            out[emu] = {"latest": None, "error": f"bad catalog entry: {err!r}"}
+    write_check_cache(cache)
+    print(json.dumps({"emulators": out}, sort_keys=True))
+    return EXIT_OK
+
+
+def cmd_rollback(emu):
+    e = entry(load_catalog(), emu)
+    if unpack_spec(emu, e) is not None:
+        raise Fail(EXIT_USAGE, f"{emu} is an unpacked folder: it keeps no previous version")
+    d = os.path.join(EMU_DIR, emu)
+    if not os.path.isdir(d):
+        raise Fail(EXIT_USAGE, f"{emu} is not installed")
+    lock = lock_dir(d)
+    try:
+        prev = previous_tag(emu)
+        if prev is None:
+            raise Fail(EXIT_USAGE, f"{emu} has no previous build to go back to")
+        activate(d, prev)
+    except OSError as err:
+        raise Fail(EXIT_LOCAL, f"rollback of {emu} failed: {err}")
+    finally:
+        os.close(lock)
+    log(f"{emu} back to {prev}")
     return EXIT_OK
 
 
@@ -506,13 +710,19 @@ def remove_unpacked(emu):
 
 
 def main(argv):
-    usage = "usage: retroforge-emu list | install <emulator> | remove <emulator>"
-    if argv == ["list"]:
+    usage = ("usage: retroforge-emu list | check [<emulator>] [--refresh] | install <emulator> [--tested]"
+             " | rollback <emulator> | remove <emulator>")
+    cmd, args = (argv[0], argv[1:]) if argv else ("", [])
+    flags = {a for a in args if a.startswith("--")}
+    names = [a for a in args if not a.startswith("--")]
+    if cmd == "list" and not args:
         return cmd_list()
-    if len(argv) == 2 and argv[0] == "install":
-        return cmd_install(argv[1])
-    if len(argv) == 2 and argv[0] == "remove":
-        return cmd_remove(argv[1])
+    if cmd == "check" and flags <= {"--refresh"} and len(names) <= 1:
+        return cmd_check(names[0] if names else None, "--refresh" in flags)
+    if cmd == "install" and flags <= {"--tested"} and len(names) == 1:
+        return cmd_install(names[0], "--tested" in flags)
+    if cmd in ("rollback", "remove") and not flags and len(names) == 1:
+        return cmd_rollback(names[0]) if cmd == "rollback" else cmd_remove(names[0])
     raise Fail(EXIT_USAGE, usage)
 
 

@@ -64,23 +64,37 @@ api() {
 EOF
 }
 
-# The curl stub: logs its argv; the API URL gets the JSON, a download URL gets the asset of the tag
-# in its path (or $W/srv/override when it exists, to serve wrong bytes). Exit 22 on anything else.
+# The curl stub: logs its argv; an API URL gets its JSON and, with -w, "\n<HTTP status>" after it
+# (404 when the file is missing, 403 for everything while $W/srv/ratelimit exists), as retroforge-emu
+# reads the status from -w; a download URL gets the asset of the tag in its path (or $W/srv/override
+# when it exists, to serve wrong bytes). Exit 22 on anything else.
+#   releases/tags/<tag>       -> $W/srv/api-<tag>.json
+#   releases/latest           -> $W/srv/rel-latest.json
+#   releases?per_page=30      -> $W/srv/rel-list.json
 cat > "$W/bin/curl" <<EOF
 #!/bin/bash
 printf '%s\n' "\$*" >> "$W/curl.log"
-out="" url=""
+out="" url="" wout=""
 while [ \$# -gt 0 ]; do
   case \$1 in
     -o|--output) out=\$2; shift 2 ;;
+    -w|--write-out) wout=\$2; shift 2 ;;
     https://*|http://*) url=\$1; shift ;;
     *) shift ;;
   esac
 done
+api() {  # api <file>: serve it with its status, as curl without --fail does
+  local code=200
+  if [ -f "$W/srv/ratelimit" ]; then code=403; set -- /dev/null
+  elif [ ! -f "\$1" ]; then code=404; set -- /dev/null; fi
+  cat "\$1"
+  [ -n "\$wout" ] && printf '\n%s' "\$code"
+  [ -n "\$wout" ] || [ "\$code" = 200 ] || exit 22
+}
 case \$url in
-  https://api.github.com/repos/example/dummy/releases/tags/*)
-    f="$W/srv/api-\${url##*/}.json"; [ -f "\$f" ] || exit 22
-    if [ -n "\$out" ]; then cp "\$f" "\$out"; else cat "\$f"; fi ;;
+  https://api.github.com/repos/example/dummy/releases/tags/*) api "$W/srv/api-\${url##*/}.json" ;;
+  https://api.github.com/repos/example/dummy/releases/latest) api "$W/srv/rel-latest.json" ;;
+  "https://api.github.com/repos/example/dummy/releases?per_page=30") api "$W/srv/rel-list.json" ;;
   https://github.com/example/dummy/releases/download/*/Dummy-arm64.AppImage)
     tag=\${url%/*}; tag=\${tag##*/}
     src="$W/srv/\$tag.AppImage"; [ -f "$W/srv/override" ] && src="$W/srv/override"
@@ -106,7 +120,7 @@ run() {  # run <args...>: sets OUT, ERR, RC
   RC=$?
   ERR="$(cat "$W/err")"
 }
-reset() { rm -rf "$D" "$W/home" "$W/curl.log" "$W/srv/override" "$W/srv/fail-download" "$W/srv/fail-data"; mkdir -p "$D" "$W/home"; }
+reset() { rm -rf "$D" "$W/home" "$W/curl.log" "$W/srv/rel-latest.json" "$W/srv/rel-list.json" "$W/srv/ratelimit" "$W/srv/override" "$W/srv/fail-download" "$W/srv/fail-data"; mkdir -p "$D" "$W/home"; }
 pct_only() {  # every stdout line is N% and they never go down, ending at 100
   awk 'BEGIN{last=-1} !/^[0-9]+%$/ {exit 1} {v=$0+0; if (v < last) exit 1; last=v} END{exit last != 100}' <<<"$OUT"
 }
@@ -287,6 +301,11 @@ nightly_api() {  # nightly_api <id> <content> [digest]: the nightly release now 
   {"name": "Dummy-$1-arm64.AppImage", "size": $(size "$f"), "digest": "$digest",
    "browser_download_url": "https://github.com/example/dummy/releases/download/nightly/Dummy-$1-arm64.AppImage"}]}
 EOF
+  # The nightly is found in the releases list (GitHub flags it prerelease: not a filter); the
+  # repo's /releases/latest is an older stable one that the tag pattern skips.
+  python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); r.update(prerelease=True, published_at="2026-10-15T00:00:00Z"); json.dump([r], open(sys.argv[2], "w"))' \
+    "$W/srv/api-nightly.json" "$W/srv/rel-list.json"
+  printf '{"tag_name": "2.6", "published_at": "2026-01-01T00:00:00Z", "assets": []}' > "$W/srv/rel-latest.json"
 }
 reset; nightly_catalog; nightly_api abc123 "nightly build abc"
 run install dummy
@@ -452,6 +471,172 @@ run remove tool
 mkdir -p "$T"; touch "$T/players-own"
 run remove tool
 [ -f "$T/players-own" ] && ok "a folder without retroforge-emu's marker is left alone" || bad "deleted a folder retroforge-emu did not install"
+
+# =================================================================================================
+CASE="latest"
+# An entry with "tag_pattern" installs upstream's newest qualifying release, not the pin (plan
+# emulator-latest D1-D4); the pin stays as the tested build.
+# releases <latest-spec|-> <spec>...: what GitHub answers for /releases/latest (- = 404) and for the
+# list (in the order given). <spec> = <tag>:<MM-DD>[:flag,...], flags draft, pre, nodigest,
+# noasset, twoassets. The asset is $REL_ASSET (Dummy-arm64.AppImage), served from $W/srv/<tag>.<ext>.
+releases() {
+  REL_ASSET="${REL_ASSET:-Dummy-arm64.AppImage}" python3 - "$W/srv" "$@" <<'PY'
+import hashlib, json, os, sys
+srv, latest, specs = sys.argv[1], sys.argv[2], sys.argv[3:]
+name = os.environ["REL_ASSET"]
+def rel(spec):
+    tag, day, *rest = spec.split(":")
+    flags = set(rest[0].split(",")) if rest else set()
+    f = os.path.join(srv, tag + (".zip" if name.endswith(".zip") else ".AppImage"))
+    data = open(f, "rb").read() if os.path.exists(f) else b"x"
+    a = {"name": name, "size": len(data),
+         "browser_download_url": f"https://github.com/example/dummy/releases/download/{tag}/{name}"}
+    if "nodigest" not in flags:
+        a["digest"] = "sha256:" + hashlib.sha256(data).hexdigest()
+    assets = [] if "noasset" in flags else [a, dict(a)] if "twoassets" in flags else [a]
+    return {"tag_name": tag, "draft": "draft" in flags, "prerelease": "pre" in flags,
+            "published_at": f"2026-{day}T00:00:00Z", "assets": assets}
+json.dump([rel(s) for s in specs], open(os.path.join(srv, "rel-list.json"), "w"))
+lp = os.path.join(srv, "rel-latest.json")
+if latest == "-":
+    if os.path.exists(lp):
+        os.unlink(lp)
+else:
+    json.dump(rel(latest), open(lp, "w"))
+PY
+}
+set_field() {  # set_field <emulator> <key> <json|DELETE>: edit the catalog's entry
+  python3 -c 'import json,sys; p,emu,k,v=sys.argv[1:]; c=json.load(open(p)); e=c["emulators"][emu]
+if v == "DELETE": e.pop(k, None)
+else: e[k] = json.loads(v)
+json.dump(c, open(p, "w"))' "$W/catalog.json" "$@"
+}
+latest_catalog() { catalog v1; set_field dummy tag_pattern '"^v[0-9]+$"'; }
+current() { readlink "$D/dummy/current"; }
+mkasset latest "rolling build"
+
+reset; latest_catalog; releases "v1:01-01" "v1:01-01" "v3:03-01" "v2:02-01"
+run install dummy
+[ "$RC" = 0 ] && [ "$(current)" = v3.AppImage ] && ok "installs the newest release by date (v3), not the pin (v1)" || bad "rc=$RC current=$(current) $ERR"
+cmp -s "$D/dummy/v3.AppImage" "$W/srv/v3.AppImage" && pct_only && ok "the served bytes, stdout N% lines only" || bad "bytes or stdout: $OUT"
+grep -q 'releases/latest' "$W/curl.log" && grep -q 'releases?per_page=30' "$W/curl.log" \
+  && ok "asks both /releases/latest and the releases list" || bad "API calls: $(grep api.github "$W/curl.log")"
+grep 'api.github.com' "$W/curl.log" | grep -v -- '--proto =https' | grep -q . && bad "an API call is not https only" || ok "every API call is https only"
+run list
+[ "$(field tested)" = '"v1"' ] && [ "$(field installed)" = '"v3"' ] && [ "$(field follows_latest)" = true ] && [ "$(field update)" = false ] \
+  && ok "list: tested v1, installed v3, follows_latest, no offline update" \
+  || bad "tested=$(field tested) installed=$(field installed) follows=$(field follows_latest) update=$(field update)"
+: > "$W/curl.log"; run install dummy
+[ "$RC" = 0 ] && [ "$OUT" = "100%" ] && ! grep -q 'download/' "$W/curl.log" && grep -q "already the latest" <<<"$ERR" \
+  && ok "the newest already installed: downloads nothing, says so" || bad "rc=$RC out=$OUT $ERR"
+
+newest() {  # newest <want-tag> <what> <releases args...>: a fresh install picks <want-tag>
+  local want=$1 what=$2; shift 2
+  reset; latest_catalog; releases "$@"; run install dummy
+  [ "$RC" = 0 ] && [ "$(current)" = "$want.AppImage" ] && ok "$what" || bad "$what: rc=$RC current=$(current) $ERR"
+}
+newest v3 "the newest only in /releases/latest (RPCS3's list is sorted by tag name)" "v3:03-01" "v1:01-01" "v2:02-01"
+newest v2 "no /releases/latest (404): the list alone" - "v2:02-01" "v1:01-01"
+newest v2 "a draft is skipped" - "v3:03-01:draft" "v2:02-01"
+newest v3 "a prerelease is NOT skipped: the tag pattern decides (Cemu, ARMSX2 nightlies)" - "v3:03-01:pre" "v2:02-01"
+newest v2 "a tag the pattern does not match is skipped (DuckStation's rolling 'latest')" "latest:04-01" "latest:04-01" "v2:02-01"
+newest v2 "a release without a matching asset is skipped" - "v3:03-01:noasset" "v2:02-01"
+newest v2 "a release with two matching assets is skipped" - "v3:03-01:twoassets" "v2:02-01"
+reset; latest_catalog; releases - "v3:03-01:noasset" "latest:04-01"; run install dummy
+[ "$RC" = 4 ] && ! grep -q 'download/' "$W/curl.log" && [ ! -e "$D/dummy/current" ] \
+  && ok "no release qualifies: exit 4, nothing downloaded" || bad "rc=$RC $ERR"
+reset; latest_catalog; releases - "v3:03-01:nodigest" "v2:02-01"; run install dummy
+[ "$RC" = 4 ] && ! grep -q 'download/' "$W/curl.log" && [ ! -e "$D/dummy/current" ] \
+  && ok "the newest has no GitHub digest: exit 4, no fallback to an older one" || bad "rc=$RC current=$(current) $ERR"
+reset; latest_catalog; releases - "v3:03-01"; cp "$W/srv/v1.AppImage" "$W/srv/override"; run install dummy
+[ "$RC" = 4 ] && [ -z "$(find "$D" -type f)" ] && ok "bytes that do not hash to GitHub's digest: exit 4, nothing left" || bad "rc=$RC left: $(find "$D" -type f)"
+reset; latest_catalog; releases - "v3:03-01"; touch "$W/srv/ratelimit"; run install dummy
+[ "$RC" = 3 ] && grep -q "rate limited" <<<"$ERR" && ok "GitHub's rate limit (403): exit 3, says so" || bad "rc=$RC $ERR"
+reset; nightly_catalog; set_field dummy channel DELETE; set_field dummy tag_pattern '"^nightly$"'; nightly_api abc123 "nightly build abc"
+run install dummy
+[ "$RC" = 0 ] && [ "$(current)" = nightly-abc123.AppImage ] && ok "tag_pattern ^nightly\$ (no channel): a rolling tag is named nightly-<id>" || bad "rc=$RC current=$(current) $ERR"
+reset; latest_catalog; set_field dummy tag_pattern '"(["'; run install dummy
+[ "$RC" = 4 ] && [ ! -e "$W/curl.log" ] && ok "a bad tag_pattern is refused before any network" || bad "rc=$RC"
+
+# =================================================================================================
+CASE="install --tested"
+reset; latest_catalog; api v1; releases - "v3:03-01"; run install dummy
+run install dummy --tested
+[ "$RC" = 0 ] && [ "$(current)" = v1.AppImage ] && [ -f "$D/dummy/v3.AppImage" ] \
+  && ok "installs the pin over a newer build, which is kept as previous" || bad "rc=$RC current=$(current) $ERR"
+grep -q 'releases/tags/v1' "$W/curl.log" && ok "through the pinned tag's lookup (digest + size == catalog)" || bad "no pinned lookup"
+run list
+[ "$(field installed)" = '"v1"' ] && [ "$(field previous)" = '"v3"' ] && ok "list: installed v1, previous v3" || bad "installed=$(field installed) previous=$(field previous)"
+: > "$W/curl.log"; run install dummy --tested
+[ "$RC" = 0 ] && [ "$OUT" = "100%" ] && [ ! -s "$W/curl.log" ] && ok "the pin already installed: nothing asked, nothing downloaded" || bad "rc=$RC out=$OUT"
+reset; nightly_catalog; run install dummy --tested
+[ "$RC" = 2 ] && [ ! -e "$W/curl.log" ] && ok "an entry with no tested build (nightly): exit 2, no network" || bad "rc=$RC"
+reset; latest_catalog; run install --tested;  [ "$RC" = 2 ] && ok "--tested with no emulator: exit 2" || bad "rc=$RC"
+run install dummy --newest;                   [ "$RC" = 2 ] && ok "an unknown flag: exit 2" || bad "rc=$RC"
+
+# =================================================================================================
+CASE="rollback"
+reset; latest_catalog; releases - "v2:02-01"; run install dummy
+run rollback dummy
+[ "$RC" = 2 ] && [ "$(current)" = v2.AppImage ] && ok "nothing to go back to (first install): exit 2, current unchanged" || bad "rc=$RC current=$(current)"
+releases - "v3:03-01" "v2:02-01"; run install dummy
+: > "$W/curl.log"; run rollback dummy
+[ "$RC" = 0 ] && [ "$(current)" = v2.AppImage ] && [ -f "$D/dummy/v3.AppImage" ] && ok "back to v2, v3 kept" || bad "rc=$RC current=$(current) $ERR"
+[ ! -s "$W/curl.log" ] && [ -z "$OUT" ] && ok "offline, nothing on stdout" || bad "curl ran or stdout: $OUT"
+run list
+[ "$(field installed)" = '"v2"' ] && [ "$(field previous)" = '"v3"' ] && ok "list: installed v2, previous v3" || bad "installed=$(field installed) previous=$(field previous)"
+run rollback dummy
+[ "$RC" = 0 ] && [ "$(current)" = v3.AppImage ] && [ -f "$D/dummy/v2.AppImage" ] && ok "a second rollback toggles back to v3" || bad "rc=$RC current=$(current)"
+reset; latest_catalog; run rollback dummy
+[ "$RC" = 2 ] && [ ! -e "$D/dummy" ] && ok "not installed: exit 2, creates nothing" || bad "rc=$RC"
+run rollback ../dummy; [ "$RC" = 2 ] && ok "a path as the emulator: exit 2" || bad "rc=$RC"
+reset; mkzip 2026.1 2026.1; zip_catalog 2026.1; run install tool; run rollback tool
+[ "$RC" = 2 ] && [ -f "$T/Tool.sh" ] && ok "an unpacked folder has no rollback: exit 2, left alone" || bad "rc=$RC"
+
+# =================================================================================================
+CASE="check"
+cfield() { python3 -c 'import json,sys; e=json.loads(sys.argv[1])["emulators"]["dummy"]; print(json.dumps(e[sys.argv[2]]))' "$OUT" "$1" 2>/dev/null; }
+calls() { grep -c 'api.github.com' "$W/curl.log" 2>/dev/null || true; }
+reset; latest_catalog; releases "v1:01-01" "v1:01-01" "v3:03-01" "v2:02-01"
+run check
+[ "$RC" = 0 ] && [ "$(cfield latest)" = '"v3"' ] && [ "$(cfield error)" = null ] && ok "JSON: latest v3, no error" || bad "rc=$RC out=$OUT $ERR"
+[ -f "$W/home/.cache/retroforge/emu-check.json" ] && ! grep -q 'download/' "$W/curl.log" && ok "cached, nothing downloaded" || bad "no cache, or a download"
+: > "$W/curl.log"; run check dummy
+[ "$(cfield latest)" = '"v3"' ] && [ "$(calls)" = 0 ] && ok "within the hour: answered from the cache, no GitHub call" || bad "latest=$(cfield latest) calls=$(calls)"
+run check dummy --refresh
+[ "$(calls)" -gt 0 ] && ok "--refresh asks GitHub again" || bad "--refresh used the cache"
+python3 -c 'import json,sys,time; p=sys.argv[1]; c=json.load(open(p)); c["dummy"]["at"]=time.time()-4000; json.dump(c, open(p,"w"))' "$W/home/.cache/retroforge/emu-check.json"
+: > "$W/curl.log"; run check
+[ "$(calls)" -gt 0 ] && [ "$(cfield latest)" = '"v3"' ] && ok "an answer older than an hour is asked again" || bad "stale cache used"
+: > "$W/curl.log"; set_field dummy tag_pattern '"^v[12]$"'; run check
+[ "$(calls)" -gt 0 ] && [ "$(cfield latest)" = '"v2"' ] && ok "a catalog (OTA) with another tag_pattern is asked again" || bad "latest=$(cfield latest) calls=$(calls)"
+reset; latest_catalog; releases - "v3:03-01"; run install dummy
+: > "$W/curl.log"; run check
+[ "$(cfield latest)" = '"v3"' ] && [ "$(calls)" = 0 ] && ok "an install leaves its answer in the cache" || bad "latest=$(cfield latest) calls=$(calls)"
+reset; latest_catalog; run check
+[ "$RC" = 0 ] && [ "$(cfield latest)" = null ] && [ "$(cfield error)" != null ] && ok "GitHub fails: latest null, the error reported, exit 0" || bad "rc=$RC out=$OUT"
+releases - "v3:03-01"; : > "$W/curl.log"; run check
+[ "$(calls)" -gt 0 ] && [ "$(cfield latest)" = '"v3"' ] && ok "a failure is not cached: the next check asks again" || bad "latest=$(cfield latest) calls=$(calls)"
+reset; latest_catalog; releases - "v3:03-01"; touch "$W/srv/ratelimit"; run check
+[ "$(cfield latest)" = null ] && grep -q "rate limited" <<<"$(cfield error)" && ok "rate limited: reported as the error, never as a version" || bad "out=$OUT"
+reset; catalog v2; run check
+[ "$(cfield latest)" = '"v2"' ] && [ ! -e "$W/curl.log" ] && ok "a pinned-only entry: its pin, no network" || bad "out=$OUT"
+run check nosuch; [ "$RC" = 2 ] && ok "an emulator not in the catalog: exit 2" || bad "rc=$RC"
+run check dummy --tested; [ "$RC" = 2 ] && ok "an unknown flag: exit 2" || bad "rc=$RC"
+
+# =================================================================================================
+CASE="unpacked archive: latest first install"
+# PortMaster (D6): the first install takes upstream's newest, then PortMaster updates itself.
+reset; mkzip 2026.1 2026.1; mkzip 2026.4 2026.4; zip_catalog 2026.1; set_field tool tag_pattern '"^2026\\.[0-9]+$"'
+REL_ASSET=Tool.zip releases - "2026.4:04-01" "2026.1:01-01"
+run install tool
+[ "$RC" = 0 ] && [ "$(cat "$T/version")" = 2026.4 ] && ok "the first install unpacks the newest release (2026.4), not the pin" || bad "rc=$RC version=$(cat "$T/version" 2>/dev/null) $ERR"
+: > "$W/curl.log"; run install tool
+[ "$RC" = 0 ] && [ ! -s "$W/curl.log" ] && ok "installed: it updates itself, retroforge-emu asks nothing" || bad "rc=$RC"
+reset; mkzip 2026.5 2026.1; zip_catalog 2026.1; set_field tool tag_pattern '"^2026\\.[0-9]+$"'
+REL_ASSET=Tool.zip releases - "2026.5:05-01"
+run install tool
+[ "$RC" = 4 ] && [ ! -e "$T" ] && ok "an archive whose version file is not the tag being installed: exit 4" || bad "rc=$RC"
 
 # =================================================================================================
 CASE="remove"
