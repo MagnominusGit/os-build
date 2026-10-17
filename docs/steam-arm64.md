@@ -309,10 +309,10 @@ Sarek is on by default only on the SM6115.
 Proton-CachyOS publishes an arm64 build with an ARM64EC DXVK-Sarek (`files/lib/wine/dxvk-sarek/
 aarch64-windows/`), turned on by `PROTON_DXVK_SAREK=1`. Its `toolmanifest.vdf` requires tool appid
 4185400 (Steam Linux Runtime 4.0, arm64), which Steam downloads itself. Its maintainers call the arm64
-build untested. A local ISA scan of it found nothing beyond ARMv8.0 except LSE atomics (covered by
-`0025`), apart from libraries that pick their code path at run time. Its `proton` also turns Sarek on
-by itself when the GPU lacks Vulkan 1.3 with `descriptorIndexing`, but under noconform the A610
-reports 1.3, so that check does not pick Sarek today.
+build untested. A local ISA scan of `cachyos-11.0-20261005-slr` found nothing beyond ARMv8.0 except
+LSE atomics (covered by `0025`), apart from libraries that pick their code path at run time. Its
+`proton` also turns Sarek on by itself when the GPU lacks Vulkan 1.3 with `descriptorIndexing`, but
+under noconform the A610 reports 1.3, so that check does not pick Sarek today.
 
 **One setting.** `DXVK_SAREK=on|off` in `~/.config/retroforge/steam.conf`, kept by
 `/usr/bin/retroforge-steam-sarek`. The player changes it in Settings > General > "Steam: DXVK-Sarek
@@ -323,51 +323,92 @@ follows that board until the player chooses. `RETROFORGE_STEAM_SAREK=on|off` ove
 - **On:** every `steam` start (and turning the toggle on) runs `/usr/lib/retroforge/steam-compat-tools
   on` in the background, as the user unit `retroforge-steam-compat-tools` (with setsid when there is no
   user manager). A user unit is not under OGUI's reaper, which stops everything under a game when the
-  game ends, and the first `steam` does not wait for the download. It fetches the release pinned in
-  `/usr/share/retroforge/steam/proton-cachyos-arm64.pin` (356 MB, sha256-checked), unpacks it (~2.2
-  GB) under a temporary name in the Steam root, and renames it into
-  `~/.local/share/Steam/compatibilitytools.d/proton-cachyos-11.0-20261005-slr-arm64/`, so Steam never
-  sees half a tool. It adds a `user_settings.py` with `PROTON_DXVK_SAREK=1`, which Proton-CachyOS
-  applies to every game run with it, and `/usr/bin/steam` exports `PROTON_DXVK_SAREK=1` as well
-  (Valve's Proton ignores it). Log: `~/.local/share/retroforge/steam-compat-tools.log`.
-- **Off:** nothing is downloaded or exported. Before the client starts, `steam-compat-tools off`
-  deletes that `user_settings.py` from the installed tool, which stays. Turning the toggle off also
-  stops a download in progress.
+  game ends, and the first `steam` does not wait for the download. It installs or updates the tool
+  (below), with a `user_settings.py` holding `PROTON_DXVK_SAREK=1`, which Proton-CachyOS applies to
+  every game run with it, and `/usr/bin/steam` exports `PROTON_DXVK_SAREK=1` as well (Valve's Proton
+  ignores it). Log: `~/.local/share/retroforge/steam-compat-tools.log`.
+- **Off:** nothing is downloaded, asked or exported. Before the client starts, `steam-compat-tools
+  off` deletes that `user_settings.py` from the installed tool, which stays. Turning the toggle off
+  also stops a download in progress.
+
+**Which release: a channel.** `/usr/share/retroforge/steam/proton-cachyos-arm64.pin` names a channel,
+not a version: the device resolves what is published now. Each `on` makes one request to GitHub's API
+(`/repos/CachyOS/proton-cachyos/releases?per_page=20`; 60 an hour are allowed without a token, and there
+is at most one per `steam` start, only while the setting is on) and takes the newest release that has
+`proton-cachyos-*-slr-arm64.tar.xz` and its `.sha512sum`. Newest means the
+highest Proton version, then the latest published: `cachyos-10.0-sunset-slr` was published a week after
+`cachyos-11.0-20260601-slr`, and a newest-by-date rule would have moved every player back to 10.0.
+Drafts, prereleases and assets still uploading are skipped. The tarball (~356 MB) has to match the
+`.sha512sum`, and the sha256 GitHub's API lists for it. Offline, rate-limited, or on any API error or
+answer without an arm64 build, the installed release stays (exit 0, and the log says why); on a card
+with nothing installed yet, the next `steam` start tries again. A `tag:` in the pin holds one release
+instead (reproducible builds, or keeping players off a bad release), optionally with its `sha512:`;
+once that release is installed nothing is asked. On 2026-10-16 the channel resolves to
+`cachyos-11.0-20261005-slr`.
+
+**One name.** Whatever the release, the tool is
+`~/.local/share/Steam/compatibilitytools.d/proton-cachyos-arm64-retroforge/`, and its
+`compatibilitytool.vdf` is rewritten so that its internal name is `proton-cachyos-arm64-retroforge` and
+its display name "Proton-CachyOS arm64 (RetroForge)" (only those two strings change; the comments,
+`install_path`, `from_oslist` and `to_oslist` stay the release's). Steam records a game's tool in
+`config.vdf`'s `CompatToolMapping` by that internal name, so a game set to the tool keeps it through
+updates.
+
+**Updates.** A new release is downloaded, checked and unpacked (~2.2 GB) under a temporary name in the
+Steam root, renamed to the tool's name, and swapped in by two renames (the old tree out, the new one
+in), so Steam never sees half a tool. A player's own `user_settings.py` moves into the new tree. A game
+running from the old tree would, after the swap, start wine processes and load DLLs from the new one
+by path, and wine refuses a wineserver of another build. So while a process of the player's runs from
+the tool (its program, its working folder, or a file it maps), the new tree waits, checked, in
+`~/.local/share/Steam/.retroforge-compat-tools.next/`, and goes in at the next `steam` start that finds
+nothing running from it, without a second download. One withdrawn upstream meanwhile is dropped. A
+running Steam reads the new `toolmanifest.vdf` at its next start.
 
 **Using it.** Steam reads `compatibilitytools.d` only when it starts, so restart Steam once the log
-says "installed". Then select `proton-cachyos-11.0-20261005-slr-arm64` per game (Properties >
+says "installed". Then select "Proton-CachyOS arm64 (RetroForge)" per game (Properties >
 Compatibility > Force the use of a specific Steam Play compatibility tool), or for every game
 (Settings > Compatibility > Default compatibility tool). Nothing edits Steam's `config.vdf`: choosing
-the tool is the player's. `PROTON_DXVK_SAREK=0 %command%` in a game's launch options turns Sarek off
-for that game.
+the tool is the player's, once. `PROTON_DXVK_SAREK=0 %command%` in a game's launch options turns Sarek
+off for that game.
 
-**What it never touches.** Each folder it installs carries `.retroforge-pin`. A folder without one is
-someone else's: other tools, and a Proton-CachyOS the player installed, even under the pinned name. A
-`user_settings.py` the player edited is theirs too.
+**What it never touches.** Each folder it installs carries `.retroforge-pin` (name, tag, asset, sha512,
+sha256). A folder without one is someone else's: other tools, and a Proton-CachyOS the player installed,
+even under the tool's name. A `user_settings.py` the player edited is theirs too.
 
-**Bumping the pin** (see the pin's header). The new version installs at the next `steam` start, and the
-old folder goes at the start after that, so a game still running on it keeps its files. The tool's
-name changes with every release, so a game set to the old one has to be set to the new one.
+**From the per-release folders.** The first version of this installed each release under its own name
+(`compatibilitytools.d/proton-cachyos-11.0-20261005-slr-arm64/`, with a `.retroforge-pin`). Those are
+removed once the one-name folder is in place, each when nothing runs from it, and a player's own
+`user_settings.py` in one moves into the new folder. A game set to one has to be set to "Proton-CachyOS
+arm64 (RetroForge)", once.
 
-**Removing it.** Turn the setting off, then delete the
-`~/.local/share/Steam/compatibilitytools.d/proton-cachyos-*-arm64/` folders that have a
-`.retroforge-pin`, and set games that used it back to another tool. Steam Linux Runtime 4.0 (arm64) can
-then be uninstalled from Steam's library like any tool.
+**Removing it.** Turn the setting off, then delete
+`~/.local/share/Steam/compatibilitytools.d/proton-cachyos-arm64-retroforge/` (and
+`~/.local/share/Steam/.retroforge-compat-tools.next/`, if there), and set games that used it back to
+another tool. Steam Linux Runtime 4.0 (arm64) can then be uninstalled from Steam's library like any
+tool.
 
-Checked in a linux/arm64 container on 2026-10-16: `steam-compat-tools on` installed the real tarball
-(through a `file://` pin to a copy that matched the release's `.sha512sum`) in 5 s: 2,191 MB, 1,972
-symlinks, none broken. `toolmanifest.vdf` and `compatibilitytool.vdf` are the release's (tool name
-`proton-cachyos-11.0-20261005-slr-arm64`, `from_oslist windows`, `to_oslist linux`, require 4185400),
-and `user_settings.py` imports as `{'PROTON_DXVK_SAREK': '1'}`. A second `on` touched nothing, and `off`
-then `on` removed and restored `user_settings.py`.
+Checked in a linux/arm64 container on 2026-10-16: the image's pin against the live API resolved to
+`cachyos-11.0-20261005-slr` (sha256 `e59b646e...cd06c37` as GitHub lists it, the live `.sha512sum`
+`81ca1b66...b1c0fa`, the same as a local copy's). Through the live API's own JSON, with that release's
+two URLs pointed at local copies, `steam-compat-tools on` installed it in 5 s: 2,191 MB, 1,972
+symlinks, none broken, `toolmanifest.vdf` the release's (require 4185400), `compatibilitytool.vdf`
+renamed as above, `user_settings.py` importing as `{'PROTON_DXVK_SAREK': '1'}`. A second `on` made its
+one API request and touched nothing, and `off` then `on` removed and restored `user_settings.py`.
+Updates, the wait while a process runs from the tool, and the move from per-release folders are covered
+by `tests/test-steam-compat-tools.sh` with small fake releases and a fake API.
 
 Not yet seen:
 - Whether the arm64 client lists the tool. Its `compatibilitytool.vdf` says `to_oslist linux`, and
   steamclient.so has "Ignoring tool %s as it's for a different target platform %s.".
+- Whether the arm64 client keeps a game's tool across an update under the rewritten name (that Steam
+  keys `CompatToolMapping` by the internal name is how it works on x86; not watched on this client).
+- Whether a game in Steam Linux Runtime 4.0 (pressure-vessel) shows the tool's path in
+  `/proc/<pid>/maps` as the check expects; if not, an update goes in while the game runs.
 - Whether the client's environment reaches games: the client runs in the steamrt3c container, games
   in Steam Linux Runtime 4.0. `user_settings.py` covers that either way.
 - Steam fetching 4185400 on arm64, a game run with the tool, Sarek on an A610, the plugin toggle on a
-  device, anything on hardware.
+  device, anything on hardware. A release after `cachyos-11.0-20261005-slr` is not ISA-scanned before
+  players get it.
 
 ## Open
 

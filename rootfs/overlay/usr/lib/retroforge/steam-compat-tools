@@ -1,44 +1,69 @@
 #!/usr/bin/env python3
-# steam-compat-tools — Proton-CachyOS's arm64 build as a Steam compatibility tool, with its DXVK-Sarek
-# turned on or off. Run by /usr/bin/retroforge-steam-sarek, which keeps the player's DXVK-Sarek setting.
+# steam-compat-tools — Proton-CachyOS's arm64 build as a Steam compatibility tool, kept on its newest
+# release, with its DXVK-Sarek turned on or off. Run by /usr/bin/retroforge-steam-sarek, which keeps the
+# player's DXVK-Sarek setting.
 #
-#   steam-compat-tools on    install Proton-CachyOS (download if needed), Sarek on in it
-#   steam-compat-tools off   Sarek off in the installed one. Never downloads, never removes the tool.
+#   steam-compat-tools on    install or update Proton-CachyOS, Sarek on in it
+#   steam-compat-tools off   Sarek off in the installed one. Never touches the network, never removes
+#                            the tool.
 #
 # Every upstream DXVK needs multiViewport. Turnip gives the Adreno 610 (SM6115) that only under
 # TU_DEBUG=noconform (etc/retroforge/session.conf), and Mesa 26.3 removes noconform. DXVK-Sarek works
 # without it, and Proton-CachyOS ships it (as ARM64EC in its arm64 build), turned on by
-# PROTON_DXVK_SAREK=1. None of it is in the image (a 356 MB download, ~2.2 GB unpacked), so `on`
-# downloads it into the player's home:
-#   - the release /usr/share/retroforge/steam/proton-cachyos-arm64.pin pins, refused unless its
-#     sha256 matches;
-#   - unpacked under a temporary name in the Steam root, then renamed into
-#     <Steam root>/compatibilitytools.d/<dir>/ once it is all there, so Steam never lists half a tool;
-#   - with a .retroforge-pin in it. That is how this knows its own folders: one without it is the
-#     player's and is never touched, even under the pinned name;
-#   - older folders it installed under the same pin name are removed, but only by a later run than
-#     the one that downloaded the new version. A game still running on the old version during the
-#     download keeps its files, and a running Steam lists the new tool only after a restart anyway.
-# Once the tool is installed, `on` only checks it. One `on` at a time: a second one exits at once.
+# PROTON_DXVK_SAREK=1. None of it is in the image (a ~356 MB download, ~2.2 GB unpacked), so `on`
+# downloads it into the player's home.
+#
+# WHICH RELEASE. /usr/share/retroforge/steam/proton-cachyos-arm64.pin names a channel, not a version.
+# Every `on` (one per `steam` start while the setting is on) makes ONE request to GitHub's API, which
+# allows 60 an hour without a token, and takes the newest release that has the pin's arm64 tarball and
+# its .sha512sum: the highest Proton version first, then the latest published, so the last release of
+# an older line (cachyos-10.0-sunset-slr came out after cachyos-11.0-20260601-slr) is not taken for an
+# update. Drafts, prereleases and assets still uploading are skipped. A `tag:` in the pin holds one
+# release instead (and an optional `sha512:` its tarball); once that release is installed, nothing is
+# asked at all. When GitHub cannot be asked or names nothing usable (offline, rate limit, an error),
+# the installed tool is kept as it is.
+#
+# ONE NAME. Whatever the release, the tool is <Steam root>/compatibilitytools.d/<dir>/, and its
+# compatibilitytool.vdf is rewritten so that its internal name is <dir> and its display_name the pin's.
+# Steam keys a game's tool (CompatToolMapping in config.vdf) by that internal name, so a game set to
+# the tool keeps it through updates.
+#
+# HOW. The tarball is checked against the release's .sha512sum (and against the sha256 GitHub's API
+# lists for it, when it lists one), unpacked under a temporary name in the Steam root and made ready
+# there, then put in place by two renames, the old tree out and the new one in: Steam never lists half
+# a tool. A game running from the old tree would, after that, start wine processes and load DLLs from
+# the new one by path (and wine refuses a wineserver of another build). So while a process of the
+# player's runs from the tool (its program, working folder or a mapped file), the new tree waits,
+# verified, in <Steam root>/.retroforge-compat-tools.next and goes in at a later `on` without being
+# downloaded again. A running Steam keeps the tool's toolmanifest.vdf from its start until it restarts.
+#
+# The folder carries a .retroforge-pin (name, tag, asset, sha512, sha256). That is how this knows its
+# own folders: one without it is the player's and is never touched, even under the pin's dir. Folders
+# of the earlier scheme (one per release, named after it, with a .retroforge-pin of the same name) are
+# removed once the one-name folder is in place, each when nothing runs from it. One `on` at a time: a
+# second one exits at once.
 #
 # Sarek on = a user_settings.py with PROTON_DXVK_SAREK=1 in the tool's folder, which Proton-CachyOS
 # applies to every game run with the tool. retroforge-steam-sarek also has /usr/bin/steam export
 # PROTON_DXVK_SAREK=1; the file is for a client that does not hand its environment on to games. A
 # game's own environment wins over the file, so `PROTON_DXVK_SAREK=0 %command%` in a game's launch
-# options turns Sarek off for that game. `off` deletes only a user_settings.py that is exactly the one
-# this writes: one the player edited is theirs.
+# options turns Sarek off for that game. A user_settings.py that is not exactly the one this writes is
+# the player's: `on` never writes over it, an update carries it into the new tree, `off` leaves it.
 #
 # Steam is never told to use the tool (config.vdf is not edited). The player picks it per game
 # (Properties > Compatibility) or as the Steam Play default (docs/steam-arm64.md).
 #
-# Exit 0 (`on`: the tool's folder on stdout, or nothing when another run holds the lock), 1 when the
-# tool could not be installed (no network, a checksum mismatch, a tarball without the pinned folder),
-# 2 for a bad invocation.
+# Exit 0 (`on`: the tool's folder on stdout, or nothing when another run holds the lock), also when
+# GitHub cannot be asked and a tool is installed; 1 when the release could not be installed (nothing
+# installed and GitHub unreachable, a checksum mismatch, a tarball without its folder); 2 for a bad
+# invocation.
 #
 # TEST SEAMS (tests/test-steam-compat-tools.sh): RETROFORGE_STEAM_ROOT (also set by /usr/bin/steam),
-# RETROFORGE_STEAM_COMPAT_PIN.
+# RETROFORGE_STEAM_COMPAT_PIN (whose releases: can point at a fake API).
 import fcntl
+import fnmatch
 import hashlib
+import json
 import os
 import re
 import shutil
@@ -46,6 +71,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.parse
 import urllib.request
 
 DATA = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
@@ -54,10 +81,16 @@ PIN = os.environ.get("RETROFORGE_STEAM_COMPAT_PIN", "/usr/share/retroforge/steam
 TOOLS = os.path.join(STEAM_ROOT, "compatibilitytools.d")
 LOCK = os.path.join(STEAM_ROOT, ".retroforge-compat-tools.lock")
 TMP_PREFIX = ".retroforge-compat-tools-"
+NEXT = os.path.join(STEAM_ROOT, ".retroforge-compat-tools.next")
 MARKER = ".retroforge-pin"
 SETTINGS = "user_settings.py"
+VDF = "compatibilitytool.vdf"
 # What Steam reads from a tool's folder, and the tool's entry point.
-TOOL_FILES = ("compatibilitytool.vdf", "toolmanifest.vdf", "proton")
+TOOL_FILES = (VDF, "toolmanifest.vdf", "proton")
+# Releases looked at for the channel: the newest ones. Every release since 2026-02 has the arm64 build.
+PER_PAGE = 20
+AGENT = "retroforge-steam-compat-tools"
+NAME_OK = re.compile(r"[\w+-][\w.+-]*")  # a tag, or an asset's name: no "/", no leading "."
 
 SAREK_SETTINGS = """\
 # Written by /usr/lib/retroforge/steam-compat-tools: the player's DXVK-Sarek setting is on
@@ -74,6 +107,10 @@ class Failed(Exception):
     pass
 
 
+class Unresolved(Exception):
+    """GitHub could not be asked, or named no release to install."""
+
+
 def log(msg):
     print(f"steam-compat-tools: {msg}", file=sys.stderr, flush=True)
 
@@ -81,34 +118,40 @@ def log(msg):
 def fields(text, keys):
     found = {}
     for key in keys:
-        m = re.search(rf"^{key}:[ \t]*(\S+)", text, re.M)
-        found[key] = m.group(1) if m else None
+        m = re.search(rf"^{key}:[ \t]*(.*?)[ \t]*$", text, re.M)
+        found[key] = m.group(1) if m and m.group(1) else None
     return found
 
 
 def read_pin():
     try:
         with open(PIN, encoding="utf-8") as f:
-            pin = fields(f.read(), ("name", "version", "dir", "url", "sha256"))
-    except OSError as err:
+            pin = fields(f.read(), ("name", "releases", "asset", "dir", "display_name", "tag", "sha512"))
+    except (OSError, UnicodeDecodeError) as err:
         raise Failed(f"no pin: {err}")
-    if not all(pin.values()):
-        raise Failed(f"{PIN}: needs name, version, dir, url and sha256")
-    if not re.fullmatch(r"[0-9a-fA-F]{64}", pin["sha256"]):
-        raise Failed(f"{PIN}: sha256 is not 64 hex digits")
-    if "/" in pin["dir"] or pin["dir"].startswith("."):
+    need = ("name", "releases", "asset", "dir", "display_name")
+    if not all(pin[k] for k in need):
+        raise Failed(f"{PIN}: needs {', '.join(need)}")
+    if not pin["asset"].endswith(".tar.xz") or "/" in pin["asset"]:
+        raise Failed(f"{PIN}: asset must be a .tar.xz name (a glob)")
+    if not NAME_OK.fullmatch(pin["dir"]):
         raise Failed(f"{PIN}: dir must be a plain folder name")
+    if pin["tag"] and not NAME_OK.fullmatch(pin["tag"]):
+        raise Failed(f"{PIN}: tag is not a release tag")
+    if pin["sha512"] and not (pin["tag"] and re.fullmatch(r"[0-9a-fA-F]{128}", pin["sha512"])):
+        raise Failed(f"{PIN}: sha512 goes with a tag, as 128 hex digits")
+    pin["sha512"] = pin["sha512"] and pin["sha512"].lower()
     return pin
 
 
 def marker(path):
-    """The name, version and sha256 in a folder this installed, or None for anyone else's."""
+    """The fields of the .retroforge-pin in a folder this installed, or None for anyone else's."""
     if os.path.islink(path) or not os.path.isdir(path):
         return None
     try:
         with open(os.path.join(path, MARKER), encoding="utf-8") as f:
-            return fields(f.read(), ("name", "version", "sha256"))
-    except OSError:
+            return fields(f.read(), ("name", "tag", "asset", "sha512", "sha256"))
+    except (OSError, UnicodeDecodeError):
         return None
 
 
@@ -122,14 +165,188 @@ def complete(path):
     return all(os.path.isfile(os.path.join(path, f)) for f in TOOL_FILES)
 
 
-def installed(pin):
-    """The pinned version's folder, when this installed it and it is whole; else None."""
-    path = os.path.join(TOOLS, pin["dir"])
-    m = marker(path)
-    if (m is not None and m["name"] == pin["name"] and (m["sha256"] or "").lower() == pin["sha256"].lower()
-            and complete(path)):
-        return path
+def earlier(pin):
+    """Folders of the earlier scheme: this installed them for the pin's name, under another name."""
+    try:
+        names = sorted(os.listdir(TOOLS))
+    except FileNotFoundError:
+        return []
+    return [os.path.join(TOOLS, n) for n in names if n != pin["dir"] and ours(os.path.join(TOOLS, n), pin)]
+
+
+def holds(m, rel, pin):
+    """Whether a folder's marker m is the release rel (as GitHub lists it) and, if the pin fixes a
+    sha512, that tarball."""
+    return (m["tag"] == rel["tag"] and (not rel["sha256"] or m["sha256"] == rel["sha256"])
+            and (not pin["sha512"] or m["sha512"] == pin["sha512"]))
+
+
+# ---- GitHub ----------------------------------------------------------------------------------------
+def api(url):
+    """GitHub's API at url, as JSON. Unresolved when it cannot be asked."""
+    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json",
+                                               "X-GitHub-Api-Version": "2022-11-28", "User-Agent": AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as err:
+        if err.code in (403, 429) and err.headers.get("X-RateLimit-Remaining") == "0":
+            reset = err.headers.get("X-RateLimit-Reset") or ""
+            until = time.strftime("%H:%M", time.localtime(int(reset))) if reset.isdigit() else "later"
+            raise Unresolved(f"GitHub's API allows no more requests from this network until {until}")
+        raise Unresolved(f"GitHub's API answered {err.code} for {url}")
+    except (OSError, ValueError) as err:
+        raise Unresolved(f"could not ask GitHub's API ({url}): {err}")
+
+
+def candidate(rel, pin):
+    """What to download from a release (from the API's JSON): its tarball matching the pin's asset,
+    with that tarball's .sha512sum, both uploaded. None when it has no such pair."""
+    tag = rel.get("tag_name") if isinstance(rel, dict) else None
+    if not isinstance(tag, str) or not NAME_OK.fullmatch(tag):
+        return None
+    assets = {}
+    for a in rel.get("assets") or ():
+        if (isinstance(a, dict) and isinstance(a.get("name"), str)
+                and isinstance(a.get("browser_download_url"), str) and a.get("state", "uploaded") == "uploaded"):
+            assets[a["name"]] = a
+    for name in sorted(assets):
+        sidecar = assets.get(name[:-len(".tar.xz")] + ".sha512sum")
+        if not fnmatch.fnmatchcase(name, pin["asset"]) or not NAME_OK.fullmatch(name) or sidecar is None:
+            continue
+        digest = assets[name].get("digest")
+        digest = digest[7:].lower() if isinstance(digest, str) and digest.startswith("sha256:") else None
+        return {"tag": tag, "asset": name, "url": assets[name]["browser_download_url"],
+                "sidecar": sidecar["browser_download_url"], "sha256": digest,
+                "published": rel.get("published_at") if isinstance(rel.get("published_at"), str) else ""}
     return None
+
+
+def proton_version(tag):
+    """cachyos-11.0-20261005-slr -> (11, 0); () when the tag has none."""
+    m = re.search(r"(\d+)\.(\d+)", tag)
+    return (int(m.group(1)), int(m.group(2))) if m else ()
+
+
+def resolve(pin):
+    """The release to install: the pin's tag, or the channel's newest."""
+    if pin["tag"]:
+        found = candidate(api(f"{pin['releases']}/tags/{urllib.parse.quote(pin['tag'], safe='')}"), pin)
+        if found is None:
+            raise Unresolved(f"release {pin['tag']} has no {pin['asset']} with its .sha512sum")
+        return found
+    releases = api(f"{pin['releases']}?per_page={PER_PAGE}")
+    if not isinstance(releases, list):
+        raise Unresolved("GitHub's API did not answer with a list of releases")
+    found = [c for c in (candidate(r, pin) for r in releases
+                         if isinstance(r, dict) and not r.get("draft") and not r.get("prerelease")) if c]
+    if not found:
+        raise Unresolved(f"none of the newest {len(releases)} releases has {pin['asset']} with its .sha512sum")
+    return max(found, key=lambda c: (proton_version(c["tag"]), c["published"]))
+
+
+def sidecar_sha512(rel):
+    """The sha512 in the release's .sha512sum, refused unless it names the tarball."""
+    req = urllib.request.Request(rel["sidecar"], headers={"User-Agent": AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            text = r.read(4096).decode("utf-8", "replace")
+    except (OSError, ValueError) as err:
+        raise Failed(f"could not download {rel['sidecar']}: {err}")
+    m = re.match(r"\s*([0-9a-fA-F]{128})(?:[ \t]+\*?(\S+))?", text)
+    if not m or (m.group(2) and m.group(2) != rel["asset"]):
+        raise Failed(f"{rel['sidecar']} is not a sha512sum of {rel['asset']}")
+    return m.group(1).lower()
+
+
+def download(rel, dest, sha512):
+    """The release's tarball -> dest, refused unless its sha512 matches (and the sha256 GitHub lists,
+    if it lists one). Logs every 10%. Returns the sha256."""
+    h512, h256 = hashlib.sha512(), hashlib.sha256()
+    req = urllib.request.Request(rel["url"], headers={"User-Agent": AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r, open(dest, "wb") as out:
+            total = int(r.headers.get("Content-Length") or 0)
+            done, next_pct = 0, 10
+            while chunk := r.read(1 << 20):
+                h512.update(chunk)
+                h256.update(chunk)
+                out.write(chunk)
+                done += len(chunk)
+                if total and done * 100 >= next_pct * total and next_pct < 100:
+                    log(f"{next_pct}% ({done // 1000000} of {total // 1000000} MB)")
+                    next_pct += 10
+    except (OSError, ValueError) as err:
+        raise Failed(f"could not download {rel['url']}: {err}")
+    if h512.hexdigest() != sha512:
+        raise Failed(f"sha512 mismatch for {rel['url']}: got {h512.hexdigest()}, want {sha512}")
+    if rel["sha256"] and h256.hexdigest() != rel["sha256"]:
+        raise Failed(f"sha256 mismatch for {rel['url']}: got {h256.hexdigest()}, GitHub lists {rel['sha256']}")
+    return h256.hexdigest()
+
+
+# ---- compatibilitytool.vdf -------------------------------------------------------------------------
+def vdf_tokens(text):
+    """(kind, value, start, end) for each token of a VDF text: kind "str", "{" or "}". Comments are
+    skipped. Only quoted strings: ValueError on anything else."""
+    i = 0
+    while i < len(text):
+        c = text[i]
+        if c.isspace():
+            i += 1
+        elif text.startswith("//", i):
+            end = text.find("\n", i)
+            i = len(text) if end < 0 else end
+        elif c in "{}":
+            yield c, c, i, i + 1
+            i += 1
+        elif c == '"':
+            j, value = i + 1, []
+            while j < len(text) and text[j] != '"':
+                if text[j] == "\\" and j + 1 < len(text):
+                    j += 1
+                value.append(text[j])
+                j += 1
+            if j >= len(text):
+                raise ValueError("a string is not closed")
+            yield "str", "".join(value), i, j + 1
+            i = j + 1
+        else:
+            raise ValueError(f"unexpected {c!r} at {i}")
+
+
+def quote(s):
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def rename_tool(text, name, display):
+    """compatibilitytool.vdf's text with its one tool's internal name and display_name set. Comments
+    and every other key stay. ValueError when it is not one tool with flat keys."""
+    toks = list(vdf_tokens(text))
+    if (len(toks) < 9 or [t[0] for t in toks[:6]] != ["str", "{", "str", "{", "str", "{"]
+            or [t[0] for t in toks[-3:]] != ["}", "}", "}"]
+            or toks[0][1].lower() != "compatibilitytools" or toks[2][1].lower() != "compat_tools"):
+        raise ValueError("not one tool under compatibilitytools/compat_tools")
+    body = toks[6:-3]
+    if len(body) % 2 or any(t[0] != "str" for t in body):
+        raise ValueError("the tool's keys are not flat")
+    edits = [(toks[4][2], toks[4][3], quote(name))]
+    for key, value in zip(body[::2], body[1::2]):
+        if key[1].lower() == "display_name":
+            edits.append((value[2], value[3], quote(display)))
+            break
+    else:
+        edits.append((toks[5][3], toks[5][3], f"\n      \"display_name\" {quote(display)}"))
+    for start, end, new in sorted(edits, reverse=True):
+        text = text[:start] + new + text[end:]
+    return text
+
+
+# ---- the folders -----------------------------------------------------------------------------------
+def write(path, text):
+    with open(path + ".part", "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(path + ".part", path)
 
 
 def our_settings(path):
@@ -148,10 +365,7 @@ def sarek_on(tool):
         if not our_settings(path):
             log(f"{path} is the player's own; not writing PROTON_DXVK_SAREK into it")
         return
-    tmp = path + ".part"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(SAREK_SETTINGS)
-    os.replace(tmp, path)
+    write(path, SAREK_SETTINGS)
 
 
 def sarek_off(pin):
@@ -172,6 +386,46 @@ def sarek_off(pin):
             log(f"{path} is the player's own; leaving it (it may still turn DXVK-Sarek on)")
 
 
+def settings_into(new, final, pin):
+    """The user_settings.py for a tree about to go in: the player's own from the tool (or, before the
+    first one-name install, from a folder of the earlier scheme), else the Sarek one."""
+    for tool in [final] if ours(final, pin) else earlier(pin):
+        path = os.path.join(tool, SETTINGS)
+        if os.path.lexists(path) and not our_settings(path):
+            shutil.copy2(path, os.path.join(new, SETTINGS), follow_symlinks=False)
+            log(f"keeping the player's own {SETTINGS} (from {os.path.basename(tool)})")
+            return
+    sarek_on(new)
+
+
+def in_use(path):
+    """Whether a process of the player's runs from path: its program, working folder or a mapped file
+    there. Matched on the path's last two parts (compatibilitytools.d/<dir>/), which is also what a
+    process in Steam's runtime container shows."""
+    needle = f"/{os.path.basename(os.path.dirname(path))}/{os.path.basename(path)}/"
+    try:
+        pids = [p for p in os.listdir("/proc") if p.isdigit() and int(p) != os.getpid()]
+    except OSError:
+        return False
+    for pid in pids:
+        proc = f"/proc/{pid}"
+        try:
+            if os.stat(proc).st_uid != os.getuid():
+                continue
+            for link in ("exe", "cwd"):
+                try:
+                    if needle in os.readlink(f"{proc}/{link}") + "/":
+                        return True
+                except OSError:
+                    pass
+            with open(f"{proc}/maps", encoding="utf-8", errors="replace") as f:
+                if any(needle in line for line in f):
+                    return True
+        except OSError:
+            continue
+    return False
+
+
 def discard(path):
     """Takes path out of Steam's sight in one rename, then deletes it."""
     trash = tempfile.mkdtemp(dir=STEAM_ROOT, prefix=TMP_PREFIX)
@@ -179,13 +433,17 @@ def discard(path):
     shutil.rmtree(trash, ignore_errors=True)
 
 
-def prune(pin):
-    """Removes older versions this installed under the pin's name. Nothing else."""
-    for name in sorted(os.listdir(TOOLS)):
-        path = os.path.join(TOOLS, name)
-        if name != pin["dir"] and ours(path, pin):
-            log(f"removing {name}, an older {pin['name']}")
-            discard(path)
+def retire(pin):
+    """Removes folders of the earlier scheme, now that the one-name folder is in place. One that a
+    process runs from stays until a later run."""
+    for path in earlier(pin):
+        name = os.path.basename(path)
+        if in_use(path):
+            log(f"keeping {name}, of the earlier per-release scheme, while something runs from it")
+            continue
+        log(f"removing {name}, of the earlier per-release scheme: a game set to it now needs "
+            f"\"{pin['display_name']}\"")
+        discard(path)
 
 
 def sweep():
@@ -196,58 +454,79 @@ def sweep():
             shutil.rmtree(path, ignore_errors=True)
 
 
-def download(url, dest, sha256):
-    """url -> dest, refusing it unless its sha256 matches. Logs every 10%."""
-    digest = hashlib.sha256()
+def staged(rel, pin):
+    """NEXT, when it holds rel ready to go in. A stale one is removed."""
+    if not os.path.lexists(NEXT):
+        return None
+    m = marker(NEXT)
+    if m is not None and m["name"] == pin["name"] and holds(m, rel, pin) and complete(NEXT):
+        log(f"{rel['tag']} was downloaded and checked before; putting it in")
+        return NEXT
+    discard(NEXT)
+    return None
+
+
+def prepare(rel, pin, tmp):
+    """Downloads, checks and unpacks rel under tmp, ready to go in: the pin's name in its
+    compatibilitytool.vdf, and its .retroforge-pin. Returns its folder."""
+    sha512 = pin["sha512"] or sidecar_sha512(rel)
+    log(f"downloading {rel['asset']} ({rel['tag']}) from {rel['url']}")
+    archive = os.path.join(tmp, "tool.tar.xz")
+    sha256 = download(rel, archive, sha512)
+    tree = os.path.join(tmp, "tree")
+    os.mkdir(tree)
+    res = subprocess.run(["tar", "--no-same-owner", "-xJf", archive, "-C", tree],
+                         stderr=subprocess.PIPE, text=True)
+    os.unlink(archive)
+    if res.returncode != 0:
+        raise Failed(f"could not unpack {rel['url']}: {res.stderr.strip()}")
+    top = rel["asset"][:-len(".tar.xz")]
+    new = os.path.join(tree, top)
+    if os.path.islink(new) or not os.path.isdir(new) or not complete(new):
+        raise Failed(f"{rel['url']} has no {top}/ with {', '.join(TOOL_FILES)}")
+    vdf = os.path.join(new, VDF)
     try:
-        with urllib.request.urlopen(url, timeout=60) as r, open(dest, "wb") as out:
-            total = int(r.headers.get("Content-Length") or 0)
-            done, next_pct = 0, 10
-            while chunk := r.read(1 << 20):
-                digest.update(chunk)
-                out.write(chunk)
-                done += len(chunk)
-                if total and done * 100 >= next_pct * total and next_pct < 100:
-                    log(f"{next_pct}% ({done // 1000000} of {total // 1000000} MB)")
-                    next_pct += 10
-    except OSError as err:
-        raise Failed(f"could not download {url}: {err}")
-    if digest.hexdigest() != sha256.lower():
-        raise Failed(f"sha256 mismatch for {url}: got {digest.hexdigest()}, want {sha256}")
+        with open(vdf, encoding="utf-8") as f:
+            text = rename_tool(f.read(), pin["dir"], pin["display_name"])
+    except (OSError, ValueError) as err:
+        raise Failed(f"could not name {top}'s {VDF} {pin['dir']}: {err}")
+    write(vdf, text)
+    write(os.path.join(new, MARKER), f"name: {pin['name']}\ntag: {rel['tag']}\nasset: {rel['asset']}\n"
+                                     f"sha512: {sha512}\nsha256: {sha256}\n")
+    return new
 
 
-def install(pin):
-    """Downloads, checks and unpacks the pinned version, then renames it into compatibilitytools.d."""
-    log(f"downloading {pin['dir']} from {pin['url']}")
+def update(rel, pin, final, was):
+    """Puts rel in as final: from NEXT when it is there, else downloaded. Waits in NEXT while a
+    process runs from final."""
     started = time.monotonic()
     tmp = tempfile.mkdtemp(dir=STEAM_ROOT, prefix=TMP_PREFIX)
     try:
-        archive = os.path.join(tmp, "tool.tar.xz")
-        download(pin["url"], archive, pin["sha256"])
-        tree = os.path.join(tmp, "tree")
-        os.mkdir(tree)
-        res = subprocess.run(["tar", "--no-same-owner", "-xJf", archive, "-C", tree],
-                             stderr=subprocess.PIPE, text=True)
-        os.unlink(archive)
-        if res.returncode != 0:
-            raise Failed(f"could not unpack {pin['url']}: {res.stderr.strip()}")
-        new = os.path.join(tree, pin["dir"])
-        if os.path.islink(new) or not os.path.isdir(new) or not complete(new):
-            raise Failed(f"{pin['url']} has no {pin['dir']}/ with {', '.join(TOOL_FILES)}")
-        with open(os.path.join(new, MARKER), "w", encoding="utf-8") as f:
-            f.write(f"name: {pin['name']}\nversion: {pin['version']}\nsha256: {pin['sha256']}\n")
-        sarek_on(new)
-        final = os.path.join(TOOLS, pin["dir"])
+        new = staged(rel, pin) or prepare(rel, pin, tmp)
+        if os.path.lexists(final) and in_use(final):
+            if new != NEXT:
+                os.rename(new, NEXT)
+            log(f"a game runs from {final}: {rel['tag']} is ready and goes in at the next `steam` "
+                f"start with nothing running from it")
+            return
+        settings_into(new, final, pin)
         if os.path.lexists(final):
-            # Ours, but not whole or not this build. Checked again: the download took minutes.
-            if not ours(final, pin):
-                raise Failed(f"{final} appeared while downloading and is not ours; leaving it alone")
-            discard(final)
-        os.rename(new, final)
+            os.rename(final, os.path.join(tmp, "old"))
+            try:
+                os.rename(new, final)
+            except OSError:
+                os.rename(os.path.join(tmp, "old"), final)
+                raise
+        else:
+            os.rename(new, final)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
-    log(f"installed {final} in {time.monotonic() - started:.0f} s. Steam lists it from its next start.")
-    return final
+    took = f"in {time.monotonic() - started:.0f} s"
+    if was:
+        log(f"updated {final} from {was} to {rel['tag']} {took}")
+    else:
+        log(f"installed {rel['tag']} as {final} {took}. Steam lists it as \"{pin['display_name']}\" "
+            f"from its next start.")
 
 
 def on(pin):
@@ -259,18 +538,32 @@ def on(pin):
             log("another steam-compat-tools is already running; leaving it to that one")
             return None
         sweep()
-        path = installed(pin)
         final = os.path.join(TOOLS, pin["dir"])
-        if path is not None:
-            sarek_on(path)
-            prune(pin)
-        elif os.path.lexists(final) and not ours(final, pin):
+        if os.path.lexists(final) and not ours(final, pin):
             log(f"{final} is already there and was not installed by RetroForge; leaving it alone")
-            path = final
-            prune(pin)
+            return final
+        have = marker(final) if complete(final) else None
+        if have:
+            sarek_on(final)
+        if have and pin["tag"] and have["tag"] == pin["tag"] and (not pin["sha512"] or have["sha512"] == pin["sha512"]):
+            current = True  # the pin's own release is in: nothing to ask
         else:
-            path = install(pin)
-    return path
+            try:
+                rel = resolve(pin)
+            except Unresolved as err:
+                if not have:
+                    raise Failed(f"{err}; no {pin['name']} is installed")
+                log(f"{err}; keeping {have['tag'] or 'the installed release'}")
+                current = None  # unknown: a release waiting in NEXT stays
+            else:
+                current = bool(have) and holds(have, rel, pin)
+                if not current:
+                    update(rel, pin, final, have and have["tag"])
+        if current and os.path.lexists(NEXT):
+            discard(NEXT)  # a release that waited there and is no longer the one to install
+        if marker(final) is not None and complete(final):
+            retire(pin)
+    return final
 
 
 def main(argv):

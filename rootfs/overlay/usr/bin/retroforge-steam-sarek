@@ -9,9 +9,10 @@
 # multiViewport, which Turnip gives the Adreno 610 (SM6115) only under TU_DEBUG=noconform
 # (etc/retroforge/session.conf), and Mesa 26.3 removes that. Proton-CachyOS ships Sarek, and this is
 # the one switch for it:
-#   on:  Proton-CachyOS's arm64 build is installed or updated in the BACKGROUND
-#        (/usr/lib/retroforge/steam-compat-tools on, a 356 MB download the first time), with Sarek on
-#        in it, and /usr/bin/steam exports PROTON_DXVK_SAREK=1. The download runs as a user unit:
+#   on:  Proton-CachyOS's arm64 build is installed, or updated to its newest release, in the
+#        BACKGROUND (/usr/lib/retroforge/steam-compat-tools on: one GitHub API request, and a ~356 MB
+#        download the first time and for each new release), with Sarek on in it, and /usr/bin/steam
+#        exports PROTON_DXVK_SAREK=1. The download runs as a user unit:
 #        nothing waits for it, and it is not under OGUI's reaper, which stops everything under a game
 #        when the game ends. Without a user manager it falls back to setsid. Log:
 #        ~/.local/share/retroforge/steam-compat-tools.log.

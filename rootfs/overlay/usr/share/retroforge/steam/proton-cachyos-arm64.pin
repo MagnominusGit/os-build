@@ -3,9 +3,9 @@
 #
 # Read by /usr/lib/retroforge/steam-compat-tools, which runs in the background while the player's
 # DXVK-Sarek setting is on (retroforge-steam-sarek; on by default on the SM6115 only). It downloads
-# this into the player's home, checks the sha256, and installs it as
-# <Steam root>/compatibilitytools.d/<dir>/. Steam lists it from its next start on. Nothing selects it:
-# the player does, per game or as the Steam Play default (docs/steam-arm64.md).
+# the release into the player's home and installs it as <Steam root>/compatibilitytools.d/<dir>/.
+# Steam lists it from its next start on. Nothing selects it: the player does, per game or as the Steam
+# Play default (docs/steam-arm64.md).
 #
 # Why: every upstream DXVK (1.10.3, 2.x, 3.x) needs multiViewport, which Turnip does not give the A610.
 # Today it only gets it because session.conf sets TU_DEBUG=noconform there, which Mesa 26.3 removes
@@ -13,23 +13,43 @@
 # works without it, and its arm64 build has Sarek as ARM64EC. PROTON_DXVK_SAREK=1 turns it on. Its
 # maintainers call the arm64 build untested.
 #
-# Not in the image: the tarball is 356 MB and unpacks to ~2.2 GB, and a root slot is 2 GB.
+# Not in the image: the tarball is ~356 MB and unpacks to ~2.2 GB, and a root slot is 2 GB.
 # Its toolmanifest.vdf requires tool appid 4185400 (Steam Linux Runtime 4.0, arm64), which Steam
-# downloads itself. A local scan of this build found nothing beyond ARMv8.0 except LSE atomics
-# (kernel/patches/0025 covers those), apart from libraries that pick their code path at run time.
+# downloads itself. A local scan of cachyos-11.0-20261005-slr found nothing beyond ARMv8.0 except LSE
+# atomics (kernel/patches/0025 covers those), apart from libraries that pick their code path at run
+# time. A later release is not scanned before players get it.
 #
-# Fields: name is the family (the helper removes older folders it installed under the same name, never
-# anyone else's), version is the release tag, dir is the tarball's top folder, which is also the tool's
-# name in its compatibilitytool.vdf and the folder under compatibilitytools.d. The URL is the GitHub
-# release asset. The sha256 was computed on 2026-10-16 from a download that matched the release's own
-# .sha512sum (81ca1b66...b1c0fa); the asset is 356312716 bytes.
+# A CHANNEL, NOT A VERSION. This names where releases come from and which build, and the device
+# resolves what is published now: at each `steam` start while the setting is on, ONE request to
+# GitHub's API (60 an hour are allowed without a token), and the newest release that has the asset
+# below and its .sha512sum. Newest = the highest Proton version, then the latest published:
+# cachyos-10.0-sunset-slr came out a week after cachyos-11.0-20260601-slr and is not an update. Drafts
+# and prereleases are skipped. The tarball is checked against that .sha512sum and the sha256 GitHub
+# lists for it. Offline, rate limited or on any API error, the installed release stays. A new release
+# replaces the old one in place (in the same run, or at the next start while a game runs from the old
+# one), under the same name, so a game set to the tool keeps it.
 #
-# TO BUMP: take the next release's *-slr-arm64.tar.xz from github.com/CachyOS/proton-cachyos/releases,
-# check it against its .sha512sum, and set version + dir + url + sha256 together. Players get it on
-# their next `steam`, and the old folder goes on the `steam` after that. The tool's name changes with
-# every release, so a game set to the old one has to be set to the new one.
+# Fields (one per line, `key: value`, no trailing comments):
+#   name          the family, written into each folder's .retroforge-pin. A folder without that marker
+#                 is never touched.
+#   releases      GitHub's API for the repo's releases: ?per_page=20 is added for the channel,
+#                 /tags/<tag> for a tag.
+#   asset         the tarball, as a glob. Its .sha512sum is <name without .tar.xz>.sha512sum next to
+#                 it, and its top folder is <name without .tar.xz>.
+#   dir           the folder under compatibilitytools.d AND the tool's internal name: its
+#                 compatibilitytool.vdf is rewritten so. Steam keys a game's tool (CompatToolMapping in
+#                 config.vdf) by that name, so a game set to it keeps it across releases. Changing it
+#                 makes every player select the tool again.
+#   display_name  what Steam shows for it.
+#   tag           OPTIONAL: hold one release instead of following the channel, for a reproducible
+#                 build or to keep players off a bad release (e.g. tag: cachyos-11.0-20261005-slr).
+#                 Once that release is installed, nothing is asked.
+#   sha512        OPTIONAL, only with tag: the tarball's sha512, used instead of its .sha512sum.
+#
+# Resolved on 2026-10-16: cachyos-11.0-20261005-slr, proton-cachyos-11.0-20261005-slr-arm64.tar.xz,
+# 356312716 bytes, sha512 81ca1b66...b1c0fa (its .sha512sum), sha256 e59b646e...cd06c37 (GitHub's).
 name: proton-cachyos-arm64
-version: cachyos-11.0-20261005-slr
-dir: proton-cachyos-11.0-20261005-slr-arm64
-url: https://github.com/CachyOS/proton-cachyos/releases/download/cachyos-11.0-20261005-slr/proton-cachyos-11.0-20261005-slr-arm64.tar.xz
-sha256: e59b646e73de4af21ff2f6c795b28e7b6c889214b3c6daf8e65a56634cd06c37
+releases: https://api.github.com/repos/CachyOS/proton-cachyos/releases
+asset: proton-cachyos-*-slr-arm64.tar.xz
+dir: proton-cachyos-arm64-retroforge
+display_name: Proton-CachyOS arm64 (RetroForge)
