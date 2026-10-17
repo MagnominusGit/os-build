@@ -119,9 +119,11 @@ Extra rows, before Delete:
 - `Revert to <previous>` when `previous` is set.
 - `Install tested version (Y)` when installed != tested.
 
-`check` runs when the Emulators screen opens (async, the rows render first from `list` and
-update when it returns); offline shows no Update and no error noise. Credits keep showing the
-installed tag.
+`check` runs ONLY when the player presses "Check for a newer version" (changed 2026-10-17 on HW:
+the unauthenticated 60 requests/hour per IP ran out; an automatic check on list focus spent 2 per
+emulator scrolled past). It says what it found; an Update replaces Open when there is a newer build.
+A used-up rate limit is retroforge-emu exit 6, shown as GitHub's limit with the wait, never as
+"check the network connection". Credits keep showing the installed tag.
 
 ## Phase 3 — catalog migration
 
