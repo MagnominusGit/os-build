@@ -22,8 +22,11 @@ static func credit_text(emu: Dictionary) -> String:
 
 
 ## A release tag as the player reads it: pkgforge-dev's "<version>@<date>_<id>" is just <version>;
-## a nightly (catalog tag "nightly", installed as retroforge-emu's "nightly-<id>") says so.
+## a nightly (catalog tag "nightly", installed as retroforge-emu's "nightly-<id>") says so; RPCS3's
+## "build-<40 hex commit>" keeps the commit's first 8 digits.
 static func version_text(tag: String) -> String:
 	if tag == "nightly" or tag.begins_with("nightly-"):
 		return ("Nightly " + tag.trim_prefix("nightly").trim_prefix("-")).strip_edges()
+	if tag.begins_with("build-") and tag.length() == 46:
+		return "Build " + tag.substr(6, 8)
 	return tag.get_slice("@", 0)

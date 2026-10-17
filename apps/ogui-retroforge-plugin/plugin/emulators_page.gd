@@ -4,14 +4,16 @@ extends ScrollContainer
 ## the one focused in the screen's list (show_emulator).
 ##
 ## Its block: who made it (author, homepage, licence and its link:
-## the attribution every emulator's licence asks for), installed vs pinned version and size, and
-## a button that is Download, Update or Open (the emulator's own UI, `retroforge-launch --gui`), plus
-## Delete once installed (a nightly entry -- catalog "channel": "nightly", Cemu -- adds an Update
-## row instead: whether a newer build exists is only known online, so the button asks), the player's
-## choice for each of the emulator's options (options.json: renderer, resolution, aspect...; see
-## emu_options.gd), and the player's "Run on fast cores" default for that emulator (every launch of it,
-## Open included, unless a game overrides it). Everything else goes through /usr/bin/retroforge-emu (list / install / remove);
-## the page never downloads or verifies anything itself.
+## the attribution every emulator's licence asks for), installed vs tested version and size, and
+## a button that is Download, Update or Open (the emulator's own UI, `retroforge-launch --gui`)
+## -- emu_state.gd decides which, and the Revert / Install tested rows (plan emulator-latest) --, the
+## player's choice for each of the emulator's options (options.json: renderer, resolution, aspect...;
+## see emu_options.gd), the player's "Run on fast cores" default for that emulator (every launch of
+## it, Open included, unless a game overrides it), and Delete once installed. Whether upstream has a
+## newer build is only known online: `retroforge-emu check` runs in the background when an emulator
+## is shown, and the rows are rebuilt when it answers (offline: no Update, no error). Everything
+## else goes through /usr/bin/retroforge-emu (list / check / install / rollback / remove); the page
+## never downloads or verifies anything itself.
 ##
 ## Built in code on the pattern of OGUI's own settings pages (library_settings_menu.tscn): a
 ## StateWatcher on this page's State hands focus to the page's FocusGroup, and Back pops the
@@ -22,10 +24,12 @@ const LAUNCHER := "/usr/bin/retroforge-launch"
 const LaunchArgs := preload("launch_args.gd")
 const Credits := preload("credits.gd")
 const EmuOptions := preload("emu_options.gd")
+const EmuState := preload("emu_state.gd")
 const PROGRESS_POLL := 0.5  # s between download progress samples
+const CHECK_TIMEOUT := 60.0  # s a background `check` may take (two GitHub calls)
 const EXIT_TEXT := {
 	3: "Download failed: check the network connection.",
-	4: "The download did not match the version RetroForge tested; nothing was changed.",
+	4: "The download could not be verified; nothing was changed.",
 	5: "Not enough free space, or the emulators folder is not writable.",
 }
 
@@ -53,6 +57,8 @@ var _focus_group: FocusGroup
 var _busy := {}  # emulator id -> true while an install or remove runs
 var _inside := false  # this page's state is the current one (it has the focus)
 var _generation := 0  # refresh() calls: only the latest one builds rows
+var _checks := {}  # emulator id -> its `retroforge-emu check` answer ({"latest", "error"})
+var _checking := {}  # emulator id -> true while its check runs
 
 
 func setup(page_state: State, state_machine: StateMachine) -> void:
@@ -118,6 +124,31 @@ func load_catalog() -> void:
 func show_emulator(id: String) -> void:
 	emulator_id = id
 	refresh()
+	_check(id)
+
+
+## Ask upstream for the emulator's newest build in the background (retroforge-emu caches the
+## answer for an hour); the rows are rebuilt if it is still the one shown.
+func _check(id: String) -> void:
+	if _checking.has(id) or not catalog.get(id, {}).get("follows_latest", false):
+		return
+	_checking[id] = true
+	var cmd := Command.create(EMU_TOOL, ["check", id])
+	cmd.timeout = CHECK_TIMEOUT
+	var code := -1
+	if cmd.execute() == OK:
+		code = await cmd.finished as int
+	_checking.erase(id)
+	var parsed = JSON.parse_string(cmd.stdout) if code == 0 else null
+	var answer = parsed.get("emulators", {}).get(id) if parsed is Dictionary else null
+	if not answer is Dictionary:
+		logger.warn("retroforge-emu check %s exited %d: %s" % [id, code, cmd.stderr])
+		return
+	if answer.get("error") != null:
+		logger.info("%s: no newest build known: %s" % [id, answer["error"]])
+	_checks[id] = answer
+	if id == emulator_id and not _busy.has(id):
+		refresh()
 
 
 ## Rebuild the rows of the shown emulator from the catalog last read.
@@ -193,41 +224,9 @@ func _add_credit(emu: Dictionary) -> void:
 func _add_emulator(id: String, emu: Dictionary) -> void:
 	var name_text := str(emu.get("name", id))
 	_add_credit(emu)
-	var size := int(emu.get("size", 0))
-	var pinned := Credits.version_text(str(emu.get("pinned", "?")))
 	var installed = emu.get("installed")
-	var nightly: bool = emu.get("channel") == "nightly"
-	var mb := size / 1048576
-
-	var main = row_scene.instantiate()
-	if installed == null:
-		main.text = "Not installed"
-		if nightly:
-			main.description = "Latest nightly build, about %d MB. Not tested by RetroForge." % mb
-		else:
-			main.description = "Version %s, %d MB." % [pinned, mb]
-		main.button_text = "Download"
-		main.button_up.connect(_install.bind(id, name_text, str(emu.get("pinned", "")), size, main, null))
-	elif nightly:
-		main.text = Credits.version_text(str(installed))
-		main.description = "Installed. Nightly builds come straight from upstream, untested by RetroForge."
-		main.button_text = "Open"
-		main.button_up.connect(_open.bind(id, name_text))
-	elif emu.get("update", false):
-		main.text = "Version " + Credits.version_text(str(installed))
-		main.description = "Update to %s available, %d MB." % [pinned, mb]
-		main.button_text = "Update"
-		main.button_up.connect(_install.bind(id, name_text, str(emu.get("pinned", "")), size, main, installed))
-	else:
-		main.text = "Version " + Credits.version_text(str(installed))
-		# PortMaster (catalog "self_update"): it offers its own updates when opened.
-		main.description = "Installed. Updates itself: open it to check." if emu.get("self_update", false) else "Installed."
-		main.button_text = "Open"
-		main.button_up.connect(_open.bind(id, name_text))
-	main.separator_visible = false
-	_rows.add_child(main)
-	if _busy.has(id):
-		main.disabled = true
+	var state := EmuState.rows(id, emu, _checks.get(id, {}))
+	_add_action_row(id, name_text, emu, state.main)
 
 	for option in EmuOptions.options_for(id):
 		_add_option(id, name_text, option)
@@ -236,20 +235,14 @@ func _add_emulator(id: String, emu: Dictionary) -> void:
 	fast.text = "Run on fast cores"
 	fast.description = "Games can override this in their own settings."
 	fast.button_pressed = LaunchArgs.emulator_fast_cores(id)
-	fast.separator_visible = installed == null  # the block's last row when there is no Delete
+	fast.separator_visible = installed == null and state.extra.is_empty()  # the block's last row
 	fast.toggled.connect(_set_fast_cores.bind(id, name_text, fast))
 	_rows.add_child(fast)
 
-	if installed != null and nightly:
-		var update = row_scene.instantiate()
-		update.text = "Newer nightly"
-		update.description = "Looks for a newer nightly build and installs it (about %d MB)." % mb
-		update.button_text = "Update"
-		update.separator_visible = false
-		update.button_up.connect(_install.bind(id, name_text, str(emu.get("pinned", "")), size, update, installed))
-		_rows.add_child(update)
-		if _busy.has(id):
-			update.disabled = true
+	for row in state.extra:
+		_add_action_row(id, name_text, emu, row)
+	if installed == null and not state.extra.is_empty():
+		_rows.get_child(_rows.get_child_count() - 1).separator_visible = true
 
 	if installed != null:
 		var remove = row_scene.instantiate()
@@ -261,37 +254,80 @@ func _add_emulator(id: String, emu: Dictionary) -> void:
 		_rows.add_child(remove)
 
 
-## `previous` is the installed build (null for a first download): a nightly Update that finds the
-## same build changes nothing, and says so.
-func _install(id: String, name_text: String, tag: String, size: int, row: Control, previous: Variant) -> void:
+## One row of emu_state.gd: its button runs retroforge-emu with the row's args, or Open without.
+func _add_action_row(id: String, name_text: String, emu: Dictionary, spec: Dictionary) -> Control:
+	var row = row_scene.instantiate()
+	row.text = spec.text
+	row.description = spec.description
+	row.button_text = spec.button
+	row.separator_visible = false
+	var args: Array = spec.args
+	if args.is_empty():
+		row.button_up.connect(_open.bind(id, name_text))
+	elif args[0] == "rollback":
+		row.button_up.connect(_rollback.bind(id, name_text, row))
+	else:
+		row.button_up.connect(_install.bind(id, name_text, args, emu, row))
+	_rows.add_child(row)
+	if _busy.has(id):
+		row.disabled = true
+	return row
+
+
+## Download / Update / Install tested: `retroforge-emu <args>`. The installed build before (null for a
+## first download) tells an Update that found nothing newer from one that installed.
+func _install(id: String, name_text: String, args: Array, emu: Dictionary, row: Control) -> void:
 	if _busy.has(id):
 		return
 	_busy[id] = true
 	row.disabled = true
 	row.description = "Downloading..."
-	var cmd := Command.create(EMU_TOOL, ["install", id])
+	var before = emu.get("installed")
+	var argv: Array[String] = []
+	argv.assign(args)  # Command.create takes Array[String]
+	var cmd := Command.create(EMU_TOOL, argv)
 	if cmd.execute() != OK:
 		_busy.erase(id)
 		_notify("Could not start the download of " + name_text)
 		_reload()
 		return
-	# Progress from the size of retroforge-emu's hidden .part file.
-	var part := OS.get_environment("HOME").path_join("emulators/%s/.%s.AppImage.part" % [id, tag])
+	# Progress from the size of retroforge-emu's hidden .part file, named after the catalog's tag;
+	# the size is the tested build's, close enough for a newer one.
+	var part := OS.get_environment("HOME").path_join("emulators/%s/.%s.AppImage.part" % [id, str(emu.get("pinned", ""))])
 	var poll := Timer.new()
 	poll.wait_time = PROGRESS_POLL
 	add_child(poll)
-	poll.timeout.connect(_show_progress.bind(part, size, row))
+	poll.timeout.connect(_show_progress.bind(part, int(emu.get("size", 0)), row))
 	poll.start()
 	var code := await cmd.finished as int
 	poll.queue_free()
 	_busy.erase(id)
-	if code == 0 and previous != null and _installed(id) == previous:
+	if code == 0 and before != null and _installed(id) == before:
 		_notify(name_text + " is up to date")
 	elif code == 0:
 		_notify(name_text + " installed")
 	else:
-		logger.warn("retroforge-emu install %s exited %d: %s" % [id, code, cmd.stderr])
+		logger.warn("retroforge-emu %s exited %d: %s" % [" ".join(args), code, cmd.stderr])
 		_notify(EXIT_TEXT.get(code, "Installing %s failed." % name_text))
+	_reload()
+
+
+## Revert: back to the build kept from before the last switch (offline, instant).
+func _rollback(id: String, name_text: String, row: Control) -> void:
+	if _busy.has(id):
+		return
+	_busy[id] = true
+	row.disabled = true
+	var cmd := Command.create(EMU_TOOL, ["rollback", id])
+	var code := -1
+	if cmd.execute() == OK:
+		code = await cmd.finished as int
+	_busy.erase(id)
+	if code == 0:
+		_notify("%s is back to %s" % [name_text, Credits.version_text(str(_installed(id)))])
+	else:
+		logger.warn("retroforge-emu rollback %s exited %d: %s" % [id, code, cmd.stderr])
+		_notify(name_text + " could not be reverted")
 	_reload()
 
 

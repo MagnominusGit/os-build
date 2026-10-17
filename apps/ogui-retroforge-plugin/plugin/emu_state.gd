@@ -1,0 +1,79 @@
+extends RefCounted
+
+## What the Emulators page offers for one emulator (plan emulator-latest, Phase 2), from its
+## `retroforge-emu list` entry and its `retroforge-emu check` answer ({} until one arrives, or
+## offline). No OGUI types, so tests/test-plugin.sh runs it in a stock headless Godot.
+##
+## rows() -> {"main": row, "extra": [row...]}; a row is {"text", "description", "button",
+## "args"}: the retroforge-emu arguments its button runs (["install", id], ["install", id,
+## "--tested"], ["rollback", id]), or [] for Open. Extra rows go before Delete.
+##
+## Tested = the catalog's pin ("tested" in list), the build RetroForge checked. An entry that
+## follows upstream ("follows_latest") installs upstream's newest by default; the page says when the
+## installed build is not the tested one, and offers it back. A failed or missing check offers no
+## Update and shows no error: offline is not a fault.
+
+const Credits := preload("credits.gd")
+
+
+static func rows(id: String, emu: Dictionary, check: Dictionary) -> Dictionary:
+	var installed = emu.get("installed")
+	var tested = emu.get("tested")
+	var follows: bool = emu.get("follows_latest", false) == true
+	var self_update: bool = emu.get("self_update", false) == true
+	var nightly: bool = tested == null and follows  # no tested build at all (Cemu)
+	var latest = check.get("latest") if check.get("error") == null else null
+	var mb := int(emu.get("size", 0)) / 1048576
+	var install := ["install", id]
+	var main := {"button": "Open", "args": []}
+
+	if installed == null:
+		main.text = "Not installed"
+		main.button = "Download"
+		main.args = install
+		if nightly:
+			main.description = "Latest nightly build, about %d MB. Not tested by RetroForge." % mb
+		elif not follows:
+			main.description = "Version %s, %d MB." % [_v(tested), mb]
+		elif latest != null and latest != tested:
+			main.description = "Version %s, the newest from upstream, about %d MB. RetroForge tested %s." % [
+				_v(latest), mb, _v(tested)]
+		else:
+			main.description = "The newest version from upstream, about %d MB. RetroForge tested %s." % [
+				mb, _v(tested)]
+	else:
+		main.text = ("" if nightly else "Version ") + _v(installed)
+		if installed == tested:
+			main.text += " · Tested"
+		if self_update:
+			# PortMaster: it offers its own updates when opened.
+			main.description = "Installed. Updates itself: open it to check."
+		elif follows and latest != null and latest != installed:
+			main.button = "Update"
+			main.args = install
+			main.description = "Update to %s available, about %d MB." % [_v(latest), mb]
+		elif not follows and emu.get("update", false):
+			main.button = "Update"
+			main.args = install
+			main.description = "Update to %s available, %d MB." % [_v(tested), mb]
+		elif nightly:
+			main.description = "Installed. Nightly builds come straight from upstream, untested by RetroForge."
+		elif installed != tested:
+			main.description = "Installed straight from upstream. RetroForge tested %s." % _v(tested)
+		else:
+			main.description = "Installed."
+
+	var extra := []
+	if installed != null and emu.get("previous") != null:
+		extra.append({"text": "Revert to " + _v(emu["previous"]), "button": "Revert",
+			"description": "Goes back to the version installed before, kept on this device.",
+			"args": ["rollback", id]})
+	if follows and tested != null and installed != tested and not (self_update and installed != null):
+		extra.append({"text": "Install tested version (%s)" % _v(tested), "button": "Install",
+			"description": "The version RetroForge tested, %d MB." % mb,
+			"args": ["install", id, "--tested"]})
+	return {"main": main, "extra": extra}
+
+
+static func _v(tag) -> String:
+	return Credits.version_text(str(tag)) if tag != null else "?"

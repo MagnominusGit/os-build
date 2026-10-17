@@ -2,7 +2,9 @@
 
 Status: decisions D1-D7 + Phase 4 AGREED 2026-10-16 (branch plan/emulator-latest). Phase 1
 (retroforge-emu) DONE 2026-10-17, offline tests + a live `check` of rpcs3/duckstation/armsx2/xemu/cemu;
-D4 corrected (prerelease flag is not a filter, newest by published_at). Next is Phase 2.
+D4 corrected (prerelease flag is not a filter, newest by published_at). Phase 2 (plugin) DONE
+2026-10-17 offline (emu_state.gd tests in Godot 4.7.1; page compile-checked against OGUI stubs), not on
+HW. Next is Phase 3.
 
 ## Why, and what it reverses
 

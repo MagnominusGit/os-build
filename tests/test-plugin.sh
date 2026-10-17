@@ -89,6 +89,7 @@ const RomWatch := preload("$SRC/rom_watch.gd")
 const Credits := preload("$SRC/credits.gd")
 const GameDirs := preload("$SRC/game_dirs.gd")
 const EmuOptions := preload("$SRC/emu_options.gd")
+const EmuState := preload("$SRC/emu_state.gd")
 const SYSTEMS := {"psx": "PlayStation", "ps2": "PlayStation 2"}
 var failed := 0
 
@@ -180,6 +181,7 @@ func _init() -> void:
 	test_game_dirs()
 	test_credits()
 	test_emu_options()
+	test_emu_state()
 	quit(1 if failed else 0)
 
 ## Games that are folders: a PS3 disc dump is PS3_GAME/USRDIR/EBOOT.BIN in a folder RPCS3 boots.
@@ -228,6 +230,52 @@ func test_credits() -> void:
 		Credits.version_text("v0.1-11894"), "v0.1-11894")
 	check("version: a nightly build (retroforge-emu's nightly-<id>) says Nightly",
 		[Credits.version_text("nightly-cc6fea125"), Credits.version_text("nightly")], ["Nightly cc6fea125", "Nightly"])
+	check("version: an RPCS3 build-<commit> keeps 8 digits",
+		Credits.version_text("build-64ba740c27be6946074cd91db85be4d48146d768"), "Build 64ba740c")
+
+## The Emulators page's rows (plan emulator-latest Phase 2): latest by default, tested kept, Revert.
+func test_emu_state() -> void:
+	var mb := 50 * 1048576
+	var follows := {"tested": "v1", "follows_latest": true, "installed": null, "previous": null, "size": mb}
+	var r := EmuState.rows("x", follows, {})
+	check("state: not installed, no check yet: Download the newest, tested named",
+		[r.main.text, r.main.button, r.main.args, r.main.description],
+		["Not installed", "Download", ["install", "x"], "The newest version from upstream, about 50 MB. RetroForge tested v1."])
+	check("state: not installed: Install tested offered beside it",
+		r.extra, [{"text": "Install tested version (v1)", "button": "Install",
+			"description": "The version RetroForge tested, 50 MB.", "args": ["install", "x", "--tested"]}])
+	r = EmuState.rows("x", follows, {"latest": "v3", "error": null})
+	check("state: not installed, check answered: names the newest", r.main.description,
+		"Version v3, the newest from upstream, about 50 MB. RetroForge tested v1.")
+	var inst := follows.merged({"installed": "v1"}, true)
+	r = EmuState.rows("x", inst, {"latest": "v1", "error": null})
+	check("state: the tested build installed and newest: Open, Tested, no extra rows",
+		[r.main.text, r.main.button, r.main.args, r.extra], ["Version v1 · Tested", "Open", [], []])
+	r = EmuState.rows("x", inst, {"latest": "v3", "error": null})
+	check("state: a newer build upstream: Update to it",
+		[r.main.text, r.main.button, r.main.args, r.main.description],
+		["Version v1 · Tested", "Update", ["install", "x"], "Update to v3 available, about 50 MB."])
+	r = EmuState.rows("x", inst, {"latest": null, "error": "GitHub answered HTTP 403"})
+	check("state: a failed check (offline, rate limit): no Update, no error shown",
+		[r.main.button, r.main.description], ["Open", "Installed."])
+	var newer := follows.merged({"installed": "v3", "previous": "v1"}, true)
+	r = EmuState.rows("x", newer, {"latest": "v3", "error": null})
+	check("state: an untested build installed: says so, Revert and Install tested before Delete",
+		[r.main.text, r.main.description, r.extra.map(func(e): return e.args)],
+		["Version v3", "Installed straight from upstream. RetroForge tested v1.", [["rollback", "x"], ["install", "x", "--tested"]]])
+	var cemu := {"tested": null, "follows_latest": true, "installed": "nightly-abc", "previous": "nightly-def", "size": mb}
+	r = EmuState.rows("x", cemu, {"latest": "nightly-123", "error": null})
+	check("state: a nightly-only entry: Update to the newer nightly, Revert, never Install tested",
+		[r.main.text, r.main.button, r.extra.map(func(e): return e.text)],
+		["Nightly abc", "Update", ["Revert to Nightly def"]])
+	var pinned := {"tested": "v2", "follows_latest": false, "installed": "v1", "update": true, "previous": null, "size": mb}
+	r = EmuState.rows("x", pinned, {})
+	check("state: a pinned-only entry keeps the offline Update to its pin, no Install tested",
+		[r.main.button, r.main.description, r.extra], ["Update", "Update to v2 available, 50 MB.", []])
+	var pm := {"tested": "2026.1", "follows_latest": true, "self_update": true, "installed": "2026.9", "previous": null, "size": mb}
+	r = EmuState.rows("x", pm, {"latest": "2026.10", "error": null})
+	check("state: PortMaster installed updates itself: Open only, no Update, no Install tested",
+		[r.main.button, r.main.description, r.extra], ["Open", "Installed. Updates itself: open it to check.", []])
 
 ## Per-emulator options: what the pages offer from options.json, and the choice at each level.
 func test_emu_options() -> void:
