@@ -88,7 +88,7 @@ for y in range(h):
     for x in range(w):
         # An opaque disc on a transparent field: enough to test placement and clipping.
         # The radius is 44% of the box, not the whole of it, because a real logo has margins --
-        # image/splash/logo.svg renders to 677px of ink inside its 768px box, ~88%. The rotation
+        # image/splash/logo.svg renders to 640px of ink inside its 768px box, ~83%. The rotation
         # -direction assertion below measures the drawn content's centre of mass against the panel
         # midline, and a disc that reaches the very edge inflates the logo's share of that bbox
         # enough to swamp the text beneath it and tip the comparison the wrong way. Match the real
@@ -103,9 +103,10 @@ fi
 # Pixel probe. Reports the PPM's dimensions and the bounding box of everything that is not the
 # background, which is all the assertions below need.
 # ---------------------------------------------------------------------------------------------
-probe() {  # probe <file> -> "w h x0 y0 x1 y1 nonbg"  (bbox is -1s when nothing was drawn)
-    python3 - "$1" <<'PY'
+probe() {  # probe <file> [threshold] -> "w h x0 y0 x1 y1 nonbg"  (bbox is -1s when nothing was drawn)
+    python3 - "$1" "${2:-8}" <<'PY'
 import sys
+t = int(sys.argv[2])
 d = open(sys.argv[1], 'rb').read()
 parts = d.split(b'\n', 3)
 w, h = map(int, parts[1].split())
@@ -116,7 +117,7 @@ for y in range(h):
     for x in range(w):
         # >8 rather than >0: the logo's halo fades asymptotically, and a single unit of blue in
         # the far corner is not "drawn content" for the purpose of a clipping check.
-        if row[x*3] > 8 or row[x*3+1] > 8 or row[x*3+2] > 8:
+        if row[x*3] > t or row[x*3+1] > t or row[x*3+2] > t:
             n += 1
             if x < x0: x0 = x
             if x > x1: x1 = x
@@ -194,8 +195,11 @@ done
 # measure is the one the gap below the logo creates.
 echo
 echo "rotation direction:"
-render "$TMP/r90.ppm" 400 800 90 "x" && read -r _ _ ax0 _ ax1 _ _ < <(probe "$TMP/r90.ppm")
-render "$TMP/r270.ppm" 400 800 270 "x" && read -r _ _ bx0 _ bx1 _ _ < <(probe "$TMP/r270.ppm")
+# Measured above a threshold of 64, not the clipping checks' 8: the logo's halo fades out at its
+# box edge in every direction, so counting it makes the logo's share of the bbox symmetric enough
+# to swamp the text (the brighter halo of the 2026-10-17 logo put both midpoints at 199/200).
+render "$TMP/r90.ppm" 400 800 90 "x" && read -r _ _ ax0 _ ax1 _ _ < <(probe "$TMP/r90.ppm" 64)
+render "$TMP/r270.ppm" 400 800 270 "x" && read -r _ _ bx0 _ bx1 _ _ < <(probe "$TMP/r270.ppm" 64)
 # The text sits BELOW the logo in logical space. Under rot=90 logical-down maps to panel-left, so
 # the drawn content's centre of mass sits left of the panel's midline; under rot=270 it mirrors.
 a_mid=$(( (ax0 + ax1) / 2 )); b_mid=$(( (bx0 + bx1) / 2 ))

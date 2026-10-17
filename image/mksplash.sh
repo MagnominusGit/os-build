@@ -35,7 +35,7 @@ PNG="$OUTDIR/logo.png"
 NDS="$OUTDIR/logo.nds1"
 
 # Square render box, sized so the drawer NEVER scales up: upscaling a raster logo softens it and
-# the star's thin points show it first.
+# the chip's thin pins and rounded corners show it first.
 #
 # retroforge-splash draws the logo at LOGO_NUM/LOGO_DEN of the canvas's SHORT edge (auto_logo_px()
 # in apps/retroforge-splash/src/retroforge-splash.c), so the largest size it can ever ask for is that
