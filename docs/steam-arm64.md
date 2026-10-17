@@ -446,6 +446,41 @@ Not yet seen:
   device, anything on hardware. A release after `cachyos-11.0-20261005-slr` is not ISA-scanned before
   players get it.
 
+## Remote Play (the handheld as a client)
+
+Valve's arm64 client has the whole Remote Play client (`steamrtarm64/streaming_client`): a PC's
+games show a Stream button in Big Picture, and nothing gates it to the Frame. Its Frame-only
+paths (VR streaming, pairing over the Frame's own hotspot, echo cancellation) switch on with
+`-steamframe`/`-deckard`, which we never pass. What the image adds:
+
+- **A way in.** `/usr/share/applications/retroforge-steam.desktop` is OGUI's "Steam" library card
+  (OGUI's desktop library lists Game-category entries): `steam -gamepadui ... steam://open/bigpicture`.
+  Not `steam://rungameid/`: OGUI treats that as one game and SIGTERMs Steam once only Steam's own
+  windows are left, which would end a stream.
+- **Controllers.** Valve's `60-steam-input.rules` (steam-devices, verbatim, MIT): uaccess on the
+  hidraw nodes of Steam, Sony, Nintendo, 8BitDo and other pads, so Steam Input reads them directly
+  and forwards gyro, trackpads and paddles. The handheld's own controls reach Steam as InputPlumber's
+  virtual Xbox Elite 2 pad.
+- **Hardware decode.** The client decodes H.264/HEVC through its own stateful V4L2 decoder
+  (`CV4L2Accel`): it probes `/dev/video-dec0..99` and `/dev/video0..99` for a mem2mem device, so
+  Iris (SM8250/8550/8650) and venus (SM6115, `VIDEO_QCOM_VENUS=m`) need no package in the image.
+  `70-retroforge-video-codec.rules` links `/dev/video-dec0`/`video-enc0` to the codec by its driver
+  name, which the UI's Chromium also looks for. Without a decoder the client falls back to software
+  (FFmpeg 8 in `libvideo.so`).
+- **Network.** The image has no firewall: discovery (UDP broadcast on 27036) and the stream
+  (UDP 27031-27036, TCP 27036-27037) are open. A firewall added later must keep those open.
+- **Audio** goes through pipewire-pulse, as for everything else.
+
+Hosting is not offered: the client's encoders are x264, VA-API and NVENC, and Adreno has no VA-API,
+so the handheld would encode in software next to the game.
+
+To check on hardware, per board: the Stream button finding a PC over Wi-Fi; the client naming
+"V4L2 ... hardware decoding" as its decoder (and no `CV4L2Accel:` errors); a stall after the first
+frame (Steam starts both V4L2 queues before any bitstream; if upstream Iris waits on it, try
+`STEAMLINK_V4L2_RESET_AFTER_LAST_BUF=1`); the stream window taking focus under OGUI's gamescope; who
+gets the Guide button ("Hold GUIDE to control remote session"); software-decode load on the SM6115
+at 720p60, its decoder's ceiling with 1080p30.
+
 ## Open
 
 - Boot the kernel with 0025 and drop the shim (0025 also removes the shim's one weakness: no

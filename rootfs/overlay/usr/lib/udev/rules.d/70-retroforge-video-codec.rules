@@ -1,0 +1,15 @@
+# retroforge video codec links — /dev/video-dec0 and /dev/video-enc0 for the hardware codec.
+#
+# The SoCs' video block is a stateful V4L2 mem2mem device: qcom-iris on SM8250/SM8550/SM8650, venus
+# on SM6115 (kernel/kernel.config). Its nodes are /dev/videoN with N in probe order. Programs that
+# look for a codec by name rather than by probing find it here:
+#   - the Steam UI's Chromium (libcef) opens /dev/video-dec0 for its V4L2 video decoder;
+#   - Steam's Remote Play client (streaming_client, CV4L2Accel) tries /dev/video-dec0..99 as well as
+#     probing /dev/video0..99, so it finds the decoder either way.
+# Valve does the same on the Steam Frame, from a service (steam-video-codec-setup) rather than udev.
+# The names are each driver's video_device name (iris_probe.c, venus vdec.c/venc.c, 7.2.10); the
+# nodes keep systemd's root:video 0660, and the session user is in `video`.
+SUBSYSTEM=="video4linux", ATTR{name}=="qcom-iris-decoder", SYMLINK+="video-dec0"
+SUBSYSTEM=="video4linux", ATTR{name}=="qcom-venus-decoder", SYMLINK+="video-dec0"
+SUBSYSTEM=="video4linux", ATTR{name}=="qcom-iris-encoder", SYMLINK+="video-enc0"
+SUBSYSTEM=="video4linux", ATTR{name}=="qcom-venus-encoder", SYMLINK+="video-enc0"
