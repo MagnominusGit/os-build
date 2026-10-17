@@ -4,10 +4,10 @@ extends RefCounted
 ## `retroforge-emu list` entry and its `retroforge-emu check` answer ({} until one arrives, or
 ## offline). No OGUI types, so tests/test-plugin.sh runs it in a stock headless Godot.
 ##
-## rows() -> {"main": row, "extra": [row...]}; a row is {"text", "description", "button",
+## rows() -> {"main": row, "tested": row or null, "extra": [row...]}; "tested" (Install tested version)
+## goes right below the main row, "extra" before Delete. A row is {"text", "description", "button",
 ## "args"}: the retroforge-emu arguments its button runs (["install", id], ["install", id,
-## "--tested"], ["rollback", id], ["check", id, "--refresh"]), or [] for Open. Extra rows go before
-## Delete.
+## "--tested"], ["rollback", id], ["check", id, "--refresh"]), or [] for Open.
 ##
 ## Tested = the catalog's pin ("tested" in list), the build RetroForge checked. An entry that
 ## follows upstream ("follows_latest") installs upstream's newest by default; the page says when the
@@ -76,11 +76,12 @@ static func rows(id: String, emu: Dictionary, check: Dictionary) -> Dictionary:
 		extra.append({"text": "Revert to " + _v(emu["previous"]), "button": "Revert",
 			"description": "Goes back to the version installed before, kept on this device.",
 			"args": ["rollback", id]})
+	var tested_row = null
 	if follows and tested != null and installed != tested and not (self_update and installed != null):
-		extra.append({"text": "Install tested version (%s)" % _v(tested), "button": "Install",
+		tested_row = {"text": "Install tested version (%s)" % _v(tested), "button": "Install",
 			"description": "The version RetroForge tested, %d MB." % mb,
-			"args": ["install", id, "--tested"]})
-	return {"main": main, "extra": extra}
+			"args": ["install", id, "--tested"]}
+	return {"main": main, "tested": tested_row, "extra": extra}
 
 
 static func _v(tag) -> String:

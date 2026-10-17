@@ -241,9 +241,9 @@ func test_emu_state() -> void:
 	check("state: not installed, no check yet: Download the newest, tested named",
 		[r.main.text, r.main.button, r.main.args, r.main.description],
 		["Not installed", "Download", ["install", "x"], "The newest version from upstream, about 50 MB. RetroForge tested v1."])
-	check("state: not installed: Install tested offered beside it",
-		r.extra, [{"text": "Install tested version (v1)", "button": "Install",
-			"description": "The version RetroForge tested, 50 MB.", "args": ["install", "x", "--tested"]}])
+	check("state: not installed: Install tested offered right below Download, nothing else",
+		[r.tested, r.extra], [{"text": "Install tested version (v1)", "button": "Install",
+			"description": "The version RetroForge tested, 50 MB.", "args": ["install", "x", "--tested"]}, []])
 	r = EmuState.rows("x", follows, {"latest": "v3", "error": null})
 	check("state: not installed, check answered: names the newest", r.main.description,
 		"Version v3, the newest from upstream, about 50 MB. RetroForge tested v1.")
@@ -266,23 +266,23 @@ func test_emu_state() -> void:
 		[r.main.button, r.main.description, r.extra.map(func(e): return e.button)], ["Open", "Installed.", ["Check"]])
 	var newer := follows.merged({"installed": "v3", "previous": "v1"}, true)
 	r = EmuState.rows("x", newer, {"latest": "v3", "error": null})
-	check("state: an untested build installed: says so, Revert and Install tested before Delete",
-		[r.main.text, r.main.description, r.extra.map(func(e): return e.args)],
-		["Version v3", "Installed straight from upstream. RetroForge tested v1.",
-			[["check", "x", "--refresh"], ["rollback", "x"], ["install", "x", "--tested"]]])
+	check("state: an untested build installed: says so, Install tested below it, Check and Revert before Delete",
+		[r.main.text, r.main.description, r.tested.args, r.extra.map(func(e): return e.args)],
+		["Version v3", "Installed straight from upstream. RetroForge tested v1.", ["install", "x", "--tested"],
+			[["check", "x", "--refresh"], ["rollback", "x"]]])
 	var cemu := {"tested": null, "follows_latest": true, "installed": "nightly-abc", "previous": "nightly-def", "size": mb}
 	r = EmuState.rows("x", cemu, {"latest": "nightly-123", "error": null})
 	check("state: a nightly-only entry: Update to the newer nightly (no Check beside it), Revert, never Install tested",
-		[r.main.text, r.main.button, r.extra.map(func(e): return e.text)],
-		["Nightly abc", "Update", ["Revert to Nightly def"]])
+		[r.main.text, r.main.button, r.tested, r.extra.map(func(e): return e.text)],
+		["Nightly abc", "Update", null, ["Revert to Nightly def"]])
 	var pinned := {"tested": "v2", "follows_latest": false, "installed": "v1", "update": true, "previous": null, "size": mb}
 	r = EmuState.rows("x", pinned, {})
 	check("state: a pinned-only entry keeps the offline Update to its pin, no Install tested",
-		[r.main.button, r.main.description, r.extra], ["Update", "Update to v2 available, 50 MB.", []])
+		[r.main.button, r.main.description, r.tested, r.extra], ["Update", "Update to v2 available, 50 MB.", null, []])
 	var pm := {"tested": "2026.1", "follows_latest": true, "self_update": true, "installed": "2026.9", "previous": null, "size": mb}
 	r = EmuState.rows("x", pm, {"latest": "2026.10", "error": null})
 	check("state: PortMaster installed updates itself: Open only, no Update, no Install tested",
-		[r.main.button, r.main.description, r.extra], ["Open", "Installed. Updates itself: open it to check.", []])
+		[r.main.button, r.main.description, r.tested, r.extra], ["Open", "Installed. Updates itself: open it to check.", null, []])
 
 ## Per-emulator options: what the pages offer from options.json, and the choice at each level.
 func test_emu_options() -> void:

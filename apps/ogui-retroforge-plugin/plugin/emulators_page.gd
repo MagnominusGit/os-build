@@ -237,6 +237,8 @@ func _add_emulator(id: String, emu: Dictionary) -> void:
 	var installed = emu.get("installed")
 	var state := EmuState.rows(id, emu, _checks.get(id, {}))
 	_add_action_row(id, name_text, emu, state.main)
+	if state.tested != null:
+		_add_action_row(id, name_text, emu, state.tested)
 
 	for option in EmuOptions.options_for(id):
 		_add_option(id, name_text, option)
