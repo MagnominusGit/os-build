@@ -228,17 +228,20 @@ func _add_credit(emu: Dictionary) -> void:
 
 
 ## The emulator's block (its name is the screen's title): who made it, then its rows -- the version
-## with Download / Update / Open, one dropdown per option, the fast-cores default, and Delete once
-## installed. Options show before the download too: a choice made then applies from the first
+## with Download / Update / Open (and Install tested), then under a "Settings" title one dropdown per
+## option and the fast-cores default, then Check / Revert and Delete once installed. Options show before the download too: a choice made then applies from the first
 ## launch. Only the last row draws a separator (OGUI's toggle draws one by default).
 func _add_emulator(id: String, emu: Dictionary) -> void:
 	var name_text := str(emu.get("name", id))
 	_add_credit(emu)
 	var installed = emu.get("installed")
 	var state := EmuState.rows(id, emu, _checks.get(id, {}))
-	_add_action_row(id, name_text, emu, state.main)
+	var last := _add_action_row(id, name_text, emu, state.main)
 	if state.tested != null:
-		_add_action_row(id, name_text, emu, state.tested)
+		last = _add_action_row(id, name_text, emu, state.tested)
+	# The version rows end the block's first part: a separator, then the settings under a title.
+	last.separator_visible = true
+	_add_label("Settings")
 
 	for option in EmuOptions.options_for(id):
 		_add_option(id, name_text, option)
