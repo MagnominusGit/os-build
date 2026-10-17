@@ -48,6 +48,8 @@ func _ready() -> void:
 	logger = Log.get_logger("RetroForge", Log.LEVEL.INFO)
 	roms = load(plugin_base.path_join("library_roms.gd")).new()
 	add_library(roms)
+	# Before the library loads: the first ROM cards already ask for their art.
+	add_boxart(load(plugin_base.path_join("boxart_retroforge.gd")).new())
 	library_manager.library_loaded.connect(_on_library_loaded)
 	logger.info("ROM library registered: %s" % library_manager.has_library(LIBRARY_ID))
 	_watch = load(plugin_base.path_join("rom_watch.gd")).new().setup(roms.roms_dir(), roms.SYSTEMS.keys(), roms.dir_markers())

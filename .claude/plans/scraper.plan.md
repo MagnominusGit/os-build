@@ -1,12 +1,12 @@
 # ROM artwork scraper — plan
 
 Status: decisions D1-D3 AGREED 2026-10-17; the user already has a ScreenScraper dev account.
-Phase 1 DONE 2026-10-17 on branch feat/scraper: `retroforge-scrape` + systems.json +
+Phase 2 DONE 2026-10-17 offline (plugin 0.1.44; NOT on HW yet). Phase 1 DONE 2026-10-17 on branch feat/scraper: `retroforge-scrape` + systems.json +
 tests/test-scrape.sh (98 ok, in `make test`; python-reviewer findings fixed: one bad ROM is
 "failed" not fatal, stale quota, redirect host check, no answer bodies on disk, cancel); live run on 4 ROMs (2 CHDs > 128 MiB by name + size,
 a single-file zip, a Mega Drive .bin): 4/4 found, 15 images, 8 s, second run 0 requests.
 `status` subcommand dropped (YAGNI: the plugin reads the media files). Next: Phase 2 (plugin art
-provider); the image-build devid step moves to Phase 3.
+provider, done); the image-build devid step moves to Phase 3. Next: HW check of Phase 2 on the ACE (library build time with art, wide boxes), then Phase 3.
 
 Live facts (2026-10-17): not found = HTTP 404 with a French text body, not JSON; a refused login
 is 403 with a text body ("utilisateurs" = player, "développeur" = developer); jeuInfos ignores a
@@ -93,12 +93,17 @@ Shape mirrors `retroforge-emu` (stdout is a contract, numbered exits, env seams 
 ## Phase 2 — plugin art provider (Low-Medium)
 
 - `plugin/boxart_retroforge.gd` extends `BoxArtProvider` (`provider_id "retroforge"`), added with
-  `add_boxart()`; finds the ROM through the item's launch item `metadata.rom` (NOT `item.name`:
-  names carry "(System)" / numbering from `rom_names.gd`).
-  GRID_PORTRAIT <- box, GRID_LANDSCAPE <- screen, BANNER <- fanart else screen, LOGO <- wheel;
-  null when missing (OGUI then tries `local`, then its placeholder).
-- Pure path mapping in its own file, tested headless in `tests/test-plugin.sh`.
-- Plugin version bump.
+  `add_boxart()` right after the library (the first cards already ask); finds the ROM through the
+  item's launch item `metadata.rom` (NOT `item.name`: names carry "(System)" / numbering from
+  `rom_names.gd`).
+  GRID_PORTRAIT <- box (every library card), GRID_LANDSCAPE (home banner) and BANNER (launch
+  menu backdrop) <- fanart else screen (fan art is 16:9), LOGO <- wheel; null when missing (OGUI's
+  `local` provider registers first and still wins; then its placeholder).
+- `plugin/art_paths.gd` (no OGUI types, tested on stock Godot in `tests/test-plugin.sh`): the path
+  per layout, and the image decoded by its magic bytes (Godot's loader goes by extension; a PNG
+  named .jpg loaded nothing -- seen with art from before the scraper's magic-bytes fix).
+- No texture cache (a card holds its texture; a cache would pin a whole library's textures).
+- Plugin 0.1.44.
 
 ## Phase 3 — Scraper page + per-game action (Medium)
 
@@ -120,4 +125,7 @@ serial lookup for big PSX/PS2 images; libretro-thumbnails as a credential-free f
 - MEDIUM: VRAM / load time on 2,000+ cards (Phase 4c, ogui-vram-tiers) -> 640 px art; measure on
   the ACE with a large library before shipping.
 - MEDIUM: renamed CHD/ISO over 128 MiB may not match -> serial lookup later.
-- LOW: OGUI fetches art per card on every view -> provider caches textures per path + mtime.
+- MEDIUM: decode is synchronous on the main thread, per card (OGUI awaits get_boxart while it
+  builds cards) -> measure library build time on the ACE with a few hundred scraped ROMs.
+- LOW: a wide box (SNES, MD) is letterboxed in a portrait card (OGUI's card keeps the aspect);
+  box-3D or a mix image could fill it better -- a look decision for HW.

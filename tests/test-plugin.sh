@@ -57,6 +57,9 @@ for gd in "$SRC"/*.gd; do
     || ok "$name does not override _init()"
 done
 grep -q '^extends Plugin$' "$SRC/$(meta entrypoint)" && ok "the entrypoint extends Plugin" || bad "the entrypoint does not extend Plugin"
+# BoxArtManager refuses a provider whose provider_id is empty when it becomes ready.
+grep -q 'add_boxart(.*boxart_retroforge.gd' "$SRC/plugin.gd" && grep -q '^	provider_id = "retroforge"$' "$SRC/boxart_retroforge.gd" \
+  && ok "the art provider is added, with an id (BoxArtManager refuses an empty one)" || bad "boxart_retroforge.gd is not added by plugin.gd, or has no provider_id"
 
 # =================================================================================================
 CASE="zip"
@@ -90,6 +93,7 @@ const Credits := preload("$SRC/credits.gd")
 const GameDirs := preload("$SRC/game_dirs.gd")
 const EmuOptions := preload("$SRC/emu_options.gd")
 const EmuState := preload("$SRC/emu_state.gd")
+const ArtPaths := preload("$SRC/art_paths.gd")
 const SYSTEMS := {"psx": "PlayStation", "ps2": "PlayStation 2"}
 var failed := 0
 
@@ -182,7 +186,44 @@ func _init() -> void:
 	test_credits()
 	test_emu_options()
 	test_emu_state()
+	test_art_paths()
 	quit(1 if failed else 0)
+
+## Art retroforge-scrape fetched, per OGUI layout (0 portrait, 1 landscape, 2 banner, 3 logo).
+## Keyed by the ROM's file (or folder) name, so Game.cue and Game.chd never share art.
+func test_art_paths() -> void:
+	var media := "$T/art/media"
+	write(media + "/psx/Game.chd-box.png", "png")
+	write(media + "/psx/Game.chd-screen.png", "png")
+	write(media + "/psx/Game.chd-wheel.jpg", "jpg")
+	write(media + "/psx/Other.cue-fanart.jpg", "jpg")
+	write(media + "/psx/Other.cue-screen.png", "png")
+	write(media + "/ps3/Flower-box.png", "png")
+	var rom := "/home/player/roms/psx/Game.chd"
+	check("art: a card is the box", ArtPaths.path_for(media, "psx", rom, 0), media + "/psx/Game.chd-box.png")
+	check("art: wide layouts fall back to the screenshot without fan art",
+		[ArtPaths.path_for(media, "psx", rom, 1), ArtPaths.path_for(media, "psx", rom, 2)],
+		[media + "/psx/Game.chd-screen.png", media + "/psx/Game.chd-screen.png"])
+	check("art: wide layouts prefer fan art", ArtPaths.path_for(media, "psx", "/r/psx/Other.cue", 2), media + "/psx/Other.cue-fanart.jpg")
+	check("art: the logo is the wheel, as .jpg too", ArtPaths.path_for(media, "psx", rom, 3), media + "/psx/Game.chd-wheel.jpg")
+	check("art: none scraped -> no path (OGUI shows its placeholder)", ArtPaths.path_for(media, "psx", "/r/psx/Other.cue", 0), "")
+	check("art: same name, other extension: not shared", ArtPaths.path_for(media, "psx", "/r/psx/Game.cue", 0), "")
+	check("art: same file, other system: not shared", ArtPaths.path_for(media, "ps2", rom, 0), "")
+	check("art: a game folder by its name (trailing slash too)",
+		[ArtPaths.path_for(media, "ps3", "/r/ps3/Flower", 0), ArtPaths.path_for(media, "ps3", "/r/ps3/Flower/", 0)],
+		[media + "/ps3/Flower-box.png", media + "/ps3/Flower-box.png"])
+	# Loaded by the file's bytes, not its name (a PNG saved as .jpg loaded nothing in Godot).
+	var img := Image.create(4, 3, false, Image.FORMAT_RGBA8)
+	img.save_png(media + "/psx/Png-named.jpg")
+	img.save_jpg(media + "/psx/Jpg-named.png")
+	var a: Image = ArtPaths.load_image(media + "/psx/Png-named.jpg")
+	var b: Image = ArtPaths.load_image(media + "/psx/Jpg-named.png")
+	check("art: a PNG named .jpg and a JPEG named .png both load", [a.get_size() if a else null, b.get_size() if b else null], [Vector2i(4, 3), Vector2i(4, 3)])
+	check("art: not an image, or no file -> null",
+		[ArtPaths.load_image(media + "/psx/Game.chd-box.png"), ArtPaths.load_image(media + "/nothing.png")], [null, null])
+	check("art: no system or ROM, or an unknown layout -> no path",
+		[ArtPaths.path_for(media, "", rom, 0), ArtPaths.path_for(media, "psx", "", 0), ArtPaths.path_for(media, "psx", rom, 9)],
+		["", "", ""])
 
 ## Games that are folders: a PS3 disc dump is PS3_GAME/USRDIR/EBOOT.BIN in a folder RPCS3 boots.
 func test_game_dirs() -> void:
