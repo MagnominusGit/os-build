@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "_source": "ScreenScraper systemeid per RetroForge system: ROCKNIX/emulationstation-next es-app/src/scrapers/ScreenScraper.cpp (MIT, (c) 2014 Alec Lofquist and contributors), each checked against ScreenScraper's systemesListe.php on 2026-10-17. exts/dirs mirror SYSTEMS in apps/ogui-retroforge-plugin/plugin/library_roms.gd (tests/test-scrape.sh compares them). ports: never scraped.",
+  "systems": {
+    "gb": {"ss": [9], "exts": ["gb", "zip", "7z"]},
+    "gbc": {"ss": [10], "exts": ["gbc", "gb", "zip", "7z"]},
+    "gba": {"ss": [12], "exts": ["gba", "zip", "7z"]},
+    "snes": {"ss": [4], "exts": ["sfc", "smc", "zip"]},
+    "nds": {"ss": [15], "exts": ["nds", "zip", "7z"]},
+    "3ds": {"ss": [17], "exts": ["3ds", "cci", "cxi", "3dsx", "zcci", "zcxi", "z3dsx"]},
+    "gc": {"ss": [13], "exts": ["iso", "gcm", "gcz", "rvz", "ciso", "wia"]},
+    "wii": {"ss": [16], "exts": ["iso", "wbfs", "rvz", "gcz", "ciso", "wia"]},
+    "wiiu": {"ss": [18], "exts": ["wua", "wud", "wux", "rpx"]},
+    "psx": {"ss": [57], "exts": ["chd", "cue", "pbp", "m3u", "iso"]},
+    "ps2": {"ss": [58], "exts": ["chd", "iso", "cso", "zso", "gz", "cue"]},
+    "psp": {"ss": [61], "exts": ["iso", "cso", "chd", "pbp"]},
+    "ps3": {"ss": [59], "exts": ["iso"], "dirs": ["PS3_GAME/USRDIR/EBOOT.BIN", "USRDIR/EBOOT.BIN"]},
+    "md": {"ss": [1], "exts": ["md", "gen", "bin", "zip"]},
+    "segacd": {"ss": [20], "exts": ["chd", "cue"]},
+    "dc": {"ss": [23], "exts": ["chd", "gdi", "cdi", "cue"]},
+    "xbox": {"ss": [32], "exts": ["iso", "xiso"]}
+  }
+}

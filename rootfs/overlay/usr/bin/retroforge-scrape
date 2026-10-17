@@ -1,0 +1,665 @@
+#!/usr/bin/env python3
+# retroforge-scrape — fetches box art, screenshots, fan art and logos for ROM cards from
+# ScreenScraper (plan .claude/plans/scraper.plan.md).
+#
+#     retroforge-scrape run [--system <s> | --rom <path>] [--all]
+#                                       -> `N%` lines on stdout, forward-only, then one JSON summary
+#                                          line: {"scraped", "not_found", "skipped", "quota_left"}
+#     retroforge-scrape login <ssid>    -> the player's ScreenScraper password on stdin; checked, saved
+#     retroforge-scrape logout
+#     retroforge-scrape region auto|wor|us|eu|jp
+#     retroforge-scrape account         -> JSON on stdout: login, region, last known quota (no network)
+#
+# THE CALLER IS THE RETROFORGE OGUI PLUGIN, which parses stdout: progress lines and JSON only;
+# everything else goes to stderr. Exit status: 0 ok, 2 bad invocation, 3 network, 5 local (no space,
+# file system, another run busy, cancelled), 6 quota (ScreenScraper's daily limit or its "too many
+# not found" limit; stderr says which), 7 the player's login refused, 8 ScreenScraper closed
+# (maintenance, closed to non-members, this software blacklisted), 9 no working developer login in
+# this build. A `run` that stops early (SIGTERM included) still writes its cache and prints its
+# summary line before exiting. Only those stop a run: a problem with ONE ROM (an unreadable zip, a
+# name the file system or the API cannot take, an answer that is not JSON, an image that does not
+# download) is logged, counted as "failed" in the summary, not cached, and the run goes on.
+#
+# SECRETS. Every request carries RetroForge's developer id and password, and the player's when
+# saved. curl reads its URL from stdin (-K -), so neither shows in argv; ScreenScraper echoes the
+# full request in its answers (header.commandRequested, every media URL), so no answer body and no
+# URL is ever logged, only our own messages, and API answers stay in memory (curl's stdout), never
+# in a file. The developer password is readable by every process of the player (it has to be, for
+# this tool to run as the player): accepted, as on every ES-based firmware. The developer login comes from $RETROFORGE_SS_DEVID +
+# $RETROFORGE_SS_DEVPASSWORD (dev hosts) else the image's DEVID_FILE (devid=/devpassword= lines,
+# written at image build from CI secrets, never in the repo). The player's goes to
+# ~/.config/retroforge/scraper.conf, mode 0600, its password read from stdin, never from argv.
+#
+# WHAT IS ASKED (ROCKNIX emulationstation-next's ScreenScraper scraper, MIT, as reference):
+# jeuInfos.php with the file name, its size, and its CRC32 + MD5 when it is at most HASH_MAX
+# (CHD / ISO dumps above that are matched by name + size). A zip holding one game file (.txt
+# aside) is asked as that file; a 7z by name + size (no 7z tool in the image); an .m3u as its first
+# disc; a game folder (PS3) by its name. One request per systemeid of the system, in order, until
+# one knows the game. A 404 is "not in the database", cached for RETRY_NOT_FOUND.
+#
+# WHAT IS KEPT: per ROM, one image per KIND, chosen by kind first (KINDS' chains, ES-next's
+# getRipList), then by region: the player's region, the file name's (USA) / (Europe)... tags,
+# then wor, us, eu, jp, ss, then any. Resized by ScreenScraper (maxwidth). Written to
+# MEDIA_DIR/<system>/<rom file or folder name>-<kind>.<png|jpg> through a .part file and a rename;
+# an answer that is not an image (ScreenScraper's NOMEDIA text) is dropped, and so is a media URL
+# that is not https://*.screenscraper.fr, or whose redirects end anywhere else. ROM folders are the plugin's (library_roms.gd SYSTEMS,
+# mirrored in systems.json; tests/test-scrape.sh compares).
+#
+# QUOTA. Every jeuInfos answer carries the account's counters; the run stops (exit 6) once
+# requeststoday reaches maxrequestsperday rather than collect refusals -- counters this run read
+# only, never yesterday's. 429: waits Retry-After (at most RETRY_AFTER_MAX s) once; curl itself
+# never retries (a retried request costs quota too). Without a player login ScreenScraper allows 1 thread and
+# 10,000 requests (1,000 not found) a day (seen 2026-10-17); requests go one at a time.
+#
+# TEST SEAMS (tests/test-scrape.sh runs this file): RETROFORGE_CURL, RETROFORGE_ROMS_DIR,
+# RETROFORGE_MEDIA_DIR, RETROFORGE_SCRAPER_SYSTEMS, RETROFORGE_SCRAPER_DEVID_FILE, HOME.
+import errno
+import fcntl
+import hashlib
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import time
+import urllib.parse
+import zipfile
+import zlib
+
+EXIT_OK, EXIT_USAGE, EXIT_NET, EXIT_LOCAL, EXIT_QUOTA, EXIT_LOGIN, EXIT_CLOSED, EXIT_DEV = (
+    0, 2, 3, 5, 6, 7, 8, 9)
+
+CURL = os.environ.get("RETROFORGE_CURL", "curl")
+HOME = os.path.expanduser("~")
+ROMS_DIR = os.environ.get("RETROFORGE_ROMS_DIR", os.path.join(HOME, "roms"))
+MEDIA_DIR = os.environ.get("RETROFORGE_MEDIA_DIR", os.path.join(HOME, ".local/share/retroforge/media"))
+SYSTEMS_FILE = os.environ.get("RETROFORGE_SCRAPER_SYSTEMS", "/usr/share/retroforge/scraper/systems.json")
+DEVID_FILE = os.environ.get("RETROFORGE_SCRAPER_DEVID_FILE", "/usr/share/retroforge/scraper/devid")
+CACHE = os.path.join(HOME, ".cache/retroforge/scrape.json")
+CONF = os.path.join(HOME, ".config/retroforge/scraper.conf")
+API = "https://api.screenscraper.fr/api2/"
+SOFTNAME = "RetroForge"
+HASH_MAX = 128 << 20  # bytes: larger files are asked by name + size (ES-next's limit)
+RETRY_NOT_FOUND = 7 * 86400  # s before a ROM the database did not know is asked again
+RETRY_AFTER_MAX = 60  # s waited on a 429
+REGIONS = ("auto", "wor", "us", "eu", "jp")
+FALLBACK_REGIONS = ("wor", "us", "eu", "jp", "ss")
+# kind -> (ScreenScraper media types, best first; width asked for)
+KINDS = {
+    "box": (("box-2D", "box-3D"), 640),
+    "screen": (("ss", "sstitle"), 640),
+    "fanart": (("fanart",), 1280),
+    "wheel": (("wheel", "wheel-hd", "wheel-steel", "wheel-carbon", "screenmarqueesmall",
+               "screenmarquee"), 640),
+}
+# No-Intro / Redump file name tags -> ScreenScraper region codes
+TAG_REGIONS = {"usa": "us", "europe": "eu", "japan": "jp", "world": "wor", "korea": "kr",
+               "brazil": "br", "france": "fr", "germany": "de", "spain": "sp", "italy": "it",
+               "australia": "au"}
+# What a file IS, by its first bytes: ScreenScraper labels resized PNGs image/jpeg (seen live
+# 2026-10-17), so the Content-Type only tells an image from its NOMEDIA text, never the format.
+MAGIC = {b"\x89PNG\r\n\x1a\n": "png", b"\xff\xd8\xff": "jpg"}
+NAME_MAX = 255  # bytes in one file name (ext4, exfat)
+HOST = re.compile(r"(?:[a-z0-9-]+\.)*screenscraper\.fr")
+W_MARK = "\n@@retroforge@@"  # curl -w: after the body; fields tab-separated, content type last
+W_FORMAT = W_MARK + "%{http_code}\t%header{retry-after}\t%{url_effective}\t%{content_type}"
+
+
+class Fail(Exception):
+    def __init__(self, code, msg):
+        super().__init__(msg)
+        self.code = code
+
+
+class Skip(Exception):
+    """A problem with one ROM or one image: logged, counted, and the run goes on."""
+
+
+def log(msg):
+    print(f"retroforge-scrape: {msg}", file=sys.stderr, flush=True)
+
+
+def load_systems():
+    try:
+        with open(SYSTEMS_FILE) as f:
+            table = json.load(f)
+    except (OSError, ValueError) as err:
+        raise Fail(EXIT_LOCAL, f"unreadable systems table {SYSTEMS_FILE}: {err}")
+    if table.get("schema") != 1 or not isinstance(table.get("systems"), dict):
+        raise Fail(EXIT_LOCAL, f"{SYSTEMS_FILE} is not a schema 1 systems table")
+    return table["systems"]
+
+
+def read_kv(path):
+    """key=value lines (blank lines and # comments skipped); {} when the file is missing."""
+    try:
+        with open(path) as f:
+            lines = f.read().splitlines()
+    except FileNotFoundError:
+        return {}
+    except OSError as err:
+        raise Fail(EXIT_LOCAL, f"cannot read {path}: {err}")
+    pairs = (l.partition("=") for l in lines if l.strip() and not l.lstrip().startswith("#"))
+    return {k.strip(): v for k, _, v in pairs}
+
+
+def write_conf(conf):
+    """The player's settings, 0600 from the first byte (it may hold their password)."""
+    tmp = f"{CONF}.{os.getpid()}.tmp"
+    try:
+        os.makedirs(os.path.dirname(CONF), exist_ok=True)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.writelines(f"{k}={v}\n" for k, v in sorted(conf.items()))
+        os.replace(tmp, CONF)
+    except OSError as err:
+        raise Fail(EXIT_LOCAL, f"cannot write {CONF}: {err}")
+
+
+def dev_login():
+    devid = os.environ.get("RETROFORGE_SS_DEVID", "")
+    devpw = os.environ.get("RETROFORGE_SS_DEVPASSWORD", "")
+    if not (devid and devpw):
+        kv = read_kv(DEVID_FILE)
+        devid, devpw = kv.get("devid", ""), kv.get("devpassword", "")
+    if not (devid and devpw):
+        raise Fail(EXIT_DEV, "this build has no ScreenScraper developer login: scraping is off")
+    return {"devid": devid, "devpassword": devpw, "softname": SOFTNAME, "output": "json"}
+
+
+def read_cache():
+    try:
+        with open(CACHE) as f:
+            cache = json.load(f)
+        if isinstance(cache, dict) and cache.get("schema") == 1 and isinstance(cache.get("roms"), dict):
+            roms = {k: v for k, v in cache["roms"].items() if isinstance(v, dict)}
+            quota = cache.get("quota") if isinstance(cache.get("quota"), dict) else {}
+            return {"schema": 1, "roms": roms, "quota": quota}
+    except (OSError, ValueError):
+        pass
+    return {"schema": 1, "roms": {}, "quota": {}}
+
+
+def write_cache(cache):
+    tmp = f"{CACHE}.{os.getpid()}.tmp"
+    try:
+        os.makedirs(os.path.dirname(CACHE), exist_ok=True)
+        with open(tmp, "w") as f:
+            json.dump(cache, f, sort_keys=True)
+        os.replace(tmp, CACHE)
+    except OSError as err:
+        log(f"warning: cannot write {CACHE}: {err}")
+
+
+def curl(url, out=None):
+    """GET `url`; (body or None when written to the file `out`, HTTP status, Retry-After, the URL
+    redirects ended at, content type). The URL holds passwords: it goes to curl on stdin and never
+    into a message."""
+    if any(c in url for c in '"\\\n\r'):
+        raise Fail(EXIT_NET, "refusing a URL with quotes or line breaks")
+    cmd = [CURL, "--silent", "--location", "--proto", "=https", "--proto-redir", "=https",
+           "--connect-timeout", "20", "--max-time", "120", "-K", "-", "-w", W_FORMAT]
+    if out:
+        cmd += ["-o", out]
+    try:
+        p = subprocess.run(cmd, input=f'url = "{url}"\n'.encode(), capture_output=True, timeout=300)
+    except (subprocess.TimeoutExpired, OSError) as err:
+        raise Fail(EXIT_NET, f"curl did not finish: {type(err).__name__}")
+    if p.returncode == 23:
+        raise Fail(EXIT_LOCAL, "cannot write a download (no space?)")
+    if p.returncode != 0:
+        raise Fail(EXIT_NET, f"ScreenScraper unreachable (curl exit {p.returncode})")
+    body, _, trailer = p.stdout.rpartition(W_MARK.encode())
+    code, retry, final, ctype = (trailer.decode(errors="replace").split("\t", 3) + [""] * 4)[:4]
+    return (None if out else body), code, retry.strip(), final, ctype.split(";")[0].strip().lower()
+
+
+def api(endpoint, params, dev):
+    """GET api2/<endpoint> as JSON; None when ScreenScraper does not know the game (404)."""
+    try:
+        url = API + endpoint + "?" + urllib.parse.urlencode({**dev, **params})
+    except UnicodeEncodeError:
+        raise Skip("a name the API cannot take (not UTF-8)")
+    for attempt in (1, 2):
+        body, code, retry, _, _ = curl(url)
+        if code != "429" or attempt == 2:
+            break
+        wait = min(int(retry), RETRY_AFTER_MAX) if retry.isdigit() else 5
+        log(f"ScreenScraper asks to slow down: waiting {wait} s")
+        time.sleep(wait)
+    if code == "200":
+        try:
+            answer = json.loads(body)
+        except ValueError:
+            answer = None
+        if not isinstance(answer, dict) or not isinstance(answer.get("response"), dict):
+            raise Skip(f"ScreenScraper's {endpoint} answer is not the JSON expected")
+        return answer
+    if code == "404":
+        return None
+    if code == "403":
+        if b"utilisateur" in body:
+            raise Fail(EXIT_LOGIN, "ScreenScraper refused the player's login")
+        raise Fail(EXIT_DEV, "ScreenScraper refused this build's developer login")
+    if code in ("429", "430"):
+        raise Fail(EXIT_QUOTA, "ScreenScraper's daily request quota is used up: try again tomorrow")
+    if code == "431":
+        raise Fail(EXIT_QUOTA, "too many ROMs ScreenScraper does not know today: try again tomorrow")
+    if code in ("401", "423", "426"):
+        why = {"401": "closed to non-members right now (a ScreenScraper login helps)",
+               "423": "closed for maintenance", "426": "refusing this software"}[code]
+        raise Fail(EXIT_CLOSED, f"ScreenScraper is {why}")
+    raise Fail(EXIT_NET, f"ScreenScraper answered HTTP {code} to {endpoint}")
+
+
+def player_login(conf):
+    if conf.get("ssid") and conf.get("sspassword"):
+        return {"ssid": conf["ssid"], "sspassword": conf["sspassword"]}
+    return {}
+
+
+def remember_quota(cache, answer):
+    """Keep the account's counters from an answer (api() answers are dicts with a dict response),
+    stamped with when they were read."""
+    user = answer["response"].get("ssuser") if answer else None
+    if isinstance(user, dict):
+        cache["quota"] = {k: str(user[k]) for k in ("maxthreads", "requeststoday", "maxrequestsperday",
+                                                    "requestskotoday", "maxrequestskoperday") if k in user}
+        cache["quota"]["at"] = time.time()
+
+
+def quota_left(cache, since=0.0):
+    """Requests left today, from counters read at or after `since`; None when unknown."""
+    q = cache.get("quota", {})
+    try:
+        if float(q.get("at", 0)) < since:
+            return None
+        return max(0, int(q["maxrequestsperday"]) - int(q["requeststoday"]))
+    except (KeyError, ValueError, TypeError):
+        return None
+
+
+# --- which ROMs -----------------------------------------------------------------------------------
+
+def m3u_members(path):
+    try:
+        with open(path, errors="replace") as f:
+            lines = [l.strip() for l in f]
+    except OSError:
+        return []
+    return [os.path.basename(l) for l in lines if l and not l.startswith("#")]
+
+
+def utf8(name, system):
+    try:
+        name.encode()
+        return True
+    except UnicodeEncodeError:
+        log(f"warning: {system}: skipped a file whose name is not UTF-8: {name.encode(errors='replace').decode()}")
+        return False
+
+
+def scan(system, spec):
+    """The ROMs of one system the plugin makes cards of: files one level deep whose extension is
+    the system's, minus .m3u members, plus folders holding one of the system's marker files."""
+    folder = os.path.join(ROMS_DIR, system)
+    try:
+        names = sorted(n for n in os.listdir(folder) if not n.startswith(".") and utf8(n, system))
+    except OSError:
+        return []
+    files = [n for n in names if os.path.isfile(os.path.join(folder, n))
+             and os.path.splitext(n)[1][1:].lower() in spec["exts"]]
+    members = {m for n in files if n.lower().endswith(".m3u")
+               for m in m3u_members(os.path.join(folder, n))}
+    roms = [os.path.join(folder, n) for n in files if n not in members]
+    for n in names:
+        path = os.path.join(folder, n)
+        if os.path.isdir(path) and any(os.path.isfile(os.path.join(path, m)) for m in spec.get("dirs", [])):
+            roms.append(path)
+    return roms
+
+
+def rom_system(path, systems):
+    """(system, absolute path) of a --rom argument, which must be a ROM of ROMS_DIR/<system>/."""
+    path = os.path.abspath(path)
+    parts = os.path.relpath(path, os.path.abspath(ROMS_DIR)).split(os.sep)
+    if len(parts) != 2 or parts[0] not in systems or path not in scan(parts[0], systems[parts[0]]):
+        raise Fail(EXIT_USAGE, f"not a ROM of a scrapeable system under {ROMS_DIR}: {path}")
+    return parts[0], path
+
+
+# --- what identifies a ROM ------------------------------------------------------------------------
+
+def hashes(f):
+    crc, md5 = 0, hashlib.md5()
+    for chunk in iter(lambda: f.read(1 << 20), b""):
+        crc = zlib.crc32(chunk, crc)
+        md5.update(chunk)
+    return {"crc": f"{crc & 0xffffffff:08X}", "md5": md5.hexdigest().upper()}
+
+
+def identify(path, nested=False):
+    """jeuInfos parameters naming this ROM."""
+    name = os.path.basename(path)
+    if os.path.isdir(path):
+        return {"romnom": name, "romtype": "rom"}
+    ext = os.path.splitext(name)[1].lower()
+    if ext == ".m3u" and not nested:
+        first = next(iter(m3u_members(path)), "")
+        disc = os.path.join(os.path.dirname(path), first)
+        if first and os.path.isfile(disc):
+            return identify(disc, nested=True)
+    if ext == ".zip":
+        try:
+            with zipfile.ZipFile(path) as z:
+                games = [i for i in z.infolist() if not i.is_dir() and not i.filename.lower().endswith(".txt")]
+                if len(games) == 1 and games[0].file_size <= HASH_MAX:
+                    with z.open(games[0]) as f:
+                        return {"romnom": os.path.basename(games[0].filename), "romtype": "rom",
+                                "romtaille": str(games[0].file_size), **hashes(f)}
+        except (zipfile.BadZipFile, OSError, RuntimeError, EOFError, NotImplementedError, zlib.error) as err:
+            log(f"warning: {name}: unreadable zip ({err}), asked by name")
+    size = os.path.getsize(path)
+    params = {"romnom": name, "romtype": "rom", "romtaille": str(size)}
+    if size <= HASH_MAX and ext != ".7z":
+        try:
+            with open(path, "rb") as f:
+                params.update(hashes(f))
+        except OSError as err:
+            raise Skip(f"cannot read it: {err.strerror}")
+    return params
+
+
+# --- which art ------------------------------------------------------------------------------------
+
+def region_order(rom_name, region):
+    tags = [t.strip().lower() for group in re.findall(r"\(([^)]*)\)", rom_name) for t in group.split(",")]
+    order = ([region] if region in REGIONS and region != "auto" else []) \
+        + [TAG_REGIONS[t] for t in tags if t in TAG_REGIONS] + list(FALLBACK_REGIONS)
+    return list(dict.fromkeys(order))
+
+
+def pick(medias, types, regions):
+    """The best media entry: the first type with any entry, in the first region that has one; an
+    entry without a region (fan art) fits any; else that type's first entry."""
+    for t in types:
+        found = [m for m in medias if m.get("type") == t]
+        if not found:
+            continue
+        by_region = {m.get("region"): m for m in reversed(found)}
+        return next((by_region[r] for r in regions if r in by_region), by_region.get(None, found[0]))
+    return None
+
+
+def media_url_ok(url):
+    """https on a plain *.screenscraper.fr host name (no user info, port games or odd characters)."""
+    if any(c.isspace() or c in '"\\' for c in url):
+        return False
+    try:
+        u = urllib.parse.urlsplit(url)
+        return (u.scheme == "https" and u.username is None and u.port is None
+                and HOST.fullmatch(u.hostname or "") is not None)
+    except ValueError:
+        return False
+
+
+def media_files(system, key):
+    return [os.path.join(MEDIA_DIR, system, f"{key}-{kind}.{ext}") for kind in KINDS for ext in ("png", "jpg")]
+
+
+def fetch(media, width, dest):
+    """Download one image to dest.<png|jpg>; False (and nothing written) when it is not one."""
+    url = media["url"] + "&" + urllib.parse.urlencode({"maxwidth": width})
+    part = f"{dest}.part"
+    name = os.path.basename(dest)
+    if len(os.fsencode(os.path.basename(part))) > NAME_MAX:
+        raise Skip("its name is too long for an art file name")
+    try:
+        try:
+            _, code, _, final, ctype = curl(url, part)
+        except Fail as f:
+            if f.code != EXIT_NET:
+                raise
+            log(f"warning: {name}: download failed ({f})")
+            return False
+        if not media_url_ok(final):
+            log(f"warning: {name}: redirected away from https://*.screenscraper.fr, dropped")
+            return False
+        try:
+            with open(part, "rb") as f:
+                head = f.read(8)
+        except FileNotFoundError:
+            head = b""
+        fmt = next((ext for magic, ext in MAGIC.items() if head.startswith(magic)), None)
+        if code != "200" or not ctype.startswith("image/") or not fmt:
+            log(f"warning: {name}: no image ({code} {ctype or '?'})")
+            return False
+        for ext in MAGIC.values():
+            if ext != fmt and os.path.exists(f"{dest}.{ext}"):
+                os.unlink(f"{dest}.{ext}")
+        os.replace(part, f"{dest}.{fmt}")
+        return True
+    except OSError as err:
+        if err.errno in (errno.ENOSPC, errno.EDQUOT, errno.EROFS):
+            raise Fail(EXIT_LOCAL, f"cannot write {MEDIA_DIR}: {err.strerror}")
+        raise Skip(f"cannot write its art: {err.strerror}")
+    finally:
+        if os.path.exists(part):
+            os.unlink(part)
+
+
+def save_art(system, key, game, regions):
+    medias = [m for m in game.get("medias") or [] if isinstance(m, dict) and m.get("url")]
+    safe = [m for m in medias if media_url_ok(str(m["url"]))]
+    if len(safe) < len(medias):
+        log(f"warning: {key}: skipped {len(medias) - len(safe)} media outside https://*.screenscraper.fr")
+    os.makedirs(os.path.join(MEDIA_DIR, system), exist_ok=True)
+    got = 0
+    for kind, (types, width) in KINDS.items():
+        m = pick(safe, types, regions)
+        if m and fetch(m, width, os.path.join(MEDIA_DIR, system, f"{key}-{kind}")):
+            got += 1
+    return got
+
+
+# --- commands -------------------------------------------------------------------------------------
+
+def lock_media():
+    try:
+        os.makedirs(MEDIA_DIR, exist_ok=True)
+        fd = os.open(MEDIA_DIR, os.O_RDONLY)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return fd
+    except BlockingIOError:
+        raise Fail(EXIT_LOCAL, "another scrape is running")
+    except OSError as err:
+        raise Fail(EXIT_LOCAL, f"cannot use {MEDIA_DIR}: {err}")
+
+
+def up_to_date(entry, path, system, key):
+    """Without --all: nothing to ask for this ROM (same file, and its art is there or the database
+    did not know it lately)."""
+    st = os.stat(path)
+    if not entry or entry.get("size") != st.st_size or entry.get("mtime") != int(st.st_mtime):
+        return False
+    recent = isinstance(entry.get("checked"), (int, float)) and time.time() - entry["checked"] < RETRY_NOT_FOUND
+    if entry.get("status") == "found":
+        # art deleted: ask again; ScreenScraper had none for it: like not found, once a week
+        return any(os.path.exists(f) for f in media_files(system, key)) or (entry.get("art") == 0 and recent)
+    return entry.get("status") == "not_found" and recent
+
+
+def scrape_one(system, spec, path, dev, user, region, cache):
+    """Ask for one ROM, save its art; True when ScreenScraper knew it."""
+    key = os.path.basename(path)
+    params = identify(path)
+    game = None
+    for sid in spec["ss"]:
+        answer = api("jeuInfos.php", {**user, **params, "systemeid": str(sid)}, dev)
+        remember_quota(cache, answer)
+        game = ((answer or {}).get("response") or {}).get("jeu")
+        if isinstance(game, dict):
+            break
+    found = isinstance(game, dict)
+    st = os.stat(path)
+    entry = {"size": st.st_size, "mtime": int(st.st_mtime), "checked": int(time.time()),
+             "status": "found" if found else "not_found"}
+    if found:
+        entry["game"] = str(game.get("id", ""))
+        entry["art"] = save_art(system, key, game, region_order(key, region))
+    cache["roms"][f"{system}/{key}"] = entry
+    return found
+
+
+def sweep():
+    """Leftovers of a run killed outright (power loss, SIGKILL): half downloads, temp files."""
+    for folder, _, files in os.walk(MEDIA_DIR):
+        for n in files:
+            if n.endswith(".part"):
+                discard(os.path.join(folder, n))
+    for path in (CACHE, CONF):
+        folder, base = os.path.split(path)
+        for n in os.listdir(folder) if os.path.isdir(folder) else []:
+            if n.startswith(base + ".") and n.endswith(".tmp"):
+                discard(os.path.join(folder, n))
+
+
+def discard(path):
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def work_list(args, systems):
+    """[(system, rom path)] for run's arguments (--all aside)."""
+    if args[:1] == ["--system"] and len(args) == 2:
+        if args[1] not in systems:
+            raise Fail(EXIT_USAGE, f"no scrapeable system '{args[1]}'")
+        return [(args[1], p) for p in scan(args[1], systems[args[1]])]
+    if args[:1] == ["--rom"] and len(args) == 2:
+        return [rom_system(args[1], systems)]
+    if not args:
+        return [(s, p) for s in systems for p in scan(s, systems[s])]
+    raise Fail(EXIT_USAGE, USAGE)
+
+
+def cmd_run(args):
+    systems = load_systems()
+    every = "--all" in args
+    work = work_list([a for a in args if a != "--all"], systems)
+    dev = dev_login()
+    conf = read_kv(CONF)
+    user, region = player_login(conf), conf.get("region", "auto")
+    lock = lock_media()
+    started = time.time()
+    sweep()
+    cache = read_cache()
+    counts = {"scraped": 0, "not_found": 0, "skipped": 0, "failed": 0}
+    shown = -1
+    try:
+        for done, (system, path) in enumerate(work, 1):
+            key = os.path.basename(path)
+            try:
+                if not every and up_to_date(cache["roms"].get(f"{system}/{key}"), path, system, key):
+                    counts["skipped"] += 1
+                elif scrape_one(system, systems[system], path, dev, user, region, cache):
+                    counts["scraped"] += 1
+                else:
+                    counts["not_found"] += 1
+            except Fail:
+                raise
+            except Exception as err:  # one ROM's problem (Skip, or a surprise): the run goes on
+                counts["failed"] += 1
+                log(f"warning: {system}/{key}: skipped: {err if isinstance(err, Skip) else type(err).__name__}")
+            pct = done * 100 // len(work)
+            if pct > shown:
+                print(f"{pct}%", flush=True)
+                shown = pct
+            # Counters read by this run only: a quota used up yesterday must not stop today's run.
+            if done < len(work) and quota_left(cache, started) == 0:
+                raise Fail(EXIT_QUOTA, "ScreenScraper's daily request quota is used up: try again tomorrow")
+    finally:
+        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGTERM})  # a 2nd Cancel must not cut this
+        write_cache(cache)
+        print(json.dumps({**counts, "quota_left": quota_left(cache)}), flush=True)
+        os.close(lock)
+    return EXIT_OK
+
+
+def cmd_login(ssid):
+    password = sys.stdin.readline().rstrip("\r\n")
+    if not ssid or not password:
+        raise Fail(EXIT_USAGE, "login needs a user name and, on stdin, a password")
+    if any(not c.isprintable() for c in ssid + password) or ssid != ssid.strip():
+        raise Fail(EXIT_USAGE, "the user name or password holds characters a login cannot have")
+    answer = api("ssuserInfos.php", {"ssid": ssid, "sspassword": password}, dev_login())
+    if not answer:
+        raise Fail(EXIT_LOGIN, "ScreenScraper refused the player's login")
+    cache = read_cache()
+    remember_quota(cache, answer)
+    write_cache(cache)
+    write_conf({**read_kv(CONF), "ssid": ssid, "sspassword": password})
+    return EXIT_OK
+
+
+def cmd_logout():
+    write_conf({k: v for k, v in read_kv(CONF).items() if k not in ("ssid", "sspassword")})
+    return EXIT_OK
+
+
+def cmd_region(region):
+    if region not in REGIONS:
+        raise Fail(EXIT_USAGE, f"region is one of {', '.join(REGIONS)}")
+    write_conf({**read_kv(CONF), "region": region})
+    return EXIT_OK
+
+
+def cmd_account():
+    conf = read_kv(CONF)
+    q = read_cache().get("quota", {})
+
+    def num(k):
+        return int(q[k]) if str(q.get(k, "")).isdigit() else None
+    print(json.dumps({
+        "configured": bool(player_login(conf)), "user": conf.get("ssid") or None,
+        "region": conf.get("region", "auto"), "max_threads": num("maxthreads"),
+        "requests_today": num("requeststoday"), "max_requests_per_day": num("maxrequestsperday"),
+        "not_found_today": num("requestskotoday"), "max_not_found_per_day": num("maxrequestskoperday")}))
+    return EXIT_OK
+
+
+USAGE = ("usage: retroforge-scrape run [--system <s> | --rom <path>] [--all] | login <ssid> (password on"
+         " stdin) | logout | region auto|wor|us|eu|jp | account")
+
+
+def main(argv):
+    cmd, args = (argv[0], argv[1:]) if argv else ("", [])
+    if cmd == "run":
+        return cmd_run(args)
+    if cmd == "login" and len(args) == 1:
+        return cmd_login(args[0])
+    if cmd == "logout" and not args:
+        return cmd_logout()
+    if cmd == "region" and len(args) == 1:
+        return cmd_region(args[0])
+    if cmd == "account" and not args:
+        return cmd_account()
+    raise Fail(EXIT_USAGE, USAGE)
+
+
+def on_sigterm(signum, frame):
+    raise KeyboardInterrupt  # the plugin's Cancel: unwinds through run's cache write and summary
+
+
+if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, on_sigterm)
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except Fail as f:
+        log(str(f))
+        sys.exit(f.code)
+    except KeyboardInterrupt:
+        log("cancelled")
+        sys.exit(EXIT_LOCAL)
