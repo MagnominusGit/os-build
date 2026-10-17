@@ -247,6 +247,30 @@ func test_card_images(media: String) -> void:
 	check("card cache: no box -> no card", ArtPaths.make_card(media + "/snes/None.zip-box.png", cache + ".x"), null)
 
 
+## PortMaster ports are never scraped: each port PortMaster installs carries a gameinfo.xml (ES
+## gameList) whose <path> is the launch script and <image> its screenshot, both relative to
+## ~/roms/ports (seen for Apotris and 8-Bit Buccaneer, 2026-10-17). Every layout but the logo uses it.
+func test_port_art(media: String) -> void:
+	var ports := "$T/art/roms/ports"
+	write(ports + "/8bitbuccaneer/gameinfo.xml", '<?xml version="1.0" encoding="utf-8"?>\n<gameList>\n  <game>\n    <path>./8-BIT BUCCANEER.sh</path>\n    <name>8-BIT BUCCANEER</name>\n    <image>./8bitbuccaneer/screenshot.png</image>\n  </game>\n</gameList>\n')
+	write(ports + "/8bitbuccaneer/screenshot.png", "png")
+	write(ports + "/apotris/gameinfo.xml", "<?xml version='1.0' encoding='utf-8'?>\n<gameList><game><path>./Apotris.sh</path><name>Apotris</name><image>./apotris/screenshot.png</image></game></gameList>")
+	write(ports + "/apotris/screenshot.png", "png")
+	write(ports + "/evil/gameinfo.xml", "<gameList><game><path>./Evil.sh</path><image>../../../etc/passwd</image></game></gameList>")
+	write(ports + "/gone/gameinfo.xml", "<gameList><game><path>./Gone.sh</path><image>./gone/screenshot.png</image></game></gameList>")
+	write(ports + "/broken/gameinfo.xml", "<gameList><game><path>./Broken.sh</pa")
+	check("ports: a card is the port's screenshot",
+		ArtPaths.path_for(media, "ports", ports + "/8-BIT BUCCANEER.sh", 0, ports), ports + "/8bitbuccaneer/screenshot.png")
+	check("ports: the wide layouts too, no logo",
+		[ArtPaths.path_for(media, "ports", ports + "/Apotris.sh", 1, ports), ArtPaths.path_for(media, "ports", ports + "/Apotris.sh", 2, ports), ArtPaths.path_for(media, "ports", ports + "/Apotris.sh", 3, ports)],
+		[ports + "/apotris/screenshot.png", ports + "/apotris/screenshot.png", ""])
+	check("ports: an image outside ~/roms/ports, a missing image, a broken file, an unknown port -> none",
+		[ArtPaths.path_for(media, "ports", ports + "/Evil.sh", 0, ports), ArtPaths.path_for(media, "ports", ports + "/Gone.sh", 0, ports),
+		 ArtPaths.path_for(media, "ports", ports + "/Broken.sh", 0, ports), ArtPaths.path_for(media, "ports", ports + "/Other.sh", 0, ports)],
+		["", "", "", ""])
+	check("ports: the default ports folder is ~/roms/ports", ArtPaths.ports_dir(), OS.get_environment("HOME").path_join("roms/ports"))
+
+
 ## Art retroforge-scrape fetched, per OGUI layout (0 portrait, 1 landscape, 2 banner, 3 logo).
 ## Keyed by the ROM's file (or folder) name, so Game.cue and Game.chd never share art.
 func test_art_paths() -> void:
@@ -280,6 +304,7 @@ func test_art_paths() -> void:
 	check("art: not an image, or no file -> null",
 		[ArtPaths.load_image(media + "/psx/Game.chd-box.png"), ArtPaths.load_image(media + "/nothing.png")], [null, null])
 	test_card_images(media)
+	test_port_art(media)
 	check("art: no system or ROM, or an unknown layout -> no path",
 		[ArtPaths.path_for(media, "", rom, 0), ArtPaths.path_for(media, "psx", "", 0), ArtPaths.path_for(media, "psx", rom, 9)],
 		["", "", ""])

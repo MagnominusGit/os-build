@@ -1,6 +1,10 @@
 # ROM artwork scraper — plan
 
 Status: decisions D1-D3 AGREED 2026-10-17; the user already has a ScreenScraper dev account.
+Port art DONE 2026-10-17 (plugin 0.1.52, HW-OK on the ACE): PortMaster ports are never scraped; the
+plugin reads each port's gameinfo.xml (ES gameList: <path> launch script, <image> screenshot, relative
+to ~/roms/ports) and uses the screenshot for every layout but LOGO; cards are its centre crop (user
+decision: keep the crop). Its desc/developer/date wait for the text-metadata step (D3).
 Phase 3 DONE 2026-10-17 (plugin 0.1.51): image stage scraper-login (rootfs/lib-assemble-scraper.sh,
 RETROFORGE_SS_DEVID/DEVPASSWORD from dev.env.local or repository secrets; SCRAPER_STAMP), Settings >
 Library > ROM Art (scraper_settings.gd), Game settings > RetroForge > Box art, scrape_runner.gd

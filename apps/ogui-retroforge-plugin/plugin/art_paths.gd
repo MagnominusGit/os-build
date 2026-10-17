@@ -15,6 +15,13 @@ const KINDS := {
 	3: ["wheel"],  # LOGO
 }
 const EXTS := ["png", "jpg"]
+## PortMaster ports are never scraped: each port PortMaster installs carries a gameinfo.xml (an ES
+## gameList) whose <path> names its launch script and <image> its screenshot, both relative to
+## ~/roms/ports. That screenshot serves every layout but LOGO (ports have no logo). The files are read
+## once per PORT_MAP_TTL_MS, not once per card.
+const PORT_LAYOUTS := [0, 1, 2]
+const PORT_MAP_TTL_MS := 5000
+static var _port_maps := {}  # ports folder -> {"at": msec, "map": {script file name: image path}}
 ## A card image: OGUI's card is 200x300 and draws its texture whole from the top-left, so a box of
 ## any other shape left part of the card empty (a SNES box filled its top third, ACE 2026-10-17).
 ## 1.5x the card, for sharpness on the larger panels.
@@ -32,6 +39,53 @@ static func media_dir() -> String:
 ## Godot 4.7.1, 2026-10-17: 0.67 / 1.3 ms vs 1.65 / 9.3 ms; PNG 2.1 / 33 ms).
 static func cards_dir() -> String:
 	return OS.get_environment("HOME").path_join(".cache/retroforge/cards")
+
+
+## ~/roms/ports, where PortMaster puts its ports (plan Phase 4b).
+static func ports_dir() -> String:
+	return OS.get_environment("HOME").path_join("roms/ports")
+
+
+## {launch script file name: its screenshot} from every <port>/gameinfo.xml in `ports`. An image
+## outside `ports` or missing is left out; a file that does not parse is skipped.
+static func port_images(ports: String) -> Dictionary:
+	var cached: Dictionary = _port_maps.get(ports, {})
+	if not cached.is_empty() and Time.get_ticks_msec() - int(cached["at"]) < PORT_MAP_TTL_MS:
+		return cached["map"]
+	var root := ports.simplify_path()
+	var images := {}
+	for folder in DirAccess.get_directories_at(ports):
+		for game in _gameinfo(ports.path_join(folder).path_join("gameinfo.xml")):
+			var image := root.path_join(game.get("image", "")).simplify_path()
+			var script: String = game.get("path", "").get_file()
+			if script != "" and image.begins_with(root + "/") and FileAccess.file_exists(image):
+				images[script] = image
+	_port_maps[ports] = {"at": Time.get_ticks_msec(), "map": images}
+	return images
+
+
+## The <game> entries of an ES gameList file: [{"path": ..., "image": ...}]; [] when unreadable.
+static func _gameinfo(path: String) -> Array:
+	var parser := XMLParser.new()
+	if not FileAccess.file_exists(path) or parser.open(path) != OK:
+		return []
+	var games := []
+	var game := {}
+	var field := ""
+	while parser.read() == OK:
+		match parser.get_node_type():
+			XMLParser.NODE_ELEMENT:
+				field = parser.get_node_name()
+				if field == "game":
+					game = {}
+			XMLParser.NODE_TEXT:
+				if field in ["path", "image"]:
+					game[field] = parser.get_node_data().strip_edges()
+			XMLParser.NODE_ELEMENT_END:
+				if parser.get_node_name() == "game" and game.has("path"):
+					games.append(game)
+				field = ""
+	return games
 
 
 ## An art file as an Image, decoded by its first bytes (Godot's loader goes by the extension, and a
@@ -86,11 +140,16 @@ static func make_card(box_path: String, cache: String) -> Image:
 	return card
 
 
-## The art file for a ROM (a file, or a game folder) in a layout; "" when none was scraped.
-static func path_for(media: String, system: String, rom: String, layout: int) -> String:
+## The art file for a ROM (a file, or a game folder) in a layout; "" when none was scraped. A port's
+## comes from PortMaster's gameinfo.xml in `ports` (default: the port script's own folder).
+static func path_for(media: String, system: String, rom: String, layout: int, ports := "") -> String:
 	var key := rom.trim_suffix("/").get_file()
 	if system == "" or key == "":
 		return ""
+	if system == "ports":
+		if not layout in PORT_LAYOUTS:
+			return ""
+		return port_images(ports if ports != "" else rom.get_base_dir()).get(key, "")
 	for kind in KINDS.get(layout, []):
 		for ext in EXTS:
 			var path := media.path_join(system).path_join("%s-%s.%s" % [key, kind, ext])
