@@ -278,7 +278,7 @@ calls_before="$(wc -l < "$W/curl.log")"; run list
 [ "$(wc -l < "$W/curl.log")" = "$calls_before" ] && ok "list never touches the network" || bad "list called curl"
 
 # =================================================================================================
-CASE="nightly channel"
+CASE="no tested build (nightly)"
 # Cemu has no aarch64 release that runs (2.6 predates the AArch64 recompiler): its catalog entry
 # follows pkgforge-dev's rolling `nightly` release (user decision 2026-10-07). No sha256 in the
 # catalog: GitHub's per-asset digest is required instead and the bytes must match it; the build is
@@ -287,7 +287,7 @@ nightly_catalog() {  # nightly_catalog [asset-pattern]
   cat > "$W/catalog.json" <<EOF
 {"schema": 1, "emulators": {"dummy": {
   "name": "Dummy", "author": "A. Dummy", "systems": ["psx"], "github": "example/dummy", "tag": "nightly",
-  "channel": "nightly", "asset": "${1:-^Dummy-([0-9a-f]+)-arm64\\\\.AppImage\$}", "size": 1000,
+  "tag_pattern": "^nightly\$", "asset": "${1:-^Dummy-([0-9a-f]+)-arm64\\\\.AppImage\$}", "size": 1000,
   "homepage": "https://example.org/", "licence": {"name": "MIT", "url": "https://example.org/LICENSE"}}}}
 EOF
 }
@@ -322,9 +322,9 @@ run install dummy
 [ "$RC" = 0 ] && [ "$(readlink "$D/dummy/current")" = nightly-def456.AppImage ] && [ -f "$D/dummy/nightly-abc123.AppImage" ] \
   && ok "a newer nightly installs, the previous one is kept for a rollback" || bad "rc=$RC left: $(ls "$D/dummy" | tr '\n' ' ')"
 run list
-[ "$(field channel)" = '"nightly"' ] && [ "$(field installed)" = '"nightly-def456"' ] && [ "$(field update)" = false ] \
-  && ok "list: channel nightly, installed nightly-<commit>, update unknown offline (false)" \
-  || bad "got channel=$(field channel) installed=$(field installed) update=$(field update)"
+[ "$(field tested)" = null ] && [ "$(field follows_latest)" = true ] && [ "$(field installed)" = '"nightly-def456"' ] && [ "$(field update)" = false ] \
+  && ok "list: no tested build, follows latest, installed nightly-<commit>, update unknown offline (false)" \
+  || bad "got tested=$(field tested) follows=$(field follows_latest) installed=$(field installed) update=$(field update)"
 # Refusals: no digest to check against, bytes that do not match it.
 reset; nightly_catalog; nightly_api abc123 "nightly build abc" ""
 run install dummy
@@ -338,13 +338,10 @@ reset; nightly_catalog '^Dummy-[0-9a-f]+-arm64\\.AppImage$'; nightly_api abc123 
 run install dummy
 want="nightly-$(sha "$W/srv/nightly.AppImage" | cut -c1-12).AppImage"
 [ "$RC" = 0 ] && [ "$(readlink "$D/dummy/current")" = "$want" ] && ok "no capture group: named nightly-<sha256 prefix>" || bad "current=$(readlink "$D/dummy/current") want $want: $ERR"
-# A pinned entry stays pinned: a sha256 is still required without the channel.
-reset; nightly_catalog; python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); del c["emulators"]["dummy"]["channel"]; json.dump(c, open(sys.argv[1], "w"))' "$W/catalog.json"
+# A pinned-only entry stays pinned: a sha256 is still required without a tag_pattern.
+reset; nightly_catalog; python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); del c["emulators"]["dummy"]["tag_pattern"]; json.dump(c, open(sys.argv[1], "w"))' "$W/catalog.json"
 nightly_api abc123 "nightly build abc"; run install dummy
-[ "$RC" = 4 ] && [ ! -e "$D/dummy/current" ] && ok "no channel and no sha256: refused (exit 4)" || bad "rc=$RC $ERR"
-reset; nightly_catalog; python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); c["emulators"]["dummy"]["channel"]="weekly"; json.dump(c, open(sys.argv[1], "w"))' "$W/catalog.json"
-run install dummy
-[ "$RC" = 4 ] && [ ! -e "$W/curl.log" ] && ok "an unknown channel is refused before any download" || bad "rc=$RC"
+[ "$RC" = 4 ] && [ ! -e "$D/dummy/current" ] && ok "no tag_pattern and no sha256: refused (exit 4)" || bad "rc=$RC $ERR"
 
 # =================================================================================================
 CASE="unpacked archive"
@@ -552,9 +549,6 @@ reset; latest_catalog; releases - "v3:03-01"; cp "$W/srv/v1.AppImage" "$W/srv/ov
 [ "$RC" = 4 ] && [ -z "$(find "$D" -type f)" ] && ok "bytes that do not hash to GitHub's digest: exit 4, nothing left" || bad "rc=$RC left: $(find "$D" -type f)"
 reset; latest_catalog; releases - "v3:03-01"; touch "$W/srv/ratelimit"; run install dummy
 [ "$RC" = 3 ] && grep -q "rate limited" <<<"$ERR" && ok "GitHub's rate limit (403): exit 3, says so" || bad "rc=$RC $ERR"
-reset; nightly_catalog; set_field dummy channel DELETE; set_field dummy tag_pattern '"^nightly$"'; nightly_api abc123 "nightly build abc"
-run install dummy
-[ "$RC" = 0 ] && [ "$(current)" = nightly-abc123.AppImage ] && ok "tag_pattern ^nightly\$ (no channel): a rolling tag is named nightly-<id>" || bad "rc=$RC current=$(current) $ERR"
 reset; latest_catalog; set_field dummy tag_pattern '"(["'; run install dummy
 [ "$RC" = 4 ] && [ ! -e "$W/curl.log" ] && ok "a bad tag_pattern is refused before any network" || bad "rc=$RC"
 

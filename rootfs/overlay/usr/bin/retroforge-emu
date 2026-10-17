@@ -43,10 +43,9 @@
 # build, so the build is installed as <tag>-<id>, <id> = the asset pattern's first capture group
 # (the commit in pkgforge-dev's file names), else the digest's first 12 hex digits. Same build as
 # `current`, rolling or not: nothing is downloaded and stderr says "already the latest".
-# NIGHTLY CHANNEL (catalog "channel": "nightly", no "sha256"; "size" is only an estimate for the
-# page): the older spelling of tag_pattern "^<tag>$" -- Cemu, whose only aarch64 release (2.6)
-# predates its AArch64 recompiler and dies with SIGILL (user decision 2026-10-07). It has no tested
-# build: --tested is refused. The page says "Nightly".
+# NO TESTED BUILD (no "sha256"; "size" is only an estimate for the page; tag_pattern "^<tag>$" on a
+# rolling tag): Cemu, whose only aarch64 release (2.6) predates its AArch64 recompiler and dies with
+# SIGILL (user decision 2026-10-07). --tested is refused; the page says "Nightly".
 #
 # DATA FILES (catalog "data": [{"url": "https://...", "to": "<path under $HOME>"}], optional): files
 # an emulator needs but never fetches the way RetroForge runs it -- RPCS3 downloads its per-game config
@@ -109,7 +108,6 @@ EMU_ID = re.compile(r"[a-z0-9_-]+")
 # A tag names a file (<tag>.AppImage) and a URL path segment: no '/', nothing a shell or URL reads
 # specially. '@' is allowed: pkgforge-dev's AppImage repos tag releases as <version>@<date>_<id>.
 SAFE_TAG = re.compile(r"[A-Za-z0-9._@-]+")
-CHANNELS = {"nightly"}
 # Tags an upstream moves from build to build: a build under one is named <tag>-<id> (ROLLING TAGS).
 ROLLING = {"latest", "preview", "nightly", "continuous", "dev", "master", "main"}
 SPACE_MARGIN = 16 << 20  # bytes kept free beyond the AppImage itself
@@ -245,13 +243,10 @@ def tested_build(e):
 
 
 def tag_pattern(e):
-    """The entry's tag pattern (a "channel" entry's is its own rolling tag), or None: pinned-only."""
-    if "tag_pattern" in e:
-        src = e["tag_pattern"]
-    elif "channel" in e:
-        src = f"^{re.escape(e['tag'])}$"
-    else:
+    """The entry's tag pattern, or None: pinned-only."""
+    if "tag_pattern" not in e:
         return None
+    src = e["tag_pattern"]
     try:
         return re.compile(src)
     except (re.error, TypeError) as err:
@@ -300,7 +295,7 @@ def digest_build(tag, pattern, a):
 
 def check_key(e):
     """What a cached check answered for: a catalog (OTA) that changes any of it asks again."""
-    return json.dumps([e.get("github"), e.get("tag_pattern", e.get("channel")), e.get("asset")])
+    return json.dumps([e.get("github"), e.get("tag_pattern"), e.get("asset")])
 
 
 def read_check_cache():
@@ -490,16 +485,13 @@ def checked_entry(emu, e):
     """Refuse a catalog entry retroforge-emu cannot install safely (exit 4, before any download)."""
     if not SAFE_TAG.fullmatch(str(e.get("tag", ""))):
         raise Fail(EXIT_VERIFY, f"unsafe tag in the catalog: {e.get('tag')!r}")
-    channel = e.get("channel")
-    if channel is not None and channel not in CHANNELS:
-        raise Fail(EXIT_VERIFY, f"unknown channel in the catalog: {channel!r}")
     if tag_pattern(e) is None and "sha256" not in e:
         raise Fail(EXIT_VERIFY, f"{emu}: a pinned catalog entry needs a sha256")
     return e
 
 
 def tested_tag(e):
-    """The build RetroForge tested (the pin), or None: a "channel" entry has none."""
+    """The build RetroForge tested (the pin), or None: an entry without a sha256 has none."""
     return e.get("tag") if "sha256" in e else None
 
 
@@ -575,13 +567,12 @@ def cmd_list():
         except Fail as f:
             log(f"warning: {f}")
             continue
-        follows = "tag_pattern" in e or "channel" in e
+        follows = "tag_pattern" in e
         out[emu] = {
             "name": e.get("name", emu),
             "systems": e.get("systems", []),
             "pinned": e.get("tag"),
             "tested": tested_tag(e),
-            "channel": e.get("channel"),
             "follows_latest": follows,
             "installed": inst,
             "previous": previous_tag(emu) if e.get("unpack") is None else None,

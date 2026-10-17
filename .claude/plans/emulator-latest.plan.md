@@ -4,7 +4,9 @@ Status: decisions D1-D7 + Phase 4 AGREED 2026-10-16 (branch plan/emulator-latest
 (retroforge-emu) DONE 2026-10-17, offline tests + a live `check` of rpcs3/duckstation/armsx2/xemu/cemu;
 D4 corrected (prerelease flag is not a filter, newest by published_at). Phase 2 (plugin) DONE
 2026-10-17 offline (emu_state.gd tests in Godot 4.7.1; page compile-checked against OGUI stubs), not on
-HW. Next is Phase 3.
+HW. Phase 3 (catalog) DONE 2026-10-17: every entry has a tag_pattern, verified live
+(`RETROFORGE_NET_TEST=1 tests/test-catalog.sh`, 246 ok); `channel` removed from catalog and
+retroforge-emu. Next: Phase 4 (CI key drift), then the HW gate.
 
 ## Why, and what it reverses
 
@@ -124,10 +126,10 @@ Per entry: `tag_pattern` + version-agnostic `asset`, pins untouched. Every patte
 verified against the live releases list before it lands (`RETROFORGE_NET_TEST=1
 tests/test-catalog.sh` gains a "latest resolves to exactly one asset" check):
 
-| Emulator | tag_pattern (to verify) | note |
+| Emulator | tag_pattern (verified live 2026-10-17) | note |
 |---|---|---|
 | armsx2 | `^nightly-[0-9]{8}$` | asset must stay the 4K-pages build |
-| azahar, clownmdemu, dolphin, flycast, melonds, mgba, snes9x | `^[0-9][^@]*@[0-9-]+_[0-9]+$` | pkgforge-dev `<ver>@<date>_<id>`; check none of these repos also publish nightly tags |
+| azahar, clownmdemu, dolphin, flycast, melonds, mgba, snes9x | `^[0-9][0-9.]*(-[0-9]+)?@[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]+$` | pkgforge-dev `<ver>@<date>_<id>`; Azahar's repo also has a `nightly` (prerelease) tag, kept out by the pattern |
 | cemu | `^nightly$` | replaces `channel` |
 | duckstation | `^v0\.1-[0-9]+$` | NEVER `latest` (asset replaced in place) |
 | ppsspp | `^v[0-9]+\.[0-9]+(\.[0-9]+)?$` | |

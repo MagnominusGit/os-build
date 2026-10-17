@@ -8,9 +8,13 @@
 # broken game for everyone who downloads after it:
 #
 #   - a rolling tag (DuckStation's `latest` / `preview`) replaces its asset in place, so a pin on
-#     one silently ships an untested build: pins must be numbered releases -- unless the entry says
-#     so with "channel": "nightly" (Cemu, user decision 2026-10-07): then no sha256 (retroforge-emu
-#     checks GitHub's own digest), "size" is an estimate, and the tag must be the rolling one;
+#     one silently ships an untested build: pins must be numbered releases -- unless the entry has no
+#     tested build at all (Cemu, user decision 2026-10-07): then no sha256 (retroforge-emu checks
+#     GitHub's own digest), "size" is an estimate, and tag_pattern is ^<that rolling tag>$;
+#   - "tag_pattern" (plan emulator-latest) decides which upstream release is the newest and gets
+#     installed by default: it must match the tested pin, and never a rolling tag (a build swapped
+#     under the same name would read as "already the latest" forever); with RETROFORGE_NET_TEST=1,
+#     `retroforge-emu check` must resolve every entry's newest build;
 #   - the sha256 is what the plugin checks the download against (and must match GitHub's per-asset
 #     digest): a malformed one would make every install fail, or, if skipped, verify nothing;
 #   - an emulator the image cannot launch (no /usr/share/retroforge/emulators/<emu>/emulator.json), or one serving a
@@ -72,8 +76,7 @@ for line in open(launch_conf):
 
 ROLLING = {"latest", "preview", "nightly", "continuous", "dev", "master", "main"}
 REQUIRED = {"name", "author", "systems", "github", "tag", "asset", "sha256", "size", "homepage", "licence"}
-OPTIONAL = {"data", "unpack", "self_update"}
-CHANNELS = {"nightly"}
+OPTIONAL = {"data", "unpack", "self_update", "tag_pattern"}
 
 def check_github(case, e, rx):
     url = f"https://api.github.com/repos/{e['github']}/releases/tags/{e['tag']}"
@@ -91,7 +94,7 @@ def check_github(case, e, rx):
         bad(case, f"asset pattern matches {len(assets)} assets of {e['tag']}, want exactly 1")
         return
     a = assets[0]
-    if "channel" in e:
+    if "sha256" not in e:
         if re.fullmatch(r"sha256:[0-9a-f]{64}", str(a.get("digest"))):
             ok(case, f"GitHub publishes a sha256 digest for {a['name']} (the nightly is checked against it)")
         else:
@@ -119,14 +122,14 @@ for emu, e in emus.items():
     if not re.fullmatch(r"[a-z0-9_-]+", emu):
         bad(case, "id is not [a-z0-9_-]+ (it names a folder and a conf)")
         continue
-    channel = e.get("channel")
-    required = REQUIRED - {"sha256"} if channel is not None else REQUIRED
+    nightly = "sha256" not in e  # no tested build: follows a rolling release (Cemu)
+    required = REQUIRED - {"sha256"} if nightly else REQUIRED
     missing = required - set(e)
     if missing:
         bad(case, f"lacks {sorted(missing)}")
         continue
     ok(case, "has every field")
-    extra = set(e) - REQUIRED - OPTIONAL - {"channel"}
+    extra = set(e) - REQUIRED - OPTIONAL
     if extra:
         bad(case, f"unknown fields {sorted(extra)} (launch settings belong in the image's emulator.json)")
     # Optional data files retroforge-emu fetches after an install (RPCS3's config database): https only,
@@ -154,10 +157,10 @@ for emu, e in emus.items():
         else:
             bad(case, f"bad unpack {unpack!r}: needs exactly 'to' and 'version', relative paths")
     if "self_update" in e:
-        if e["self_update"] is True and unpack is not None and channel is None:
-            ok(case, "updates itself after the pinned first install (no update offered)")
+        if e["self_update"] is True and unpack is not None and not nightly:
+            ok(case, "updates itself after the first install (no update offered)")
         else:
-            bad(case, "self_update must be true, on a pinned unpacked archive only")
+            bad(case, "self_update must be true, on an unpacked archive with a tested pin only")
 
     if os.path.isfile(os.path.join(emu_conf_dir, emu, "emulator.json")):
         ok(case, f"the image can launch it (/usr/share/retroforge/emulators/{emu}/emulator.json)")
@@ -174,19 +177,34 @@ for emu, e in emus.items():
         bad(case, "systems is not a non-empty list")
 
     tag = e["tag"]
-    if channel is not None:
-        if channel not in CHANNELS:
-            bad(case, f"unknown channel {channel!r} (retroforge-emu knows {sorted(CHANNELS)})")
-        elif "sha256" in e:
-            bad(case, "a nightly entry has no sha256: its build changes, GitHub's digest is checked")
-        elif tag.lower() in ROLLING:
-            ok(case, f"follows the rolling {tag!r} release on purpose (channel {channel})")
+    tags = None
+    if "tag_pattern" in e:
+        try:
+            tags = re.compile(e["tag_pattern"])
+        except (re.error, TypeError) as err:
+            bad(case, f"tag_pattern does not compile: {err}")
+    if tags is not None:
+        tp = e["tag_pattern"]
+        rolling_hits = sorted(t for t in ROLLING if tags.fullmatch(t))
+        if not (tp.startswith("^") and tp.endswith("$")):
+            bad(case, f"tag_pattern {tp!r} must be ^...$")
+        elif not tags.fullmatch(tag):
+            bad(case, f"tag_pattern {tp!r} does not match the tested tag {tag!r}")
+        elif nightly and tp == f"^{re.escape(tag)}$" and tag in ROLLING:
+            ok(case, f"follows the rolling {tag!r} release on purpose (no tested build)")
+        elif nightly:
+            bad(case, f"no sha256 (no tested build) needs tag_pattern ^<rolling tag>$, not {tp!r}")
+        elif rolling_hits:
+            bad(case, f"tag_pattern {tp!r} matches the rolling tag(s) {rolling_hits}")
         else:
-            bad(case, f"channel {channel} but tag {tag!r} is not a rolling one")
-    elif tag.lower() in ROLLING or not re.search(r"\d", tag):
-        bad(case, f"tag {tag!r} is rolling: its asset can change under the pin")
-    else:
-        ok(case, f"pinned to a numbered release ({tag})")
+            ok(case, f"follows upstream's newest release matching {tp}")
+    elif nightly:
+        bad(case, "no sha256 and no tag_pattern: retroforge-emu has nothing to install")
+    if not nightly:
+        if tag.lower() in ROLLING or not re.search(r"\d", tag):
+            bad(case, f"tag {tag!r} is rolling: its asset can change under the pin")
+        else:
+            ok(case, f"tested pin is a numbered release ({tag})")
     if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", e["github"]):
         ok(case, f"source github.com/{e['github']}")
     else:
@@ -206,7 +224,7 @@ for emu, e in emus.items():
             ok(case, f"asset pattern {pattern} is anchored and {'arm64' if arm else 'multi-arch (unpacked)'}")
         else:
             bad(case, f"asset pattern {pattern!r} must be ^...$ and name arm64/aarch64")
-    if channel is not None:
+    if nightly:
         if rx and rx.groups >= 1:
             ok(case, "asset pattern captures the build id (installed as nightly-<id>)")
         elif rx:
@@ -235,6 +253,26 @@ for emu, e in emus.items():
 
     if net and rx:
         check_github(f"emulator {emu} (GitHub)", e, rx)
+
+# The newest build every entry would install, resolved by retroforge-emu itself (the code that runs on
+# the device): a tag_pattern or asset pattern that matches nothing upstream fails here, not on a player.
+if net:
+    import subprocess, tempfile
+    case = "newest (GitHub)"
+    tool = os.path.normpath(os.path.join(os.path.dirname(launch_conf), "../../usr/bin/retroforge-emu"))
+    with tempfile.TemporaryDirectory() as home:
+        env = dict(os.environ, HOME=home, RETROFORGE_CATALOG=catalog_path, RETROFORGE_EMU_DIR=home + "/emulators")
+        run = subprocess.run([sys.executable, tool, "check", "--refresh"], env=env, capture_output=True, text=True)
+    try:
+        answers = json.loads(run.stdout)["emulators"]
+    except (ValueError, KeyError) as err:
+        answers = {}
+        bad(case, f"retroforge-emu check gave no JSON ({err}): {run.stderr.strip()}")
+    for emu, a in answers.items():
+        if a.get("error") is None and a.get("latest"):
+            ok(case, f"{emu}: newest is {a['latest']}")
+        else:
+            bad(case, f"{emu}: no newest build resolves: {a.get('error')}")
 
 # Every system the image launches has an emulator in the catalog, or the plugin cannot offer it.
 case = "coverage"
