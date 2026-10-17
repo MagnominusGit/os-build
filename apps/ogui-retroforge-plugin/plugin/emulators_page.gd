@@ -227,10 +227,11 @@ func _add_credit(emu: Dictionary) -> void:
 	_rows.add_child(label)
 
 
-## The emulator's block (its name is the screen's title): who made it, then its rows -- the version
-## with Download / Update / Open (and Install tested), then under a "Settings" title one dropdown per
-## option and the fast-cores default, then Check / Revert and Delete once installed. Options show before the download too: a choice made then applies from the first
-## launch. Only the last row draws a separator (OGUI's toggle draws one by default).
+## The emulator's block (its name is the screen's title): who made it, then the build's rows -- the
+## version with Download / Update / Open, Install tested, Check, Revert, Delete -- then under a
+## "Settings" title the fast-cores default and one dropdown per option. Options show before the
+## download too: a choice made then applies from the first launch. Lines: under the build's last row
+## and under the title, nowhere else.
 func _add_emulator(id: String, emu: Dictionary) -> void:
 	var name_text := str(emu.get("name", id))
 	_add_credit(emu)
@@ -239,34 +240,33 @@ func _add_emulator(id: String, emu: Dictionary) -> void:
 	var last := _add_action_row(id, name_text, emu, state.main)
 	if state.tested != null:
 		last = _add_action_row(id, name_text, emu, state.tested)
-	# The version rows end the block's first part: a separator, then the settings under a title.
+	for row in state.extra:
+		last = _add_action_row(id, name_text, emu, row)
+	if installed != null:
+		last = row_scene.instantiate()
+		last.text = "Delete"
+		last.description = "Removes the emulator. Its settings, saves and states are kept."
+		last.button_text = "Delete"
+		last.separator_visible = false
+		last.button_up.connect(_remove.bind(id, name_text, last))
+		_rows.add_child(last)
+	# The build's rows end the first part; the settings follow under their own title. The options
+	# come last: a dropdown's value box sits under its description, so a row placed after one reads
+	# as if the box were its header.
 	last.separator_visible = true
 	_add_label("Settings")
-
-	for option in EmuOptions.options_for(id):
-		_add_option(id, name_text, option)
+	_rows.add_child(HSeparator.new())
 
 	var fast = toggle_scene.instantiate()
 	fast.text = "Run on fast cores"
 	fast.description = "Games can override this in their own settings."
 	fast.button_pressed = LaunchArgs.emulator_fast_cores(id)
-	fast.separator_visible = installed == null and state.extra.is_empty()  # the block's last row
+	fast.separator_visible = false
 	fast.toggled.connect(_set_fast_cores.bind(id, name_text, fast))
 	_rows.add_child(fast)
 
-	for row in state.extra:
-		_add_action_row(id, name_text, emu, row)
-	if installed == null and not state.extra.is_empty():
-		_rows.get_child(_rows.get_child_count() - 1).separator_visible = true
-
-	if installed != null:
-		var remove = row_scene.instantiate()
-		remove.text = "Delete"
-		remove.description = "Removes the emulator. Its settings, saves and states are kept."
-		remove.button_text = "Delete"
-		remove.separator_visible = true
-		remove.button_up.connect(_remove.bind(id, name_text, remove))
-		_rows.add_child(remove)
+	for option in EmuOptions.options_for(id):
+		_add_option(id, name_text, option)
 
 
 ## One row of emu_state.gd: its button runs retroforge-emu with the row's args, or Open without.
