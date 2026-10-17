@@ -626,6 +626,14 @@ func run() -> void:
 		 ScrapeRunner.failure_text(8, "retroforge-scrape: ScreenScraper is closed for maintenance")],
 		["ScreenScraper's daily request quota is used up: try again tomorrow", "ScreenScraper is closed for maintenance"])
 	check("failure: cancelled", ScrapeRunner.failure_text(5, "retroforge-scrape: cancelled"), "Cancelled.")
+	# Auto-scrape after a library load: on, a build that can scrape, nothing running, no game, and not
+	# the reload a scrape itself asked for (that would only loop).
+	check("auto: a library load with everything allowed scrapes", ScrapeRunner.auto_scrape_wanted(true, true, false, false, false), true)
+	check("auto: not when off, without a login in the build, while a scrape or a game runs, or after its own reload",
+		[ScrapeRunner.auto_scrape_wanted(false, true, false, false, false), ScrapeRunner.auto_scrape_wanted(true, false, false, false, false),
+		 ScrapeRunner.auto_scrape_wanted(true, true, true, false, false), ScrapeRunner.auto_scrape_wanted(true, true, false, true, false),
+		 ScrapeRunner.auto_scrape_wanted(true, true, false, false, true)],
+		[false, false, false, false, false])
 
 	var a := await job("ok", ["run", "--all"])
 	check("ok: exit 0, progress in order, the summary", [a.code, a.seen, a.summary.get("scraped")], [0, [50, 100], 3.0])

@@ -1,6 +1,11 @@
 # ROM artwork scraper — plan
 
 Status: decisions D1-D3 AGREED 2026-10-17; the user already has a ScreenScraper dev account.
+Auto-scrape DONE 2026-10-17 (plugin 0.1.53, HW-OK on the ACE, issue #9): every ROM library load
+(start, rescan, Refresh Library) starts a background "scrape missing art" unless off (Settings > Library
+> ROM Art > "Scrape new games automatically", default on), the build cannot scrape, a scrape or a game
+runs, or the load is the reload a scrape asked for. Quiet: a notification only when art arrives,
+failures logged. ACE: a ROM copied in got its art 14 s later and its card rebuilt, no loop.
 Port art DONE 2026-10-17 (plugin 0.1.52, HW-OK on the ACE): PortMaster ports are never scraped; the
 plugin reads each port's gameinfo.xml (ES gameList: <path> launch script, <image> screenshot, relative
 to ~/roms/ports) and uses the screenshot for every layout but LOGO; cards are its centre crop (user

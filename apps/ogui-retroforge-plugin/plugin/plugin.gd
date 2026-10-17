@@ -185,6 +185,8 @@ func _on_library_loaded(library_id: String) -> void:
 	_rescanning = false
 	for system in roms.SYSTEMS:
 		_refresh_system(system)
+	if _scraper:
+		_scraper.on_library_loaded()  # new ROMs get their art in the background (issue #9)
 
 
 ## Library items whose retroforge-roms launch item belongs to the given system, sorted by name.
