@@ -10,8 +10,8 @@ extends ScrollContainer
 ## player's choice for each of the emulator's options (options.json: renderer, resolution, aspect...;
 ## see emu_options.gd), the player's "Run on fast cores" default for that emulator (every launch of
 ## it, Open included, unless a game overrides it), and Delete once installed. Whether upstream has a
-## newer build is only known online: `retroforge-emu check` runs in the background when an emulator
-## is shown, and the rows are rebuilt when it answers (offline: no Update, no error). Everything
+## newer build is only known online: `retroforge-emu check` runs in the background when the player
+## opens the page, and the rows are rebuilt when it answers (offline: no Update, no error). Everything
 ## else goes through /usr/bin/retroforge-emu (list / check / install / rollback / remove); the page
 ## never downloads or verifies anything itself.
 ##
@@ -111,7 +111,9 @@ func _build_rows() -> void:
 	add_child(watcher)
 	# Rows are rebuilt after every install / delete, which frees the focused one; while the page
 	# is entered, refresh() hands the focus back.
-	watcher.state_entered.connect(func(): _inside = true)
+	watcher.state_entered.connect(func():
+		_inside = true
+		_check(emulator_id))
 	watcher.state_exited.connect(func(): _inside = false)
 	watcher.state_removed.connect(func(): _inside = false)
 
@@ -125,11 +127,12 @@ func load_catalog() -> void:
 func show_emulator(id: String) -> void:
 	emulator_id = id
 	refresh()
-	_check(id)
 
 
-## Ask upstream for the emulator's newest build in the background (retroforge-emu caches the
-## answer for an hour); the rows are rebuilt if it is still the one shown.
+## Ask upstream for the emulator's newest build in the background, when the player opens its page
+## (A on its entry), never while the focus only passes over the list: each check costs two of the
+## 60 GitHub requests an hour this network gets (retroforge-emu caches the answer for an hour).
+## The rows are rebuilt if it is still the one shown.
 func _check(id: String) -> void:
 	if _checking.has(id) or not catalog.get(id, {}).get("follows_latest", false):
 		return
