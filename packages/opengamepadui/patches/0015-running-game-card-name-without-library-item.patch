@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Sat, 17 Oct 2026 12:08:38 +0200
+Subject: [PATCH] fix(RunningGameCard): show the launch item's name for an app
+ no library provides
+
+The main menu's running-game card looked the app up by name in the
+library and, for an app no library provides (an emulator started on its
+own), returned early: the card kept the scene's "Game Name" placeholder,
+and its window buttons and focus tracking were never wired. The launch
+item's name is shown instead (as the quick bar does) and the card is set
+up as for any app.
+
+---
+ core/ui/card_ui/navigation/running_game_card.gd | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/core/ui/card_ui/navigation/running_game_card.gd b/core/ui/card_ui/navigation/running_game_card.gd
+index b9386105..762ca623 100644
+--- a/core/ui/card_ui/navigation/running_game_card.gd
++++ b/core/ui/card_ui/navigation/running_game_card.gd
+@@ -103,18 +103,21 @@ func set_running_app(app: RunningApp):
+ 		return
+ 	running_app = app
+ 	var item := library_manager.get_app_by_name(app.launch_item.name)
+-	if not item:
+-		logger.warn("App", app.app_id, "has no library item.")
+-		return
+ 	game_logo.visible = false
+ 	game_label.visible = false
+-	var logo := await boxart_manager.get_boxart(item, BoxArtProvider.LAYOUT.LOGO) as Texture2D
++	var logo: Texture2D = null
++	if item:
++		logo = await boxart_manager.get_boxart(item, BoxArtProvider.LAYOUT.LOGO) as Texture2D
++	else:
++		# An app no library provides (an emulator started on its own): its launch item's name,
++		# as the quick bar shows, rather than the scene's "Game Name" placeholder.
++		logger.debug("App", app.app_id, "has no library item.")
+ 	if logo != null:
+ 		game_logo.texture = logo
+ 		game_logo.visible = true
+ 	else:
+ 		game_label.visible = true
+-		game_label.text = item.name
++		game_label.text = item.name if item else app.launch_item.name
+ 	_xwayland = gamescope.get_xwayland(gamescope.XWAYLAND_TYPE_PRIMARY)
+ 
+ 	# Connect to app signals to allow switching between app windows
+-- 
+2.55.0
+
