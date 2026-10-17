@@ -57,6 +57,15 @@ for gd in "$SRC"/*.gd; do
     || ok "$name does not override _init()"
 done
 grep -q '^extends Plugin$' "$SRC/$(meta entrypoint)" && ok "the entrypoint extends Plugin" || bad "the entrypoint does not extend Plugin"
+# OGUI is a release export: a component's method called before it is in the tree (its @onready
+# children still null) segfaults OGUI instead of erroring. scraper_settings.gd filled its dropdown
+# before add_child and OGUI crashed at every start (ACE, 2026-10-17).
+python3 - "$SRC/scraper_settings.gd" <<'PY2' && ok "scraper_settings.gd fills its dropdown only once it is in the tree" || bad "scraper_settings.gd calls the dropdown before add_child: OGUI segfaults"
+import sys
+s = open(sys.argv[1]).read()
+add, fill = s.find("box.add_child(node)"), s.find("_region.clear()")
+sys.exit(0 if 0 <= add < fill and s.find("_region.add_item") > add else 1)
+PY2
 # BoxArtManager refuses a provider whose provider_id is empty when it becomes ready.
 grep -q 'add_boxart(.*boxart_retroforge.gd' "$SRC/plugin.gd" && grep -q '^	provider_id = "retroforge"$' "$SRC/boxart_retroforge.gd" \
   && ok "the art provider is added, with an id (BoxArtManager refuses an empty one)" || bad "boxart_retroforge.gd is not added by plugin.gd, or has no provider_id"
@@ -522,6 +531,105 @@ GD
     bad "Godot failed: $(printf '%s\n' "$out" | grep -E 'ERROR|error' | head -3)"
   fi
   # Godot exits 0 when a preloaded script does not compile: the checks using it just never run.
+  if printf '%s\n' "$out" | grep -q 'SCRIPT ERROR'; then
+    bad "a script did not compile: $(printf '%s\n' "$out" | grep 'SCRIPT ERROR' | head -3)"
+  fi
+
+  # scrape_runner.gd runs /usr/bin/retroforge-scrape on a worker thread; here against a fake tool
+  # that behaves like it (progress lines, a JSON summary, warnings on stderr, an exit code). Its
+  # signals arrive over frames, so this is a script of its own that awaits them.
+  CASE="scrape runner"
+  cat >"$T/fake-scrape" <<'SH'
+#!/bin/bash
+# $FAKE_MODE: ok | quota | login (reads the password on stdin) | slow (until SIGTERM)
+printf '%s\n' "$*" > "$FAKE_ARGS"
+case $FAKE_MODE in
+  login) read -r pw; [ "$pw" = pw-secret ] && exit 0; echo "retroforge-scrape: ScreenScraper refused the player's login" >&2; exit 7 ;;
+  slow) trap 'echo "{\"scraped\": 1, \"not_found\": 0, \"skipped\": 0, \"failed\": 0, \"quota_left\": 9}"; echo "retroforge-scrape: cancelled" >&2; exit 5' TERM
+        echo "10%"; while :; do sleep 0.1; done ;;
+esac
+for i in $(seq 1 3000); do echo "retroforge-scrape: warning: $i: no image (200 text/html)" >&2; done
+echo "50%"; echo "100%"
+echo '{"scraped": 3, "not_found": 1, "skipped": 5, "failed": 1, "quota_left": 9000}'
+[ "$FAKE_MODE" = quota ] && { echo "retroforge-scrape: ScreenScraper's daily request quota is used up: try again tomorrow" >&2; exit 6; }
+exit 0
+SH
+  chmod +x "$T/fake-scrape"
+  cat >"$T/runner_test.gd" <<GD
+extends SceneTree
+
+const ScrapeRunner := preload("$SRC/scrape_runner.gd")
+var failed := 0
+
+func check(what: String, got, want) -> void:
+	if got == want:
+		print("  ok   $CASE -- ", what)
+	else:
+		failed += 1
+		print("  FAIL $CASE -- ", what, ": got ", got, ", want ", want)
+
+func _initialize() -> void:
+	run()
+
+func job(mode: String, args: Array, stdin_text := "", cancel_at := -1) -> Dictionary:
+	OS.set_environment("FAKE_MODE", mode)
+	OS.set_environment("FAKE_ARGS", "$T/fake-args")
+	var r := ScrapeRunner.new()
+	r.tool = "$T/fake-scrape"
+	var seen: Array[int] = []
+	r.progressed.connect(func(p: int) -> void:
+		seen.append(p)
+		if p == cancel_at:
+			r.cancel())
+	check(mode + ": starts", r.start(args, stdin_text), true)
+	check(mode + ": a second start while running is refused", r.start(args), false)
+	var res: Array = await r.finished
+	return {"code": res[0], "summary": res[1], "error": res[2], "seen": seen, "running": r.running}
+
+func run() -> void:
+	check("line: progress", ScrapeRunner.parse_line("42%"), {"percent": 42})
+	check("line: the summary (JSON numbers are floats)", ScrapeRunner.parse_line('{"scraped": 1}'), {"summary": {"scraped": 1.0}})
+	check("line: anything else is ignored", [ScrapeRunner.parse_line("x"), ScrapeRunner.parse_line("101%"), ScrapeRunner.parse_line("[1]")], [{}, {}, {}])
+	check("summary text", ScrapeRunner.summary_text({"scraped": 3, "not_found": 1, "skipped": 5, "failed": 1}),
+		"Art for 3 games. 1 not found on ScreenScraper. 1 failed: try again later.")
+	check("summary text: nothing new", ScrapeRunner.summary_text({"scraped": 0, "not_found": 0, "skipped": 5, "failed": 0}), "No new art: every game is up to date.")
+	check("failure: no developer login in this build", "cannot scrape" in ScrapeRunner.failure_text(9, ""), true)
+	check("failure: login refused", "user name or password" in ScrapeRunner.failure_text(7, ""), true)
+	check("failure: network", "network" in ScrapeRunner.failure_text(3, "retroforge-scrape: ScreenScraper unreachable (curl exit 6)"), true)
+	check("failure: quota and closed say the tool's own reason, without its prefix",
+		[ScrapeRunner.failure_text(6, "retroforge-scrape: warning: x\nretroforge-scrape: ScreenScraper's daily request quota is used up: try again tomorrow"),
+		 ScrapeRunner.failure_text(8, "retroforge-scrape: ScreenScraper is closed for maintenance")],
+		["ScreenScraper's daily request quota is used up: try again tomorrow", "ScreenScraper is closed for maintenance"])
+	check("failure: cancelled", ScrapeRunner.failure_text(5, "retroforge-scrape: cancelled"), "Cancelled.")
+
+	var a := await job("ok", ["run", "--all"])
+	check("ok: exit 0, progress in order, the summary", [a.code, a.seen, a.summary.get("scraped")], [0, [50, 100], 3.0])
+	check("ok: arguments reach the tool", FileAccess.get_file_as_string("$T/fake-args").strip_edges(), "run --all")
+	check("ok: 3,000 warnings on stderr did not stall it, and are not the error", a.error, "")
+	check("ok: not running any more", a.running, false)
+	var b := await job("quota", ["run"])
+	check("quota: exit 6 with the tool's last stderr line", [b.code, b.error], [6, "retroforge-scrape: ScreenScraper's daily request quota is used up: try again tomorrow"])
+	var c := await job("login", ["login", "good"], "pw-secret")
+	check("login: the password goes on stdin", c.code, 0)
+	check("login: never in the arguments", FileAccess.get_file_as_string("$T/fake-args").strip_edges(), "login good")
+	var d := await job("login", ["login", "good"], "wrong")
+	check("login: refused is exit 7", d.code, 7)
+	var e := await job("slow", ["run"], "", 10)
+	check("cancel: SIGTERM, the tool's summary and exit 5", [e.code, e.summary.get("scraped"), e.seen], [5, 1.0, [10]])
+	var r := ScrapeRunner.new()
+	r.tool = "$T/no-such-tool"
+	r.start(["run"])
+	var f: Array = await r.finished
+	check("a tool that cannot start: exit -1", f[0], -1)
+	quit(1 if failed else 0)
+GD
+  out="$(XDG_CONFIG_HOME="$T/config" timeout 60 "$GODOT" --headless --script "$T/runner_test.gd" 2>&1)"; rc=$?
+  printf '%s\n' "$out" | grep -E '^  (ok|FAIL) '
+  n_ok="$(printf '%s\n' "$out" | grep -c '^  ok ')"; n_bad="$(printf '%s\n' "$out" | grep -c '^  FAIL ')"
+  PASS=$((PASS + n_ok)); FAIL=$((FAIL + n_bad))
+  if [ "$rc" -ne 0 ] && [ "$n_bad" -eq 0 ]; then
+    bad "Godot failed (rc $rc): $(printf '%s\n' "$out" | grep -E 'ERROR|error' | head -3)"
+  fi
   if printf '%s\n' "$out" | grep -q 'SCRIPT ERROR'; then
     bad "a script did not compile: $(printf '%s\n' "$out" | grep 'SCRIPT ERROR' | head -3)"
   fi

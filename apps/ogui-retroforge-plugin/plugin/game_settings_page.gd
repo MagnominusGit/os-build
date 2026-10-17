@@ -5,7 +5,8 @@ extends ScrollContainer
 ## (CPUS=big / all in the game's conf, which retroforge-launch reads; launch_args.gd). Then one
 ## dropdown per option of the game's emulator (options.json, emu_options.gd): "Emulator default
 ## (<its choice>)" or a value for this game only, rebuilt at each visit (another game may run in
-## another emulator).
+## another emulator). "Box art": scrape this game's art from ScreenScraper again (scrape_runner.gd;
+## the library reloads when it is done, so the card shows the new art).
 ##
 ## Wired like that screen's own sections (game_settings.tscn): the button replaces the
 ## game-settings state with this page's State on focus and hands the focus to the page when
@@ -15,6 +16,9 @@ extends ScrollContainer
 const LIBRARY_ID := "retroforge-roms"
 const EmuOptions := preload("emu_options.gd")
 const LaunchArgs := preload("launch_args.gd")
+const ScrapeRunner := preload("scrape_runner.gd")
+const SCRAPER_DEVID := "/usr/share/retroforge/scraper/devid"
+const ART_DESCRIPTION := "Fetch this game's box art from ScreenScraper again."
 const TITLE := "RetroForge"
 
 var game_settings_state := load("res://assets/state/states/game_settings.tres") as State
@@ -22,6 +26,9 @@ var settings_state_machine := load("res://assets/state/state_machines/game_setti
 var focus_stack := load("res://core/ui/card_ui/launch/game_settings_focus.tres")
 var dropdown_scene := load("res://core/ui/components/dropdown.tscn") as PackedScene
 var button_scene := load("res://core/ui/components/card_button.tscn") as PackedScene
+var setting_button_scene := load("res://core/ui/components/card_button_setting.tscn") as PackedScene
+var library_manager := load("res://core/global/library_manager.tres") as LibraryManager
+var notification_manager := load("res://core/global/notification_manager.tres")
 var focus_group_scene := load("res://core/systems/input/focus_group.tscn") as PackedScene
 var state_updater_scene := load("res://core/systems/state/state_updater.tscn") as PackedScene
 var state_watcher_scene := load("res://core/systems/state/state_watcher.tscn") as PackedScene
@@ -35,6 +42,8 @@ var _focus_group: FocusGroup
 const CPUS_CHOICES := ["", "big", "all"]
 
 var _fast_cores: Control  # OGUI Dropdown
+var _art: Control  # OGUI CardButtonSetting: "Box art"
+var _scrape := ScrapeRunner.new()  # a field: a runner must outlive its worker thread
 var _rows: VBoxContainer
 var _option_rows: Array = []  # this game's option dropdowns, rebuilt at each visit
 var _section_label: Label
@@ -108,6 +117,15 @@ func _build_page() -> void:
 	rows.add_child(_fast_cores)
 	_focus_group.current_focus = _fast_cores
 
+	_art = setting_button_scene.instantiate()
+	_art.text = "Box art"
+	_art.button_text = "Scrape"
+	_art.description = ART_DESCRIPTION
+	_art.pressed.connect(_on_scrape_art)
+	rows.add_child(_art)
+	_scrape.progressed.connect(func(pct: int) -> void: _art.description = "Scraping... %d%%" % pct)
+	_scrape.finished.connect(_on_art_scraped)
+
 
 func _build_button(buttons: Node) -> void:
 	button = button_scene.instantiate()
@@ -151,6 +169,9 @@ func _on_game_settings_entered(_from: State) -> void:
 		_fast_cores.add_item("On")
 		_fast_cores.add_item("Off")
 		_fast_cores.select(CPUS_CHOICES.find(roms.get_cpus(_item)))
+		_art.disabled = not FileAccess.file_exists(SCRAPER_DEVID) or _scrape.running
+		if not _scrape.running:
+			_art.description = ART_DESCRIPTION if FileAccess.file_exists(SCRAPER_DEVID) else ScrapeRunner.failure_text(9, "")
 		_build_options(roms.emulator_of(_item))
 
 
@@ -198,6 +219,26 @@ func _on_option_selected(index: int, option: Dictionary, dropdown: Control) -> v
 		return
 	logger.warn("could not write " + LaunchArgs.game_conf_path(system, rom))
 	dropdown.select(EmuOptions.index_of(option, EmuOptions.game_choice(system, rom, option)))  # what is saved
+
+
+func _on_scrape_art() -> void:
+	if not _item or _scrape.running:
+		return
+	if _scrape.start(["run", "--rom", str(_item.metadata["rom"]), "--all"]):
+		_art.disabled = true
+		_art.description = "Asking ScreenScraper..."
+
+
+func _on_art_scraped(code: int, summary: Dictionary, error: String) -> void:
+	_art.disabled = false
+	_art.description = ART_DESCRIPTION
+	var text := ScrapeRunner.failure_text(code, error) if code != 0 else \
+		("New art saved." if int(summary.get("scraped", 0)) > 0 else "ScreenScraper does not know this game.")
+	notification_manager.show(Notification.new(text))
+	if code != 0:
+		logger.warn("retroforge-scrape exited %d: %s" % [code, error])
+	if int(summary.get("scraped", 0)) > 0:
+		library_manager.load_library(LIBRARY_ID)
 
 
 func _on_fast_cores_selected(index: int) -> void:

@@ -38,6 +38,7 @@ var _osk_nav: RefCounted  # osk_navigation.gd
 var _touch_keyboard: RefCounted  # touch_keyboard.gd
 var _buttons: RefCounted  # button_layout.gd
 var _pause: RefCounted  # pause_on_menu.gd
+var _scraper: RefCounted  # scraper_settings.gd
 var _watch: RefCounted  # rom_watch.gd
 var _rescan_timer: Timer
 var _rescanning := false
@@ -73,6 +74,9 @@ func _ready() -> void:
 	_pause = load(plugin_base.path_join("pause_on_menu.gd")).new().setup(get_tree())
 	if not _pause.attach():
 		logger.warn("OGUI general settings layout not found; no pause-in-menus toggle")
+	_scraper = load(plugin_base.path_join("scraper_settings.gd")).new().setup(get_tree())
+	if not _scraper.attach():
+		logger.warn("OGUI library settings layout not found; no ROM art section")
 	_setup_input_boost()
 
 
@@ -97,6 +101,8 @@ func unload() -> void:
 		_buttons.detach()
 	if _pause:
 		_pause.detach()
+	if _scraper:
+		_scraper.detach()
 	for card in [_hardware_card, _fan_test_card]:
 		if is_instance_valid(card):
 			var qb_card: Node = card.find_parent("QuickBarCard*")

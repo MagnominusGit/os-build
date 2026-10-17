@@ -1,6 +1,15 @@
 # ROM artwork scraper — plan
 
 Status: decisions D1-D3 AGREED 2026-10-17; the user already has a ScreenScraper dev account.
+Phase 3 DONE 2026-10-17 (plugin 0.1.50): image stage scraper-login (rootfs/lib-assemble-scraper.sh,
+RETROFORGE_SS_DEVID/DEVPASSWORD from dev.env.local or repository secrets; SCRAPER_STAMP), Settings >
+Library > ROM Art (scraper_settings.gd), Game settings > RetroForge > Box art, scrape_runner.gd
+(worker thread + OS.execute_with_pipe: live N%, password on stdin, SIGTERM cancel). HW on the ACE:
+game page Box art seen by the user; 0.1.49 crash-looped OGUI (dropdown filled before add_child
+segfaults the release export) -> fixed in 0.1.50 + test. TODO: user to set the CI repository
+secrets; Settings > Library section and sign-in not yet tried on HW by the user. Known OGUI issue
+(not ours): game settings opened from a HOME screen card carry no library item (OGUI's own Library
+section warns too), so the RetroForge button stays hidden there; needs an OGUI patch.
 Phase 2 DONE 2026-10-17, HW-OK on the Pocket ACE (plugin 0.1.47; user: "looks right"). HW findings
 fixed: cards are 2:3 card images composed by the plugin (OGUI's card draws a texture whole from
 the top-left, so a SNES box filled a third of it): the box's centre crop (user decision 2026-10-17,

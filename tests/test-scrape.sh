@@ -530,6 +530,27 @@ run logout
 check "logout forgets the login" '[ "$RC" = 0 ] && ! grep -q good "$W/home/.config/retroforge/scraper.conf" 2>/dev/null'
 
 # =================================================================================================
+CASE="image stage"
+# rootfs/lib-assemble-scraper.sh, sourced the way assemble-rootfs.sh does (it reads $stage).
+stage_run() {  # stage_run <devid> <devpassword>: sets OUT, RC; the staged tree is $W/stage
+  rm -rf "$W/stage"; mkdir -p "$W/stage"
+  OUT="$(stage="$W/stage" RETROFORGE_SS_DEVID="$1" RETROFORGE_SS_DEVPASSWORD="$2" \
+    bash -c '. "$0"' "$ROOT/rootfs/lib-assemble-scraper.sh" 2>&1)"; RC=$?
+}
+F="$W/stage/usr/share/retroforge/scraper/devid"
+stage_run dev dev-secret
+check "with both values: the login file the tool reads" '[ "$RC" = 0 ] && [ "$(cat "$F")" = "$(printf "devid=dev\ndevpassword=dev-secret")" ]'
+check "readable by the player (the scraper runs as the player)" '[ "$(stat -c %a "$F")" = 644 ]'
+check "the build log never shows the password" '! grep -q dev-secret <<<"$OUT"'
+DEVFILE_OK="$(HOME="$W/home" RETROFORGE_SS_DEVID= RETROFORGE_SS_DEVPASSWORD= RETROFORGE_SCRAPER_DEVID_FILE="$F" RETROFORGE_CURL=/bin/false \
+  RETROFORGE_ROMS_DIR="$W/none" RETROFORGE_MEDIA_DIR="$W/stage-media" RETROFORGE_SCRAPER_SYSTEMS="$SYSTEMS" python3 "$SCRAPE" run 2>&1)"
+check "the tool takes the staged file as its login (no exit 9)" '! grep -q "no ScreenScraper developer login" <<<"$DEVFILE_OK"'
+stage_run dev ""
+check "one value missing: no file, a warning, the build goes on" '[ "$RC" = 0 ] && [ ! -e "$F" ] && grep -q WARN <<<"$OUT"'
+stage_run $'dev\nx' dev-secret
+check "a line break in a value fails the build" '[ "$RC" != 0 ] && [ ! -e "$F" ]'
+
+# =================================================================================================
 CASE="repo hygiene"
 check "no developer credentials file in the tree" '[ ! -e "$ROOT/rootfs/overlay/usr/share/retroforge/scraper/devid" ]'
 check "dev.env.local stays ignored" 'git -C "$ROOT" check-ignore -q dev.env.local'
