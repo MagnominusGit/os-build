@@ -83,26 +83,66 @@ anything on hardware.
 ## steamcmd
 
 The OGUI Steam plugin uses `steamcmd` for the library, installs and updates, not the client. Valve
-publishes an arm64 build next to the x86 one (`steamcmd_linuxarm64.tar.gz`, update manifest
-`steam_cmd_linuxarm64`). The plugin runs `~/.steam/steamcmd/steamcmd.sh`, and only when that file
-is missing does it download the x86 one there. Like the client, steamcmd is downloaded on demand,
-not shipped:
+publishes an arm64 build next to the x86 one (update manifest `steam_cmd_linuxarm64`, installer
+`steamcmd_linuxarm64.tar.gz`). The plugin runs `~/.steam/steamcmd/steamcmd.sh`, and only when that
+file is missing does it download the x86 one there. Like the client, steamcmd is downloaded on
+demand, not shipped:
 
 - **Before the shell starts**, `retroforge-session` runs `/usr/lib/retroforge/install-steamcmd`. It
   puts a stub (`/usr/lib/retroforge/steamcmd-stub`) at `~/.steam/steamcmd/steamcmd.sh`, which stops
   the plugin's x86 download. It writes nothing when the stub or a working arm64 copy is already
   there. It replaces an x86 copy, a half-written copy and a stub from an older image, and leaves the
   rest of the folder alone.
-- **The first time the plugin runs steamcmd**, the stub downloads the tarball pinned in
-  `/usr/share/retroforge/steam/steamcmd.pin` (curl, sha256-checked) into its own folder. It renames
-  the files into place with Valve's `steamcmd.sh` last, so Valve's script replaces the stub, then
-  execs it with the plugin's arguments. steamcmd then updates itself there, as on x86. Copies that
-  start at the same time share one download (flock on the folder).
-- **Offline or on a checksum mismatch**, the stub says why on stderr, exits 1 and stays in place.
-  The plugin starts steamcmd once per start of the shell, so the next start tries again. The pinned
-  URL is unversioned, and Valve replaces the file at that URL in place. A mismatch on a good
-  connection therefore means the pin needs a bump. Players who already have steamcmd are not
-  affected.
+- **The first time the plugin runs steamcmd**, the stub has `/usr/lib/retroforge/steamcmd-fetch`
+  download whatever Valve publishes at that moment into a temporary folder inside its own (see
+  below). It renames the files into place with Valve's `steamcmd.sh` last, so Valve's script
+  replaces the stub, then execs it with the plugin's arguments. steamcmd then downloads the rest of
+  itself there and restarts, as on x86. Copies that start at the same time share one download
+  (flock on the folder).
+- **Offline, or on a download that fails a check**, the stub says why on stderr, exits 1 and stays
+  in place. The plugin starts steamcmd once per start of the shell, so the next start tries again.
+  Players who already have steamcmd are not affected.
+
+`/usr/share/retroforge/steam/steamcmd.pin` pins a channel, not a file: every first run resolves what
+Valve publishes at that moment, so a new steamcmd release needs no bump. What Valve publishes
+(checked 2026-10-16, manifest version 1791918946):
+
+- The manifest lists four packages. The one marked `IsBootstrapperPackage`, `steamcmd_linuxarm64`,
+  is a 3.7 MB zip holding `linuxarm64/steamcmd` alone (stored 0666, no execute bit). Run on its own,
+  that binary downloads the rest from the same manifest (`steamcmd_bins_linuxarm64`:
+  `steamclient.so`, `crashhandler.so`, `steamerrorreporter` and more, plus `public/` and
+  `siteserverui/`, 23.5 MB). It then exits 42 for its launcher to start it again.
+- That launcher, `steamcmd.sh`, is in no manifest package, arm64 or x86, and steamcmd never writes
+  it. It is only in the installer tarball, at an unversioned URL Valve replaces in place. The
+  tarball's binaries lag the manifest: on 2026-10-16 it still held the 2026-07-27 build. So the
+  tarball cannot be checked against the manifest. The x86 tarball has not changed since 2018.
+
+So the helper takes each piece from where it is published and checks it against something that
+vouches for it:
+
+- **Binary:** the manifest is read fresh at every first run, and the bootstrapper zip it names is
+  refused unless its sha256 is the manifest's `sha2`. The trust anchor is the manifest, read over
+  HTTPS from Valve's update host; the helper cannot check its `kvsignatures` without Valve's key.
+  The zip is unpacked like the client's: `\` read as a separator, execute bits on ELF files and
+  scripts, no path out of the folder.
+- **Launcher:** `steamcmd.sh` alone is taken from the installer tarball, and only if its own sha256
+  is the pin's `script_sha256`. The tarball's binaries are never used, so Valve republishing it with
+  new binaries changes nothing. If the bootstrapper zip ever carries a `steamcmd.sh`, that one is
+  used (the manifest vouches for it) and the tarball is not downloaded.
+- **Shape:** `linuxarm64/steamcmd` must be an arm64 ELF, and `steamcmd.sh` must pick `linuxarm64`
+  and must not be the stub.
+
+The one fixed value left is `script_sha256`, the 2.5 kB launcher. If Valve edits it, a player who
+has not run steamcmd yet gets "Valve's steamcmd.sh has changed" and no steamcmd until the pin is
+bumped and shipped. For a reproducible install, the pin also takes `fixed_file` + `fixed_sha256`,
+one package file, instead of the manifest. They are commented out, because nothing says how long
+Valve keeps an old package file.
+
+Against Valve's servers on 2026-10-16, as a non-root player in a pty (linux/arm64 container): the
+stub resolved manifest version 1791918946, downloaded and checked the zip and the launcher, became
+Valve's `steamcmd.sh`, and steamcmd updated itself (23.5 MB), restarted, and reached "Loading Steam
+API...OK" in 6 s. The next `install-steamcmd` left that copy alone. With the update host
+unreachable, the stub exited 1 and stayed in place, and the next start succeeded.
 
 It is built like the client: ~300 unguarded LSE atomics in the bootstrapper alone, so the same
 `0025` applies.

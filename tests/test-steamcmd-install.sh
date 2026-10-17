@@ -6,14 +6,17 @@
 #
 # WHY THIS EXISTS. The plugin runs ~/.steam/steamcmd/steamcmd.sh, and when that is missing it fetches
 # Valve's x86 build, which cannot run here. The image ships no steamcmd, only a stub that downloads
-# Valve's arm64 one the first time it runs (tests/test-steamcmd-stub.sh tests that part). The rules
-# here, each of which goes wrong silently:
+# Valve's arm64 one the first time it runs, from the channel steamcmd.pin names, through
+# steamcmd-fetch (tests/test-steamcmd-stub.sh tests that part). The rules here, each of which goes
+# wrong silently:
 #   - place the stub when there is no working arm64 copy: none, an x86 one, or a half-written one;
 #   - the image's stub already in place is fine: nothing is rewritten on every boot;
 #   - a stub from an older image is replaced with this image's;
 #   - a stub with Valve's binaries beside it (its download was cut off before steamcmd.sh) is
 #     still a stub, not a working copy;
-#   - never touch a working arm64 copy (steamcmd has updated itself past anything we could put back);
+#   - never touch a working arm64 copy (steamcmd has updated itself past anything we could put back),
+#     including the bare one the stub leaves (steamcmd.sh + linuxarm64/steamcmd) before steamcmd's
+#     first start downloads the rest;
 #   - steamcmd.sh goes in through a temporary file and a rename, and a failed write leaves no
 #     steamcmd.sh that would make the plugin skip its download;
 #   - nothing else in the folder is touched (the plugin's game installs, an x86 linux32/);
@@ -24,7 +27,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TOOL="$ROOT/rootfs/overlay/usr/lib/retroforge/install-steamcmd"
 STUB_REAL="$ROOT/rootfs/overlay/usr/lib/retroforge/steamcmd-stub"
-for f in "$TOOL" "$STUB_REAL"; do [ -f "$f" ] || { echo "missing: $f" >&2; exit 1; }; done
+FETCH_REAL="$ROOT/rootfs/overlay/usr/lib/retroforge/steamcmd-fetch"
+for f in "$TOOL" "$STUB_REAL" "$FETCH_REAL"; do [ -f "$f" ] || { echo "missing: $f" >&2; exit 1; }; done
 
 PASS=0; FAIL=0; CASE=""
 ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
@@ -47,11 +51,18 @@ run() {
 }
 is_stub()   { cmp -s "$STUB" "$DST/steamcmd.sh"; }
 tempfiles() { find "$DST" -name '.steamcmd.sh.*' 2>/dev/null; }
-valve_arm64() {  # Valve's arm64 copy, as its tarball lays it out
+valve_arm64() {  # Valve's arm64 copy as the stub leaves it: the launcher and the bootstrapper binary
   mkdir -p "$DST/linuxarm64"
   printf '#!/usr/bin/env bash\n: "${STEAM_PLATFORM:=linuxarm64}"\n' >"$DST/steamcmd.sh"
   printf 'ELF arm64 steamcmd\n' >"$DST/linuxarm64/steamcmd"
   chmod 755 "$DST/steamcmd.sh" "$DST/linuxarm64/steamcmd"
+}
+self_updated() {  # ... and as steamcmd's first start leaves it: the rest of the manifest's packages
+  mkdir -p "$DST/package" "$DST/public"
+  printf 'ELF arm64 steamclient\n' >"$DST/linuxarm64/steamclient.so"
+  printf '"linuxarm64" { "version" "1791918946" }\n' >"$DST/package/steam_cmd_linuxarm64.manifest"
+  : >"$DST/package/steam_cmd_linuxarm64.installed"
+  printf '"Language" "English"\n' >"$DST/public/steambootstrapper_english.txt"
 }
 
 # =================================================================================================
@@ -59,6 +70,8 @@ CASE="the image's stub"
 head -n 2 "$STUB_REAL" | grep -qx '# RETROFORGE_STEAMCMD_STUB' \
   && ok "carries the marker line install-steamcmd tells it apart by" || bad "no marker line on line 2"
 [ -x "$STUB_REAL" ] && ok "is executable in the overlay (the image copies the tree as-is)" || bad "mode $(mode "$STUB_REAL")"
+[ -x "$FETCH_REAL" ] && grep -q 'RETROFORGE_STEAMCMD_FETCH:-/usr/lib/retroforge/steamcmd-fetch}' "$STUB_REAL" \
+  && ok "its download helper is executable in the overlay, where the stub looks for it" || bad "steamcmd-fetch: mode $(mode "$FETCH_REAL")"
 
 CASE="fresh card"
 run
@@ -95,6 +108,11 @@ run
 
 CASE="working arm64 copy"
 rm -rf "$DST"; valve_arm64
+before="$(stamp "$DST/linuxarm64/steamcmd") $(stamp "$DST/steamcmd.sh")"
+run
+[ "$RC" = 0 ] && [ "$(stamp "$DST/linuxarm64/steamcmd") $(stamp "$DST/steamcmd.sh")" = "$before" ] && [ -z "$ERR" ] \
+  && ok "as the stub leaves it (launcher + bootstrapper binary, nothing else yet): left alone, silently" || bad "rewritten (rc=$RC err=$ERR)"
+self_updated
 printf 'ELF arm64 steamcmd, self-updated\n' >"$DST/linuxarm64/steamcmd"
 before="$(stamp "$DST/linuxarm64/steamcmd") $(stamp "$DST/steamcmd.sh")"
 run

@@ -1,0 +1,270 @@
+#!/usr/bin/env python3
+# steamcmd-fetch — find, download and check Valve's arm64 steamcmd for RetroForge's steamcmd stub.
+#
+# The stub (/usr/lib/retroforge/steamcmd-stub, sitting at ~/.steam/steamcmd/steamcmd.sh) runs this
+# under its lock, as `python3 -I steamcmd-fetch <pin> <work>`, with <work> an empty temporary folder
+# inside ~/.steam/steamcmd. It leaves in <work>/tree/ exactly the files the stub then renames into
+# place, and writes nothing outside <work>. The stub owns the lock, the renames and the exec; this
+# owns the network and every check. Exit 0 when tree/ is ready; 1 with a line on stderr saying why
+# not, and then the stub changes nothing.
+#
+# THE PIN NAMES CHANNELS, NOT FILES (/usr/share/retroforge/steam/steamcmd.pin). Valve publishes
+# steamcmd as an update manifest whose package files are content-addressed and replaced on every
+# release, and a pinned file would stop matching at the next one. So, at every first run:
+#   1. MANIFEST. <cdn>/<manifest> (steam_cmd_linuxarm64), read fresh. Its <package>
+#      (steamcmd_linuxarm64, the one marked IsBootstrapperPackage) gives the zip's file name and its
+#      sha2 (sha256). The zip is downloaded from <cdn>/<file> and refused unless its sha256 is that
+#      sha2. The trust anchor is the manifest itself, read over HTTPS from Valve's update host (the
+#      manifest's own kvsignatures need a key the image does not have); redirects may only go to
+#      https. It holds linuxarm64/steamcmd alone, which on its first start downloads the rest of
+#      steamcmd from the same manifest, then exits 42 for its launcher to start it again.
+#   2. LAUNCHER. That launcher, steamcmd.sh, is in no package of the manifest, and steamcmd never
+#      writes it. It is only in Valve's installer tarball (<installer>, an unversioned URL Valve
+#      replaces in place). Only steamcmd.sh is taken from the tarball, and only if its sha256 is
+#      <script_sha256>. The tarball's binaries are never used: they lag the manifest (on 2026-10-16
+#      the tarball's steamcmd was the 2026-07-27 build, the manifest's the 2026-10-13 one), and
+#      nothing vouches for them. steamcmd.sh is a 2.5 kB launcher, not a build: the x86 tarball's has
+#      not changed since 2018, so Valve republishing the tarball with new binaries changes nothing
+#      here. If the zip ever carries a steamcmd.sh of its own, that one is used (the manifest
+#      vouches for it) and the tarball is not downloaded at all.
+#   Optional fixed override, for a reproducible install: fixed_file + fixed_sha256 in the pin skip
+#   the manifest and fetch <cdn>/<fixed_file>, refused unless its sha256 is fixed_sha256.
+#
+# Valve's zips need care, as in steam-bootstrap: some entries use '\' as the separator, files carry
+# mode 0666 (no execute bits), and symlinks are Unix link entries. ELF files and #! scripts get 0755,
+# everything else 0644. No path may leave the tree.
+#
+# The shape is checked before the stub moves anything: linuxarm64/steamcmd must be an arm64 ELF
+# (an x86 package would not run), and steamcmd.sh must pick linuxarm64 and must not be the stub (a
+# stub that execs a stub downloads forever).
+#
+# Downloads go through curl (the stub's rules: https redirects only, a transfer stalled under 1 kB/s
+# for a minute is given up, no overall cap). TEST SEAMS (tests/test-steamcmd-stub.sh):
+# RETROFORGE_STEAMCMD_CURL.
+import hashlib
+import os
+import re
+import stat
+import subprocess
+import sys
+import tarfile
+import zipfile
+import zlib
+
+CURL = os.environ.get("RETROFORGE_STEAMCMD_CURL", "curl")
+SCRIPT = "steamcmd.sh"
+BINARY = "linuxarm64/steamcmd"
+MARKER = b"# RETROFORGE_STEAMCMD_STUB"   # line 2 of the stub; see steamcmd-stub
+EM_AARCH64 = 183
+SCRIPT_MAX = 1 << 20   # steamcmd.sh is 2.5 kB; anything this big is not it
+
+
+class Failed(Exception):
+    pass
+
+
+def say(msg):
+    print(f"steamcmd (RetroForge): {msg}", file=sys.stderr)
+
+
+def pin_field(text, key):
+    m = re.search(rf"^{key}:[ \t]*(\S+)", text, re.M)
+    return m.group(1) if m else None
+
+
+def fetch(url, dest):
+    cmd = [CURL, "-fsSL", "--proto-redir", "=https", "--retry", "2", "--connect-timeout", "20",
+           "--speed-limit", "1024", "--speed-time", "60", "-o", dest, url]
+    try:
+        res = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.PIPE, text=True, errors="replace")
+    except OSError as err:
+        raise Failed(f"could not run {CURL}: {err}")
+    if res.returncode != 0:
+        why = (res.stderr.strip().splitlines() or [f"curl exit {res.returncode}"])[-1]
+        raise Failed(f"could not download {url} (offline?): {why}. Nothing changed; the next start"
+                     " of steamcmd tries again.")
+
+
+def sha256_of(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(1 << 20):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def manifest_field(text, key):
+    m = re.search(rf'^\s*"{key}"\s+"([^"]*)"', text, re.M)
+    return m.group(1) if m else None
+
+
+def manifest_package(text, name):
+    """(file, sha256) of a package in a Steam update manifest (VDF text), or None."""
+    m = re.search(rf'\n\s*"{re.escape(name)}"\s*\{{(.*?)\}}', text, re.S)
+    if not m:
+        return None
+    f = re.search(r'"file"\s+"([^"]+)"', m.group(1))
+    s = re.search(r'"sha2"\s+"([0-9a-fA-F]{64})"', m.group(1))
+    return (f.group(1), s.group(1)) if f and s else None
+
+
+def safe_parts(name):
+    rel = name.replace("\\", "/")
+    parts = [p for p in rel.split("/") if p not in ("", ".")]
+    if not parts or rel.startswith("/") or ".." in parts:
+        raise Failed(f"unsafe path in Valve's steamcmd zip: {name!r}. Nothing changed.")
+    return rel, parts
+
+
+def unpack_zip(path, tree):
+    """Valve's zip -> tree: '\\' separators, no execute bits, Unix symlinks, nothing outside tree."""
+    with zipfile.ZipFile(path) as z:
+        for info in z.infolist():
+            rel, parts = safe_parts(info.filename)
+            out = os.path.join(tree, *parts)
+            mode = info.external_attr >> 16
+            if rel.endswith("/") or stat.S_ISDIR(mode):
+                os.makedirs(out, exist_ok=True)
+                continue
+            os.makedirs(os.path.dirname(out), exist_ok=True)
+            if info.create_system == 3 and stat.S_ISLNK(mode):
+                target = z.read(info).decode()
+                if target.startswith("/") or ".." in target.split("/"):
+                    raise Failed(f"unsafe symlink in Valve's steamcmd zip: {rel} -> {target}")
+                os.symlink(target, out)
+                continue
+            with z.open(info) as src, open(out, "wb") as dst:
+                head = src.read(4)
+                dst.write(head)
+                while chunk := src.read(1 << 20):
+                    dst.write(chunk)
+            os.chmod(out, 0o755 if head == b"\x7fELF" or head[:2] == b"#!" else 0o644)
+
+
+def script_from_tarball(path, want):
+    """Valve's steamcmd.sh out of its installer tarball, refused unless its sha256 is want."""
+    try:
+        with tarfile.open(path, "r:gz") as t:
+            for m in t:
+                if re.sub(r"^(\./)+", "", m.name) != SCRIPT:
+                    continue
+                if not m.isreg() or m.size > SCRIPT_MAX:
+                    raise Failed(f"the {SCRIPT} in Valve's installer tarball is not a plain file."
+                                 " Nothing changed.")
+                data = t.extractfile(m).read()
+                break
+            else:
+                raise Failed(f"Valve's installer tarball has no {SCRIPT}. Nothing changed.")
+    except (OSError, EOFError, zlib.error, tarfile.TarError) as err:
+        raise Failed(f"could not read Valve's installer tarball: {err}. Nothing changed.")
+    got = hashlib.sha256(data).hexdigest()
+    if got != want.lower():
+        raise Failed(f"Valve's {SCRIPT} has changed: sha256 {got}, the pin wants {want}. Nothing"
+                     " changed. Check the new script, then bump script_sha256 in the pin.")
+    return data
+
+
+def is_arm64_elf(path):
+    try:
+        st = os.lstat(path)
+        with open(path, "rb") as f:
+            h = f.read(20)
+    except OSError:
+        return False
+    # ELF, 64-bit, little-endian, e_machine (bytes 18-19) AArch64.
+    return (stat.S_ISREG(st.st_mode) and len(h) == 20 and h[:4] == b"\x7fELF" and h[4] == 2
+            and h[5] == 1 and int.from_bytes(h[18:20], "little") == EM_AARCH64)
+
+
+def main(pin_path, work):
+    try:
+        with open(pin_path, encoding="utf-8") as f:
+            pin = f.read()
+    except OSError:
+        raise Failed(f"no pin at {pin_path}, so Valve's arm64 steamcmd cannot be downloaded")
+    keys = ("cdn", "manifest", "package", "installer", "script_sha256")
+    cdn, manifest, package, installer, script_sha = (pin_field(pin, k) for k in keys)
+    fixed_file, fixed_sha = pin_field(pin, "fixed_file"), pin_field(pin, "fixed_sha256")
+    if not all((cdn, manifest, package, installer, script_sha)):
+        raise Failed(f"{pin_path} needs {', '.join(keys)}")
+    if bool(fixed_file) != bool(fixed_sha):
+        raise Failed(f"{pin_path}: fixed_file and fixed_sha256 go together, or neither")
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", script_sha) or (fixed_sha and not re.fullmatch(
+            r"[0-9a-fA-F]{64}", fixed_sha)):
+        raise Failed(f"{pin_path}: a sha256 there is not 64 hex digits")
+    cdn = cdn.rstrip("/")
+
+    # 1. The binary: the bootstrapper package the channel names today, or the fixed one.
+    if fixed_file:
+        file, sha, said = fixed_file, fixed_sha, "the pin's fixed_sha256 is"
+        say(f"downloading Valve's arm64 steamcmd ({file}, fixed in {pin_path})")
+    else:
+        url = f"{cdn}/{manifest}"
+        dest = os.path.join(work, "manifest")
+        fetch(url, dest)
+        with open(dest, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+        pkg = manifest_package(text, package)
+        if pkg is None:
+            raise Failed(f"Valve's {manifest} lists no {package} with a file and a sha2. Nothing"
+                         " changed.")
+        file, sha = pkg
+        said = f"its sha2 in {manifest} is"
+        say(f"downloading Valve's arm64 steamcmd ({manifest} version"
+            f" {manifest_field(text, 'version') or '?'}: {file})")
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9._-]*", file):
+        raise Failed(f"{file!r} is not a package file name. Nothing changed.")
+    archive = os.path.join(work, "package.zip")
+    fetch(f"{cdn}/{file}", archive)
+    got = sha256_of(archive)
+    if got != sha.lower():
+        raise Failed(f"sha256 mismatch for {file}: got {got}, {said} is {sha}. Nothing changed;"
+                     " the next start of steamcmd tries again.")
+    tree = os.path.join(work, "tree")
+    os.mkdir(tree)
+    try:
+        unpack_zip(archive, tree)
+    except (OSError, EOFError, UnicodeDecodeError, NotImplementedError, zlib.error,
+            zipfile.BadZipFile) as err:
+        raise Failed(f"could not unpack {file}: {err}. Nothing changed.")
+    if not is_arm64_elf(os.path.join(tree, BINARY)):
+        raise Failed(f"{file} holds no arm64 {BINARY}, so it is not Valve's arm64 steamcmd. Nothing"
+                     " changed.")
+
+    # 2. The launcher: the zip's own if it has one, else the tarball's, checked against the pin.
+    script = os.path.join(tree, SCRIPT)
+    if os.path.lexists(script):
+        if not os.path.isfile(script) or os.path.islink(script):
+            raise Failed(f"the {SCRIPT} in {file} is not a plain file. Nothing changed.")
+        with open(script, "rb") as f:
+            data = f.read()
+        os.chmod(script, 0o755)
+    else:
+        tarball = os.path.join(work, "installer.tar.gz")
+        fetch(installer, tarball)
+        data = script_from_tarball(tarball, script_sha)
+        with open(script, "wb") as f:
+            f.write(data)
+        os.chmod(script, 0o755)
+    if MARKER in data.splitlines():
+        raise Failed(f"that {SCRIPT} is RetroForge's stub, not Valve's launcher (it would download"
+                     " again, forever). Nothing changed.")
+    if b"linuxarm64" not in data:
+        raise Failed(f"that {SCRIPT} does not pick linuxarm64, so it is not Valve's arm64 launcher."
+                     " Nothing changed.")
+    return 0
+
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3 or not os.path.isdir(sys.argv[2]):
+        say("usage: steamcmd-fetch <pin> <empty work folder>")
+        sys.exit(1)
+    try:
+        sys.exit(main(sys.argv[1], sys.argv[2]))
+    except Failed as err:
+        say(str(err))
+        sys.exit(1)
+    except OSError as err:
+        say(f"could not set Valve's arm64 steamcmd up: {err}. Nothing changed.")
+        sys.exit(1)

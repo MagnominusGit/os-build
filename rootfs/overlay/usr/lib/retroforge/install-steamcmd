@@ -5,15 +5,17 @@
 # missing it downloads Valve's x86 bootstrapper there, which cannot run on this machine. The image
 # ships no steamcmd (everything that can be downloaded is). It ships a stub,
 # /usr/lib/retroforge/steamcmd-stub: sitting at steamcmd.sh it stops the plugin's x86 download, and
-# the first time the plugin runs it, it downloads Valve's arm64 steamcmd
-# (/usr/share/retroforge/steam/steamcmd.pin) into that folder and replaces itself with it.
+# the first time the plugin runs it, it downloads Valve's arm64 steamcmd into that folder (the release
+# Valve publishes at that moment: /usr/share/retroforge/steam/steamcmd.pin names a channel, which
+# /usr/lib/retroforge/steamcmd-fetch resolves and checks) and replaces itself with it.
 # retroforge-session runs this, as the player, before every start of the shell:
 #   - places the stub when there is no working arm64 copy: nothing there yet, an x86 one the plugin
 #     downloaded, or a half-written one;
 #   - counts the image's stub, already in place, as fine and writes nothing (an ordinary boot
 #     touches nothing). A stub from an older image (the marker line, other bytes) is replaced;
 #   - never touches a working arm64 copy (linuxarm64/steamcmd, and a steamcmd.sh that knows
-#     linuxarm64 and is not the stub): steamcmd keeps that one updated itself;
+#     linuxarm64 and is not the stub): steamcmd keeps that one updated itself. That is all the stub
+#     leaves before steamcmd's first start, which downloads the rest;
 #   - writes steamcmd.sh through a temporary file and a rename. The plugin runs whatever that name
 #     holds, so it never sees half a file. The stub is a whole program on its own, and it puts
 #     Valve's steamcmd.sh in only after the binary it starts, so steamcmd.sh never points at

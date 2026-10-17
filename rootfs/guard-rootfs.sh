@@ -774,11 +774,15 @@ fi
 # Valve's arm64 client and Steam Runtime into the player's home the first time it runs
 # (/usr/lib/retroforge/steam-bootstrap, ~560 MB unpacked, ~3 GB after the client's own update), and
 # runs it from there. The plugin's steamcmd goes the same way: /usr/lib/retroforge/install-steamcmd
-# puts a stub at ~/.steam/steamcmd/steamcmd.sh, and the stub's first run downloads Valve's arm64
-# steamcmd over itself (/usr/share/retroforge/steam/steamcmd.pin). It used to be a prebuilt
-# (packages/steamcmd, 4 MB, at /usr/lib/retroforge/steamcmd), which is why that path is listed
-# below. The only Steam pieces the root carries are the wrapper, its bootstrap, the steamcmd stub
-# and its installer, and the two pins. FEX for x86 games is left to Steam as well. The arm64 client
+# puts a stub at ~/.steam/steamcmd/steamcmd.sh, and the stub's first run has
+# /usr/lib/retroforge/steamcmd-fetch download Valve's arm64 steamcmd over it. Its pin
+# (/usr/share/retroforge/steam/steamcmd.pin) names a channel, Valve's steam_cmd_linuxarm64 update
+# manifest, not a file: whatever release that manifest names at the time is downloaded and checked
+# against the manifest's sha256, and only the launcher script (steamcmd.sh, in no manifest package)
+# is checked against a sha256 in the pin. It used to be a prebuilt (packages/steamcmd, 4 MB, at
+# /usr/lib/retroforge/steamcmd), which is why that path is listed below. The only Steam pieces the
+# root carries are the wrapper, its bootstrap, the steamcmd stub, its download helper and its
+# installer, and the two pins. FEX for x86 games is left to Steam as well. The arm64 client
 # adds it to a game as a dependency, as it does Proton ("adding FEX dependency to %s %u" and
 # STEAM_COMPAT_FEX_CONFIG in steamclient.so; not yet seen on hardware), so nothing x86 belongs here.
 # See docs/steam-arm64.md.
