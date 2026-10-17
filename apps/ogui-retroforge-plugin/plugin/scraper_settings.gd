@@ -18,6 +18,8 @@ const LIBRARY_ID := "retroforge-roms"
 ## Region choices, in dropdown order: retroforge-scrape's values and what the player reads.
 const REGIONS := ["auto", "wor", "us", "eu", "jp"]
 const REGION_NAMES := ["Automatic (from the file names)", "World", "USA", "Europe", "Japan"]
+const MISSING_TEXT := "Fetch box art from ScreenScraper for the games that have none yet."
+const ALL_TEXT := "Fetch every game's art again. Uses more of ScreenScraper's daily quota."
 
 var library_manager := load("res://core/global/library_manager.tres") as LibraryManager
 var notification_manager := load("res://core/global/notification_manager.tres")
@@ -58,9 +60,9 @@ func attach() -> bool:
 	var at: int = box.get_node("RefreshLibraryButton").get_index() + 1 if box.has_node("RefreshLibraryButton") else box.get_child_count()
 	var label = section_scene.instantiate()
 	label.text = "ROM Art"
-	_missing = _button("Scrape missing art", "Scrape", "Fetch box art from ScreenScraper for the games that have none yet.")
+	_missing = _button("Scrape missing art", "Scrape", MISSING_TEXT)
 	_missing.pressed.connect(_on_scrape.bind(false))
-	_all = _button("Scrape all art again", "Scrape all", "Fetch every game's art again. Uses more of ScreenScraper's daily quota.")
+	_all = _button("Scrape all art again", "Scrape all", ALL_TEXT)
 	_all.pressed.connect(_on_scrape.bind(true))
 	_region = dropdown_scene.instantiate()
 	_region.title = "Art region"
@@ -125,10 +127,14 @@ func _refresh() -> void:
 	_account.button_text = "Sign out" if signed_in else "Sign in"
 	_account.description = "Signed in as %s." % _account_info.get("user") if signed_in else \
 		"Not signed in: ScreenScraper's anonymous limits apply."
+	# Progress is shown in the running button's description: both are rewritten once nothing runs
+	# ("Scrape all" kept "Scraping... 100%" after its run, ACE 2026-10-17).
 	if not available:
 		_missing.description = ScrapeRunner.failure_text(9, "")
+		_all.description = ALL_TEXT
 	elif not runner.running:
-		_missing.description = "Fetch box art from ScreenScraper for the games that have none yet." + _quota_text()
+		_missing.description = MISSING_TEXT + _quota_text()
+		_all.description = ALL_TEXT
 
 
 func _quota_text() -> String:

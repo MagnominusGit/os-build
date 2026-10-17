@@ -1,13 +1,16 @@
 # ROM artwork scraper — plan
 
 Status: decisions D1-D3 AGREED 2026-10-17; the user already has a ScreenScraper dev account.
-Phase 3 DONE 2026-10-17 (plugin 0.1.50): image stage scraper-login (rootfs/lib-assemble-scraper.sh,
+Phase 3 DONE 2026-10-17 (plugin 0.1.51): image stage scraper-login (rootfs/lib-assemble-scraper.sh,
 RETROFORGE_SS_DEVID/DEVPASSWORD from dev.env.local or repository secrets; SCRAPER_STAMP), Settings >
 Library > ROM Art (scraper_settings.gd), Game settings > RetroForge > Box art, scrape_runner.gd
 (worker thread + OS.execute_with_pipe: live N%, password on stdin, SIGTERM cancel). HW on the ACE:
 game page Box art seen by the user; 0.1.49 crash-looped OGUI (dropdown filled before add_child
 segfaults the release export) -> fixed in 0.1.50 + test. CI repository secrets set by the user 2026-10-17.
-TODO: Settings > Library section and sign-in not yet tried on HW by the user. Known OGUI issue
+Settings > Library > ROM Art HW-OK on the ACE (plugin 0.1.51; user): scrape missing ("nothing new"),
+scrape all with progress, sign-in with the user's account (limits 10,000 -> 20,000 a day; conf 0600; the
+password in no log, file or command line). 0.1.50 left "Scraping... 100%" on the Scrape all button
+after its run (description not restored): fixed in 0.1.51. Known OGUI issue
 (not ours): game settings opened from a HOME screen card carry no library item (OGUI's own Library
 section warns too), so the RetroForge button stays hidden there; needs an OGUI patch.
 Phase 2 DONE 2026-10-17, HW-OK on the Pocket ACE (plugin 0.1.47; user: "looks right"). HW findings
