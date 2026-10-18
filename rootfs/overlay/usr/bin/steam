@@ -101,5 +101,8 @@ while :; do
   if [ "$status" -eq 132 ] && ! grep -qw atomics "${RETROFORGE_CPUINFO:-/proc/cpuinfo}" 2>/dev/null; then
     log "the client died of SIGILL on a CPU without LSE atomics: the kernel needs kernel/patches/0025"
   fi
+  # Never fail silently: pressure-vessel writes its own errors straight to the journal (as
+  # pressure-vessel-wrap) when stderr is the journal, so nothing of them shows up next to ours.
+  [ "$status" -eq 0 ] || log "the client exited with status $status (runtime errors: journalctl -t pressure-vessel-wrap)"
   exit "$status"
 done

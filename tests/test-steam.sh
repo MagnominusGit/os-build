@@ -397,6 +397,13 @@ echo "Features	: fp asimd evtstrm aes crc32 atomics fphp" >"$W/cpuinfo"
 wrap 132
 ! grep -q "0025" <<<"$WERR" && ok "with LSE it does not" || bad "err=$WERR"
 
+CASE="wrapper: the client fails"
+wrap 1
+[ "$WRC" = 1 ] && grep -q "the client exited with status 1" <<<"$WERR" && grep -q "pressure-vessel-wrap" <<<"$WERR" \
+  && ok "a failed start is said, with where the runtime's own errors are" || bad "rc=$WRC err=$WERR"
+wrap 0
+! grep -q "exited with status" <<<"$WERR" && ok "a clean exit says nothing" || bad "err=$WERR"
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
