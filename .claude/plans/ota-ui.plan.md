@@ -96,6 +96,18 @@ first beta.
 - ACE: stable -> beta, check, install (progress), Restart now, trial boot confirmed; beta -> stable
   (older build offered, install, restart); dev card shows the channel pinned; nothing before first boot.
 - Look for rauc's `using HTTP/1` warning on the first real R2 stream (never observed yet).
+- Remote access on the ACE: the switch starts/stops pairingd with no password prompt (polkit needs
+  the OGUI session to be `subject.local`), a key registers, it is off after a reboot; an OTA from an
+  always-on image leaves pairing off (seed_var dropped the link).
+- Settings > General in the real shell: OGUI's updater rows gone, focus starts on System update,
+  no crash at start (release export).
+
+**Offline harness used (2026-10-18)**: Godot 4.7.1 x86_64 (official, sha512-checked) as
+`RETROFORGE_GODOT`; a copy of the pinned OGUI 0.46.1 tree with upstream's x86_64 core library
+(`opengamepadui-x86_64.tar.gz` of v0.46.1, sha256 05fe8b0e..., copied as template_debug and
+template_release into `addons/core/bin`) as `RETROFORGE_OGUI_PROJECT`. Reviews: code + security,
+no CRITICAL/HIGH; MEDIUMs fixed in ec1566f6, ef9c9f18. Not done (low): auto-stop for a forgotten
+pairing switch (RuntimeMaxSec), hash-compare in install-ogui-plugin.
 
 ### Phase 5: docs
 - `docs/ota.md`, `docs/RUNBOOK.md`, `release-bundle.yml` comment ("There is no Settings picker"),
