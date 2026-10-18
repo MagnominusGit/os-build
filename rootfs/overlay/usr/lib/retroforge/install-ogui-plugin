@@ -4,10 +4,11 @@
 # OGUI only scans the player's user://plugins (~/.local/share/opengamepadui/plugins), so the copy
 # the image ships read-only (/usr/share/retroforge/opengamepadui/retroforge.zip) does nothing until it is
 # copied there. retroforge-session runs this, as the player, before every start of the shell:
-#   - installs it when there is none, or the installed one is unreadable or OLDER (an OS update
-#     brought a newer plugin);
-#   - never touches a copy of the same or a NEWER version (a later one from the RetroForge plugin
-#     store must survive boots and OS updates that still ship the older one);
+#   - installs it when there is none, or the installed one is unreadable or of ANOTHER version: an
+#     OS update brings a newer plugin, a beta -> stable channel switch an older one. The image (and
+#     so the OTA bundle) is the plugin's only source -- there is no plugin store -- so the image's
+#     copy always wins; a newer one left behind would call tools the running image lacks;
+#   - never touches a copy of the same version;
 #   - copies through a temporary file and a rename, so OGUI never sees half a zip.
 # Exit 0 when the plugin is in place (installed or kept), 1 when the image's copy is missing or
 # unreadable. Messages go to stderr (the session log); stdout stays empty.
@@ -48,7 +49,7 @@ def main():
         return 1
     dst = os.path.join(DST_DIR, "retroforge.zip")
     dst_v = version(dst) if os.path.exists(dst) else None
-    if dst_v is not None and dst_v >= src_v:
+    if dst_v == src_v:
         return 0
     os.makedirs(DST_DIR, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=DST_DIR, prefix=".retroforge.zip.")

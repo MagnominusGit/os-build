@@ -7,10 +7,11 @@
 # WHY THIS EXISTS. OGUI only loads plugins from the player's ~/.local/share/opengamepadui/plugins,
 # so a fresh card has no ROM library and no Emulators page until something copies the image's copy
 # there. The rules, each of which goes wrong silently:
-#   - install when missing, or when the installed copy is OLDER than the image's (an OS update
-#     brings a newer plugin);
-#   - never replace a copy that is the same or NEWER (a later version from the RetroForge plugin store
-#     must survive the next boot -- and the next OS update that still ships the older one);
+#   - install when missing, or when the installed copy's version DIFFERS from the image's: an OS
+#     update brings a newer plugin, and a beta -> stable channel switch an OLDER one that must win
+#     too (the image is the plugin's only source; a newer copy left behind calls tools the stable
+#     image does not have);
+#   - never rewrite a copy of the same version;
 #   - an unreadable installed zip counts as missing (it would never load);
 #   - the copy is atomic: OGUI must never find a half-written retroforge.zip;
 #   - a broken image copy is an error, not an install.
@@ -66,11 +67,12 @@ mkzip "$SRC" 0.10.0
 run
 [ "$RC" = 0 ] && [ "$(version_of "$DST")" = 0.10.0 ] && ok "0.2.0 installed, image has 0.10.0: upgraded (compared as versions, not text)" || bad "installed=$(version_of "$DST") rc=$RC"
 
-CASE="store copy is newer"
+CASE="beta -> stable channel switch"
 mkzip "$DST" 0.11.0
 mkzip "$SRC" 0.10.0
 run
-[ "$RC" = 0 ] && [ "$(version_of "$DST")" = 0.11.0 ] && ok "a newer copy from the store is never downgraded" || bad "installed=$(version_of "$DST") rc=$RC"
+[ "$RC" = 0 ] && [ "$(version_of "$DST")" = 0.10.0 ] && ok "a newer installed copy is replaced by the image's older one" || bad "installed=$(version_of "$DST") rc=$RC"
+[ "$(ls -A "$DST_DIR")" = retroforge.zip ] && ok "no temporary file left beside it" || bad "left: $(ls -A "$DST_DIR")"
 
 CASE="unreadable installed copy"
 echo "not a zip" > "$DST"

@@ -495,6 +495,8 @@ plus the ROM library that launches them)
   copied into `~player/.local/share/opengamepadui/plugins/` by the session when missing or older
   than the image's copy (compare `plugin.version`), so a fresh card works offline. Later
   versions come from the RetroForge store; the session never downgrades a store-updated copy.
+  SUPERSEDED 2026-10-18 (ota-ui plan): no plugin store exists, the image is the only source, so the
+  session installs the image's copy whenever the version DIFFERS (beta -> stable channel switch).
 
 **Decided 2026-10-03**
 - Download source: ~~RetroForge mirror~~ REVERSED 2026-10-03 -- straight from upstream releases,
