@@ -86,9 +86,13 @@ done
 #     right then and the next game has it; an older image a game may be using stays until Steam exits;
 #   - leaves a holder outside this process tree that waits for this script's PID ($$) to exit, however
 #     it ends, and then releases the mount unless another `steam` still runs.
-# STEAM_COMPAT_GRAPHICS_PROVIDER is set before the download is done too: the client's environment is
-# fixed when it starts, and the path is the same once mounted. Proton under FEX also needs
-# ~/.steam/sdk32 and sdk64. RETROFORGE_STEAM_X86_GUEST=0: no download, no mount, no provider.
+# STEAM_COMPAT_GRAPHICS_PROVIDER is set only once graphics_provider.json is there, i.e. the guest is
+# mounted. pressure-vessel reads it for the client's OWN container as well, and a path that does not
+# exist yet aborts that container ("opendir(...graphics_provider.json): No such file or directory"),
+# so a client started during the first download never started at all (Air X, 2026-10-18). The
+# client's environment is fixed when it starts, so after a first download x86 games get the guest
+# from the next start of Steam. Proton under FEX also needs ~/.steam/sdk32 and sdk64.
+# RETROFORGE_STEAM_X86_GUEST=0: no download, no mount, no provider.
 # TEST SEAMS (tests/test-steam-x86-guest.sh): RETROFORGE_STEAM_X86_GUEST_HELPER, RETROFORGE_STEAM_X86_GUEST_DIR.
 for b in 32 64; do
   if [ -d "$HOME/.steam/sdk$b" ] && [ ! -L "$HOME/.steam/sdk$b" ]; then
@@ -100,7 +104,12 @@ done
 if [ "${RETROFORGE_STEAM_X86_GUEST:-1}" != 0 ]; then
   export RETROFORGE_STEAM_X86_GUEST_DIR="${RETROFORGE_STEAM_X86_GUEST_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/retroforge/fex-guest}"
   "${RETROFORGE_STEAM_X86_GUEST_HELPER:-/usr/lib/retroforge/steam-x86-guest}" start "$$"
-  export STEAM_COMPAT_GRAPHICS_PROVIDER="$RETROFORGE_STEAM_X86_GUEST_DIR/root/graphics_provider.json"
+  provider="$RETROFORGE_STEAM_X86_GUEST_DIR/root/graphics_provider.json"
+  if [ -f "$provider" ]; then
+    export STEAM_COMPAT_GRAPHICS_PROVIDER="$provider"
+  else
+    log "the x86 guest is not in place yet (it downloads in the background); x86 games get it from the next start of Steam"
+  fi
 fi
 # ----------------------------------------------------------------------------------------------------
 

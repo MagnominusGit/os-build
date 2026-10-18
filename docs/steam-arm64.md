@@ -244,8 +244,12 @@ squashfuse. Thunks stay off, as Steam leaves them (`ThunksDB_GL:0,ThunksDB_Vulka
 - Only one fetch runs at a time, and it refuses to start without ~1.6 GB free.
 
 **The mount.** squashfuse mounts the image on `~/.local/share/retroforge/fex-guest/root`, as the
-player. `steam` always exports `STEAM_COMPAT_GRAPHICS_PROVIDER=<that>/graphics_provider.json`,
-because the client's environment is fixed when it starts.
+player. `steam` exports `STEAM_COMPAT_GRAPHICS_PROVIDER=<that>/graphics_provider.json` only when
+that file is there, i.e. once the guest is mounted. pressure-vessel reads the variable for the
+client's own container too, and a file that does not exist yet aborts it (`opendir(...): No such
+file or directory`), so a client started during the first download never started (Air X,
+2026-10-18). The client's environment is fixed when it starts, so after the first download x86
+games get the guest from the next start of Steam; `steam` says so on stderr.
 - **Mounted** by `start` when an image is there and nothing is mounted yet: a fixed pin's own image,
   else the current one. A mount is never made twice. A dead one (squashfuse killed: `ENOTCONN`) is
   released and replaced. `fex-guest/.mounted` records which image it is.

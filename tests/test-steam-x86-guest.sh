@@ -552,7 +552,8 @@ mkimage "$SRV/w.sqsh" wrapper; mkpin 2026-07-01 w.sqsh
 echo 3 >"$SRV/.delay"; reset_calls
 wrap 0 steam://rungameid/42
 [ "$WRC" = 0 ] && grep -qx "image: no" "$W/call1" && ok "the client starts at once, before the download is done" || bad "rc=$WRC $(cat "$W/call1" 2>&1) $WERR"
-grep -qx "provider: $WGUEST/root/graphics_provider.json" "$W/call1" && ok "STEAM_COMPAT_GRAPHICS_PROVIDER=<guest>/root/graphics_provider.json already" || bad "$(cat "$W/call1")"
+grep -qx "provider: unset" "$W/call1" && ok "no STEAM_COMPAT_GRAPHICS_PROVIDER yet: pressure-vessel would abort the client on the missing file" || bad "$(cat "$W/call1")"
+grep -q "the x86 guest is not in place yet" "$W/err" && ok "and says x86 games get it from the next start" || bad "stderr: $(cat "$W/err")"
 [ "$(readlink "$WHOME/.steam/sdk64")" = "$WROOT/linux64" ] && [ "$(readlink "$WHOME/.steam/sdk32")" = "$WROOT/linux32" ] \
   && ok "~/.steam/sdk64 and sdk32 point at the client's linux64 and linux32" || bad "links: $(ls -la "$WHOME/.steam")"
 grep -q "^helper start [0-9]" "$T/calls" && ok "steam ran the helper's start with its PID" || bad "calls: $(cat "$T/calls")"
@@ -568,6 +569,8 @@ CASE="wrapper: downloaded"
 reset_calls
 wrap 0 steam://rungameid/42
 grep -qx "mounted: yes" "$W/call1" && ok "mounted before the client starts" || bad "$(cat "$W/call1" 2>&1) $WERR"
+grep -qx "provider: $WGUEST/root/graphics_provider.json" "$W/call1" && ok "STEAM_COMPAT_GRAPHICS_PROVIDER=<guest>/root/graphics_provider.json" || bad "$(cat "$W/call1")"
+! grep -q "not in place yet" <<<"$WERR" && ok "and no word about the guest missing" || bad "stderr: $WERR"
 settle
 [ ! -s "$T/requests" ] && ok "no download" || bad "requests: $(cat "$T/requests")"
 w_unmounted && grep -qF "fusermount -u -z $WGUEST/root" "$T/calls" && ok "released (lazily) once steam exits" || bad "mounts: $(cat "$T/mounts") calls: $(cat "$T/calls")"
@@ -589,7 +592,7 @@ CASE="wrapper: download done while steam runs"
 rm -f "$WGUEST"/*.sqsh; mkimage "$SRV/w2.sqsh" wrapper2; mkpin 2026-08-01 w2.sqsh
 echo 1 >"$SRV/.delay"; reset_calls
 start_bg
-grep -qx "mounted: no" "$W/call1" && ok "steam starts with nothing mounted" || bad "$(cat "$W/call1" 2>&1)"
+grep -qx "mounted: no" "$W/call1" && grep -qx "provider: unset" "$W/call1" && ok "steam starts with nothing mounted and no provider" || bad "$(cat "$W/call1" 2>&1)"
 until_true 100 w_mounted && ok "mounted when the download finishes, while steam runs" || bad "mounts: $(cat "$T/mounts") err: $(cat "$W/err")"
 kill -TERM "$WPID"; wait "$WPID"
 until_true 50 w_unmounted && ok "released when steam exits" || bad "mounts: $(cat "$T/mounts")"
