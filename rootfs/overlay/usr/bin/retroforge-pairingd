@@ -14,10 +14,10 @@ THE CONSENT MODEL — read this before changing anything here
     remote-access switch: the socket only exists while this daemon runs, and the daemon should
     run only while a human has turned that switch ON.
 
-    THERE IS NO SWITCH YET. The shell that drew it is gone and its replacement does not have
-    one, so for now the unit is enabled at boot and the daemon is ALWAYS ON. Anyone on the same
-    network can register a key while that is true. When the shell gains a switch, remove the
-    unit's [Install] section and preset and let the switch start and stop it again.
+    THE SWITCH is Settings > General > Remote access > "Allow pairing a computer" (the plugin's
+    retroforge_os.gd), which starts and stops this unit through polkit rule
+    50-retroforge-pairing.rules. The unit has no [Install]: pairing is OFF at every boot. Anyone on
+    the same network can register a key while the switch is on, and nobody while it is off.
 
     There is deliberately NO time window. An earlier design opened a bounded window measured from
     process start; it was dropped because the switch and the window could disagree (the UI showed

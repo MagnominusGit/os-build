@@ -277,6 +277,12 @@ seed_var() {  # <dev> <slot> <mnt> <source>
   # MAC forever.
   rm -f "$mnt/lib/retroforge/mac-wifi"
 
+  # THE THIRD: an enable link for the pairing daemon in the /etc overlay upper. Pairing was always on
+  # until the shell got its Remote access switch, which starts and stops it (plan ota-ui D5); an
+  # older image's link copied here would start it at every boot of the target, accepting SSH keys
+  # with nobody having turned pairing on. The unit has no [Install] any more, so nothing recreates it.
+  rm -f "$mnt/lib/overlays/etc/upper/systemd/system/multi-user.target.wants/retroforge-pairingd.service"
+
   # Put the caller's handler back exactly as it was -- `trap - EXIT` only when there was nothing.
   umount "$mnt"
   if [ -n "$prev_cmd" ]; then trap "$prev_cmd" EXIT; else trap - EXIT; fi

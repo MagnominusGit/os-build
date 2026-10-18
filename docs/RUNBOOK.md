@@ -161,13 +161,14 @@ instrument is the offline card mount — see [Recovery](#recovery-when-it-does-n
 sshd ships **always-on and key-only**, with no host keys baked in and no account with a password.
 Access is granted at runtime by whoever is holding the device:
 
-1. The pairing daemon (`retroforge-pairingd`, port 32000) is **always on** for now — there is no
-   on-screen switch yet, so anyone on the same network can register a key.
+1. On the device, turn on **Settings > General > Remote access > Allow pairing a computer**. That
+   starts the pairing daemon (`retroforge-pairingd`, port 32000); it is off at every boot, and the
+   switch's description shows the address to use.
 2. From the machine you want to connect from:
    ```sh
    curl -X POST --data-binary @~/.ssh/id_ed25519.pub http://<device>:32000/register
    ```
-3. `ssh player@<device>` — immediately, no password. Installed keys live on `/home` and survive
+3. Turn the switch off again. `ssh player@<device>` — immediately, no password. Installed keys live on `/home` and survive
    updates, so an already-paired machine never re-pairs.
 
 Pairing is separate from sshd, which is always on and key-only. Full protocol notes, the Windows

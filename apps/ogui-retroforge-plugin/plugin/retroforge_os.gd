@@ -11,20 +11,31 @@ extends OSPlatform
 ## description) -> Restart now, and a Stable / Beta dropdown; switching never asks (plan ota-ui D3)
 ## and checks the new channel straight away. Nothing installs or restarts without a press (D2). An
 ## update already installed and waiting for a reboot shows Restart now from the start.
+##
+## Under it, Remote access: "Allow pairing a computer" starts and stops retroforge-pairingd, the
+## unauthenticated socket that accepts an SSH key for `player` (docs/remote-access.md). Off at every
+## boot (the unit has no [Install], D5); polkit 50-retroforge-pairing.rules lets the session start
+## and stop that one unit. The switch shows the daemon's real state, read again whenever Settings >
+## General opens, so it never claims "on" after a crash or "off" while it still listens.
 
 const UpdateStates := preload("update_states.gd")
 const ScrapeRunner := preload("scrape_runner.gd")
 const TOOL := "/usr/bin/retroforge-update"
 const CHECK_TIMEOUT := 60.0  # s: the manifest fetch retries for at most ~30 s
+const PAIRING_UNIT := "retroforge-pairingd.service"
+const PAIRING_PORT := 32000  # retroforge-pairingd's SERVICE_PORT
 
 var notification_manager := load("res://core/global/notification_manager.tres") as NotificationManager
 var button_scene := load("res://core/ui/components/card_button_setting.tscn") as PackedScene
 var dropdown_scene := load("res://core/ui/components/dropdown.tscn") as PackedScene
 var section_scene := load("res://core/ui/components/section_label.tscn") as PackedScene
+var toggle_scene := load("res://core/ui/components/toggle.tscn") as PackedScene
+var general_settings_state := load("res://assets/state/states/settings_general.tres") as State
 
 ## Test seams (tests/test-plugin.sh runs this against OGUI's own settings scene and a fake client).
 var tool := TOOL
 var reboot_command: Array[String] = ["systemctl", "reboot"]
+var systemctl := "systemctl"
 
 var _apply := ScrapeRunner.new()  # runs the install: `N%` lines on a worker thread
 var _step := UpdateStates.Step.IDLE
@@ -33,6 +44,7 @@ var _offered := ""  # the version check found, or the one staged
 var _channels: Array[String] = []
 var _button: Control  # card_button_setting
 var _channel: Control  # dropdown
+var _pairing: Control  # toggle
 var _nodes: Array[Node] = []
 
 
@@ -52,9 +64,12 @@ func ready(root: Window) -> void:
 	_remove_ogui_updater(menu, box)
 	if FileAccess.file_exists(tool):
 		_add_updater(box)
+	_add_remote_access(box)
 
 
 func detach() -> void:
+	if general_settings_state.state_entered.is_connected(_on_general_entered):
+		general_settings_state.state_entered.disconnect(_on_general_entered)
 	for node in _nodes:
 		if is_instance_valid(node):
 			node.queue_free()
@@ -110,6 +125,71 @@ func _add_updater(box: Node) -> void:
 	_channel.item_selected.connect(_on_channel_selected)
 	_show()
 	_restore_staged()
+
+
+## Remote access, after the Updates rows (or at the top when there is no update client).
+func _add_remote_access(box: Node) -> void:
+	var label = section_scene.instantiate()
+	label.text = "Remote access"
+	_pairing = toggle_scene.instantiate()
+	_pairing.name = "RetroForgePairing"
+	_pairing.text = "Allow pairing a computer"
+	var at: int = _channel.get_index() + 1 if is_instance_valid(_channel) else 0
+	for node in [label, _pairing]:
+		box.add_child(node)
+		box.move_child(node, at)
+		at += 1
+		_nodes.append(node)
+	_pairing.toggled.connect(_on_pairing_toggled)
+	general_settings_state.state_entered.connect(_on_general_entered)
+	_sync_pairing()
+
+
+func _on_general_entered(_from: State) -> void:
+	_sync_pairing()
+
+
+## Set the switch to whether the daemon runs, without acting on it (OGUI's Toggle emits toggled
+## only from its own input handling, never from the setter).
+func _sync_pairing() -> void:
+	if not is_instance_valid(_pairing):
+		return
+	var on := OS.execute(systemctl, ["is-active", "--quiet", PAIRING_UNIT]) == 0
+	_pairing.button_pressed = on
+	_pairing.description = pairing_text(on, _address())
+
+
+func _on_pairing_toggled(on: bool) -> void:
+	_pairing.disabled = true
+	var cmd := Command.create(systemctl, ["start" if on else "stop", PAIRING_UNIT])
+	var code := -1
+	if cmd.execute() == OK:
+		code = await cmd.finished as int
+	_pairing.disabled = false
+	if code != 0:
+		logger.warn("systemctl %s %s exited %d: %s" % ["start" if on else "stop", PAIRING_UNIT, code, cmd.stderr])
+		_notify("Could not turn pairing %s" % ("on" if on else "off"))
+	logger.info("pairing " + ("on" if on else "off"))
+	_sync_pairing()
+
+
+## What the switch says: how to pair while it is on.
+static func pairing_text(on: bool, address: String) -> String:
+	if not on:
+		return "Turn on to send your computer's SSH key to this device. Turns off when the device restarts."
+	return "From a computer on this network: curl -X POST --data-binary @~/.ssh/id_ed25519.pub http://%s:%d/register" % [address, PAIRING_PORT]
+
+
+## The device's first global IPv4 address, or its mDNS name when it has none.
+func _address() -> String:
+	var out := []
+	if OS.execute("ip", ["-4", "-o", "addr", "show", "scope", "global"], out) == 0 and not out.is_empty():
+		for line in str(out[0]).split("\n", false):
+			var fields := line.split(" ", false)
+			var at := fields.find("inet")
+			if at >= 0 and at + 1 < fields.size():
+				return fields[at + 1].get_slice("/", 0)
+	return "retroforge.local"
 
 
 ## Run a local subcommand synchronously (no network); its stdout, "" on failure.

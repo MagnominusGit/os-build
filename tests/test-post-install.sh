@@ -460,6 +460,25 @@ expect_absent "$(tvar B)/lib/retroforge/mac-wifi"
 expect_file "$(tvar B)/lib/overlays/etc/upper/machine-id" '7070e56b'
 done_
 
+t "a-stale-pairing-enable-link-does-not-survive-the-copy"
+# Pairing was always on until the shell got its Remote access switch (plan ota-ui D5): a device that
+# ran an older image may hold retroforge-pairingd's multi-user.target.wants link in the /etc overlay
+# upper, and that upper rides along with /var. Left there it would start the pairing daemon at
+# every boot on the updated slot -- keys accepted with nobody having turned pairing on.
+mkdir -p "$SB/var/lib/overlays/etc/upper/systemd/system/multi-user.target.wants"
+ln -s /usr/lib/systemd/system/retroforge-pairingd.service \
+  "$SB/var/lib/overlays/etc/upper/systemd/system/multi-user.target.wants/retroforge-pairingd.service"
+ln -s /usr/lib/systemd/system/sshd.service \
+  "$SB/var/lib/overlays/etc/upper/systemd/system/multi-user.target.wants/sshd.service"
+run
+expect_rc 0
+link="$(tvar B)/lib/overlays/etc/upper/systemd/system/multi-user.target.wants/retroforge-pairingd.service"
+{ [ -e "$link" ] || [ -L "$link" ]; } && bad "the pairing enable link survived the update" || ok "the pairing enable link is gone"
+[ -L "$(tvar B)/lib/overlays/etc/upper/systemd/system/multi-user.target.wants/sshd.service" ] \
+  && ok "other enable links are kept" || bad "sshd's enable link was removed too"
+rm -rf "$SB/var/lib/overlays/etc/upper/systemd"
+done_
+
 t "the-overlay-dirs-exist-even-if-the-copy-did-not-bring-them"
 # The one case that would be unrecoverable: the initramfs mounts /etc from these, so a slot without
 # them does not come up at all.

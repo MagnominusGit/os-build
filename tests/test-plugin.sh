@@ -744,7 +744,18 @@ case "$1" in
 esac
 SH
     printf '#!/bin/sh\ntouch "$FAKE_DIR/rebooted"\n' >"$T/updates/fake-reboot"
-    chmod +x "$T/updates/fake-update" "$T/updates/fake-reboot"
+    cat >"$T/updates/fake-systemctl" <<'SH'
+#!/bin/bash
+# Fake systemctl for retroforge-pairingd: the unit runs while $FAKE_DIR/pairing exists.
+echo "$*" >> "$FAKE_DIR/systemctl-calls"
+case "$1" in
+  is-active) [ -e "$FAKE_DIR/pairing" ] ;;
+  start) touch "$FAKE_DIR/pairing" ;;
+  stop) rm -f "$FAKE_DIR/pairing" ;;
+  *) exit 1 ;;
+esac
+SH
+    chmod +x "$T/updates/fake-update" "$T/updates/fake-reboot" "$T/updates/fake-systemctl"
     cat >"$OGUI_PROJECT/retroforge_updates_test.gd" <<'GD'
 extends SceneTree
 
@@ -779,6 +790,7 @@ func run() -> void:
 	var os = load("res://plugins/retroforge/retroforge_os.gd").new()
 	os.tool = D.path_join("../fake-update")
 	os.reboot_command.assign([D.path_join("../fake-reboot")])
+	os.systemctl = D.path_join("../fake-systemctl")
 	put("latest.stable", "0.0.3")
 	put("latest.beta", "0.0.4-beta.1")
 	os.ready(root)
@@ -792,6 +804,7 @@ func run() -> void:
 	check("focus starts on the button", box.get_node("FocusGroup").current_focus, button)
 	check("idle: Check for updates, version shown", [button.button_text, button.description], ["Check for updates", "RetroForge 0.0.3."])
 	check("dropdown: Stable, Beta; Stable selected", [channel.option_button.item_count, channel.option_button.get_item_text(0), channel.option_button.get_item_text(1), channel.selected], [2, "Stable", "Beta", 0])
+	await test_pairing(box, channel)
 	button.button_up.emit()
 	await wait(0.5)
 	check("stable is up to date: still Check, says so", [button.button_text, button.description], ["Check for updates", "No update found on the Stable channel."])
@@ -816,12 +829,40 @@ func run() -> void:
 	await process_frame
 	var os2 = load("res://plugins/retroforge/retroforge_os.gd").new()
 	os2.tool = os.tool
+	os2.systemctl = os.systemctl
 	os2.ready(root)
 	await wait(0.5)
 	var b2: Node = menu2.get_node("MarginContainer/VBoxContainer/VBoxContainer/RetroForgeUpdateButton")
 	check("restarted session: staged update shows Restart now", [b2.button_text, b2.description], ["Restart now", "RetroForge 0.0.4-beta.1 is installed. Restart to use it."])
 	check("restarted session: Beta still selected", menu2.get_node("MarginContainer/VBoxContainer/VBoxContainer/RetroForgeUpdateChannel").selected, 1)
 	quit(1 if failed else 0)
+
+# A player's press on an OGUI Toggle, as its _gui_input does on ui_accept.
+func press(toggle: Node) -> void:
+	toggle.button_pressed = not toggle.button_pressed
+	toggle.toggled.emit(toggle.button_pressed)
+
+# Remote access: the switch starts and stops retroforge-pairingd and shows its real state.
+func test_pairing(box: Node, channel: Node) -> void:
+	var pairing: Node = box.get_node_or_null("RetroForgePairing")
+	check("pairing: a Remote access switch right under the update channel", pairing.get_index(), channel.get_index() + 2)
+	check("pairing: off at start, says how to turn it on", [pairing.button_pressed, "Turn on" in pairing.description], [false, true])
+	press(pairing)
+	await wait(0.5)
+	check("pairing: on starts the unit", FileAccess.file_exists(D.path_join("pairing")), true)
+	check("pairing: on says where to send the key", [pairing.button_pressed, ":32000/register" in pairing.description], [true, true])
+	DirAccess.remove_absolute(D.path_join("pairing"))  # stopped elsewhere (a crash, ssh)
+	load("res://assets/state/states/settings_general.tres").state_entered.emit(null)
+	await wait(0.2)
+	check("pairing: reopening Settings > General shows a stop made elsewhere, without acting on it",
+		[pairing.button_pressed, FileAccess.get_file_as_string(D.path_join("systemctl-calls")).count("stop")], [false, 0])
+	press(pairing)
+	await wait(0.5)
+	press(pairing)
+	await wait(0.5)
+	check("pairing: off stops the unit", [FileAccess.file_exists(D.path_join("pairing")), pairing.button_pressed], [false, false])
+	check("pairing: only start, stop and is-active are asked",
+		Array(FileAccess.get_file_as_string(D.path_join("systemctl-calls")).split("\n", false)).filter(func(l): return not (l.begins_with("is-active") or l == "start retroforge-pairingd.service" or l == "stop retroforge-pairingd.service")), [])
 GD
     out="$(cd "$OGUI_PROJECT" && FAKE_DIR="$T/updates/d" timeout 120 "$GODOT" --headless --path . --script res://retroforge_updates_test.gd 2>&1)"; rc=$?
     rm -f "$OGUI_PROJECT/retroforge_updates_test.gd"

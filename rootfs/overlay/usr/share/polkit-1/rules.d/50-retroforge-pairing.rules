@@ -1,0 +1,18 @@
+// Let the shell (player user) start and stop the key-pairing daemon: Settings > General > Remote
+// access (the RetroForge plugin's retroforge_os.gd) runs `systemctl start|stop retroforge-pairingd`.
+//
+// Pairing is off at every boot (the unit has no [Install]); this switch is the only thing that turns
+// it on, so the unauthenticated key-registration socket exists only while a human holding the device
+// has asked for it. org.freedesktop.systemd1.manage-units defaults to auth_admin_keep even for an
+// active session, so without this rule the switch would do nothing.
+//
+// Exactly start and stop, of this one unit, for the active seat0 session (retroforge-session.service
+// autologin) and wheel, as 50-retroforge-timezone.rules. Not restart, not enable (manage-unit-files),
+// not any other unit. tests/test-pairingd.sh evaluates this rule.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "retroforge-pairingd.service" &&
+        (action.lookup("verb") == "start" || action.lookup("verb") == "stop") &&
+        subject.active && subject.isInGroup("wheel"))
+        return polkit.Result.YES;
+});

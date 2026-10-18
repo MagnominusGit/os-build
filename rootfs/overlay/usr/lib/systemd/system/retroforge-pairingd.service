@@ -37,8 +37,8 @@ ExecStart=/usr/bin/retroforge-pairingd
 # cleanly, and a stop when nothing was registered is an ordinary no-op.
 ExecStopPost=-/usr/bin/busctl call org.freedesktop.resolve1 /org/freedesktop/resolve1 org.freedesktop.resolve1.Manager UnregisterService o /org/freedesktop/resolve1/dnssd/retroforge_2dpairing
 
-# Restart on failure: pairing is always on, so a crash should not leave the port silently shut.
-# A clean `systemctl stop` is not a failure and stops it for good until the next boot.
+# Restart on failure: while the switch is on, a crash should not leave the port silently shut. The
+# switch's `systemctl stop` is not a failure, so turning it off stops it for good.
 Restart=on-failure
 
 # Runs as root because it writes another account's (player's) authorized_keys. Doing that from an
@@ -55,8 +55,8 @@ PrivateTmp=yes
 # over D-Bus writes nothing, so the carve-out is gone with it -- the advertisement no longer
 # costs this unit any write access to /etc at all.
 
-# ALWAYS ON for now: there is no on-screen remote-access switch yet, so pairing runs from boot
-# (enabled by 60-retroforge-pairingd.preset plus a build-time multi-user.target.wants symlink). When
-# the shell grows a switch, drop the [Install] section again and let the switch start and stop it.
-[Install]
-WantedBy=multi-user.target
+# NO [Install], deliberately: pairing is OFF at every boot. Settings > General > Remote access
+# (the plugin's retroforge_os.gd) starts and stops this unit, through polkit rule
+# 50-retroforge-pairing.rules, so the socket exists only while a human turned pairing on. A device
+# updated from an image where it was always on loses that image's enable link in the RAUC
+# post-install hook (lib-slotwrite.sh seed_var).

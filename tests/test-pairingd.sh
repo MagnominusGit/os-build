@@ -238,18 +238,19 @@ fi
 
 # --- 2. the unit: structural guarantees ----------------------------------------------------------
 CASE="unit"
-# Always on until the shell has a remote-access switch: enabled at boot, by preset AND by the
-# committed wants symlink (the preset alone is lost if preset-all does not run).
-if grep -q '^WantedBy=multi-user.target' "$UNIT"; then
-  ok "unit is WantedBy=multi-user.target — pairing runs from boot"
+# Off at every boot: only Settings > General > Remote access starts it (plan ota-ui D5), so the
+# socket exists only while a human turned pairing on. No [Install], no preset, no wants symlink --
+# any one of them would start it at boot.
+if grep -q '^\[Install\]' "$UNIT" || grep -q '^WantedBy=' "$UNIT"; then
+  bad "unit has an [Install] section: something could enable pairing at boot"
 else
-  bad "unit has no WantedBy=multi-user.target: pairing would not start at boot"
+  ok "unit has no [Install] section — nothing can enable it at boot"
 fi
-if grep -qx 'enable retroforge-pairingd.service' "$ROOT/rootfs/overlay/usr/lib/systemd/system-preset/60-retroforge-pairingd.preset" 2>/dev/null \
-   && [ -L "$ROOT/rootfs/overlay/etc/systemd/system/multi-user.target.wants/retroforge-pairingd.service" ]; then
-  ok "preset + wants symlink both enable pairingd"
+if [ -e "$ROOT/rootfs/overlay/usr/lib/systemd/system-preset/60-retroforge-pairingd.preset" ] \
+   || [ -L "$ROOT/rootfs/overlay/etc/systemd/system/multi-user.target.wants/retroforge-pairingd.service" ]; then
+  bad "a preset or a multi-user.target.wants symlink still enables pairingd at boot"
 else
-  bad "pairingd is missing its preset or its multi-user.target.wants symlink"
+  ok "no preset and no wants symlink enable pairingd"
 fi
 
 # Restart=on-failure keeps the running daemon matching the switch after a crash; a clean stop by
@@ -364,6 +365,39 @@ if [ -e "$ROOT/rootfs/overlay/usr/share/retroforge/pairing.avahi-service" ]; the
   bad "pairing.avahi-service is still in the overlay — publishing moved to the resolve1 bus, nothing reads that file"
 else
   ok "the avahi service file is gone from the overlay"
+fi
+
+# --- the switch's polkit rule --------------------------------------------------------------------
+CASE="polkit"
+# The Remote access switch runs `systemctl start|stop retroforge-pairingd` as the session user.
+# The rule must grant exactly that: start and stop, of this one unit, to the active session's
+# wheel user. Anything wider (restart of any unit, enable, another unit) would let the shell -- or
+# any process of `player` -- manage system services.
+RULE="$ROOT/rootfs/overlay/usr/share/polkit-1/rules.d/50-retroforge-pairing.rules"
+if [ ! -f "$RULE" ]; then
+  bad "missing: ${RULE#"$ROOT"/}"
+elif ! command -v node >/dev/null; then
+  skip "no node to evaluate ${RULE#"$ROOT"/}"
+else
+  verdicts="$(node - "$RULE" <<'JS'
+const fs = require("fs");
+let rule;
+global.polkit = { Result: { YES: "yes", NO: "no" }, addRule: f => { rule = f; } };
+eval(fs.readFileSync(process.argv[2], "utf8"));
+const ask = (id, unit, verb, active = true, wheel = true) =>
+  rule({ id, lookup: k => ({ unit, verb })[k] }, { active, isInGroup: g => g === "wheel" && wheel }) || "pass";
+const M = "org.freedesktop.systemd1.manage-units";
+console.log([
+  ask(M, "retroforge-pairingd.service", "start"), ask(M, "retroforge-pairingd.service", "stop"),
+  ask(M, "retroforge-pairingd.service", "restart"), ask(M, "sshd.service", "start"),
+  ask(M, "retroforge-pairingd.service", "start", false), ask(M, "retroforge-pairingd.service", "start", true, false),
+  ask("org.freedesktop.systemd1.manage-unit-files", "retroforge-pairingd.service", "enable"),
+].join(" "));
+JS
+)"
+  [ "$verdicts" = "yes yes pass pass pass pass pass" ] \
+    && ok "grants start/stop of retroforge-pairingd to the active wheel session, nothing else" \
+    || bad "verdicts (start stop restart other-unit inactive non-wheel enable): $verdicts"
 fi
 
 printf '\n%s: %d passed, %d failed, %d skipped\n' "$(basename "$0")" "$PASS" "$FAIL" "$SKIP"

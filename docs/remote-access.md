@@ -10,22 +10,25 @@ Access is granted at runtime, as a **key only**, to the session user `player` (u
 `/home/player`). Delivering that key over the network is the job of a small pairing daemon,
 `retroforge-pairingd`.
 
-## Pairing is always on — for now
+## Pairing is off until you turn it on
 
-The design is that a person holding the device turns pairing on with an on-screen switch, and the
-daemon runs only while that switch is on. **There is no such switch yet.** The shell that drew it is
-gone and its replacement does not have one, so `retroforge-pairingd.service` is enabled at boot
-(`60-retroforge-pairingd.preset`, plus a build-time `multi-user.target.wants` symlink as a fallback) and
-the daemon is **always on**: **anyone on the same network can register a key** while that is true.
-It restarts on failure; a clean `systemctl stop retroforge-pairingd` stops it until the next boot.
+A person holding the device turns pairing on with **Settings > General > Remote access > Allow
+pairing a computer**, and the daemon runs only while that switch is on. It is **off at every boot**:
+`retroforge-pairingd.service` has no `[Install]` section, preset or enable link. The switch (the
+RetroForge plugin's `retroforge_os.gd`) runs `systemctl start|stop retroforge-pairingd` as `player`,
+which polkit rule `50-retroforge-pairing.rules` allows for that one unit and nothing else. The switch
+shows whether the daemon really runs, read again each time Settings > General opens. While it is on,
+its description gives the address and the command to send a key.
 
-When the shell grows a switch, the unit's `[Install]` section and its preset go away again and the
-switch starts and stops the daemon. Everything below about what the daemon accepts and what it
-grants stays as it is.
+Images before the switch (2026-10-18) had pairing always on, enabled at boot. A device updated over
+the air from one of those loses that enable link in the RAUC post-install hook (`seed_var` in
+`lib-slotwrite.sh`), so it does not stay always-on after the update. The daemon restarts on failure
+while the switch is on.
 
 ## How a user pairs
 
-1. Make sure the device is on the network. The daemon listens on port 32000.
+1. Make sure the device is on the network, and turn on Settings > General > Remote access > Allow
+   pairing a computer. The daemon listens on port 32000.
 2. From the machine you want to connect *from*:
 
    Linux / macOS:
@@ -62,7 +65,7 @@ grants stays as it is.
    resolve.
 3. The key is appended to `player`'s `authorized_keys`. sshd is already running, so you can
    `ssh player@<device>` immediately — no password, and no need to re-pair. Registering the same
-   key again is a no-op.
+   key again is a no-op. Turn the switch off once your key is in.
 
 Third-party pairing GUIs that speak the same protocol work too: the endpoint and the mDNS service
 type (`_steamos-devkit._tcp`) are deliberately the ones existing devkit pairing tools already use.
@@ -77,14 +80,13 @@ Pairing and sshd are separate, and that split is the whole security model:
   lets a headless A/B update be verified — the updated slot trial-boots already reachable.
 - **The pairing daemon is the sensitive part**, because `POST /register` has to be
   unauthenticated: the whole point is to accept a key from someone who has no credential yet. The
-  intended credential is physical presence — a hand on the device, turning pairing on. Until that
-  switch exists the daemon is always listening, so treat a device on an untrusted network as
-  pairable by anyone on it.
+  credential is physical presence — a hand on the device, turning pairing on. While the switch is
+  on, anyone on the same network can register a key, so leave it on only while you pair.
 
 There is **no time window**, by design. An earlier design closed the port after five minutes; it was
 dropped because a switch and a window can disagree (the UI shows "on" after the window has silently
-closed). Accepting keys for exactly as long as the daemon runs is simpler and truthful, and is the
-behaviour a future switch will inherit.
+closed). The switch accepts keys for exactly as long as the daemon runs, which is simpler and
+truthful.
 
 A submitted line is rejected unless it is exactly one public key of an allowed type that
 `ssh-keygen` can fingerprint. In particular a line that begins with `authorized_keys` options
