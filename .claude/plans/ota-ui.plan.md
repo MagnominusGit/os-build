@@ -1,6 +1,6 @@
 # Plan: OS updates in the shell (stable / beta)
 
-**Complexity**: Medium. **Branch**: `feat/ota-ui`. **Status**: Phases 1, 2, 2b, 3, 5 done offline 2026-10-18 (plugin 0.1.56), not pushed; Phase 4 (first beta + HW) next.
+**Complexity**: Medium. **Branch**: `feat/ota-ui`. **Status**: Phases 1, 2, 2b, 3, 5 done offline 2026-10-18 (plugin 0.1.56), not pushed; Phase 4 in progress (local beta HW-OK, tag next).
 
 ## Summary
 
@@ -101,6 +101,15 @@ first beta.
   always-on image leaves pairing off (seed_var dropped the link).
 - Settings > General in the real shell: OGUI's updater rows gone, focus starts on System update,
   no crash at start (release export).
+
+**HW so far (ACE, 2026-10-18)**: local release card `v0.0.4-beta.0` (0d231886): Stable check offers
+v0.0.3, Beta empty -> no update; pairing switch on -> key registered from the PC -> off, no polkit
+prompt; no plugin errors in the shell log. `v0.0.4-beta.1` bundle (same commit, release key)
+verified and installed from a local file, rebooted into B, trial boot good, pairing off after the
+reboot, channel kept (beta). A manual `rauc install` writes no staged stamp, so the button cannot
+offer Restart now for it (by design). Still to do: tag, then reflash beta.0 and run the in-shell
+Install -> Restart now on Beta, and Beta -> Stable (v0.0.3 predates the plugin fix: expect the
+0.1.57 plugin to stay, blank version, pairing switch without its polkit rule).
 
 **Offline harness used (2026-10-18)**: Godot 4.7.1 x86_64 (official, sha512-checked) as
 `RETROFORGE_GODOT`; a copy of the pinned OGUI 0.46.1 tree with upstream's x86_64 core library
