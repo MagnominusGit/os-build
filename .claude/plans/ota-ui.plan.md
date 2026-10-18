@@ -20,6 +20,7 @@ first beta.
 | D2 | **Never automatic.** A background check only notifies. Install and reboot happen only on a button press. |
 | D2b | **One button, Steam-style**: `Check for updates` -> `Install <version>` (progress while installing) -> `Restart now` when the install is done. Restart = `systemctl reboot`, the same call OGUI's power menu makes (`power_menu.gd:22`). A staged update found at start (client's "restart pending") shows `Restart now` straight away. |
 | D3 | **No restriction on channel changes**: stable -> beta and beta -> stable switch freely, no confirmation. Whatever the new channel's `latest.json` names is offered, older or not (the client's inequality check already does this). |
+| D5 | **Remote access switch** in the same `PlatformRetroForge` (added 2026-10-18): a toggle that starts / stops `retroforge-pairingd`, so a key can only be sent while the player turned it on (the daemon's documented consent model). Pairing stops being always-on: the unit loses `[Install]`, its preset and the wants symlink. Off at every boot (not persisted), pending user confirmation. |
 | D4 | Beta versions are `X.Y.Z-beta.N`, ahead of the next stable (what the workflow already keys on). |
 
 ## Patterns to Mirror
@@ -68,6 +69,23 @@ first beta.
 - `plugin.gd`: install it only when `platform.os == null` and `os_info.id == "retroforge"`.
 - **Validate**: `tests/test-plugin.sh`; deploy with auto-rollback; HW on ACE.
 
+### Phase 2b: remote access (pairing) switch
+- Unit: drop `[Install]`, `60-retroforge-pairingd.preset` and the committed
+  `multi-user.target.wants/retroforge-pairingd.service`; `Restart=on-failure` stays.
+- Already-installed devices: first-boot preset-all wrote the wants link into the `/etc` overlay's
+  upper dir, which survives an OTA. Remove it in the RAUC post-install hook on the new slot (it already
+  rsyncs `/var`), with a test, or pairing stays always-on on every device updated over the air.
+- polkit rule `50-retroforge-pairing.rules`: `org.freedesktop.systemd1.manage-units` for
+  `unit == "retroforge-pairingd.service"`, verbs `start`/`stop` only, active session + wheel (as the
+  timezone rule). Nothing else becomes manageable.
+- UI: "Remote access" section, toggle "Allow pairing a computer" (state read from
+  `systemctl is-active`, so the switch never lies after a crash or a stop elsewhere), and while on, the
+  address and port to pair with (`docs/remote-access.md`).
+- Guard / tests: guard-rootfs no longer expects pairingd enabled; `tests/test-pairingd.sh`
+  (unit has no `[Install]`); polkit rule grants exactly start/stop of that one unit.
+- Docs: `docs/remote-access.md` "Pairing is always on — for now" becomes how the switch works;
+  daemon header CONSENT MODEL.
+
 ### Phase 3: background check
 - One check a few minutes after session start, then every 6 h, skipped while a game runs. An
   available update posts an OGUI notification pointing at Settings > General. Nothing installs.
@@ -98,6 +116,7 @@ make test
 | Beta -> stable leaves the beta plugin in `/home` | — | fixed in Phase 1: the image's plugin always wins; HW step in Phase 4 |
 | Restart into a bundle that never reaches a session (no serial) | Medium | every bundle HW-installed before tagging; trial boot + rollback |
 | Runtime edits of Settings > General crash the release export | Medium | configure after `add_child`; deploy with auto-rollback |
+| OTA'd devices keep the pairing wants link in `/etc` upper | High if missed | post-install removes it; HW check after an OTA |
 | A future OGUI adds `retroforge` to its list | Low | only install when `platform.os` is null |
 | HTTP/1 streaming from R2 is slow | Low | observe in Phase 4 |
 
