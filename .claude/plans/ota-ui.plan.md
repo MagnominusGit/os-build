@@ -49,7 +49,7 @@ first beta.
 ## Tasks
 
 ### Phase 1: client gaps (test first)
-- `retroforge-update version`: `<version><TAB><channel>` for the header.
+- `retroforge-update version`: the running identity (identity_of; a dev build its stamp) for the header. DONE.
 - Test that a channel switch offers the other channel's release even when it is older
   (beta `0.0.4-beta.1` -> stable `0.0.3`), so D3 is pinned by a test, not by accident.
 - `install-ogui-plugin` installs the image's plugin whenever its version DIFFERS, not only when

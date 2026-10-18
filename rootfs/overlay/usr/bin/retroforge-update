@@ -584,6 +584,19 @@ def progress_emitter():
 # one. A streamed bundle cannot be truncated on disk, because it is never on disk.
 
 
+def cmd_version():
+    """The running image's identity on STDOUT, for the shell's Updates section. identity_of() --
+    the string `check` compares against -- so a dev build shows its build stamp and the UI never
+    re-derives that rule. Local only: no fetch, no first-boot gate. Exit 1 with nothing on stdout
+    when the release file says nothing."""
+    identity = identity_of(device_identity())
+    if not identity:
+        log(f"no version in {RELEASE_FILE}")
+        return EXIT_FAIL
+    print(identity)
+    return EXIT_OK
+
+
 def cmd_channel():
     """The effective channel and where it came from, for another program to read.
 
@@ -681,11 +694,12 @@ def cmd_status():
     return EXIT_OK
 
 
-USAGE = """usage: retroforge-update [check|status|channel|channels|set-channel <name>|--supports-duplicate-detection]
+USAGE = """usage: retroforge-update [check|status|version|channel|channels|set-channel <name>|--supports-duplicate-detection]
 
   (no argument)  apply the available update: download, install, arm the trial
   check          exit 0 and print the version if an update is available, else exit 7
   status         human-readable diagnostics
+  version        the running image's version (a dev build: its build stamp)
   channel        the channel in effect and the source that supplied it, tab-separated
   channels       the channels a picker offers, one per line (+ `pinned<TAB>source` if pinned)
   set-channel N  make N the user's channel (~/.config/retroforge/ota.conf); never downloads
@@ -726,6 +740,8 @@ def main(argv):
             return cmd_check()
         if arg == "status":
             return cmd_status()
+        if arg == "version":
+            return cmd_version()
         if arg == "channel":
             return cmd_channel()
         if arg == "channels":

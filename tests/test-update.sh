@@ -628,5 +628,37 @@ run set-channel
                               || bad "bare set-channel: exit $RC out='$OUT'"
 
 # =================================================================================================
+CASE="channel-switch-either-way"
+# Channel changes are unrestricted (ota-ui plan D3): beta -> stable offers stable's release even
+# though it is OLDER than the running beta. The check compares for inequality, never for order;
+# this pins that, so nobody "fixes" it into a newer-only check that strands a device on beta.
+manifest stable '{"version":"0.0.3","bundle":"retroforge-0.0.3.raucb","size":100}'
+manifest beta '{"version":"0.0.4-beta.1","bundle":"retroforge-0.0.4-beta.1.raucb","size":100}'
+run RETROFORGE_RELEASE_FILE="$(release_file 0.0.3)" RETROFORGE_OTA_CHANNEL=beta check
+[ "$RC" = 0 ] && [ "$OUT" = "0.0.4-beta.1" ] && ok "stable -> beta offers the beta" \
+                                             || bad "exit $RC, printed '$OUT'"
+run RETROFORGE_RELEASE_FILE="$(release_file 0.0.4-beta.1)" RETROFORGE_OTA_CHANNEL=stable check
+[ "$RC" = 0 ] && [ "$OUT" = "0.0.3" ] && ok "beta -> stable offers the older stable release" \
+                                      || bad "exit $RC, printed '$OUT'"
+
+# =================================================================================================
+CASE="version"
+# The shell's Updates section shows the running version. It is identity_of() over the release
+# file -- the same string `check` compares against -- so the UI never re-derives the dev rule.
+run RETROFORGE_RELEASE_FILE="$(release_file 0.0.4-beta.1)" version
+[ "$RC" = 0 ] && [ "$OUT" = "0.0.4-beta.1" ] && ok "prints the running version" \
+                                             || bad "exit $RC, printed '$OUT'"
+run RETROFORGE_RELEASE_FILE="$(release_file dev 20261018T101500Z dev)" version
+[ "$OUT" = "20261018T101500Z" ] && ok "a dev build prints its build stamp, as check would" \
+                                || bad "dev build printed '$OUT'"
+[ "$(requests)" = 0 ] && ok "fetches nothing" || bad "version made $(requests) request(s)"
+run RETROFORGE_RELEASE_FILE="$(release_file 1.0.0)" RETROFORGE_SHELL_SETTINGS="$W/nonexistent.cfg" version
+[ "$OUT" = "1.0.0" ] && ok "answers before first-boot setup too (nothing is fetched)" \
+                     || bad "before setup printed '$OUT' (exit $RC)"
+run RETROFORGE_RELEASE_FILE="$W/nonexistent-release" version
+[ "$RC" = 1 ] && [ -z "$OUT" ] && ok "no release file: exit 1, nothing on stdout" \
+                              || bad "no release file: exit $RC, printed '$OUT'"
+
+# =================================================================================================
 printf '\ntest-update.sh: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
