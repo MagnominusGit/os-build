@@ -584,6 +584,17 @@ def progress_emitter():
 # one. A streamed bundle cannot be truncated on disk, because it is never on disk.
 
 
+def cmd_staged():
+    """An update installed and waiting for a reboot: exit 0 with its identity, else exit 7. `check`
+    reprints the same identity, so it cannot tell the shell whether to offer Install or Restart now;
+    this can, with no fetch and no first-boot gate (a staged update exists only after setup)."""
+    pending = staged_identity()
+    if not pending:
+        return EXIT_NONE
+    print(pending, flush=True)
+    return EXIT_OK
+
+
 def cmd_version():
     """The running image's identity on STDOUT, for the shell's Updates section. identity_of() --
     the string `check` compares against -- so a dev build shows its build stamp and the UI never
@@ -694,10 +705,11 @@ def cmd_status():
     return EXIT_OK
 
 
-USAGE = """usage: retroforge-update [check|status|version|channel|channels|set-channel <name>|--supports-duplicate-detection]
+USAGE = """usage: retroforge-update [check|staged|status|version|channel|channels|set-channel <name>|--supports-duplicate-detection]
 
   (no argument)  apply the available update: download, install, arm the trial
   check          exit 0 and print the version if an update is available, else exit 7
+  staged         exit 0 and print the version installed and waiting for a reboot, else exit 7
   status         human-readable diagnostics
   version        the running image's version (a dev build: its build stamp)
   channel        the channel in effect and the source that supplied it, tab-separated
@@ -740,6 +752,8 @@ def main(argv):
             return cmd_check()
         if arg == "status":
             return cmd_status()
+        if arg == "staged":
+            return cmd_staged()
         if arg == "version":
             return cmd_version()
         if arg == "channel":

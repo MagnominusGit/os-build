@@ -587,6 +587,16 @@ nvu.write_staged(stamp)
 if nvu.staged_identity(Installer("rootfs.1", "rootfs.0")) != "9.9.9":
     fails.append("did not report a genuinely pending update before the reboot")
 
+# 3. `staged` (the shell's Restart now at session start) answers from staged_identity() alone.
+import contextlib, io
+for value, want_rc, want_out in (("9.9.9", 0, "9.9.9\n"), (None, 7, "")):
+    nvu.staged_identity = lambda installer=None, v=value: v
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = nvu.main(["staged"])
+    if (rc, buf.getvalue()) != (want_rc, want_out):
+        fails.append(f"staged with {value!r}: exit {rc}, stdout {buf.getvalue()!r}")
+
 print("\n".join(fails))
 PY
 staged_out="$(CLIENT="$CLIENT" RETROFORGE_OTA_STAGE="$W/stage" python3 "$W/staged_test.py" 2>&1)"
@@ -640,6 +650,14 @@ run RETROFORGE_RELEASE_FILE="$(release_file 0.0.3)" RETROFORGE_OTA_CHANNEL=beta 
 run RETROFORGE_RELEASE_FILE="$(release_file 0.0.4-beta.1)" RETROFORGE_OTA_CHANNEL=stable check
 [ "$RC" = 0 ] && [ "$OUT" = "0.0.3" ] && ok "beta -> stable offers the older stable release" \
                                       || bad "exit $RC, printed '$OUT'"
+
+# =================================================================================================
+CASE="staged"
+# No stamp: nothing pending, exit 7, nothing fetched -- without asking rauc at all.
+rm -f "$W/stage/staged.json"
+run staged
+[ "$RC" = 7 ] && [ -z "$OUT" ] && [ "$(requests)" = 0 ] && ok "no staged update: exit 7, empty stdout, no request" \
+                                                   || bad "exit $RC, printed '$OUT', $(requests) request(s)"
 
 # =================================================================================================
 CASE="version"
