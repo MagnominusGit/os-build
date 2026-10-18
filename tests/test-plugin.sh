@@ -66,6 +66,21 @@ s = open(sys.argv[1]).read()
 add, fill = s.find("box.add_child(node)"), s.find("_region.clear()")
 sys.exit(0 if 0 <= add < fill and s.find("_region.add_item") > add else 1)
 PY2
+# The same crash rule for the Updates section: the channel dropdown is filled after add_child.
+python3 - "$SRC/retroforge_os.gd" <<'PY2' && ok "retroforge_os.gd fills its dropdown only once it is in the tree" || bad "retroforge_os.gd calls the dropdown before add_child: OGUI segfaults"
+import sys
+s = open(sys.argv[1]).read()
+add, fill = s.find("box.add_child(node)"), s.find("_fill_channels()\n\t_channel.item_selected")
+sys.exit(0 if 0 <= add < fill and s.find("_channel.clear()") > 0 and s.find("_channel.add_item") > 0 else 1)
+PY2
+# OGUI never calls ready() on our OS platform (it knows no `retroforge` OS): plugin.gd must, and
+# only where OGUI detected none.
+grep -q 'if platform.os or not platform.os_info or platform.os_info.id != "retroforge":' "$SRC/plugin.gd" \
+  && grep -q '_os.ready(get_tree().root)' "$SRC/plugin.gd" \
+  && ok "plugin.gd installs the RetroForge OS platform only over none, and calls its ready()" \
+  || bad "plugin.gd does not install retroforge_os.gd as platform.os (or would replace OGUI's)"
+grep -q '^extends OSPlatform$' "$SRC/retroforge_os.gd" && ok "retroforge_os.gd extends OSPlatform" || bad "retroforge_os.gd does not extend OSPlatform"
+
 # BoxArtManager refuses a provider whose provider_id is empty when it becomes ready.
 grep -q 'add_boxart(.*boxart_retroforge.gd' "$SRC/plugin.gd" && grep -q '^	provider_id = "retroforge"$' "$SRC/boxart_retroforge.gd" \
   && ok "the art provider is added, with an id (BoxArtManager refuses an empty one)" || bad "boxart_retroforge.gd is not added by plugin.gd, or has no provider_id"
@@ -103,6 +118,7 @@ const GameDirs := preload("$SRC/game_dirs.gd")
 const EmuOptions := preload("$SRC/emu_options.gd")
 const EmuState := preload("$SRC/emu_state.gd")
 const ArtPaths := preload("$SRC/art_paths.gd")
+const UpdateStates := preload("$SRC/update_states.gd")
 const SYSTEMS := {"psx": "PlayStation", "ps2": "PlayStation 2"}
 var failed := 0
 
@@ -196,7 +212,36 @@ func _init() -> void:
 	test_emu_options()
 	test_emu_state()
 	test_art_paths()
+	test_update_states()
 	quit(1 if failed else 0)
+
+# Settings > General > Updates (retroforge_os.gd): retroforge-update's answers -> what is shown.
+func test_update_states() -> void:
+	check("channels: stable and beta, not pinned",
+		UpdateStates.parse_channels("stable\nbeta\n"), {"channels": ["stable", "beta"], "pinned": ""})
+	check("channels: a dev card's pin is listed and named",
+		UpdateStates.parse_channels("stable\nbeta\ndev\npinned\t/etc/retroforge/ota.conf\n"),
+		{"channels": ["stable", "beta", "dev"], "pinned": "/etc/retroforge/ota.conf"})
+	check("channel: the name before the tab", UpdateStates.parse_channel("beta\t/home/player/.config/retroforge/ota.conf\n"), "beta")
+	check("channel: nothing read is empty", UpdateStates.parse_channel(""), "")
+	check("channel names: Stable, Beta, others as they are",
+		[UpdateStates.channel_name("stable"), UpdateStates.channel_name("beta"), UpdateStates.channel_name("dev")], ["Stable", "Beta", "dev"])
+	var S := UpdateStates.Step
+	check("button: one button walks Check -> Install -> Restart now",
+		[UpdateStates.button_for(S.IDLE, "0.0.3")["button"], UpdateStates.button_for(S.AVAILABLE, "0.0.3", "0.0.4")["button"],
+		 UpdateStates.button_for(S.STAGED, "0.0.3", "0.0.4")["button"]],
+		["Check for updates", "Install", "Restart now"])
+	check("button: pressable only when it does something",
+		[UpdateStates.button_for(S.IDLE, "1")["disabled"], UpdateStates.button_for(S.CHECKING, "1")["disabled"],
+		 UpdateStates.button_for(S.AVAILABLE, "1", "2")["disabled"], UpdateStates.button_for(S.INSTALLING, "1", "2")["disabled"],
+		 UpdateStates.button_for(S.STAGED, "1", "2")["disabled"]],
+		[false, true, false, true, false])
+	check("button: the install's progress is in its description",
+		"42%" in UpdateStates.button_for(S.INSTALLING, "0.0.3", "0.0.4", 42)["description"], true)
+	check("button: both versions when one is available",
+		UpdateStates.button_for(S.AVAILABLE, "0.0.4-beta.1", "0.0.3")["description"], "RetroForge 0.0.3 is available (you have 0.0.4-beta.1).")
+	check("channel description: says what pins it",
+		UpdateStates.channel_description("/etc/retroforge/ota.conf"), "Set by /etc/retroforge/ota.conf on this device.")
 
 ## OGUI's card is 2:3 and draws its texture whole, top-left: a SNES box (wider than tall) left two
 ## thirds of the card empty (ACE, 2026-10-17). A card image is the box scaled to cover the card,
@@ -665,6 +710,130 @@ GD
   fi
   if printf '%s\n' "$out" | grep -q 'SCRIPT ERROR'; then
     bad "a script did not compile: $(printf '%s\n' "$out" | grep 'SCRIPT ERROR' | head -3)"
+  fi
+
+  # =================================================================================================
+  # Settings > General > Updates (retroforge_os.gd) in OGUI's own settings scene, against a fake
+  # retroforge-update: OGUI's updater goes, the one button walks Check -> Install -> Restart now, the
+  # channel switch checks at once, and a session restarted with an update waiting offers Restart now.
+  # Needs OGUI's classes, so a copy of the pinned OGUI source tree whose addons/core/bin also holds
+  # upstream's x86_64 core library (from the same release's opengamepadui-x86_64.tar.gz, named
+  # template_debug and template_release): RETROFORGE_OGUI_PROJECT=<dir>. Skipped without. The plugin
+  # is copied into <dir>/plugins/retroforge on every run.
+  CASE="updates-ui"
+  OGUI_PROJECT="${RETROFORGE_OGUI_PROJECT:-}"
+  if [ -z "$OGUI_PROJECT" ] || [ ! -f "$OGUI_PROJECT/project.godot" ]; then
+    printf '  skip %s -- no OGUI project (set RETROFORGE_OGUI_PROJECT)\n' "$CASE"
+  else
+    mkdir -p "$OGUI_PROJECT/plugins/retroforge" "$T/updates/d"
+    cp "$SRC"/* "$OGUI_PROJECT/plugins/retroforge/"
+    cat >"$T/updates/fake-update" <<'SH'
+#!/bin/bash
+# Fake retroforge-update. State in $FAKE_DIR: channel, staged (version), latest.<channel>
+D=$FAKE_DIR; echo "$*" >> $D/calls
+ch=$(cat $D/channel 2>/dev/null || echo stable)
+case "$1" in
+  version) echo 0.0.3 ;;
+  channels) printf 'stable\nbeta\n' ;;
+  channel) printf '%s\t/home/player/.config/retroforge/ota.conf\n' "$ch" ;;
+  set-channel) echo "$2" > $D/channel ;;
+  staged) [ -s $D/staged ] && { cat $D/staged; exit 0; }; exit 7 ;;
+  check) [ -s $D/staged ] && { cat $D/staged; exit 0; }
+         v=$(cat $D/latest.$ch 2>/dev/null); [ -n "$v" ] && [ "$v" != 0.0.3 ] && { echo "$v"; exit 0; }; exit 7 ;;
+  "") v=$(cat $D/latest.$ch); for p in 10 50 100; do echo "$p%"; sleep 0.2; done; echo "$v" > $D/staged ;;
+esac
+SH
+    printf '#!/bin/sh\ntouch "$FAKE_DIR/rebooted"\n' >"$T/updates/fake-reboot"
+    chmod +x "$T/updates/fake-update" "$T/updates/fake-reboot"
+    cat >"$OGUI_PROJECT/retroforge_updates_test.gd" <<'GD'
+extends SceneTree
+
+var failed := 0
+var D := OS.get_environment("FAKE_DIR")
+
+func check(what: String, got, want) -> void:
+	if got == want:
+		print("  ok   updates-ui -- ", what)
+	else:
+		failed += 1
+		print("  FAIL updates-ui -- ", what, ": got ", got, ", want ", want)
+
+func _initialize() -> void:
+	run.call_deferred()
+
+func wait(sec: float) -> void:
+	await create_timer(sec).timeout
+
+func put(name: String, text: String) -> void:
+	var f := FileAccess.open(D.path_join(name), FileAccess.WRITE)
+	f.store_string(text)
+	f.close()
+
+func run() -> void:
+	var processor := ResourceProcessor.new()  # card_ui.tscn has one: it drives every Command
+	processor.registry = load("res://core/systems/resource/resource_registry.tres") as ResourceRegistry
+	root.add_child(processor)
+	var menu: Node = load("res://core/ui/card_ui/settings/general_settings_menu.tscn").instantiate()
+	root.add_child(menu)
+	await process_frame
+	var os = load("res://plugins/retroforge/retroforge_os.gd").new()
+	os.tool = D.path_join("../fake-update")
+	os.reboot_command.assign([D.path_join("../fake-reboot")])
+	put("latest.stable", "0.0.3")
+	put("latest.beta", "0.0.4-beta.1")
+	os.ready(root)
+	await wait(0.5)
+	var box: Node = menu.get_node("MarginContainer/VBoxContainer/VBoxContainer")
+	check("OGUI's updater controls are gone", [box.has_node("AutoUpdateToggle"), box.has_node("CheckUpdateButton"), box.has_node("UpdateButton"), menu.has_node("SoftwareUpdater"), menu.has_node("UpdateTimer")], [false, false, false, false, false])
+	var button: Node = box.get_node_or_null("RetroForgeUpdateButton")
+	var channel: Node = box.get_node_or_null("RetroForgeUpdateChannel")
+	check("the button and dropdown sit right under the Updates label",
+		[box.get_node("UpdatesLabel").get_index() + 1, box.get_node("UpdatesLabel").get_index() + 2], [button.get_index(), channel.get_index()])
+	check("focus starts on the button", box.get_node("FocusGroup").current_focus, button)
+	check("idle: Check for updates, version shown", [button.button_text, button.description], ["Check for updates", "RetroForge 0.0.3."])
+	check("dropdown: Stable, Beta; Stable selected", [channel.option_button.item_count, channel.option_button.get_item_text(0), channel.option_button.get_item_text(1), channel.selected], [2, "Stable", "Beta", 0])
+	button.button_up.emit()
+	await wait(0.5)
+	check("stable is up to date: still Check, says so", [button.button_text, button.description], ["Check for updates", "No update found on the Stable channel."])
+	channel.option_button.select(1)
+	channel.item_selected.emit(1)
+	await wait(0.8)
+	check("switching to Beta writes it and checks at once", FileAccess.get_file_as_string(D.path_join("channel")).strip_edges(), "beta")
+	check("beta offers 0.0.4-beta.1: Install", [button.button_text, button.disabled], ["Install", false])
+	button.button_up.emit()
+	await wait(0.3)
+	check("installing: disabled, channel locked", [button.button_text, button.disabled, channel.disabled], ["Installing...", true, true])
+	await wait(1.5)
+	check("installed: Restart now", [button.button_text, button.disabled, channel.disabled], ["Restart now", false, false])
+	button.button_up.emit()
+	await wait(0.3)
+	check("Restart now runs the reboot command", FileAccess.file_exists(D.path_join("rebooted")), true)
+	# A new session with the update still waiting: Restart now from the start.
+	var menu2: Node = load("res://core/ui/card_ui/settings/general_settings_menu.tscn").instantiate()
+	menu.queue_free()
+	await process_frame
+	root.add_child(menu2)
+	await process_frame
+	var os2 = load("res://plugins/retroforge/retroforge_os.gd").new()
+	os2.tool = os.tool
+	os2.ready(root)
+	await wait(0.5)
+	var b2: Node = menu2.get_node("MarginContainer/VBoxContainer/VBoxContainer/RetroForgeUpdateButton")
+	check("restarted session: staged update shows Restart now", [b2.button_text, b2.description], ["Restart now", "RetroForge 0.0.4-beta.1 is installed. Restart to use it."])
+	check("restarted session: Beta still selected", menu2.get_node("MarginContainer/VBoxContainer/VBoxContainer/RetroForgeUpdateChannel").selected, 1)
+	quit(1 if failed else 0)
+GD
+    out="$(cd "$OGUI_PROJECT" && FAKE_DIR="$T/updates/d" timeout 120 "$GODOT" --headless --path . --script res://retroforge_updates_test.gd 2>&1)"; rc=$?
+    rm -f "$OGUI_PROJECT/retroforge_updates_test.gd"
+    printf '%s\n' "$out" | grep -E '^  (ok|FAIL) '
+    n_ok="$(printf '%s\n' "$out" | grep -c '^  ok ')"; n_bad="$(printf '%s\n' "$out" | grep -c '^  FAIL ')"
+    PASS=$((PASS + n_ok)); FAIL=$((FAIL + n_bad))
+    if [ "$rc" -ne 0 ] && [ "$n_bad" -eq 0 ]; then
+      bad "Godot failed (rc $rc): $(printf '%s\n' "$out" | grep -E 'ERROR' | head -3)"
+    fi
+    if printf '%s\n' "$out" | grep -q 'SCRIPT ERROR'; then
+      bad "a script did not compile: $(printf '%s\n' "$out" | grep 'SCRIPT ERROR' | head -3)"
+    fi
   fi
 fi
 

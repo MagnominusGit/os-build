@@ -39,6 +39,7 @@ var _touch_keyboard: RefCounted  # touch_keyboard.gd
 var _buttons: RefCounted  # button_layout.gd
 var _pause: RefCounted  # pause_on_menu.gd
 var _scraper: RefCounted  # scraper_settings.gd
+var _os: Resource  # retroforge_os.gd, installed as OGUI's platform.os
 var _watch: RefCounted  # rom_watch.gd
 var _rescan_timer: Timer
 var _rescanning := false
@@ -77,6 +78,7 @@ func _ready() -> void:
 	_scraper = load(plugin_base.path_join("scraper_settings.gd")).new().setup(get_tree())
 	if not _scraper.attach():
 		logger.warn("OGUI library settings layout not found; no ROM art section")
+	_install_os_platform()
 	_setup_input_boost()
 
 
@@ -103,10 +105,26 @@ func unload() -> void:
 		_pause.detach()
 	if _scraper:
 		_scraper.detach()
+	if _os:
+		_os.detach()
 	for card in [_hardware_card, _fan_test_card]:
 		if is_instance_valid(card):
 			var qb_card: Node = card.find_parent("QuickBarCard*")
 			(qb_card if qb_card else card).queue_free()
+
+
+## OGUI knows no `retroforge` OS (core/global/platform.gd's fixed list), so platform.os is null and
+## nothing would call an OS platform's ready(): install ours and call it, as Platform.load() does.
+## Never over an OS platform OGUI detected itself.
+func _install_os_platform() -> void:
+	var platform := load("res://core/global/platform.tres") as Platform
+	if platform.os or not platform.os_info or platform.os_info.id != "retroforge":
+		logger.info("OS platform left to OGUI")
+		return
+	_os = load(plugin_base.path_join("retroforge_os.gd")).new()
+	platform.os = _os
+	_os.ready(get_tree().root)
+	logger.info("RetroForge OS platform installed")
 
 
 ## Game settings > RetroForge (the gear on a ROM's launch menu): per-game options.
