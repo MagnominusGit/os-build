@@ -1,6 +1,6 @@
 # Plan: OS updates in the shell (stable / beta)
 
-**Complexity**: Medium. **Branch**: `feat/ota-ui`. **Status**: Phases 1, 2, 2b, 3, 5 done offline 2026-10-18 (plugin 0.1.56), not pushed; Phase 4 in progress (local beta HW-OK, tag next).
+**Complexity**: Medium. **Branch**: `feat/ota-ui`. **Status**: Phases 1, 2, 2b, 3, 5 done offline 2026-10-18 (plugin 0.1.56), not pushed; Phase 4 HW-OK on the ACE 2026-10-18 (first beta published).
 
 ## Summary
 
@@ -107,9 +107,14 @@ v0.0.3, Beta empty -> no update; pairing switch on -> key registered from the PC
 prompt; no plugin errors in the shell log. `v0.0.4-beta.1` bundle (same commit, release key)
 verified and installed from a local file, rebooted into B, trial boot good, pairing off after the
 reboot, channel kept (beta). A manual `rauc install` writes no staged stamp, so the button cannot
-offer Restart now for it (by design). Still to do: tag, then reflash beta.0 and run the in-shell
-Install -> Restart now on Beta, and Beta -> Stable (v0.0.3 predates the plugin fix: expect the
-0.1.57 plugin to stay, blank version, pairing switch without its polkit rule).
+offer Restart now for it (by design). Tagged `ota/v0.0.4-beta.1` (8972d8f0): CI published `beta/`. Reflashed beta.0 (with the scraper
+login), then in the shell: Beta -> Install (streamed, 11.9% of the bundle fetched, no `using
+HTTP/1` warning) -> Restart now -> CI's beta.1 on B, boot confirmed good, pairing (left on) off
+after the reboot. Beta -> Stable: v0.0.3 offered, installed (5.7% fetched), Restart now, A good.
+On v0.0.3 as predicted: its image plugin is 0.1.43 and its old never-downgrade rule keeps the
+installed 0.1.57 (`retroforge-update version` unknown -> blank version line, logged as a WARN),
+and pairingd is enabled + active again (v0.0.3's always-on design, no polkit rule). A clean
+beta -> stable needs a stable release that carries the plugin fix (0.0.4).
 
 **Offline harness used (2026-10-18)**: Godot 4.7.1 x86_64 (official, sha512-checked) as
 `RETROFORGE_GODOT`; a copy of the pinned OGUI 0.46.1 tree with upstream's x86_64 core library
