@@ -736,14 +736,16 @@ GD
     cp "$SRC"/* "$OGUI_PROJECT/plugins/retroforge/"
     cat >"$T/updates/fake-update" <<'SH'
 #!/bin/bash
-# Fake retroforge-update. State in $FAKE_DIR: channel, staged (version), latest.<channel>
+# Fake retroforge-update. State in $FAKE_DIR: channel, staged (version), latest.<channel>, and
+# pinned: a dev card, whose /etc/retroforge/ota.conf pins `dev` and refuses set-channel.
 D=$FAKE_DIR; echo "$*" >> $D/calls
-ch=$(cat $D/channel 2>/dev/null || echo stable)
+ch=$(cat $D/channel 2>/dev/null || echo stable); src=/home/player/.config/retroforge/ota.conf
+[ -e $D/pinned ] && { ch=dev; src=/etc/retroforge/ota.conf; }
 case "$1" in
   version) echo 0.0.3 ;;
-  channels) printf 'stable\nbeta\n' ;;
-  channel) printf '%s\t/home/player/.config/retroforge/ota.conf\n' "$ch" ;;
-  set-channel) [ -e $D/slow-set ] && sleep 0.5; echo "$2" > $D/channel ;;
+  channels) printf 'stable\nbeta\n'; if [ -e $D/pinned ]; then printf 'dev\npinned\t%s\n' "$src"; fi ;;
+  channel) printf '%s\t%s\n' "$ch" "$src" ;;
+  set-channel) [ -e $D/pinned ] && exit 1; [ -e $D/slow-set ] && sleep 0.5; echo "$2" > $D/channel ;;
   staged) [ -s $D/staged ] && { cat $D/staged; exit 0; }; exit 7 ;;
   check) [ -s $D/staged ] && { cat $D/staged; exit 0; }
          v=$(cat $D/latest.$ch 2>/dev/null); [ -n "$v" ] && [ "$v" != 0.0.3 ] && { echo "$v"; exit 0; }; exit 7 ;;
@@ -846,12 +848,13 @@ func run() -> void:
 	var b2: Node = menu2.get_node("MarginContainer/VBoxContainer/VBoxContainer/RetroForgeUpdateButton")
 	check("restarted session: staged update shows Restart now", [b2.button_text, b2.description], ["Restart now", "RetroForge 0.0.4-beta.1 is installed. Restart to use it."])
 	check("restarted session: Beta still selected", menu2.get_node("MarginContainer/VBoxContainer/VBoxContainer/RetroForgeUpdateChannel").selected, 1)
-	await test_background_check(menu2)
+	var menu3: Node = await test_background_check(menu2)
+	await test_pinned(menu3)
 	quit(1 if failed else 0)
 
 # A background check (here 0.3 s after start instead of 3 min) finds an update: Install, and one
 # notification naming it -- never an install.
-func test_background_check(previous: Node) -> void:
+func test_background_check(previous: Node) -> Node:
 	DirAccess.remove_absolute(D.path_join("staged"))
 	put("channel", "stable")
 	put("latest.stable", "0.0.5")
@@ -878,6 +881,42 @@ func test_background_check(previous: Node) -> void:
 	nm.notification_sent.disconnect(note)
 	check("background check: one notification naming it", notes.has("RetroForge 0.0.5 is available: Settings > General > Updates"), true)
 	check("background check: nothing installed", FileAccess.file_exists(D.path_join("staged")), false)
+	return menu3
+
+# A dev card: /etc/retroforge/ota.conf pins `dev`. The dropdown shows it, greyed out with the file
+# that pins it, and a check asks the dev channel only -- never stable or beta, never a set-channel.
+func test_pinned(previous: Node) -> void:
+	put("pinned", "")
+	put("latest.dev", "")
+	var sets_before := FileAccess.get_file_as_string(D.path_join("calls")).count("set-channel")
+	var menu4: Node = load("res://core/ui/card_ui/settings/general_settings_menu.tscn").instantiate()
+	previous.queue_free()
+	await process_frame
+	root.add_child(menu4)
+	await process_frame
+	var os4 = load("res://plugins/retroforge/retroforge_os.gd").new()
+	os4.tool = D.path_join("../fake-update")
+	os4.systemctl = D.path_join("../fake-systemctl")
+	os4.ready(root)
+	await wait(0.5)
+	var box: Node = menu4.get_node("MarginContainer/VBoxContainer/VBoxContainer")
+	var b4: Node = box.get_node("RetroForgeUpdateButton")
+	var c4: Node = box.get_node("RetroForgeUpdateChannel")
+	check("pinned: dropdown lists dev after Stable and Beta, dev selected",
+		[c4.option_button.item_count, c4.option_button.get_item_text(2), c4.selected], [3, "dev", 2])
+	check("pinned: dropdown greyed out, names the file that pins it",
+		[c4.disabled, c4.description], [true, "Set by /etc/retroforge/ota.conf on this device."])
+	b4.button_up.emit()
+	await wait(0.5)
+	check("pinned: nothing on dev -- no offer, the dropdown stays greyed out",
+		[b4.button_text, b4.description, c4.disabled], ["Check for updates", "No update found on the dev channel.", true])
+	put("latest.dev", "20261018.1200")
+	b4.button_up.emit()
+	await wait(0.5)
+	check("pinned: a bundle seeded on dev is offered", [b4.button_text, b4.description],
+		["Install", "RetroForge 20261018.1200 is available (you have 0.0.3)."])
+	check("pinned: no set-channel was ever asked",
+		FileAccess.get_file_as_string(D.path_join("calls")).count("set-channel"), sets_before)
 
 var notes: Array[String] = []
 func note(n) -> void:
