@@ -48,6 +48,7 @@ var _apply := ScrapeRunner.new()  # runs the install: `N%` lines on a worker thr
 var _step := UpdateStates.Step.IDLE
 var _running := ""  # this image's version
 var _offered := ""  # the version check found, or the one staged
+var _switching := false  # set-channel is running: the button and the background check wait
 var _channels: Array[String] = []
 var _button: Control  # card_button_setting
 var _channel: Control  # dropdown
@@ -131,6 +132,8 @@ func _add_updater(box: Node) -> void:
 	if focus_group:
 		focus_group.current_focus = _button  # was OGUI's auto-update toggle, now freed
 	_running = _run(["version"]).strip_edges()
+	if _running == "":
+		logger.warn("retroforge-update version printed nothing")
 	_fill_channels()
 	_channel.item_selected.connect(_on_channel_selected)
 	_show()
@@ -149,7 +152,7 @@ func _start_background_checks(host: Node) -> void:
 
 
 func _on_background_check() -> void:
-	if not UpdateStates.background_check_wanted(_step, in_game.call()):
+	if _switching or not UpdateStates.background_check_wanted(_step, in_game.call()):
 		_timer.start(IN_GAME_RETRY if _step == UpdateStates.Step.IDLE else CHECK_INTERVAL)
 		return
 	_timer.start(CHECK_INTERVAL)
@@ -203,11 +206,14 @@ func _on_pairing_toggled(on: bool) -> void:
 	var code := -1
 	if cmd.execute() == OK:
 		code = await cmd.finished as int
+	if not is_instance_valid(_pairing):  # detached while systemctl ran
+		return
 	_pairing.disabled = false
 	if code != 0:
 		logger.warn("systemctl %s %s exited %d: %s" % ["start" if on else "stop", PAIRING_UNIT, code, cmd.stderr])
 		_notify("Could not turn pairing %s" % ("on" if on else "off"))
-	logger.info("pairing " + ("on" if on else "off"))
+	else:
+		logger.info("pairing " + ("on" if on else "off"))
 	_sync_pairing()
 
 
@@ -249,29 +255,37 @@ func _fill_channels() -> void:
 	_channel.set_meta("pinned", listed["pinned"] != "")
 
 
+## Whether the section's nodes still exist: every await below may end after detach() freed them, and
+## touching a freed node in OGUI's release export can crash it.
+func _alive() -> bool:
+	return is_instance_valid(_button) and is_instance_valid(_channel)
+
+
 func _show(percent := 0) -> void:
-	if not is_instance_valid(_button):
+	if not _alive():
 		return
 	var shown := UpdateStates.button_for(_step, _running, _offered, percent)
 	_button.button_text = shown["button"]
 	_button.description = shown["description"]
-	_button.disabled = shown["disabled"]
-	var busy := _step in [UpdateStates.Step.CHECKING, UpdateStates.Step.INSTALLING]
+	_button.disabled = shown["disabled"] or _switching
+	var busy := _switching or _step in [UpdateStates.Step.CHECKING, UpdateStates.Step.INSTALLING]
 	_channel.disabled = busy or bool(_channel.get_meta("pinned", false))
 
 
 ## A session restarted after an install (OGUI crash, logout) still has the update waiting.
 func _restore_staged() -> void:
 	var cmd := Command.create(tool, ["staged"])
-	if cmd.execute() != OK or (await cmd.finished) != 0:
+	if cmd.execute() != OK or (await cmd.finished) != 0 or not _alive():
 		return
-	if _step == UpdateStates.Step.IDLE:
+	if _step == UpdateStates.Step.IDLE and not _switching:
 		_offered = cmd.stdout.strip_edges()
 		_step = UpdateStates.Step.STAGED
 		_show()
 
 
 func _on_button() -> void:
+	if _switching:
+		return
 	match _step:
 		UpdateStates.Step.IDLE:
 			check()
@@ -298,22 +312,32 @@ func check() -> bool:
 	if code == 0 and offered != "":
 		_offered = offered
 		# check reprints an update that is already installed: Restart, not Install again.
-		var staged := Command.create(tool, ["staged"])
-		var is_staged: bool = staged.execute() == OK and (await staged.finished) == 0
-		_step = UpdateStates.Step.STAGED if is_staged else UpdateStates.Step.AVAILABLE
+		_step = UpdateStates.Step.STAGED if await _is_staged() else UpdateStates.Step.AVAILABLE
 	else:
 		# Exit 7 is also how every failure ends (no network, a bad manifest): the client fails closed.
 		_step = UpdateStates.Step.IDLE
 		if code != 7:
 			logger.warn("retroforge-update check exited %d: %s" % [code, cmd.stderr])
+	if not _alive():
+		return false
 	_show()
 	if _step == UpdateStates.Step.IDLE:
 		_button.description = "No update found on the %s channel." % UpdateStates.channel_name(_current_channel())
 	return _step != UpdateStates.Step.IDLE
 
 
+## `staged` answers 0 (with the version) when an update waits for a reboot; updates _offered.
+func _is_staged() -> bool:
+	var cmd := Command.create(tool, ["staged"])
+	if cmd.execute() != OK or (await cmd.finished) != 0:
+		return false
+	_offered = cmd.stdout.strip_edges()
+	return true
+
+
 func _install() -> void:
 	if not _apply.start([]):
+		logger.warn("an install is already running")
 		return
 	_step = UpdateStates.Step.INSTALLING
 	_show()
@@ -325,26 +349,42 @@ func _on_install_progress(percent: int) -> void:
 
 
 func _on_install_finished(code: int, _summary: Dictionary, error: String) -> void:
-	if code == 0:
+	# Exit 0 is also "already running the newest, nothing installed": Restart now only for an update
+	# that really waits for a reboot.
+	if code == 0 and await _is_staged():
 		_step = UpdateStates.Step.STAGED
 		_show()
 		_notify("RetroForge %s is installed. Restart to use it." % _offered)
 		return
-	logger.warn("retroforge-update exited %d: %s" % [code, error])
 	_step = UpdateStates.Step.IDLE
 	_show()
+	if not _alive():
+		return
+	if code == 0:
+		_button.description = "Nothing to install: RetroForge is up to date."
+		return
+	logger.warn("retroforge-update exited %d: %s" % [code, error])
 	_button.description = "The update could not be installed. Check the network and try again."
 	_notify("The RetroForge update could not be installed")
 
 
 func _on_channel_selected(index: int) -> void:
-	if index < 0 or index >= _channels.size():
+	if index < 0 or index >= _channels.size() or _switching:
 		return
+	# The dropdown is disabled while a check or an install runs, and _switching holds the button and
+	# the background check until the new channel is written and checked.
+	_switching = true
+	_show()
 	var cmd := Command.create(tool, ["set-channel", _channels[index]])
-	if cmd.execute() != OK or (await cmd.finished) != 0:
+	var ok: bool = cmd.execute() == OK and (await cmd.finished) == 0
+	_switching = false
+	if not _alive():
+		return
+	if not ok:
 		logger.warn("retroforge-update set-channel %s failed: %s" % [_channels[index], cmd.stderr])
 		_notify("Could not change the update channel")
 		_fill_channels()
+		_show()
 		return
 	logger.info("update channel: " + _channels[index])
 	if _step == UpdateStates.Step.AVAILABLE:

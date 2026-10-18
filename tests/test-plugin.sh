@@ -743,7 +743,7 @@ case "$1" in
   version) echo 0.0.3 ;;
   channels) printf 'stable\nbeta\n' ;;
   channel) printf '%s\t/home/player/.config/retroforge/ota.conf\n' "$ch" ;;
-  set-channel) echo "$2" > $D/channel ;;
+  set-channel) [ -e $D/slow-set ] && sleep 0.5; echo "$2" > $D/channel ;;
   staged) [ -s $D/staged ] && { cat $D/staged; exit 0; }; exit 7 ;;
   check) [ -s $D/staged ] && { cat $D/staged; exit 0; }
          v=$(cat $D/latest.$ch 2>/dev/null); [ -n "$v" ] && [ "$v" != 0.0.3 ] && { echo "$v"; exit 0; }; exit 7 ;;
@@ -815,9 +815,13 @@ func run() -> void:
 	button.button_up.emit()
 	await wait(0.5)
 	check("stable is up to date: still Check, says so", [button.button_text, button.description], ["Check for updates", "No update found on the Stable channel."])
+	put("slow-set", "")
 	channel.option_button.select(1)
 	channel.item_selected.emit(1)
-	await wait(0.8)
+	await wait(0.2)
+	check("while the channel is being written, the button and the dropdown wait", [button.disabled, channel.disabled], [true, true])
+	DirAccess.remove_absolute(D.path_join("slow-set"))
+	await wait(1.2)
 	check("switching to Beta writes it and checks at once", FileAccess.get_file_as_string(D.path_join("channel")).strip_edges(), "beta")
 	check("beta offers 0.0.4-beta.1: Install", [button.button_text, button.disabled], ["Install", false])
 	button.button_up.emit()
