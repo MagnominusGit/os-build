@@ -10,7 +10,9 @@ extends OSPlatform
 ## The section: one button walking Check for updates -> Install <version> (progress in its
 ## description) -> Restart now, and a Stable / Beta dropdown; switching never asks (plan ota-ui D3)
 ## and checks the new channel straight away. Nothing installs or restarts without a press (D2). An
-## update already installed and waiting for a reboot shows Restart now from the start.
+## update already installed and waiting for a reboot shows Restart now from the start. A background
+## check (3 min after start, then every 6 h, never while a game runs) posts one notification per
+## version found; it never installs (plan ota-ui Phase 3).
 ##
 ## Under it, Remote access: "Allow pairing a computer" starts and stops retroforge-pairingd, the
 ## unauthenticated socket that accepts an SSH key for `player` (docs/remote-access.md). Off at every
@@ -22,6 +24,9 @@ const UpdateStates := preload("update_states.gd")
 const ScrapeRunner := preload("scrape_runner.gd")
 const TOOL := "/usr/bin/retroforge-update"
 const CHECK_TIMEOUT := 60.0  # s: the manifest fetch retries for at most ~30 s
+const FIRST_CHECK_DELAY := 180.0  # s after start: the network is up, the player is not mid-menu
+const CHECK_INTERVAL := 6 * 3600.0
+const IN_GAME_RETRY := 600.0  # s: a check skipped for a running game is tried again this soon
 const PAIRING_UNIT := "retroforge-pairingd.service"
 const PAIRING_PORT := 32000  # retroforge-pairingd's SERVICE_PORT
 
@@ -36,6 +41,8 @@ var general_settings_state := load("res://assets/state/states/settings_general.t
 var tool := TOOL
 var reboot_command: Array[String] = ["systemctl", "reboot"]
 var systemctl := "systemctl"
+var first_check_delay := FIRST_CHECK_DELAY
+var in_game := _game_running
 
 var _apply := ScrapeRunner.new()  # runs the install: `N%` lines on a worker thread
 var _step := UpdateStates.Step.IDLE
@@ -45,6 +52,8 @@ var _channels: Array[String] = []
 var _button: Control  # card_button_setting
 var _channel: Control  # dropdown
 var _pairing: Control  # toggle
+var _timer: Timer  # background checks
+var _notified := ""  # the last version a background check announced
 var _nodes: Array[Node] = []
 
 
@@ -64,6 +73,7 @@ func ready(root: Window) -> void:
 	_remove_ogui_updater(menu, box)
 	if FileAccess.file_exists(tool):
 		_add_updater(box)
+		_start_background_checks(menu)
 	_add_remote_access(box)
 
 
@@ -125,6 +135,34 @@ func _add_updater(box: Node) -> void:
 	_channel.item_selected.connect(_on_channel_selected)
 	_show()
 	_restore_staged()
+
+
+## A Timer beside OGUI's own (the menu held its UpdateTimer the same way).
+func _start_background_checks(host: Node) -> void:
+	_timer = Timer.new()
+	_timer.name = "RetroForgeUpdateTimer"
+	_timer.one_shot = true
+	_timer.timeout.connect(_on_background_check)
+	host.add_child(_timer)
+	_nodes.append(_timer)
+	_timer.start(first_check_delay)
+
+
+func _on_background_check() -> void:
+	if not UpdateStates.background_check_wanted(_step, in_game.call()):
+		_timer.start(IN_GAME_RETRY if _step == UpdateStates.Step.IDLE else CHECK_INTERVAL)
+		return
+	_timer.start(CHECK_INTERVAL)
+	if await check() and _step == UpdateStates.Step.AVAILABLE and _offered != _notified:
+		_notified = _offered
+		_notify(UpdateStates.available_text(_offered))
+
+
+## Whether a game runs. Behind the `in_game` seam, so tests/test-plugin.sh need not load LaunchManager
+## (it brings InputPlumber, which a test host lacks).
+func _game_running() -> bool:
+	var launch_manager := load("res://core/global/launch_manager.tres") as LaunchManager
+	return launch_manager.get_current_app() != null
 
 
 ## Remote access, after the Updates rows (or at the top when there is no update client).

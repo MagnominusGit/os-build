@@ -240,6 +240,13 @@ func test_update_states() -> void:
 		"42%" in UpdateStates.button_for(S.INSTALLING, "0.0.3", "0.0.4", 42)["description"], true)
 	check("button: both versions when one is available",
 		UpdateStates.button_for(S.AVAILABLE, "0.0.4-beta.1", "0.0.3")["description"], "RetroForge 0.0.3 is available (you have 0.0.4-beta.1).")
+	check("background check: only when idle and no game runs",
+		[UpdateStates.background_check_wanted(S.IDLE, false), UpdateStates.background_check_wanted(S.IDLE, true),
+		 UpdateStates.background_check_wanted(S.CHECKING, false), UpdateStates.background_check_wanted(S.AVAILABLE, false),
+		 UpdateStates.background_check_wanted(S.INSTALLING, false), UpdateStates.background_check_wanted(S.STAGED, false)],
+		[true, false, false, false, false, false])
+	check("background check: the notification names the version and where to install it",
+		UpdateStates.available_text("0.0.4"), "RetroForge 0.0.4 is available: Settings > General > Updates")
 	check("channel description: says what pins it",
 		UpdateStates.channel_description("/etc/retroforge/ota.conf"), "Set by /etc/retroforge/ota.conf on this device.")
 
@@ -835,7 +842,42 @@ func run() -> void:
 	var b2: Node = menu2.get_node("MarginContainer/VBoxContainer/VBoxContainer/RetroForgeUpdateButton")
 	check("restarted session: staged update shows Restart now", [b2.button_text, b2.description], ["Restart now", "RetroForge 0.0.4-beta.1 is installed. Restart to use it."])
 	check("restarted session: Beta still selected", menu2.get_node("MarginContainer/VBoxContainer/VBoxContainer/RetroForgeUpdateChannel").selected, 1)
+	await test_background_check(menu2)
 	quit(1 if failed else 0)
+
+# A background check (here 0.3 s after start instead of 3 min) finds an update: Install, and one
+# notification naming it -- never an install.
+func test_background_check(previous: Node) -> void:
+	DirAccess.remove_absolute(D.path_join("staged"))
+	put("channel", "stable")
+	put("latest.stable", "0.0.5")
+	var menu3: Node = load("res://core/ui/card_ui/settings/general_settings_menu.tscn").instantiate()
+	previous.queue_free()
+	await process_frame
+	root.add_child(menu3)
+	await process_frame
+	# A method, disconnected before quit: lambdas left on the NotificationManager resource abort
+	# Godot's teardown ("double free").
+	var nm = load("res://core/global/notification_manager.tres")
+	nm.notification_queued.connect(note)
+	nm.notification_sent.connect(note)
+	var os3 = load("res://plugins/retroforge/retroforge_os.gd").new()
+	os3.tool = D.path_join("../fake-update")
+	os3.systemctl = D.path_join("../fake-systemctl")
+	os3.first_check_delay = 0.3
+	os3.in_game = func() -> bool: return false  # LaunchManager needs InputPlumber, absent here
+	os3.ready(root)
+	await wait(1.2)
+	var b3: Node = menu3.get_node("MarginContainer/VBoxContainer/VBoxContainer/RetroForgeUpdateButton")
+	check("background check: found 0.0.5, offers Install", [b3.button_text, b3.description], ["Install", "RetroForge 0.0.5 is available (you have 0.0.3)."])
+	nm.notification_queued.disconnect(note)
+	nm.notification_sent.disconnect(note)
+	check("background check: one notification naming it", notes.has("RetroForge 0.0.5 is available: Settings > General > Updates"), true)
+	check("background check: nothing installed", FileAccess.file_exists(D.path_join("staged")), false)
+
+var notes: Array[String] = []
+func note(n) -> void:
+	notes.append(n.text)
 
 # A player's press on an OGUI Toggle, as its _gui_input does on ui_accept.
 func press(toggle: Node) -> void:

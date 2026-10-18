@@ -54,3 +54,14 @@ static func channel_description(pinned: String) -> String:
 	if pinned != "":
 		return "Set by %s on this device." % pinned
 	return "Beta gets new versions first. You can switch back to Stable at any time."
+
+
+## Whether the periodic background check may run now: nothing else is going on in the section, and
+## no game runs (a check is a network fetch; a notification would land over the game).
+static func background_check_wanted(step: Step, in_game: bool) -> bool:
+	return step == Step.IDLE and not in_game
+
+
+## The notification a background check posts when it finds an update.
+static func available_text(version: String) -> String:
+	return "RetroForge %s is available: Settings > General > Updates" % version
