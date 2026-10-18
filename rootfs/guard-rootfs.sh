@@ -203,6 +203,30 @@ done < <(find "$STAGE/usr/lib/systemd" "$STAGE/etc/systemd" \
 if [ "$wants_bad" = 0 ]; then echo "    ok  $wants_seen enable-symlinks, all resolve"; fi
 
 # ------------------------------------------------------------------------------------------
+# 3b. The pairing daemon is never enabled at boot.
+#
+# retroforge-pairingd accepts an SSH key from anyone on the network. It runs only while Settings >
+# General > Remote access has it on (plan ota-ui D5): no [Install], no preset, no enable link. Any
+# one of the three coming back -- a preset, a build step, a restored symlink -- makes pairing
+# always-on again with nothing else failing, so the sealed tree is checked, not just the overlay.
+# ------------------------------------------------------------------------------------------
+pair_bad=0
+PAIR_UNIT="$STAGE/usr/lib/systemd/system/retroforge-pairingd.service"
+if [ -f "$PAIR_UNIT" ] && grep -qE '^\[Install\]|^WantedBy=' "$PAIR_UNIT"; then
+  bad "retroforge-pairingd.service has an [Install] section: something can enable pairing at boot"
+  pair_bad=1
+fi
+while IFS= read -r -d '' l; do
+  bad "pairing enabled at boot: ${l#"$STAGE"/}"
+  pair_bad=1
+done < <(find "$STAGE/usr/lib/systemd" "$STAGE/etc/systemd" -path '*.wants/retroforge-pairingd.service' -print0 2>/dev/null)
+if grep -rqsE '^enable[[:space:]]+retroforge-pairingd' "$STAGE/usr/lib/systemd/system-preset" "$STAGE/etc/systemd/system-preset"; then
+  bad "a systemd preset enables retroforge-pairingd"
+  pair_bad=1
+fi
+if [ "$pair_bad" = 0 ]; then echo "    ok  pairing is not enabled at boot (no [Install], link or preset)"; fi
+
+# ------------------------------------------------------------------------------------------
 # 4. The lock still describes this tree.
 #
 # The payoff of steps 1-3: rootfs/manifest.lock is a committed, reviewed artifact, and this is

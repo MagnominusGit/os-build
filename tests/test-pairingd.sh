@@ -384,21 +384,42 @@ const fs = require("fs");
 let rule;
 global.polkit = { Result: { YES: "yes", NO: "no" }, addRule: f => { rule = f; } };
 eval(fs.readFileSync(process.argv[2], "utf8"));
-const ask = (id, unit, verb, active = true, wheel = true) =>
-  rule({ id, lookup: k => ({ unit, verb })[k] }, { active, isInGroup: g => g === "wheel" && wheel }) || "pass";
+const ask = (id, unit, verb, active = true, wheel = true, local = true) =>
+  rule({ id, lookup: k => ({ unit, verb })[k] }, { active, local, isInGroup: g => g === "wheel" && wheel }) || "pass";
 const M = "org.freedesktop.systemd1.manage-units";
 console.log([
   ask(M, "retroforge-pairingd.service", "start"), ask(M, "retroforge-pairingd.service", "stop"),
   ask(M, "retroforge-pairingd.service", "restart"), ask(M, "sshd.service", "start"),
   ask(M, "retroforge-pairingd.service", "start", false), ask(M, "retroforge-pairingd.service", "start", true, false),
   ask("org.freedesktop.systemd1.manage-unit-files", "retroforge-pairingd.service", "enable"),
+  ask(M, "retroforge-pairingd.service", "start", true, true, false),
 ].join(" "));
 JS
 )"
-  [ "$verdicts" = "yes yes pass pass pass pass pass" ] \
-    && ok "grants start/stop of retroforge-pairingd to the active wheel session, nothing else" \
-    || bad "verdicts (start stop restart other-unit inactive non-wheel enable): $verdicts"
+  [ "$verdicts" = "yes yes pass pass pass pass pass pass" ] \
+    && ok "grants start/stop of retroforge-pairingd to the active local wheel session, nothing else (not over ssh)" \
+    || bad "verdicts (start stop restart other-unit inactive non-wheel enable ssh): $verdicts"
 fi
+
+# --- the image guard ------------------------------------------------------------------------------
+CASE="guard"
+# rootfs/guard-rootfs.sh 3b checks the SEALED tree, where a preset or a build step could re-enable
+# pairing without touching the overlay this suite reads above. The guard exits non-zero on a minimal
+# fixture for unrelated assertions, so its pairing lines are what is checked.
+G="$(mktemp -d)"
+mkdir -p "$G/usr/lib/retroforge/pkgdb" "$G/usr/lib/systemd/system" "$G/usr/lib/systemd/system-preset" \
+         "$G/etc/systemd/system/multi-user.target.wants"
+echo 'pkg x' >"$G/usr/lib/retroforge/seal.list"
+cp "$UNIT" "$G/usr/lib/systemd/system/"
+out="$(bash "$ROOT/rootfs/guard-rootfs.sh" "$G" 2>&1)"
+grep -q 'ok  pairing is not enabled at boot' <<<"$out" && ok "the shipped unit passes the guard" || bad "guard on the shipped unit: $(grep -i pairing <<<"$out")"
+ln -s /usr/lib/systemd/system/retroforge-pairingd.service "$G/etc/systemd/system/multi-user.target.wants/"
+echo 'enable retroforge-pairingd.service' >"$G/usr/lib/systemd/system-preset/60-x.preset"
+printf '[Install]\nWantedBy=multi-user.target\n' >>"$G/usr/lib/systemd/system/retroforge-pairingd.service"
+out="$(bash "$ROOT/rootfs/guard-rootfs.sh" "$G" 2>&1)"
+[ "$(grep -c 'GUARD FAIL: .*pairing' <<<"$out")" = 3 ] && ok "the guard fails an [Install], an enable link and a preset" \
+  || bad "guard missed one: $(grep -i pairing <<<"$out")"
+rm -rf "$G"
 
 printf '\n%s: %d passed, %d failed, %d skipped\n' "$(basename "$0")" "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" -eq 0 ]
