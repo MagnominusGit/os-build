@@ -981,6 +981,9 @@ gamescopes). Thor Lite first, then Thor and Pocket DS.
   driving `retroforge-update` (`check` / apply with `N%` / `channels` / `set-channel`; its contract is
   already OGUI-shaped). Upstreamable like the other distro platforms, and the natural home for
   other RetroForge defaults (theme, startup actions). Replaces "update channel stays CLI/SSH" (Phase 2).
+  DONE differently 2026-10-18 (`.claude/plans/ota-ui.plan.md`): no OGUI patch -- the plugin ships
+  `retroforge_os.gd` (extends OSPlatform) and installs it as `platform.os` itself, with Updates
+  (one button Check/Install/Restart now, Stable/Beta) and Remote access (pairing switch).
 - Update server via `ota/setup-server.sh`; replace the `updates.retroforge.invalid` placeholder in
   `retroforge-update`, `installer/release-info`, `installer/netcfg`.
 - CI release secrets `RAUC_CERT_PEM` / `RAUC_KEY_PEM` from `~/retroforge-pki`.

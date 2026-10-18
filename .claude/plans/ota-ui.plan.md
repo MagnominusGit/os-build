@@ -1,6 +1,6 @@
 # Plan: OS updates in the shell (stable / beta)
 
-**Complexity**: Medium. **Branch**: `feat/ota-ui`. **Status**: agreed 2026-10-18, Phase 1 in progress.
+**Complexity**: Medium. **Branch**: `feat/ota-ui`. **Status**: Phases 1, 2, 2b, 3, 5 done offline 2026-10-18 (plugin 0.1.56), not pushed; Phase 4 (first beta + HW) next.
 
 ## Summary
 
@@ -20,7 +20,7 @@ first beta.
 | D2 | **Never automatic.** A background check only notifies. Install and reboot happen only on a button press. |
 | D2b | **One button, Steam-style**: `Check for updates` -> `Install <version>` (progress while installing) -> `Restart now` when the install is done. Restart = `systemctl reboot`, the same call OGUI's power menu makes (`power_menu.gd:22`). A staged update found at start (client's "restart pending") shows `Restart now` straight away. |
 | D3 | **No restriction on channel changes**: stable -> beta and beta -> stable switch freely, no confirmation. Whatever the new channel's `latest.json` names is offered, older or not (the client's inequality check already does this). |
-| D5 | **Remote access switch** in the same `PlatformRetroForge` (added 2026-10-18): a toggle that starts / stops `retroforge-pairingd`, so a key can only be sent while the player turned it on (the daemon's documented consent model). Pairing stops being always-on: the unit loses `[Install]`, its preset and the wants symlink. Off at every boot (not persisted), pending user confirmation. |
+| D5 | **Remote access switch** in the same `PlatformRetroForge` (added 2026-10-18): a toggle that starts / stops `retroforge-pairingd`, so a key can only be sent while the player turned it on (the daemon's documented consent model). Pairing stops being always-on: the unit loses `[Install]`, its preset and the wants symlink. Off at every boot (not persisted), confirmed by the user 2026-10-18. |
 | D4 | Beta versions are `X.Y.Z-beta.N`, ahead of the next stable (what the workflow already keys on). |
 
 ## Patterns to Mirror

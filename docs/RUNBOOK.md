@@ -92,6 +92,11 @@ up first: the release run compiles the overlay from the sources in the commit it
 (~34 min on top of the image), so a tag is never waiting on a separate pipeline to have published
 anything.
 
+An update goes to the **stable** channel unless its version has a pre-release suffix:
+`ota/v0.3.0-beta.1` publishes to **beta**, which devices reach by choosing Beta in Settings > General
+> Updates. Number a beta ahead of the stable release it leads to (`0.3.0-beta.N` before `0.3.0`). Install
+every bundle on hardware before tagging it (`docs/ota.md`, "Cutting an update").
+
 The version and commit a card was built from are stamped into `/etc/retroforge-release` on the device
 (`RETROFORGE_VERSION`, `RETROFORGE_GIT`), so a running system can name where it came from.
 

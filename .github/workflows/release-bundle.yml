@@ -129,10 +129,10 @@ jobs:
           # The channel is the first path segment in the bucket, and it is what a
           # device's OTA_CHANNEL selects — the environment, then /etc/retroforge/ota.conf,
           # then the user-writable ~/.config/retroforge/ota.conf (retroforge-update's
-          # channel_setting()). There is no Settings picker: that work was dropped with
-          # PR #82. So this line is what gives a user something to point at; without a
-          # beta directory on the server, naming `beta` is a 404 and the device's update
-          # check quietly reports "no update available" forever.
+          # channel_setting()), which the shell's Settings > General > Updates channel
+          # dropdown writes. So this line is what gives that dropdown something to point
+          # at; without a beta directory on the server, choosing Beta is a 404 and the
+          # device's update check quietly reports "no update found" forever.
           #
           # NOT A SEPARATE TAG NAMESPACE (`ota-beta/v*`), which is the obvious alternative
           # and the shape the ota/ + card/ split would suggest. The suffix wins because the

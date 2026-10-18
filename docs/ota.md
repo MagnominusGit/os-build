@@ -57,8 +57,8 @@ under `$HOME` must not repoint every future update.
 
 `retroforge-update status` prints which of them supplied the channel in effect, which is the fastest
 answer to "why is it checking that channel". `retroforge-update channel` prints the same pair
-tab-separated for a program to read, so a future channel picker does not re-derive the precedence and
-then disagree with the fetch.
+tab-separated for a program to read, so the shell's channel picker does not re-derive the precedence
+and then disagree with the fetch.
 
 ### The client contract
 
@@ -66,8 +66,25 @@ then disagree with the fetch.
 available version on stdout, or exits 7 for "none" — and 7 is also how every recoverable failure
 exits (unreachable server, malformed manifest), so a check fails closed. Apply (no argument) emits
 forward-only `N%` lines on stdout and everything else on stderr. An update already installed and
-waiting for a reboot is reported by reprinting its version. The caller is the RetroForge shell plugin's
-updates screen; it can also be run by hand over SSH as `player`.
+waiting for a reboot is reported by reprinting its version; `staged` answers that question alone
+(exit 0 and the version, else 7), and `version` prints the running one. The caller is the RetroForge
+shell plugin's Updates section; it can also be run by hand over SSH as `player`.
+
+### Settings > General > Updates
+
+The plugin's RetroForge OS platform (`apps/ogui-retroforge-plugin/plugin/retroforge_os.gd`) replaces
+OGUI's own updater with:
+
+- **System update**, one button walking Steam's steps: *Check for updates* -> *Install* (the install's
+  progress in its description) -> *Restart now* (`systemctl reboot`). An update already installed
+  when the shell starts shows *Restart now* straight away. Nothing installs or restarts without a
+  press.
+- **Update channel**, Stable or Beta. Switching either way needs no confirmation and checks the new
+  channel at once; going back to Stable offers stable's release even when it is older than the beta
+  running (the check compares for inequality). The dropdown is disabled when `/etc` or the
+  environment pins the channel, as on a dev card.
+- **A background check** 3 minutes after the shell starts, then every 6 hours, never while a game runs.
+  It posts one notification per version found and never installs.
 
 Channel selection lives in the same program: `retroforge-update channels` lists what a picker offers
 (`stable`, `beta`, plus the channel in effect if it is neither, and a `pinned<TAB><source>` line
