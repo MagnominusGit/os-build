@@ -2,10 +2,9 @@ extends RefCounted
 ## Settings > Library > "ROM art": scrape box art from ScreenScraper (plan scraper Phase 3).
 ##
 ## Under OGUI's Refresh Library button: Scrape missing art / Scrape all art again (with progress and
-## Cancel), "Scrape new games automatically" (on by default: every ROM library load -- start,
-## rescan, Refresh Library -- runs a background "scrape missing art"; the tool skips every ROM that
-## has its art or was not found lately, so a load without new ROMs sends nothing; only new art is
-## notified, failures are logged), the art region, and the player's optional ScreenScraper account (a free account scrapes
+## Cancel), "Scrape new games automatically" (on by default: a card of a ROM the tool never tried
+## fetches its art when it is built, art_fetch.gd, as Steam's cards do), the art region, and the
+## player's optional ScreenScraper account (a free account scrapes
 ## with more threads and quota, and keeps working when ScreenScraper closes to non-members). All of
 ## it goes through /usr/bin/retroforge-scrape (scrape_runner.gd); the password goes to the tool on
 ## stdin and is kept only in its 0600 conf, never in OGUI's settings. When a run ends the ROM
@@ -28,7 +27,6 @@ const MISSING_TEXT := "Fetch box art from ScreenScraper for the games that have 
 const ALL_TEXT := "Fetch every game's art again. Uses more of ScreenScraper's daily quota."
 
 var library_manager := load("res://core/global/library_manager.tres") as LibraryManager
-var launch_manager := load("res://core/global/launch_manager.tres") as LaunchManager
 var settings := load("res://core/global/settings_manager.tres") as SettingsManager
 var toggle_scene := load("res://core/ui/components/toggle.tscn") as PackedScene
 var notification_manager := load("res://core/global/notification_manager.tres")
@@ -51,8 +49,6 @@ var _account: Control  # card_button_setting
 var _account_info := {}  # `retroforge-scrape account`
 var _running_button: Control  # the button whose run is going (it reads Cancel)
 var _auto: Control  # toggle: "Scrape new games automatically"
-var _auto_run := false  # the run going is a background one: quiet unless art arrives
-var _own_reload := false  # the next library load is the one a finished scrape asked for
 
 
 func setup(scene_tree: SceneTree) -> RefCounted:
@@ -78,7 +74,7 @@ func attach() -> bool:
 	_all.pressed.connect(_on_scrape.bind(true))
 	_auto = toggle_scene.instantiate()
 	_auto.text = "Scrape new games automatically"
-	_auto.description = "Fetch art for new ROMs when they appear in the library."
+	_auto.description = "Fetch art for a new ROM when its card first shows."
 	_region = dropdown_scene.instantiate()
 	_region.title = "Art region"
 	_region.description = "Which region's box to prefer when a game has several."
@@ -158,21 +154,10 @@ func auto_enabled() -> bool:
 	return settings.get_value(SECTION, AUTO_KEY, true) as bool
 
 
-## plugin.gd calls this on every load of the ROM library: maybe start a background scrape.
-func on_library_loaded() -> void:
-	var own := _own_reload
-	_own_reload = false
-	var in_game := not launch_manager.get_running().is_empty()
-	if not ScrapeRunner.auto_scrape_wanted(auto_enabled(), FileAccess.file_exists(DEVID_FILE), runner.running or _login.running, in_game, own):
-		return
-	_running_button = _missing
-	_auto_run = true
-	if runner.start(["run"]):
-		if is_instance_valid(_missing):
-			_missing.button_text = "Cancel"
-	else:
-		_auto_run = false
-		_running_button = null
+## Whether a card may fetch its art (art_fetch.gd): the setting is on, the build can scrape, and no
+## sign-in is being checked (the tool's conf is being rewritten).
+func can_fetch() -> bool:
+	return auto_enabled() and FileAccess.file_exists(DEVID_FILE) and not _login.running
 
 
 func _quota_text() -> String:
@@ -200,13 +185,7 @@ func _on_progress(percent: int) -> void:
 
 
 func _on_finished(code: int, summary: Dictionary, error: String) -> void:
-	var quiet := _auto_run
-	_auto_run = false
-	if quiet and int(summary.get("scraped", 0)) > 0:
-		_notify(ScrapeRunner.summary_text(summary))
-	elif quiet:
-		pass  # a background run that found nothing new, or failed: the log has it, no popup
-	elif code == 0 or not summary.is_empty():
+	if code == 0 or not summary.is_empty():
 		_notify(ScrapeRunner.summary_text(summary) if code == 0 else
 			ScrapeRunner.failure_text(code, error) + " " + ScrapeRunner.summary_text(summary))
 	else:
@@ -217,7 +196,6 @@ func _on_finished(code: int, summary: Dictionary, error: String) -> void:
 		_running_button.button_text = "Scrape all" if _running_button == _all else "Scrape"
 	_running_button = null
 	if int(summary.get("scraped", 0)) > 0:
-		_own_reload = true  # this load must not start another scrape
 		library_manager.load_library(LIBRARY_ID)  # our tabs rebuild their cards, with the new art
 	_refresh()
 

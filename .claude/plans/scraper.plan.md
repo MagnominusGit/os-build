@@ -6,6 +6,13 @@ Auto-scrape DONE 2026-10-17 (plugin 0.1.53, HW-OK on the ACE, issue #9): every R
 > ROM Art > "Scrape new games automatically", default on), the build cannot scrape, a scrape or a game
 runs, or the load is the reload a scrape asked for. Quiet: a notification only when art arrives,
 failures logged. ACE: a ROM copied in got its art 14 s later and its card rebuilt, no loop.
+REPLACED 2026-10-18 (plugin 0.1.59, Pocket FIT): only our own tabs rebuilt; OGUI's All Games /
+Installed and Home keep a card and ask its art once, so new art stayed on the placeholder until a
+launch. User decision: no OGUI patch, do it like the Steam plugin. Now art_fetch.gd: a card asking
+for a ROM with no art and no scrape.json entry runs `retroforge-scrape run --rom` and awaits it (one
+run at a time, deduped, waits for a Settings run, holds 10 min after a network/quota failure); the
+library-load background run is gone, the setting gates on-demand fetches. FIT: a GBA ROM copied in
+had its box 1 s after the rescan, card built with it. Visual check by the user pending.
 Port art DONE 2026-10-17 (plugin 0.1.52, HW-OK on the ACE): PortMaster ports are never scraped; the
 plugin reads each port's gameinfo.xml (ES gameList: <path> launch script, <image> screenshot, relative
 to ~/roms/ports) and uses the screenshot for every layout but LOGO; cards are its centre crop (user

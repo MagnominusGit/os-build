@@ -38,6 +38,7 @@ var _touch_keyboard: RefCounted  # touch_keyboard.gd
 var _buttons: RefCounted  # button_layout.gd
 var _pause: RefCounted  # pause_on_menu.gd
 var _scraper: RefCounted  # scraper_settings.gd
+var _art_fetch: RefCounted  # art_fetch.gd: new ROMs' art, fetched when their card asks for it
 var _os: Resource  # retroforge_os.gd, installed as OGUI's platform.os
 var _watch: RefCounted  # rom_watch.gd
 var _rescan_timer: Timer
@@ -50,7 +51,10 @@ func _ready() -> void:
 	roms = load(plugin_base.path_join("library_roms.gd")).new()
 	add_library(roms)
 	# Before the library loads: the first ROM cards already ask for their art.
-	add_boxart(load(plugin_base.path_join("boxart_retroforge.gd")).new())
+	_art_fetch = load(plugin_base.path_join("art_fetch.gd")).new()
+	var art = load(plugin_base.path_join("boxart_retroforge.gd")).new()
+	art.fetcher = _art_fetch
+	add_boxart(art)
 	library_manager.library_loaded.connect(_on_library_loaded)
 	logger.info("ROM library registered: %s" % library_manager.has_library(LIBRARY_ID))
 	_watch = load(plugin_base.path_join("rom_watch.gd")).new().setup(roms.roms_dir(), roms.SYSTEMS.keys(), roms.dir_markers())
@@ -77,6 +81,9 @@ func _ready() -> void:
 	_scraper = load(plugin_base.path_join("scraper_settings.gd")).new().setup(get_tree())
 	if not _scraper.attach():
 		logger.warn("OGUI library settings layout not found; no ROM art section")
+	# Until here no card fetches (allowed unset): the setting lives in the Settings section.
+	_art_fetch.other = _scraper.runner
+	_art_fetch.allowed = _scraper.can_fetch
 	_install_os_platform()
 	_setup_input_boost()
 
@@ -104,6 +111,9 @@ func unload() -> void:
 		_pause.detach()
 	if _scraper:
 		_scraper.detach()
+	if _art_fetch:
+		_art_fetch.allowed = Callable()
+		_art_fetch.runner.cancel()
 	if _os:
 		_os.detach()
 	if is_instance_valid(_hardware_card):
@@ -201,8 +211,6 @@ func _on_library_loaded(library_id: String) -> void:
 	_rescanning = false
 	for system in roms.SYSTEMS:
 		_refresh_system(system)
-	if _scraper:
-		_scraper.on_library_loaded()  # new ROMs get their art in the background (issue #9)
 
 
 ## Library items whose retroforge-roms launch item belongs to the given system, sorted by name.

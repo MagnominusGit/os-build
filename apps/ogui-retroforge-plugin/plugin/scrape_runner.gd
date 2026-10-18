@@ -101,13 +101,6 @@ static func parse_line(line: String) -> Dictionary:
 	return {}
 
 
-## Whether a library load should start a background "scrape missing art" (issue #9): the player
-## left it on, the build can scrape, no scrape and no game is running, and the load is not the
-## reload a scrape asked for once its art arrived (that one would only loop).
-static func auto_scrape_wanted(enabled: bool, available: bool, scraping: bool, in_game: bool, own_reload: bool) -> bool:
-	return enabled and available and not scraping and not in_game and not own_reload
-
-
 ## What a finished run achieved, for a notification.
 static func summary_text(summary: Dictionary) -> String:
 	var scraped := int(summary.get("scraped", 0))

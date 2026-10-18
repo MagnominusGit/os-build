@@ -82,7 +82,8 @@ grep -q 'if platform.os or not platform.os_info or platform.os_info.id != "retro
 grep -q '^extends OSPlatform$' "$SRC/retroforge_os.gd" && ok "retroforge_os.gd extends OSPlatform" || bad "retroforge_os.gd does not extend OSPlatform"
 
 # BoxArtManager refuses a provider whose provider_id is empty when it becomes ready.
-grep -q 'add_boxart(.*boxart_retroforge.gd' "$SRC/plugin.gd" && grep -q '^	provider_id = "retroforge"$' "$SRC/boxart_retroforge.gd" \
+grep -q 'load(plugin_base.path_join("boxart_retroforge.gd"))' "$SRC/plugin.gd" && grep -q 'add_boxart(art)' "$SRC/plugin.gd" \
+  && grep -q '^	provider_id = "retroforge"$' "$SRC/boxart_retroforge.gd" \
   && ok "the art provider is added, with an id (BoxArtManager refuses an empty one)" || bad "boxart_retroforge.gd is not added by plugin.gd, or has no provider_id"
 
 # =================================================================================================
@@ -620,7 +621,10 @@ GD
 #!/bin/bash
 # $FAKE_MODE: ok | quota | login (reads the password on stdin) | slow (until SIGTERM)
 printf '%s\n' "$*" > "$FAKE_ARGS"
+printf '%s\n' "$*" >> "${FAKE_LOG:-/dev/null}"
 case $FAKE_MODE in
+  rom) echo "100%"; echo '{"scraped": 1, "not_found": 0, "skipped": 0, "failed": 0, "quota_left": 9}'; exit 0 ;;
+  lost) echo "100%"; echo '{"scraped": 0, "not_found": 0, "skipped": 0, "failed": 1, "quota_left": 9}'; exit 0 ;;
   login) read -r pw; [ "$pw" = pw-secret ] && exit 0; echo "retroforge-scrape: ScreenScraper refused the player's login" >&2; exit 7 ;;
   slow) trap 'echo "{\"scraped\": 1, \"not_found\": 0, \"skipped\": 0, \"failed\": 0, \"quota_left\": 9}"; echo "retroforge-scrape: cancelled" >&2; exit 5' TERM
         echo "10%"; while :; do sleep 0.1; done ;;
@@ -636,6 +640,7 @@ SH
 extends SceneTree
 
 const ScrapeRunner := preload("$SRC/scrape_runner.gd")
+const ArtFetch := preload("$SRC/art_fetch.gd")
 var failed := 0
 
 func check(what: String, got, want) -> void:
@@ -678,14 +683,6 @@ func run() -> void:
 		 ScrapeRunner.failure_text(8, "retroforge-scrape: ScreenScraper is closed for maintenance")],
 		["ScreenScraper's daily request quota is used up: try again tomorrow", "ScreenScraper is closed for maintenance"])
 	check("failure: cancelled", ScrapeRunner.failure_text(5, "retroforge-scrape: cancelled"), "Cancelled.")
-	# Auto-scrape after a library load: on, a build that can scrape, nothing running, no game, and not
-	# the reload a scrape itself asked for (that would only loop).
-	check("auto: a library load with everything allowed scrapes", ScrapeRunner.auto_scrape_wanted(true, true, false, false, false), true)
-	check("auto: not when off, without a login in the build, while a scrape or a game runs, or after its own reload",
-		[ScrapeRunner.auto_scrape_wanted(false, true, false, false, false), ScrapeRunner.auto_scrape_wanted(true, false, false, false, false),
-		 ScrapeRunner.auto_scrape_wanted(true, true, true, false, false), ScrapeRunner.auto_scrape_wanted(true, true, false, true, false),
-		 ScrapeRunner.auto_scrape_wanted(true, true, false, false, true)],
-		[false, false, false, false, false])
 
 	var a := await job("ok", ["run", "--all"])
 	check("ok: exit 0, progress in order, the summary", [a.code, a.seen, a.summary.get("scraped")], [0, [50, 100], 3.0])
@@ -706,7 +703,61 @@ func run() -> void:
 	r.start(["run"])
 	var f: Array = await r.finished
 	check("a tool that cannot start: exit -1", f[0], -1)
+	await test_art_fetch()
 	quit(1 if failed else 0)
+
+# art_fetch.gd: a card of a ROM with no art fetches it (run --rom) and awaits it, as Steam's do.
+func fetcher(mode: String, allowed := true) -> ArtFetch:
+	OS.set_environment("FAKE_MODE", mode)
+	var a := ArtFetch.new()
+	a.runner.tool = "$T/fake-scrape"
+	a.cache_path = "$T/scrape.json"
+	a.allowed = func() -> bool: return allowed
+	return a
+
+func runs() -> PackedStringArray:
+	var text := FileAccess.get_file_as_string("$T/fake-log").strip_edges()
+	return PackedStringArray() if text == "" else text.split("\n")
+
+func test_art_fetch() -> void:
+	OS.set_environment("FAKE_LOG", "$T/fake-log")
+	FileAccess.open("$T/scrape.json", FileAccess.WRITE).store_string('{"roms": {"snes/Known.zip": {"status": "not_found"}}}')
+	check("fetch: the key is the tool's (system/file, a game folder's name)",
+		[ArtFetch.key_of("snes", "/r/snes/A (USA).zip"), ArtFetch.key_of("ps3", "/r/ps3/Game/")], ["snes/A (USA).zip", "ps3/Game"])
+	var a := fetcher("rom")
+	await a.fetch("snes", "/r/snes/New.zip")
+	check("fetch: a ROM never tried is scraped, alone, and awaited", runs(), PackedStringArray(["run --rom /r/snes/New.zip"]))
+	await a.fetch("snes", "/r/snes/Known.zip")
+	await a.fetch("ports", "/r/ports/Port.sh")
+	check("fetch: not a ROM the tool already tried, nor a port (PortMaster's art)", runs().size(), 1)
+	a.fetch("snes", "/r/snes/Twice.zip")
+	a.fetch("snes", "/r/snes/Twice.zip")
+	a.fetch("snes", "/r/snes/Other.zip")
+	while not a._pending.is_empty():
+		await a.fetched
+	check("fetch: a ROM asked for twice runs once; one run at a time, in order", runs().slice(1),
+		PackedStringArray(["run --rom /r/snes/Twice.zip", "run --rom /r/snes/Other.zip"]))
+	await fetcher("rom", false).fetch("snes", "/r/snes/Off.zip")
+	check("fetch: nothing when not allowed (setting off, no developer login)", runs().size(), 3)
+	var b := fetcher("rom")
+	b.other = ScrapeRunner.new()
+	b.other.tool = "$T/fake-scrape"
+	OS.set_environment("FAKE_MODE", "slow")
+	b.other.start(["run", "--all"])
+	b.fetch("snes", "/r/snes/Wait.zip")
+	await create_timer(0.3).timeout
+	check("fetch: waits for a Settings run going", runs()[-1], "run --all")
+	OS.set_environment("FAKE_MODE", "rom")
+	b.other.cancel()
+	while not b._pending.is_empty():
+		await b.fetched
+	check("fetch: then runs", runs()[-1], "run --rom /r/snes/Wait.zip")
+	for mode in ["quota", "lost"]:
+		var c := fetcher(mode)
+		await c.fetch("snes", "/r/snes/%s.zip" % mode)
+		var n := runs().size()
+		await c.fetch("snes", "/r/snes/%s-next.zip" % mode)
+		check("fetch: after a %s run, every fetch is held (offline, cards would wait on curl)" % mode, runs().size(), n)
 GD
   out="$(XDG_CONFIG_HOME="$T/config" timeout 60 "$GODOT" --headless --script "$T/runner_test.gd" 2>&1)"; rc=$?
   printf '%s\n' "$out" | grep -E '^  (ok|FAIL) '

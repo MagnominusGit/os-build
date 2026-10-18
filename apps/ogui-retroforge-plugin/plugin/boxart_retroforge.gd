@@ -5,6 +5,8 @@ extends BoxArtProvider
 ## rom_names.gd's "(System)" / "(EXT)" suffixes. No texture cache: a card holds its texture, and a
 ## cache would keep every texture of a 2,000-ROM library in memory after its cards are gone.
 ## OGUI's own "local" provider registers first, so art dropped in user://boxart/local still wins.
+## A ROM with no art yet is fetched there and then (art_fetch.gd, as the Steam plugin downloads its
+## art), so the card asking for it gets it: OGUI never asks a card again.
 ##
 ## Decoding is what costs (ACE, 2026-10-17: a 640 px box PNG ~8.5 ms, on OGUI's main thread for
 ## every card, so 300 cards froze it 2.7 s). A card (GRID_PORTRAIT) shows a small cached card image
@@ -15,6 +17,8 @@ extends BoxArtProvider
 
 const ArtPaths := preload("art_paths.gd")
 const LIBRARY_ID := "retroforge-roms"
+
+var fetcher: RefCounted  # art_fetch.gd, set by plugin.gd; none: no fetching
 
 
 # Set in _ready, not _init: overriding _init skips BoxArtProvider._init, which registers the
@@ -32,6 +36,9 @@ func get_boxart(item: LibraryItem, kind: LAYOUT) -> Texture2D:
 	var system := str(launch.metadata.get("system", ""))
 	var rom := str(launch.metadata.get("rom", ""))
 	var path := ArtPaths.path_for(ArtPaths.media_dir(), system, rom, kind)
+	if path == "" and fetcher and system != "" and rom != "":
+		await fetcher.fetch(system, rom)
+		path = ArtPaths.path_for(ArtPaths.media_dir(), system, rom, kind)
 	if path == "":
 		return null
 	var image: Image
