@@ -99,16 +99,17 @@ done
 # RETROFORGE_STEAM_X86_GUEST=0: no download, no mount, no provider.
 # TEST SEAMS (tests/test-steam-x86-guest.sh): RETROFORGE_STEAM_X86_GUEST_HELPER, RETROFORGE_STEAM_X86_GUEST_DIR.
 # bin32/bin64 are where games look for the Steam overlay's preload libraries (Nova-Deck links them
-# the same way).
-for b in 32 64; do
-  for pair in "sdk$b linux$b" "bin$b ubuntu12_$b"; do
-    link="${pair% *}"; target="${pair#* }"   # not `set --`: "$@" is the client's arguments
-    if [ -d "$HOME/.steam/$link" ] && [ ! -L "$HOME/.steam/$link" ]; then
-      log "$HOME/.steam/$link is a directory, not a link; leaving it alone"
-    else
-      ln -sfn "$RETROFORGE_STEAM_ROOT/$target" "$HOME/.steam/$link"
-    fi
-  done
+# the same way). sdkarm64 is where the arm64 client runs EVERY game and install script from
+# (~/.steam/sdkarm64/steam-launch-wrapper, in <Steam>/linuxarm64): without it a launch ends in the
+# second it starts, and so does the game's install script (Hades, KONKR Pocket FIT, 2026-10-19).
+# Valve's steam.sh makes these links; this wrapper stands in for it.
+for pair in "sdk32 linux32" "sdk64 linux64" "bin32 ubuntu12_32" "bin64 ubuntu12_64" "sdkarm64 linuxarm64"; do
+  link="${pair% *}"; target="${pair#* }"   # not `set --`: "$@" is the client's arguments
+  if [ -d "$HOME/.steam/$link" ] && [ ! -L "$HOME/.steam/$link" ]; then
+    log "$HOME/.steam/$link is a directory, not a link; leaving it alone"
+  else
+    ln -sfn "$RETROFORGE_STEAM_ROOT/$target" "$HOME/.steam/$link"
+  fi
 done
 if [ "${RETROFORGE_STEAM_X86_GUEST:-1}" != 0 ]; then
   export RETROFORGE_STEAM_X86_GUEST_DIR="${RETROFORGE_STEAM_X86_GUEST_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/retroforge/fex-guest}"

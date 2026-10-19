@@ -378,6 +378,8 @@ grep -qx "rt: unset" "$W/call1" && ok "STEAM_RUNTIME is unset" || bad "$(grep rt
 [ -z "$WERR" ] && ok "nothing on stderr" || bad "stderr: $WERR"
 [ "$(readlink "$W/home/.steam/bin64")" = "$WROOT/ubuntu12_64" ] && [ "$(readlink "$W/home/.steam/bin32")" = "$WROOT/ubuntu12_32" ] \
   && ok "~/.steam/bin64 and bin32 point at ubuntu12_64 and ubuntu12_32 (the overlay's preload paths)" || bad "links: $(ls -la "$W/home/.steam")"
+[ "$(readlink "$W/home/.steam/sdkarm64")" = "$WROOT/linuxarm64" ] \
+  && ok "~/.steam/sdkarm64 points at linuxarm64 (every game launches through its steam-launch-wrapper)" || bad "links: $(ls -la "$W/home/.steam")"
 
 CASE="wrapper: Steam Client not installed"
 cp "$W/bootstrap" "$W/bootstrap.real"
