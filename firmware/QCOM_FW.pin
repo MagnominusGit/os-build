@@ -13,7 +13,11 @@
 #
 # Fetch + verify with:  firmware/fetch-qcom-fw.sh
 repo:   https://github.com/retroforge-linux/qcom-firmwares
-commit: f3a7b02d30553752faf3133da7b48fc921523fb1
+# c849966 adds the AYN Odin 3 + KONKR Pocket FIT Elite sets (per-device adsp/cdsp + .jsn
+# + battmgr + amp ACF, WCN7860 ath12k + qca gngbt* BT, both DP-audio tplg; mirrors
+# Nova-Deck/qcom-firmwares fece049). Merged to that repo's main 2026-10-19. Everything
+# previously pinned at f3a7b02 is contained unchanged (sha256sums rows verified identical).
+commit: c8499666106621508c27e3cba929c4de14d4f242
 
 # --- SM8250: OPEN, with one exception, and one still-open gap ----------------------------
 # The six SM8250 boards need almost nothing from this repo. Their GPU microcode, zap shader,
