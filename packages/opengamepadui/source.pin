@@ -88,6 +88,14 @@
 #         Connected only when activated, and a new core instance once the old one loses the Wi-Fi
 #         device (after a NetworkManager restart it knew only the P2P device, so every join did
 #         nothing). First boot: same field/submit fixes.
+#   0019  ours, for upstream: a launched app's new windows switched the gamescope baselayer to the
+#         first new one, and the ids come sorted: Steam's Big Picture window arrived with helper
+#         windows of lower id that never become focusable, OGUI focused one, then dropped it as
+#         not focusable, and nothing switched to Big Picture -- a black screen over a running
+#         Steam (HW, KONKR Pocket FIT, 2026-10-19). Now a focusable new window is preferred, and
+#         with none focused, a running app's window that becomes focusable gets the focus, deferred
+#         out of gamescope's signal (switch_window calls back into GamescopeInstance, which
+#         godot-rust refuses while it is bound).
 #
 # The earlier 0006/0007 (plugin store URL as a project setting, set to "" for RetroForge) were dropped on
 # 2026-10-06: with the store off, OGUI's first-start screen showed an empty catalog. RetroForge has no
@@ -105,4 +113,4 @@
 name: opengamepadui
 pkgbuild_local: PKGBUILD
 pkgrel_suffix: 1
-patches: 0001-hardware-manager-no-dmi.patch 0002-install-dialogs-rename-custom-maximum-size.patch 0003-performance-menu-hide-unsupported-controls.patch 0004-running-app-exit-before-window.patch 0005-performance-manager-save-default-profiles.patch 0006-performance-menu-power-profiles-without-tdp.patch 0007-performance-manager-profile-key-app-id.patch 0008-animated-effects-setting.patch 0009-library-banner-clip-with-a-scissor-not-a-canvas-group.patch 0010-inputplumber-signal-handlers-deferred.patch 0011-settings-unset-keys-and-offline-store-quiet.patch 0012-input-icons-mangmi-digital-triggers.patch 0013-hardware-manager-single-gpu-no-glxinfo.patch 0014-home-recents-and-icon-device-name-quiet.patch 0015-running-game-card-name-without-library-item.patch 0016-thread-pool-start-on-first-use.patch 0017-running-app-steam-launch-alive-while-steam-reaper-runs.patch 0018-network-one-working-profile-connected-means-activated-forget.patch
+patches: 0001-hardware-manager-no-dmi.patch 0002-install-dialogs-rename-custom-maximum-size.patch 0003-performance-menu-hide-unsupported-controls.patch 0004-running-app-exit-before-window.patch 0005-performance-manager-save-default-profiles.patch 0006-performance-menu-power-profiles-without-tdp.patch 0007-performance-manager-profile-key-app-id.patch 0008-animated-effects-setting.patch 0009-library-banner-clip-with-a-scissor-not-a-canvas-group.patch 0010-inputplumber-signal-handlers-deferred.patch 0011-settings-unset-keys-and-offline-store-quiet.patch 0012-input-icons-mangmi-digital-triggers.patch 0013-hardware-manager-single-gpu-no-glxinfo.patch 0014-home-recents-and-icon-device-name-quiet.patch 0015-running-game-card-name-without-library-item.patch 0016-thread-pool-start-on-first-use.patch 0017-running-app-steam-launch-alive-while-steam-reaper-runs.patch 0018-network-one-working-profile-connected-means-activated-forget.patch 0019-launch-focus-a-focusable-window-of-the-app.patch

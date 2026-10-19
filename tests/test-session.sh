@@ -161,6 +161,25 @@ fi
 # 0018: joining Wi-Fi saved a mistyped password that the UI could neither show nor undo (HW, Air X,
 # 2026-10-18). Each line below is one of the faults it fixes; the profile helper is run further down.
 P18="$PKG/patches/0018-network-one-working-profile-connected-means-activated-forget.patch"
+# 0019: Steam's Big Picture window lost the focus to a helper window (black screen over Steam, HW,
+# Pocket FIT, 2026-10-19). Checked on the patch's new side: launch_manager.gd only.
+P19="$PKG/patches/0019-launch-focus-a-focusable-window-of-the-app.patch"
+if [ -f "$P19" ]; then
+  files19="$(grep -E '^\+\+\+ b/' "$P19" | sed 's#^+++ b/##' | sort -u)"
+  [ "$files19" = "core/global/launch_manager.gd" ] && ok "0019: changes launch_manager.gd only" || bad "0019 touches: $files19"
+  grep -qE '^\+\s+if window in focusable:' "$P19" && grep -qE '^\+\s+var focusable := _xwayland_primary.get_focusable_windows\(\)' "$P19" \
+    && ok "0019: a new window gamescope can focus is preferred over the first new one" || bad "0019: no focusable preference"
+  grep -qE '^\+\s+for app in running:' "$P19" && grep -qE '^\+\s+app.switch_window.call_deferred\(window\)' "$P19" \
+    && ok "0019: with nothing focused, a running app's newly focusable window gets the focus" || bad "0019: no late focus"
+  # Not synchronously: the signal comes while GamescopeInstance is bound, and switch_window calls back
+  # into it; godot-rust refuses that and the switch is lost (Steam behind the loading screen, HW).
+  ! grep -qE '^\+\s+app.switch_window\(window\)' "$P19" \
+    && ok "0019: that switch is deferred, out of gamescope's signal" || bad "0019: switch_window called inside focusable_windows_updated"
+  grep -q "0019-launch-focus-a-focusable-window-of-the-app.patch" "$PKG/source.pin" \
+    && ok "0019: listed in source.pin" || bad "0019: not in source.pin's patches"
+else
+  bad "0019: $P19 is missing"
+fi
 # One file of the tree as 0018 leaves it, hunk by hunk (context and added lines; a new file whole).
 newside() { python3 - "$P18" "$1" <<'PY'
 import sys

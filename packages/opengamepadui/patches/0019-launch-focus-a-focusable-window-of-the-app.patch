@@ -1,0 +1,92 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Mon, 19 Oct 2026 08:10:00 -0700
+Subject: [PATCH] fix(LaunchManager): focus a window gamescope can focus
+
+When a launched app's window list changes, OGUI switches the gamescope
+baselayer to the FIRST new window, and RunningApp.window_ids is sorted.
+Steam's Big Picture window arrives together with helper windows that
+have lower ids and never become focusable (a 200x200 steamwebhelper, a
+64x24 one, Chromium's clipboard window), so OGUI focused a helper. The
+focusable-windows handler then dropped that baselayer window as soon as
+it was not focusable, and nothing switched to Big Picture: gamescope
+stayed on OGUI's own transparent layer, a black screen over a running
+Steam (HW, KONKR Pocket FIT, 2026-10-19: setting
+GAMESCOPECTRL_BASELAYER_WINDOW to the Big Picture window by hand showed
+it at once).
+
+Now a new window gamescope lists as focusable is preferred (the first
+new one still, when none is), and when no window is focused and a window
+of a running app becomes focusable, it gets the focus.
+
+That switch is deferred. focusable_windows_updated is emitted while
+GamescopeInstance is mutably bound, and switch_window calls back into it
+(gamescope.get_xwayland): godot-rust refuses that ("Gd<T>::bind()
+failed, already bound"), the call returns nil and the switch is lost.
+Run synchronously, it left Steam's sign-in behind OGUI's loading screen,
+with Steam's sounds playing (HW, KONKR Pocket FIT, 2026-10-19).
+
+---
+ core/global/launch_manager.gd | 35 +++++++++++++++++++++++++++++++----
+ 1 file changed
+
+--- a/core/global/launch_manager.gd
++++ b/core/global/launch_manager.gd
+@@ -129,12 +129,30 @@
+ 		_xwayland_primary.focusable_apps_updated.connect(on_focusable_apps_changed)
+ 
+ 		# Listen for when focusable windows change
+-		var on_focusable_windows_changed := func(_from: PackedInt64Array, to: PackedInt64Array):
++		var on_focusable_windows_changed := func(from: PackedInt64Array, to: PackedInt64Array):
+ 			# If focusable windows has changed and the currently focused window no longer exists,
+ 			# remove the manual focus
+ 			var baselayer_window := _xwayland_primary.baselayer_window
+ 			if baselayer_window > 0 and not baselayer_window in to:
+ 				_xwayland_primary.remove_baselayer_window()
++				baselayer_window = 0
++			# With no window focused, a window of a running app that has just become focusable gets
++			# the focus. An app whose first windows never become focusable (Steam's startup and
++			# helper windows) otherwise leaves gamescope on our own layer: a black screen over a
++			# running Steam.
++			if baselayer_window > 0:
++				return
++			var running := _running.duplicate()
++			running.reverse()
++			for app in running:
++				for window in to:
++					if window in from or not window in app.window_ids:
++						continue
++					# Deferred: this signal is emitted while GamescopeInstance is bound, and
++					# switch_window calls back into it (gamescope.get_xwayland), which godot-rust
++					# refuses there ("Gd<T>::bind() failed, already bound") and the switch is lost.
++					app.switch_window.call_deferred(window)
++					return
+ 		_xwayland_primary.focusable_windows_updated.connect(on_focusable_windows_changed)
+ 
+ 	# Listen for signals from the secondary Gamescope XWayland
+@@ -233,13 +251,22 @@
+ 			_execute_hooks(app, AppLifecycleHook.TYPE.EXIT)
+ 	running_app.state_changed.connect(on_app_state_changed)
+ 
+-	# Focus any new windows that get created
++	# Focus any new windows that get created. One gamescope can focus first: window ids come sorted,
++	# so a helper window with a lower id than the app's real one would otherwise win (Steam's Big
++	# Picture window arrives together with such helpers).
+ 	var switch_to_new_window := func(old_windows: PackedInt64Array, new_windows: PackedInt64Array):
++		var focusable := _xwayland_primary.get_focusable_windows() if _xwayland_primary else PackedInt64Array()
++		var first := -1
+ 		for window in new_windows:
+ 			if window in old_windows:
+ 				continue
+-			running_app.switch_window(window)
+-			break
++			if window in focusable:
++				running_app.switch_window(window)
++				return
++			if first < 0:
++				first = window
++		if first >= 0:
++			running_app.switch_window(first)
+ 	running_app.window_ids_changed.connect(switch_to_new_window)
+ 
+ 	# Remove/restore focus if any windows get removed
