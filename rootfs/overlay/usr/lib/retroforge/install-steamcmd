@@ -112,7 +112,7 @@ def main():
         return 1
     finally:
         os.close(lock)
-    log(f"{what}: Valve's arm64 steamcmd downloads the first time the Steam plugin runs it")
+    log(f"{what}: Valve's arm64 steamcmd is installed from Main menu > Emulators > Steam CLI")
     return 0
 
 
