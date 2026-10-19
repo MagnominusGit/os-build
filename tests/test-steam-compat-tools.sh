@@ -668,7 +668,7 @@ SOUT="$("${STUBS[@]}" RETROFORGE_STEAM_COMPAT_TOOLS="$HELPER" RETROFORGE_STEAM_C
 rm -f "$WCONF"
 
 # ================================================================================================
-# The wrapper, with the bootstrap and the runtime stubbed too, and the real setting command.
+# The wrapper, with the bootstrap and the client stubbed too, and the real setting command.
 mkdir -p "$W/rt"
 cat >"$W/rt/run" <<EOF
 #!/usr/bin/env bash
@@ -677,7 +677,7 @@ echo client >>"$W/sequence"
 EOF
 cat >"$W/bootstrap" <<EOF
 #!/usr/bin/env bash
-mkdir -p "\$RETROFORGE_STEAM_ROOT"; echo "$W/rt/run"
+mkdir -p "\$RETROFORGE_STEAM_ROOT/steamrtarm64"; echo "$W/rt/run"
 EOF
 chmod +x "$W/rt/run" "$W/bootstrap"
 wrap() {  # wrap <SoC class> <systemd-run exit> [VAR=value...]

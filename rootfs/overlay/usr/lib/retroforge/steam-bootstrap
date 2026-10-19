@@ -1,59 +1,46 @@
 #!/usr/bin/env python3
-# steam-bootstrap — set up Valve's arm64 Steam client and its runtime in the player's home.
-#   steam-bootstrap            for /usr/bin/steam, on every start: keeps the runtime on its channel and
-#                              prints its `run` on stdout. Exit 10, downloading nothing at all, when the
-#                              client is not installed: the player installs "Steam Client" from Main
-#                              menu > Emulators (steam-install), where the download shows its progress.
-#   steam-bootstrap --install  for steam-install: the runtime and the client, each downloaded when it
-#                              is missing, then the `run` on stdout. With RETROFORGE_STEAM_PROGRESS=1
-#                              each download also logs "steam-bootstrap: progress <bytes> <total>".
+# steam-bootstrap — set up Valve's arm64 Steam client in the player's home.
+#   steam-bootstrap            for /usr/bin/steam, on every start: prints the client's path on stdout.
+#                              Exit 10, downloading nothing, when the client is not installed: the
+#                              player installs "Steam Client" from Main menu > Emulators
+#                              (steam-install), where the download shows its progress.
+#   steam-bootstrap --install  for steam-install: the client, downloaded when it is missing, then its
+#                              path on stdout. With RETROFORGE_STEAM_PROGRESS=1 the download also logs
+#                              "steam-bootstrap: progress <bytes> <total>".
 # Everything else goes to stderr.
 #
-# Nothing of it is in the image (a root slot is 2 GB; the two unpack to ~560 MB), so steam-install
-# downloads them. This is what the OpenGamepadUI Steam plugin does for steamcmd, but done here with the arm64
-# builds. Neither is pinned to a version: /usr/share/retroforge/steam/steam.pin names CHANNELS (why:
-# its comments), and this installs whatever Valve currently publishes on them. Every download is
-# still checked against a sha256 Valve publishes next to it.
-#   - the RUNTIME (steamrt3c arm64). On every start, one small GET of
-#     <runtime_base>/<runtime_channel>.txt, with a short timeout, gives the snapshot id the channel
-#     points at. When that snapshot is not installed yet, the sha256 of
-#     steam-runtime-steamrt-arm64.tar.xz is read from <runtime_base>/<snapshot>/SHA256SUMS, and the
-#     tarball is downloaded, checked and unpacked to
-#     ~/.local/share/retroforge/steam-runtime/<snapshot>/.
-#     That is ~52 MB (222 MB unpacked) and it is done synchronously, before Steam starts: the player
-#     waits for it once per runtime release, which Valve makes every few weeks, and Steam never
-#     starts in a runtime that is half there. Older snapshots are removed only after the new one is
-#     in place, and never one that a running Steam was started from (/usr/bin/steam holds a shared
-#     lock on its snapshot's folder while the client runs).
-#     When the channel cannot be read (offline, a timeout, an answer that is not a snapshot id), or
-#     the new snapshot cannot be installed, the newest installed snapshot is used and one line on
-#     stderr says why: a start that could run is never failed for an update. With none installed,
-#     that is exit 1.
-#     RETROFORGE_STEAM_RUNTIME_SNAPSHOT=<id> in the environment, or runtime_snapshot: in the pin,
-#     pins one snapshot instead of following the channel (the environment wins).
-#   - the CLIENT from the manifest of the pinned client channel (steam_client_<channel>_linuxarm64):
-#     its arm64 binaries (package bins_linuxarm64_linuxarm64, unpacked to <Steam root>/steamrtarm64/),
-#     checked against the sha256 the manifest gives for them. Only with --install, and only when they
-#     are missing: the client
-#     updates itself from its channel when it starts, as it does after a manual install
-#     (docs/steam-arm64.md). The manifest is read when it is needed, because its package files are
-#     content-addressed and replaced on every client release.
-#     <Steam root>/package/beta, the file the client reads its channel from, is set to the pinned
-#     channel when the client is installed, and when the file is missing. Otherwise it is left alone:
-#     the client owns it and rewrites it to match its launch flag (steam.pin).
-# Each lands under a temporary name and is renamed into place, so a failed or interrupted download
-# never leaves a half-set-up client or runtime that looks ready.
+# The client is not in the image (a root slot is 2 GB), so steam-install downloads it. This is what
+# the OpenGamepadUI Steam plugin does for steamcmd, but done here with the arm64 build. It is not
+# pinned to a version: /usr/share/retroforge/steam/steam.pin names a CHANNEL (why: its comments), and
+# this installs whatever Valve currently publishes on it, checked against the sha256 Valve publishes
+# next to it.
+#
+# The CLIENT comes from the manifest of the pinned client channel (steam_client_<channel>_linuxarm64):
+# its arm64 binaries (package bins_linuxarm64_linuxarm64, unpacked to <Steam root>/steamrtarm64/),
+# checked against the sha256 the manifest gives for them. Only with --install, and only when they are
+# missing: the client updates itself from its channel when it starts, as it does after a manual
+# install (docs/steam-arm64.md). The manifest is read when it is needed, because its package files
+# are content-addressed and replaced on every client release.
+# <Steam root>/package/beta, the file the client reads its channel from, is set to the pinned channel
+# when the client is installed, and when the file is missing. Otherwise it is left alone: the client
+# owns it and rewrites it to match its launch flag (steam.pin).
+# The binaries land under a temporary name and are renamed into place, so a failed or interrupted
+# download never leaves a half-set-up client that looks ready.
+#
+# No Steam Runtime: /usr/bin/steam runs the client raw on the host, with gtk2, libibus and lsof from
+# the image (rootfs/customize-base.sh), because games' own pressure-vessel cannot start nested in the
+# runtime's container. Earlier builds kept that runtime in ~/.local/share/retroforge/steam-runtime
+# (~220 MB); it is removed here when found.
 #
 # Valve's client zips need care: some entries use '\' as the separator, regular files carry mode 0666
 # (no execute bits), and symlinks are Unix link entries. ELF files and #! scripts get 0755.
 #
-# Exit 0 with the run path on stdout; 10 when the client is not installed (without --install); 2 for
-# bad arguments; or 1 when Steam cannot start: no runtime installed and none could be downloaded, no
-# client and none could be downloaded (--install), a checksum mismatch on the first download, a
-# broken pin.
+# Exit 0 with the client's path on stdout; 10 when the client is not installed (without --install); 2
+# for bad arguments; or 1 when Steam cannot start: no client and none could be downloaded
+# (--install), a checksum mismatch, a broken pin.
 #
 # TEST SEAMS (tests/test-steam.sh): RETROFORGE_STEAM_ROOT (also set by /usr/bin/steam),
-# RETROFORGE_STEAM_RUNTIME_DIR, RETROFORGE_STEAM_PIN, RETROFORGE_STEAM_CDN.
+# RETROFORGE_STEAM_PIN, RETROFORGE_STEAM_CDN.
 import fcntl
 import hashlib
 import http.client
@@ -61,7 +48,6 @@ import os
 import re
 import shutil
 import stat
-import subprocess
 import sys
 import tempfile
 import urllib.request
@@ -69,21 +55,13 @@ import zipfile
 
 DATA = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
 STEAM_ROOT = os.environ.get("RETROFORGE_STEAM_ROOT") or os.path.join(DATA, "Steam")
-RUNTIME_HOME = os.environ.get("RETROFORGE_STEAM_RUNTIME_DIR",
-                              os.path.join(DATA, "retroforge", "steam-runtime"))
+# Where earlier builds kept the Steam Runtime the client ran in.
+OLD_RUNTIME = os.path.join(DATA, "retroforge", "steam-runtime")
 PIN = os.environ.get("RETROFORGE_STEAM_PIN", "/usr/share/retroforge/steam/steam.pin")
 CDN = os.environ.get("RETROFORGE_STEAM_CDN", "https://media.steampowered.com/client")
 PACKAGE = "bins_linuxarm64_linuxarm64"
 CLIENT = os.path.join("steamrtarm64", "steam")
-RUNTIME_FILE = "steam-runtime-steamrt-arm64.tar.xz"
-# The channel check runs before every start, so it must not hold up a start when the network is
-# bad. This bounds the connect and each read; name resolution is not covered, but fails at once
-# with no network at all.
-CHANNEL_TIMEOUT = 5
 TIMEOUT = 60
-# A snapshot id as Valve names them (3c.0.20260824.257593). It becomes a folder name and a URL path
-# element, so nothing else is accepted: not a captive portal's HTML, not a path.
-SNAPSHOT = re.compile(r"[0-9]+[a-z]*\.[0-9]+\.[0-9]{8}\.[0-9]+")
 # steam-install sets it to read each download's progress off our stderr.
 PROGRESS = os.environ.get("RETROFORGE_STEAM_PROGRESS") == "1"
 EXIT_NOT_INSTALLED = 10
@@ -103,27 +81,19 @@ def pin_field(text, key):
 
 
 def read_pin():
-    """steam.pin as a dict: client_channel, runtime_base, runtime_channel, snapshot (or None)."""
+    """steam.pin as a dict: client_channel."""
     try:
         with open(PIN, encoding="utf-8") as f:
             text = f.read()
     except OSError as err:
         raise Failed(f"no Steam pin: {err}")
-    pin = {k: pin_field(text, k) for k in ("client_channel", "runtime_base", "runtime_channel")}
-    missing = [k for k, v in pin.items() if not v]
-    if missing:
-        raise Failed(f"{PIN}: needs {', '.join(missing)}")
-    # Both channels become parts of a URL.
-    if not re.fullmatch(r"[a-z0-9_]+", pin["client_channel"]):
-        raise Failed(f"{PIN}: not a client channel: {pin['client_channel']!r}")
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+", pin["runtime_channel"]):
-        raise Failed(f"{PIN}: not a runtime channel: {pin['runtime_channel']!r}")
-    pin["runtime_base"] = pin["runtime_base"].rstrip("/")
-    snapshot = os.environ.get("RETROFORGE_STEAM_RUNTIME_SNAPSHOT") or pin_field(text, "runtime_snapshot")
-    if snapshot and not SNAPSHOT.fullmatch(snapshot):
-        raise Failed(f"not a Steam Runtime snapshot id to pin: {snapshot!r}")
-    pin["snapshot"] = snapshot
-    return pin
+    channel = pin_field(text, "client_channel")
+    if not channel:
+        raise Failed(f"{PIN}: needs client_channel")
+    # It becomes part of a URL.
+    if not re.fullmatch(r"[a-z0-9_]+", channel):
+        raise Failed(f"{PIN}: not a client channel: {channel!r}")
+    return {"client_channel": channel}
 
 
 def fetch(url, timeout, limit):
@@ -157,127 +127,6 @@ def download(url, dest, sha256, size=0):
         raise Failed(f"could not download {url}: {err}")
     if digest.hexdigest() != sha256.lower():
         raise Failed(f"sha256 mismatch for {url}: got {digest.hexdigest()}, want {sha256}")
-
-
-# ------------------------------------------------------------------------------------------------
-# The runtime
-
-
-def find_run(tree):
-    """<tree>/<one dir>/run, the runtime's entry point, or None."""
-    try:
-        names = sorted(os.listdir(tree))
-    except OSError:
-        return None
-    for name in names:
-        run = os.path.join(tree, name, "run")
-        if os.path.isfile(run) and os.access(run, os.X_OK):
-            return run
-    return None
-
-
-def installed_snapshots():
-    """[(snapshot, run)] of the complete installed snapshots, newest first."""
-    try:
-        names = os.listdir(RUNTIME_HOME)
-    except OSError:
-        return []
-    found = [(n, find_run(os.path.join(RUNTIME_HOME, n))) for n in names if SNAPSHOT.fullmatch(n)]
-
-    def age(entry):  # 3c.0.20260824.257593: the numeric parts compare as numbers
-        return [(int(p), "") if p.isdigit() else (-1, p) for p in entry[0].split(".")]
-
-    return sorted(((n, r) for n, r in found if r), key=age, reverse=True)
-
-
-def channel_snapshot(pin):
-    """The snapshot id to run: the pinned one, or the one the channel points at now."""
-    if pin["snapshot"]:
-        return pin["snapshot"]
-    url = f"{pin['runtime_base']}/{pin['runtime_channel']}.txt"
-    text = fetch(url, CHANNEL_TIMEOUT, 256).decode("ascii", "replace").strip()
-    if not SNAPSHOT.fullmatch(text):
-        raise Failed(f"{url} does not name a Steam Runtime snapshot: {text[:60]!r}")
-    return text
-
-
-def install_runtime(base, snapshot):
-    """Download, check and unpack one snapshot to RUNTIME_HOME/<snapshot>; its run."""
-    sums_url = f"{base}/{snapshot}/SHA256SUMS"
-    sums = fetch(sums_url, TIMEOUT, 4 << 20).decode("utf-8", "replace")
-    m = re.search(rf"^([0-9a-fA-F]{{64}}) [ *]{re.escape(RUNTIME_FILE)}[ \t\r]*$", sums, re.M)
-    if not m:
-        raise Failed(f"{sums_url} has no sha256 for {RUNTIME_FILE}")
-    url = f"{base}/{snapshot}/{RUNTIME_FILE}"
-    final = os.path.join(RUNTIME_HOME, snapshot)
-    tmp = tempfile.mkdtemp(dir=RUNTIME_HOME, prefix=".tmp-")
-    try:
-        archive = os.path.join(tmp, "runtime.tar.xz")
-        download(url, archive, m.group(1))
-        tree = os.path.join(tmp, "tree")
-        os.mkdir(tree)
-        # GNU tar, not tarfile: the runtime is a whole sysroot of symlinks, which tarfile's
-        # default "data" filter refuses.
-        res = subprocess.run(["tar", "-xJf", archive, "-C", tree], stderr=subprocess.PIPE, text=True)
-        if res.returncode != 0:
-            raise Failed(f"could not unpack the runtime: {res.stderr.strip()}")
-        if find_run(tree) is None:
-            raise Failed(f"{url} has no */run")
-        # A folder without a run, left over from an older version of this script or a hand edit.
-        if os.path.lexists(final) and not remove(final):
-            raise Failed(f"{final} is incomplete and in use")
-        os.rename(tree, final)
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-    return find_run(final)
-
-
-def remove(path):
-    """Remove a snapshot folder, unless a running Steam holds it; True when it is gone."""
-    if not os.path.isdir(path) or os.path.islink(path):
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
-        return True
-    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            return False
-        shutil.rmtree(path, ignore_errors=True)
-        return True
-    finally:
-        os.close(fd)
-
-
-def runtime(pin):
-    """The run of the runtime to start in, installing the channel's snapshot first if needed."""
-    installed = installed_snapshots()
-    try:
-        snapshot = channel_snapshot(pin)
-        run = find_run(os.path.join(RUNTIME_HOME, snapshot))
-        if run is None:
-            how = "pinned" if pin["snapshot"] else f"now on {pin['runtime_channel']}"
-            log(f"downloading the Steam Runtime {snapshot} ({how}; ~52 MB)")
-            run = install_runtime(pin["runtime_base"], snapshot)
-    except (Failed, OSError) as err:
-        if not installed:
-            raise
-        old, run = installed[0]
-        log(f"{err}; starting with the installed Steam Runtime {old}")
-        return run
-    # Only now that the new snapshot is in place.
-    for name in sorted(os.listdir(RUNTIME_HOME)):
-        if name == snapshot or name.startswith("."):
-            continue
-        try:
-            if not remove(os.path.join(RUNTIME_HOME, name)):
-                log(f"keeping the Steam Runtime {name} while the Steam started from it runs")
-        except OSError as err:
-            log(f"could not remove the Steam Runtime {name}: {err}")
-    return run
 
 
 # ------------------------------------------------------------------------------------------------
@@ -386,27 +235,40 @@ def client(channel):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def drop_old_runtime():
+    """Remove the Steam Runtime an earlier build installed: nothing runs in it any more."""
+    if not os.path.isdir(OLD_RUNTIME) or os.path.islink(OLD_RUNTIME):
+        return
+    shutil.rmtree(OLD_RUNTIME, ignore_errors=True)
+    if os.path.exists(OLD_RUNTIME):
+        log(f"could not remove {OLD_RUNTIME}, which nothing uses any more")
+    else:
+        log(f"removed {OLD_RUNTIME}: the client runs without it now")
+
+
 def main(argv):
     if argv not in ([], ["--install"]):
         log("usage: steam-bootstrap [--install]")
         return 2
+    path = os.path.join(STEAM_ROOT, CLIENT)
     try:
         pin = read_pin()
-        # Without --install, nothing is downloaded for a client that is not there: not even the
-        # runtime. The store's Steam Client entry is where it is installed, with its progress shown.
-        if argv != ["--install"] and not os.path.isfile(os.path.join(STEAM_ROOT, CLIENT)):
+        drop_old_runtime()
+        # Without --install, nothing is downloaded for a client that is not there. The store's Steam
+        # Client entry is where it is installed, with its progress shown.
+        if argv != ["--install"] and not os.path.isfile(path):
             log("Steam Client is not installed: install it from Main menu > Emulators > Steam Client")
             return EXIT_NOT_INSTALLED
-        os.makedirs(RUNTIME_HOME, exist_ok=True)
+        lock_dir = os.path.join(DATA, "retroforge")
+        os.makedirs(lock_dir, exist_ok=True)
         # One bootstrap at a time: OGUI can start `steam` again while the first one is downloading.
-        with open(os.path.join(os.path.dirname(RUNTIME_HOME), "steam-bootstrap.lock"), "w") as lock:
+        with open(os.path.join(lock_dir, "steam-bootstrap.lock"), "w") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX)
-            run = runtime(pin)
             client(pin["client_channel"])
     except (Failed, OSError) as err:
         log(str(err))
         return 1
-    print(run)
+    print(path)
     return 0
 
 

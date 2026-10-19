@@ -2,24 +2,25 @@
 # steam — Valve's arm64 Steam client, started the way the OpenGamepadUI Steam plugin asks for it:
 #   steam -gamepadui -steamos3 -steampal -steamdeck -silent steam://rungameid/<appid>
 #
-# The image ships no Steam (Holo's aarch64 repo has none, and the client is ~560 MB with its runtime).
-# The player installs it from Main menu > Emulators > Steam Client (/usr/lib/retroforge/steam-install,
-# which shows the download's progress). This:
-#   1. has /usr/lib/retroforge/steam-bootstrap get the runtime's `run`. When the client is not
-#      installed, the bootstrap says where to install it and exits 10, and so does this, with nothing
-#      downloaded. Both come from the CHANNELS /usr/share/retroforge/steam/steam.pin names, not from
-#      pinned versions. The client channel is a steamdeck_ line because the plugin passes -steamdeck:
-#      the client repoints a line that does not match its flag, at the cost of a ~631 MB download
-#      (steam.pin). On every start the bootstrap checks the runtime channel (one small GET) and
-#      installs a new snapshot before Steam starts when the channel moved (~52 MB); offline it uses
-#      the installed one;
+# The image ships no Steam (Holo's aarch64 repo has none). The player installs it from Main menu >
+# Emulators > Steam Client (/usr/lib/retroforge/steam-install, which shows the download's progress).
+# This:
+#   1. has /usr/lib/retroforge/steam-bootstrap check that the client is there. When it is not, the
+#      bootstrap says where to install it and exits 10, and so does this, with nothing downloaded.
+#      The client channel (/usr/share/retroforge/steam/steam.pin) is a steamdeck_ line because the
+#      plugin passes -steamdeck: the client repoints a line that does not match its flag, at the cost
+#      of a ~631 MB download;
 #   2. points ~/.steam/steam and ~/.steam/root at the client ("Steam data link does not exist,
-#      client is misconfigured" otherwise);
-#   3. drops a D-Bus session address that belongs to another user, because pressure-vessel's bwrap
-#      fails on it (seen with root's, over SSH), and the STEAM_RUNTIME variables Valve's steam.sh also
-#      unsets;
-#   4. runs steamrtarm64/steam inside the runtime's container. The client strips LD_LIBRARY_PATH, and
-#      steamui.so needs the runtime's GTK2 and the rest;
+#      client is misconfigured" otherwise), and the other ~/.steam links Valve's steam.sh makes;
+#   3. drops a D-Bus session address that belongs to another user, because bwrap fails on it (seen
+#      with root's, over SSH), and the STEAM_RUNTIME variables Valve's steam.sh also unsets;
+#   4. runs steamrtarm64/steam RAW ON THE HOST, as Nova-Deck does: no Steam Runtime container. Steam
+#      runs every game in Steam Linux Runtime 4.0's own container (pressure-vessel), and that cannot
+#      start nested inside a container the client runs in ("bwrap: execvp true: No such file or
+#      directory": Hades, KONKR Pocket FIT, 2026-10-19). steamui.so's gtk2, steamwebhelper's libibus
+#      and the lsof the client checks its UI's websocket with come from the image
+#      (rootfs/customize-base.sh); the client's own media libs (libav*, libvpx) come from steamrtarm64
+#      and steamrtarm64/video, put first on LD_LIBRARY_PATH;
 #   5. starts it again when it exits 42, which it does after installing an update ("Update
 #      complete, launching Steam..."). That is the same exit code Valve's steam.sh and steamcmd.sh
 #      restart on.
@@ -31,15 +32,9 @@
 # A TERM/INT/HUP sent to this script is passed on to the client, so it is never left running
 # without its wrapper.
 #
-# While this script runs, it holds a shared lock (flock) on the folder of the runtime snapshot the
-# client runs in, and the client inherits it. A second `steam` whose bootstrap finds the runtime
-# channel moved installs the new snapshot, but cannot remove this one from under the running client;
-# a later start does.
-#
-# First start, measured in a linux/arm64 container: the bootstrap took 6 s (2026-10-16; runtime
-# 222 MB, client binaries 325 MB unpacked). On 2026-10-15 the client then updated itself from Valve's
-# manifest (667 MB download) to ~3 GB, because the linuxarm64 manifest also carries the x86 client
-# and runtimes.
+# First start: on 2026-10-15 the client updated itself from Valve's manifest (667 MB download) to
+# ~3 GB, because the linuxarm64 manifest also carries the x86 client and runtimes. steam-install runs
+# that update when Steam Client is installed.
 #
 # ARMv8.0 (SM6115): Valve builds the client with unguarded LSE atomics, so on a CPU without them it
 # dies of SIGILL unless the kernel emulates them (kernel/patches/0025). See docs/steam-arm64.md.
@@ -53,19 +48,13 @@ MAGIC_RESTART_EXITCODE=42
 
 log() { echo "steam: $*" >&2; }
 
-run="$("$RETROFORGE_STEAM_BOOTSTRAP")"; rc=$?
+client="$("$RETROFORGE_STEAM_BOOTSTRAP")"; rc=$?
 # 10: the client is not installed, and the bootstrap has said where to install it.
 [ "$rc" -eq 10 ] && exit 1
-if [ "$rc" -ne 0 ] || [ ! -x "$run" ]; then
+if [ "$rc" -ne 0 ] || [ ! -x "$client" ]; then
   log "Valve's arm64 Steam client could not be set up (see above)"
   exit 1
 fi
-# <runtime home>/<snapshot>/<dir>/run -> <runtime home>/<snapshot>. Not fatal if it fails: the lock
-# only keeps a runtime update from removing the snapshot early.
-snapshot="${run%/*/run}"
-exec {held}<"$snapshot" && flock -s "$held" || log "could not lock $snapshot"
-# Gone between the bootstrap and the lock: another `steam` moved to a newer snapshot just then.
-[ -x "$run" ] || { log "the Steam Runtime changed while starting; start steam again"; exit 1; }
 
 mkdir -p "$HOME/.steam"
 for link in steam root; do
@@ -91,11 +80,12 @@ done
 #   - leaves a holder outside this process tree that waits for this script's PID ($$) to exit, however
 #     it ends, and then releases the mount unless another `steam` still runs.
 # STEAM_COMPAT_GRAPHICS_PROVIDER is set only once graphics_provider.json is there, i.e. the guest is
-# mounted. pressure-vessel reads it for the client's OWN container as well, and a path that does not
-# exist yet aborts that container ("opendir(...graphics_provider.json): No such file or directory"),
-# so a client started during the first download never started at all (Air X, 2026-10-18). The
-# client's environment is fixed when it starts, so after a first download x86 games get the guest
-# from the next start of Steam. Proton under FEX also needs ~/.steam/sdk32 and sdk64.
+# mounted. pressure-vessel reads it for every container it starts, and a path that does not exist yet
+# aborts that container ("opendir(...graphics_provider.json): No such file or directory"): when the
+# client still ran in a container of its own, a client started during the first download never
+# started at all (Air X, 2026-10-18). The client's environment is fixed when it starts, so after a
+# first download x86 games get the guest from the next start of Steam. Proton under FEX also needs
+# ~/.steam/sdk32 and sdk64.
 # RETROFORGE_STEAM_X86_GUEST=0: no download, no mount, no provider.
 # TEST SEAMS (tests/test-steam-x86-guest.sh): RETROFORGE_STEAM_X86_GUEST_HELPER, RETROFORGE_STEAM_X86_GUEST_DIR.
 # bin32/bin64 are where games look for the Steam overlay's preload libraries (Nova-Deck links them
@@ -142,11 +132,16 @@ if [ -x "$sarek_cli" ] && [ "$("$sarek_cli" apply)" = on ]; then
   export PROTON_DXVK_SAREK="${PROTON_DXVK_SAREK:-1}"
 fi
 
-cd "$RETROFORGE_STEAM_ROOT" || exit 1
+# No STEAM_MULTIPLE_XWAYLANDS, unlike SteamOS and Nova-Deck where Steam is the shell on :0: it makes
+# the client put games on the Xwayland after its own, and OGUI already starts it on :1 (games' own
+# display), so games got DISPLAY=:2, which gamescope does not run ("nodrv_CreateWindow", HW 2026-10-17).
+export LD_LIBRARY_PATH="$RETROFORGE_STEAM_ROOT/steamrtarm64:$RETROFORGE_STEAM_ROOT/steamrtarm64/video${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+# Nova-Deck starts it from steamrtarm64, and that is what has run on hardware.
+cd "$RETROFORGE_STEAM_ROOT/steamrtarm64" || exit 1
 child=""; stopping=""
 trap 'stopping=1; [ -n "$child" ] && kill -TERM "$child" 2>/dev/null' TERM INT HUP
 while :; do
-  "$run" -- "$RETROFORGE_STEAM_ROOT/steamrtarm64/steam" "$@" &
+  "$client" "$@" &
   child=$!
   # A trapped signal ends `wait` early; keep waiting until the client has really exited.
   while :; do
@@ -161,8 +156,7 @@ while :; do
   if [ "$status" -eq 132 ] && ! grep -qw atomics "${RETROFORGE_CPUINFO:-/proc/cpuinfo}" 2>/dev/null; then
     log "the client died of SIGILL on a CPU without LSE atomics: the kernel needs kernel/patches/0025"
   fi
-  # Never fail silently: pressure-vessel writes its own errors straight to the journal (as
-  # pressure-vessel-wrap) when stderr is the journal, so nothing of them shows up next to ours.
-  [ "$status" -eq 0 ] || log "the client exited with status $status (runtime errors: journalctl -t pressure-vessel-wrap)"
+  # Never fail silently.
+  [ "$status" -eq 0 ] || log "the client exited with status $status"
   exit "$status"
 done

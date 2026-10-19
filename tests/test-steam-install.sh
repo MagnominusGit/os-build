@@ -21,24 +21,22 @@ bad() { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
 
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 H="$T/home"; DATA="$H/.local/share"; CACHE="$T/cache"
-STEAM_ROOT="$DATA/Steam"; RT="$DATA/retroforge/steam-runtime"; GUEST="$DATA/retroforge/fex-guest"
+STEAM_ROOT="$DATA/Steam"; GUEST="$DATA/retroforge/fex-guest"
 SCMD="$H/.steam/steamcmd"; PROG_CLIENT="$CACHE/retroforge/steam-install-steam-client.progress"
 mkdir -p "$T/bin"
 
-# The bootstrap: --install and RETROFORGE_STEAM_PROGRESS=1 expected; two downloads' progress lines.
+# The bootstrap: --install and RETROFORGE_STEAM_PROGRESS=1 expected; the client download's progress lines.
 cat >"$T/bin/bootstrap" <<EOF
 #!/usr/bin/env bash
 echo "args=\$* progress=\${RETROFORGE_STEAM_PROGRESS-unset}" >>"$T/boot.log"
 case "\${FAKE_BOOT:-ok}" in
   sha) echo "steam-bootstrap: sha256 mismatch for https://example/client.zip" >&2; exit 1 ;;
-  net) echo "steam-bootstrap: could not download https://example/runtime.tar.xz: timed out" >&2; exit 1 ;;
+  net) echo "steam-bootstrap: could not download https://example/client.zip: timed out" >&2; exit 1 ;;
 esac
-for p in "26 52" "52 52" "55 110" "110 110"; do echo "steam-bootstrap: progress \$p" >&2; done
-mkdir -p "$STEAM_ROOT/steamrtarm64" "$RT/3c.0.20260824.1/steam-runtime-steamrt-arm64"
+for p in "30 110" "80 110" "110 110"; do echo "steam-bootstrap: progress \$p" >&2; done
+mkdir -p "$STEAM_ROOT/steamrtarm64"
 echo elf >"$STEAM_ROOT/steamrtarm64/steam"
-printf '#!/bin/sh\n' >"$RT/3c.0.20260824.1/steam-runtime-steamrt-arm64/run"
-chmod +x "$RT/3c.0.20260824.1/steam-runtime-steamrt-arm64/run"
-echo "$RT/3c.0.20260824.1/steam-runtime-steamrt-arm64/run"
+echo "$STEAM_ROOT/steamrtarm64/steam"
 EOF
 # The x86 guest helper's `fetch`.
 cat >"$T/bin/guest" <<EOF

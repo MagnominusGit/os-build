@@ -772,13 +772,12 @@ fi
 #
 # Steam itself is NOT shipped, and is not missing either. The OGUI Steam plugin launches games with
 # `steam ... steam://rungameid/<id>`, so the image carries /usr/bin/steam: a wrapper that runs Valve's
-# arm64 client from the player's home. The client and its Steam Runtime are installed from Main menu >
-# Emulators > Steam Client (/usr/lib/retroforge/steam-install, through steam-bootstrap: ~560 MB
-# unpacked, ~3 GB after the client's own update, which the install runs too); until then the wrapper
-# downloads nothing and says where to install it. None of what is downloaded is pinned to a version:
-# steam.pin names the channels
-# (client steamdeck_stable, runtime latest-public-stable), and each download is checked against what
-# that channel publishes. Everything else Steam needs on arm64 is downloaded the same way, into the
+# arm64 client from the player's home, raw on the host (gtk2, libibus and lsof are in the base for it).
+# The client is installed from Main menu > Emulators > Steam Client (/usr/lib/retroforge/steam-install,
+# through steam-bootstrap: ~3 GB after the client's own update, which the install runs too); until
+# then the wrapper downloads nothing and says where to install it. None of what is downloaded is
+# pinned to a version: steam.pin names the client channel (steamdeck_stable), and each download is
+# checked against what that channel publishes. Everything else Steam needs on arm64 is downloaded the same way, into the
 # player's home, by a helper whose channel pin is in usr/share/retroforge/steam/:
 #   - steamcmd for the OGUI plugin: install-steamcmd puts a stub at ~/.steam/steamcmd/steamcmd.sh, and
 #     installing Steam CLI from Main menu > Emulators turns it into Valve's arm64 steamcmd from its

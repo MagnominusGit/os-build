@@ -1,20 +1,18 @@
-# Valve's arm64 Steam client and Steam Runtime: the CHANNELS they are downloaded from (installed from
-# Main menu > Emulators > Steam Client by steam-install; the runtime then kept on its channel by every
-# start of /usr/bin/steam).
+# Valve's arm64 Steam client: the CHANNEL it is downloaded from (installed from Main menu > Emulators
+# > Steam Client by steam-install).
 #
-# Read by /usr/lib/retroforge/steam-bootstrap, which /usr/bin/steam runs on every start. Neither the
-# client build nor the runtime snapshot is pinned to a version here: both channels are rolling
-# pointers Valve moves, and the bootstrap installs whatever Valve publishes on them when it downloads.
-# Every download is still checked: the client against the sha2 its channel's manifest gives, the
-# runtime against the SHA256SUMS of the snapshot the channel names. Nothing of either is in the image
-# (a root slot is 2 GB; they unpack to ~560 MB), so they go into the player's home.
+# Read by /usr/lib/retroforge/steam-bootstrap. The client build is not pinned to a version here: the
+# channel is a rolling pointer Valve moves, and the bootstrap installs whatever Valve publishes on it
+# when it downloads, checked against the sha2 the channel's manifest gives. The client is not in the
+# image (a root slot is 2 GB), so it goes into the player's home.
 #
-# WHY CHANNELS AND NOT VERSIONS. Both version pins went stale on their own. The client's package files
+# WHY A CHANNEL AND NOT A VERSION. A version pin goes stale on its own: the client's package files
 # are content-addressed and replaced on every client release, so a pinned one stops existing at the
-# next one. Valve prunes old runtime snapshots too (the oldest left on 2026-10-15 was
-# 3c.0.20260526), so a pinned snapshot sets up fine until the day it is gone and then fails every
-# fresh card. And the client updates itself from its channel anyway, so a pinned build would only
-# have been the starting point of that update.
+# next one. And the client updates itself from its channel anyway, so a pinned build would only have
+# been the starting point of that update.
+#
+# No Steam Runtime is downloaded for the client: /usr/bin/steam runs it raw on the host
+# (docs/steam-arm64.md). Earlier builds also named the steamrt3c runtime it ran in here.
 #
 # client_channel:  the arm64 client line the bootstrap installs from: the manifest
 #                  steam_client_<client_channel>_linuxarm64, and its bins_linuxarm64_linuxarm64
@@ -50,27 +48,4 @@
 #                  fresh card on a welcome screen that cannot be dismissed. Its name is a gated beta
 #                  branch key rather than a line name, so Valve can rotate it at any time. And under
 #                  -steamdeck the client repoints away from it anyway: that is the 631 MB case above.
-#
-# runtime_base:    the steamrt3c image root. <base>/<snapshot>/steam-runtime-steamrt-arm64.tar.xz
-#                  is the arm64 runtime the client runs in, and <base>/<snapshot>/SHA256SUMS its
-#                  sha256. The client needs it: it loads steamui.so, which needs GTK2 and the rest
-#                  of the runtime, and it strips LD_LIBRARY_PATH, so it has to run inside the
-#                  runtime's container (docs/steam-arm64.md). This is not the runtime in the client's
-#                  own manifest: that one's runtime_steamrt_linuxarm64 is the x86_64/i386 runtime for
-#                  FEX games.
-#
-# runtime_channel: a rolling pointer under runtime_base: <base>/<channel>.txt holds one snapshot id
-#                  (3c.0.20260824.257593 on 2026-10-16, the same as
-#                  latest-steam-client-general-availability). The bootstrap reads it on every start
-#                  (one small GET, short timeout) and resolves it to that CONCRETE snapshot, never
-#                  downloading through the alias directory: the id names the folder it installs
-#                  into, so it can tell a moved channel from an unchanged one, and the log says which
-#                  build is in use. A moved channel means a ~52 MB download before Steam starts.
-#                  Offline, the newest installed snapshot is used.
-#
-# runtime_snapshot: (optional, not set) pins one snapshot id instead of following runtime_channel,
-#                  for a reproducible setup. RETROFORGE_STEAM_RUNTIME_SNAPSHOT=<id> in the
-#                  environment does the same and wins over this field.
 client_channel: steamdeck_stable
-runtime_base: https://repo.steampowered.com/steamrt3c/images
-runtime_channel: latest-public-stable

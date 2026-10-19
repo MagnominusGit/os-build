@@ -542,8 +542,8 @@ helper fetch
 settle
 
 # ================================================================================================
-# The wrapper, with the bootstrap stubbed and the real helper: a fake runtime `run` records how the
-# client was started.
+# The wrapper, with the bootstrap stubbed and the real helper: a fake client records how it was
+# started.
 W="$T/w"; mkdir -p "$W/rt"
 WHOME="$W/home"; WROOT="$WHOME/.local/share/Steam"; WGUEST="$WHOME/.local/share/retroforge/fex-guest"
 cat >"$W/rt/run" <<EOF
@@ -564,7 +564,7 @@ exit "\$c"
 EOF
 cat >"$W/bootstrap" <<EOF
 #!/usr/bin/env bash
-mkdir -p "\$RETROFORGE_STEAM_ROOT"; echo "$W/rt/run"
+mkdir -p "\$RETROFORGE_STEAM_ROOT/steamrtarm64"; echo "$W/rt/run"
 EOF
 cat >"$W/helper" <<EOF
 #!/usr/bin/env bash
@@ -597,7 +597,7 @@ mkimage "$SRV/w.sqsh" wrapper; mkpin 2026-07-01 w.sqsh
 echo 3 >"$SRV/.delay"; reset_calls
 wrap 0 steam://rungameid/42
 [ "$WRC" = 0 ] && grep -qx "image: no" "$W/call1" && ok "the client starts at once, before the download is done" || bad "rc=$WRC $(cat "$W/call1" 2>&1) $WERR"
-grep -qx "provider: unset" "$W/call1" && ok "no STEAM_COMPAT_GRAPHICS_PROVIDER yet: pressure-vessel would abort the client on the missing file" || bad "$(cat "$W/call1")"
+grep -qx "provider: unset" "$W/call1" && ok "no STEAM_COMPAT_GRAPHICS_PROVIDER yet: pressure-vessel would abort a container on the missing file" || bad "$(cat "$W/call1")"
 grep -q "the x86 guest is not in place yet" "$W/err" && ok "and says x86 games get it from the next start" || bad "stderr: $(cat "$W/err")"
 [ "$(readlink "$WHOME/.steam/sdk64")" = "$WROOT/linux64" ] && [ "$(readlink "$WHOME/.steam/sdk32")" = "$WROOT/linux32" ] \
   && ok "~/.steam/sdk64 and sdk32 point at the client's linux64 and linux32" || bad "links: $(ls -la "$WHOME/.steam")"

@@ -35,16 +35,22 @@ kernel trap costs less than a signal round trip.
 
 Found on the way, independent of the CPU:
 
-1. **The arm64 Steam Runtime.** The client loads `steamui.so`, which needs GTK2 and the rest of
-   the runtime; Holo has none of it, and the client strips `LD_LIBRARY_PATH`. Run it in Valve's
-   container: `steam-runtime-steamrt-arm64.tar.xz` from
-   `repo.steampowered.com/steamrt3c/images/latest-steam-client-general-availability/`, then
-   `<runtime>/run -- steamrtarm64/steam -gamepadui`. (The manifest's `runtime_steamrt_linuxarm64`
-   is the x86_64/i386 runtime for FEX games, not this one.)
+1. **A few host libraries, and no runtime container.** `steamui.so` links GTK2
+   (`libgtk-x11-2.0`), `steamwebhelper` links `libibus-1.0` and does not load without it, and the
+   client maps each localhost connection to a process with `lsof`, rejecting its own UI's
+   websocket when it cannot ("Unexpected Transport Error", no UI). The image has all three
+   (`rootfs/customize-base.sh`), and `steam` runs `steamrtarm64/steam` raw on the host from
+   `steamrtarm64/`, with `steamrtarm64` and `steamrtarm64/video` (the client's own libav* and
+   libvpx) first on `LD_LIBRARY_PATH`, as Nova-Deck runs it. Valve's arm64 Steam Runtime
+   container (steamrt3c, `<runtime>/run -- steamrtarm64/steam`) runs the client too, but no game
+   starts from it: Steam runs every game in Steam Linux Runtime 4.0's own pressure-vessel
+   container, and that does not start nested inside another (`bwrap: execvp true: No such file or
+   directory`, Hades on the KONKR Pocket FIT, 2026-10-19). (The manifest's
+   `runtime_steamrt_linuxarm64` is the x86_64/i386 runtime for FEX games, not either of these.)
 2. **`~/.steam/steam` and `~/.steam/root`** pointing at the client root ("Steam data link does
    not exist, client is misconfigured").
-3. **A clean environment for pressure-vessel**: a `DBUS_SESSION_BUS_ADDRESS` from another user
-   (root's, over SSH) makes bwrap fail on `/run/user/0/bus`.
+3. **A clean environment for pressure-vessel**, which games run in: a `DBUS_SESSION_BUS_ADDRESS`
+   from another user (root's, over SSH) makes bwrap fail on `/run/user/0/bus`.
 4. **Something to relaunch it after a self-update.** The client exits after installing an
    update ("Update complete, launching Steam...") and expects its wrapper script to start it again.
 5. The client zips use backslash paths; extract with the separators converted.
@@ -56,8 +62,8 @@ Test install on the Air X: `/home/player/steamtest/` (client, runtime, `lse_shim
 
 The OGUI Steam plugin launches games with
 `steam -gamepadui -steamos3 -steampal -steamdeck ... steam://rungameid/<appid>`. The image now has
-that `steam`, which does the five things above. Neither the client nor the runtime ships in the
-image, because a root slot is 2 GB and the two unpack to ~560 MB. They are installed into the
+that `steam`, which does the five things above. The client does not ship in the image, because a
+root slot is 2 GB and the client updates itself to ~3 GB. It is installed into the
 player's home from the shell's store (next section); `steam` itself downloads nothing for a client
 that is not there, and says where to install it.
 
@@ -65,8 +71,8 @@ that is not there, and says where to install it.
 
 Steam shows in the shell's Emulators screen as two entries, each with Download and its progress:
 
-- **Steam Client** (`/usr/lib/retroforge/steam-install install client`): the runtime and the
-  client's arm64 binaries (`steam-bootstrap --install`), the x86 guest for FEX (`steam-x86-guest
+- **Steam Client** (`/usr/lib/retroforge/steam-install install client`): the client's arm64
+  binaries (`steam-bootstrap --install`), the x86 guest for FEX (`steam-x86-guest
   fetch`, below), then the client's own update by Valve's updater (`steam -steamdeck -exitsteam`
   through the wrapper, with no display), so its first Open starts at once instead of downloading
   ~650 MB with nothing on screen. If that update does not finish, the install still succeeds and
@@ -85,11 +91,10 @@ themselves, so neither has Update, Check, Revert or Delete. Before Steam Client 
 is, the stub does the same for the plugin's steamcmd, and nothing is downloaded behind the player's
 back.
 
-No version of either is pinned. `/usr/share/retroforge/steam/steam.pin` names Valve's CHANNELS, and
-the bootstrap installs whatever Valve publishes on them when it downloads. Every download is still
-checked against a sha256 Valve publishes next to it. A fixed version went stale on its own: the
-client's package files are replaced on every release, and Valve prunes old runtime snapshots (the
-oldest left on 2026-10-15 was 3c.0.20260526).
+No version is pinned. `/usr/share/retroforge/steam/steam.pin` names Valve's client CHANNEL, and
+the bootstrap installs whatever Valve publishes on it when it downloads, still checked against the
+sha256 Valve publishes next to it. A fixed version went stale on its own: the client's package
+files are replaced on every release.
 
 - **Client** (`client_channel: steamdeck_stable`): only its arm64 binaries
   (`bins_linuxarm64_linuxarm64`, where `steamrtarm64/` comes from), with the file name and sha256
@@ -100,27 +105,19 @@ oldest left on 2026-10-15 was 3c.0.20260526).
   flag. `-steamdeck` keeps either `steamdeck_` line, but a line it does not accept gets repointed,
   which costs a ~631 MB client download on the device. That is why the channel is a `steamdeck_`
   line, and never the gated `-deckard` one (`steam.pin` has the details).
-- **Runtime** (`runtime_base: https://repo.steampowered.com/steamrt3c/images`,
-  `runtime_channel: latest-public-stable`): on every start, one small GET of
-  `<base>/latest-public-stable.txt` (5 s timeout) gives a snapshot id. If that snapshot is not
-  installed, its sha256 comes from `<base>/<id>/SHA256SUMS`, and
-  `<base>/<id>/steam-runtime-steamrt-arm64.tar.xz` (~52 MB) is downloaded, checked and unpacked to
-  `~/.local/share/retroforge/steam-runtime/<id>/` before Steam starts. The older snapshot is
-  removed after that, unless a running Steam still holds it (the wrapper keeps a shared `flock` on
-  its snapshot's folder); then a later start removes it. Offline, or when the update fails, the
-  newest installed snapshot is used and one line says so; with none installed, `steam` exits 1.
-  `RETROFORGE_STEAM_RUNTIME_SNAPSHOT=<id>`, or `runtime_snapshot:` in the pin, pins one snapshot.
+- **No Steam Runtime.** Earlier builds also downloaded Valve's steamrt3c runtime (~52 MB) to
+  `~/.local/share/retroforge/steam-runtime/` and ran the client in it; the bootstrap now removes
+  that folder when it finds it.
 
 Measured on 2026-10-16: `steam_client_steamdeck_stable_linuxarm64` and Valve's default line
 `steam_client_linuxarm64` (which the bootstrap read before) both serve build 1791918634
-(`steamdeck_publicbeta`: 1792192922). `latest-public-stable` and
-`latest-steam-client-general-availability` both point at runtime 3c.0.20260824.257593.
+(`steamdeck_publicbeta`: 1792192922).
 
 Valve's manifest has no arm64 bootstrapper: its one `IsBootstrapperPackage`, `steam_linuxarm64`,
 holds the i386 `ubuntu12_32/steam`. That is why the bootstrap starts from the binaries package.
 
-The channel bootstrap against Valve's servers, as a non-root user in a linux/arm64 container on
-2026-10-16: on a fresh home it resolved `latest-public-stable` to 3c.0.20260824.257593, checked
+The channel bootstrap against Valve's servers, when it still installed the runtime too, as a
+non-root user in a linux/arm64 container on 2026-10-16: on a fresh home it resolved `latest-public-stable` to 3c.0.20260824.257593, checked
 the tarball against that snapshot's SHA256SUMS and the client zip against the `steamdeck_stable`
 manifest, installed both (runtime 222 MB, client 325 MB) and wrote `package/beta` =
 `steamdeck_stable`, in 6 s. The next start, with the channel unchanged, took 160 ms and said
@@ -135,11 +132,15 @@ Checked in a linux/arm64 container on 2026-10-15, before the channel pins:
   X11 display".
 - On the second start it verified every executable checksum and found nothing to update.
 
-Not yet seen: the client signed in, a game launched by OGUI, the 42 restart from a real client,
-anything on hardware. Nor, here, the client's self-update after the channel bootstrap: that
-`-steamdeck` keeps `package/beta` on `steamdeck_stable` was measured upstream, not on this tree. A
-real move of `latest-public-stable` has only been exercised with file:// stand-ins
-(tests/test-steam.sh).
+On hardware (KONKR Pocket FIT, 2026-10-19), running on the host: Steam Client installed from
+Emulators, the client signed in and showed Big Picture, and Hades launched from it, under Proton
+11.0 (ARM64) in Steam Linux Runtime 4.0 - Arm64, with Turnip's swapchain on gamescope and the
+game's window focused. In the steamrt3c container the same launch had ended at once (`bwrap: execvp
+true`).
+
+Not yet seen: the 42 restart from a real client, an x86-only Linux game. Nor, here, that
+`-steamdeck` keeps `package/beta` on `steamdeck_stable` through a client update: that was measured
+upstream, not on this tree.
 
 ## steamcmd
 
@@ -283,10 +284,10 @@ squashfuse. Thunks stay off, as Steam leaves them (`ThunksDB_GL:0,ThunksDB_Vulka
 
 **The mount.** squashfuse mounts the image on `~/.local/share/retroforge/fex-guest/root`, as the
 player. `steam` exports `STEAM_COMPAT_GRAPHICS_PROVIDER=<that>/graphics_provider.json` only when
-that file is there, i.e. once the guest is mounted. pressure-vessel reads the variable for the
-client's own container too, and a file that does not exist yet aborts it (`opendir(...): No such
-file or directory`), so a client started during the first download never started (Air X,
-2026-10-18). The client's environment is fixed when it starts, so after the first download x86
+that file is there, i.e. once the guest is mounted. pressure-vessel reads the variable for every
+container it starts, and a file that does not exist yet aborts it (`opendir(...): No such file or
+directory`): while the client still ran in a container of its own, a client started during the
+first download never started (Air X, 2026-10-18). The client's environment is fixed when it starts, so after the first download x86
 games get the guest from the next start of Steam; `steam` says so on stderr.
 - **Mounted** by `start` when an image is there and nothing is mounted yet: a fixed pin's own image,
   else the current one. A mount is never made twice. A dead one (squashfuse killed: `ENOTCONN`) is
@@ -478,8 +479,8 @@ Not yet seen:
   keys `CompatToolMapping` by the internal name is how it works on x86; not watched on this client).
 - Whether a game in Steam Linux Runtime 4.0 (pressure-vessel) shows the tool's path in
   `/proc/<pid>/maps` as the check expects; if not, an update goes in while the game runs.
-- Whether the client's environment reaches games: the client runs in the steamrt3c container, games
-  in Steam Linux Runtime 4.0. `user_settings.py` covers that either way.
+- Whether the client's environment reaches games: the client runs on the host, games in Steam
+  Linux Runtime 4.0. `user_settings.py` covers that either way.
 - Steam fetching 4185400 on arm64, a game run with the tool, Sarek on an A610, the plugin toggle on a
   device, anything on hardware. A release after `cachyos-11.0-20261005-slr` is not ISA-scanned before
   players get it.

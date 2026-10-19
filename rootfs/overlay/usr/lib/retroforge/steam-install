@@ -15,9 +15,10 @@
 #
 # STEAM CLIENT (`client`, entry steam-client), three stages, each counted as its share of the bytes
 # (estimates, for the bar only):
-#   1. steam-bootstrap --install: the Steam Runtime (~52 MB) and the client's arm64 binaries
-#      (~110 MB), from the channels in /usr/share/retroforge/steam/steam.pin, each checked against a
-#      sha256 Valve publishes. Its "progress <bytes> <total>" lines are the progress;
+#   1. steam-bootstrap --install: the client's arm64 binaries (~110 MB), from the channel in
+#      /usr/share/retroforge/steam/steam.pin, checked against the sha256 Valve publishes. Its
+#      "progress <bytes> <total>" lines are the progress. No Steam Runtime: /usr/bin/steam runs the
+#      client raw on the host;
 #   2. steam-x86-guest fetch: the x86 guest Valve's FEX tool needs for x86 games (FEX's ArchLinux
 #      RootFS channel, ~1.3 GB, checked against the channel's XXH3), unless RETROFORGE_STEAM_X86_GUEST=0.
 #      Its "NN% of MMMM MB" lines are the progress;
@@ -28,8 +29,8 @@
 #      nowhere to show in the shell. If it does not finish, the install still succeeds, and the client
 #      finishes its update when it is first opened (as every first start did before this stage);
 #      stderr says so.
-# Installed = the client binary, a runtime with its `run`, and an x86 guest image (unless the guest
-# is turned off). The entry's Open starts Steam's UI (the Emulators page does that, not this).
+# Installed = the client binary and an x86 guest image (unless the guest is turned off). The entry's
+# Open starts Steam's UI (the Emulators page does that, not this).
 #
 # STEAM CLI (`cli`, entry steam-cli): Valve's arm64 steamcmd in ~/.steam/steamcmd, which the
 # OpenGamepadUI Steam plugin runs for the library, installs and updates. install-steamcmd puts the
@@ -46,7 +47,7 @@
 #
 # TEST SEAMS (tests/test-steam-install.sh): RETROFORGE_STEAM_BOOTSTRAP, RETROFORGE_STEAM_X86_GUEST_HELPER,
 # RETROFORGE_STEAM_WRAPPER, RETROFORGE_STEAMCMD_INSTALLER, RETROFORGE_STEAM_ROOT,
-# RETROFORGE_STEAM_RUNTIME_DIR, RETROFORGE_STEAM_X86_GUEST_DIR, RETROFORGE_STEAMCMD_DIR,
+# RETROFORGE_STEAM_X86_GUEST_DIR, RETROFORGE_STEAMCMD_DIR,
 # RETROFORGE_STEAM_UPDATE_TIMEOUT, RETROFORGE_STEAM_DONE_GRACE.
 import fcntl
 import json
@@ -61,7 +62,6 @@ import threading
 DATA = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "retroforge")
 STEAM_ROOT = os.environ.get("RETROFORGE_STEAM_ROOT") or os.path.join(DATA, "Steam")
-RUNTIME_HOME = os.environ.get("RETROFORGE_STEAM_RUNTIME_DIR") or os.path.join(DATA, "retroforge", "steam-runtime")
 GUEST = os.environ.get("RETROFORGE_STEAM_X86_GUEST_DIR") or os.path.join(DATA, "retroforge", "fex-guest")
 STEAMCMD = os.environ.get("RETROFORGE_STEAMCMD_DIR") or os.path.expanduser("~/.steam/steamcmd")
 BOOTSTRAP = os.environ.get("RETROFORGE_STEAM_BOOTSTRAP", "/usr/lib/retroforge/steam-bootstrap")
@@ -79,7 +79,7 @@ MB = 1 << 20
 EXIT_OK, EXIT_USAGE, EXIT_NET, EXIT_VERIFY, EXIT_LOCAL = 0, 2, 3, 4, 5
 
 # Download sizes for the bar (2026-10): what each stage fetches on a fresh card.
-CLIENT_STAGES = {"bootstrap": 162 * MB, "guest": 1296 * MB, "update": 652 * MB}
+CLIENT_STAGES = {"bootstrap": 110 * MB, "guest": 1296 * MB, "update": 652 * MB}
 CLI_STAGES = {"fetch": 4 * MB, "update": 40 * MB}
 
 UPDATE_LINE = re.compile(r"Downloading update \(([\d,]+) of ([\d,]+) KB\)")
@@ -110,26 +110,6 @@ def progress_path(entry):
 # What is installed
 
 
-def runtime_run():
-    """The `run` of an installed runtime snapshot, or None."""
-    try:
-        snapshots = sorted(os.listdir(RUNTIME_HOME), reverse=True)
-    except OSError:
-        return None
-    for snap in snapshots:
-        if snap.startswith("."):
-            continue
-        top = os.path.join(RUNTIME_HOME, snap)
-        try:
-            for sub in os.listdir(top):
-                run = os.path.join(top, sub, "run")
-                if os.path.isfile(run) and os.access(run, os.X_OK):
-                    return run
-        except OSError:
-            continue
-    return None
-
-
 def client_version():
     """The client's version from the manifest its updater last installed, "" before its first
     update, or None when the client is not there."""
@@ -158,7 +138,7 @@ def guest_installed():
 def client_installed():
     """steam-client's installed version text, or None while any part of it is missing."""
     version = client_version()
-    if version is None or runtime_run() is None or (guest_on() and not guest_installed()):
+    if version is None or (guest_on() and not guest_installed()):
         return None
     return version or "installed"
 
@@ -283,7 +263,7 @@ def failure_code(tail, default=EXIT_NET):
 def install_client():
     prog = Progress("steam-client", CLIENT_STAGES)
     try:
-        # 1. runtime + client binaries
+        # 1. the client binaries
         seen = {"finished": 0, "total": 0}
 
         def on_bootstrap(line):
@@ -300,7 +280,7 @@ def install_client():
         env = dict(os.environ, RETROFORGE_STEAM_PROGRESS="1")
         code, tail = run_stage([BOOTSTRAP, "--install"], on_bootstrap, env=env)
         if code != 0:
-            raise Fail(failure_code(tail), "the Steam Runtime or the client could not be installed")
+            raise Fail(failure_code(tail), "the client could not be installed")
         prog.set("bootstrap", 1.0)
 
         # 2. the x86 guest
