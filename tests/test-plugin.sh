@@ -85,6 +85,14 @@ grep -q '^extends OSPlatform$' "$SRC/retroforge_os.gd" && ok "retroforge_os.gd e
 grep -q 'load(plugin_base.path_join("boxart_retroforge.gd"))' "$SRC/plugin.gd" && grep -q 'add_boxart(art)' "$SRC/plugin.gd" \
   && grep -q '^	provider_id = "retroforge"$' "$SRC/boxart_retroforge.gd" \
   && ok "the art provider is added, with an id (BoxArtManager refuses an empty one)" || bad "boxart_retroforge.gd is not added by plugin.gd, or has no provider_id"
+# A download's progress poll outlives the page's rows (the player leaves Emulators and comes back):
+# it finds the row by emulator id on every tick. Bound to a row, every tick errored on the freed
+# row and the shown progress froze, and an install looked stuck (HW, Pocket FIT, 2026-10-19).
+grep -q '_show_progress_file.bind(str(emu.get("progress")), id)' "$SRC/emulators_page.gd" \
+  && grep -q '_show_progress.bind(part, int(emu.get("size", 0)), id)' "$SRC/emulators_page.gd" \
+  && ! grep -qE '_show_progress(_file)?\.bind\(.*, row\)' "$SRC/emulators_page.gd" \
+  && ok "the download progress poll finds its row by emulator id, not a row the page may have freed" \
+  || bad "emulators_page.gd binds a row to its progress poll: it freezes once the page rebuilds its rows"
 # The installed Steam games' library id is spelled in three files: a mismatch leaves the Steam tab
 # empty (plugin.gd) or its cards without art (boxart_retroforge.gd).
 [ "$(grep -ho '"retroforge-steam"' "$SRC/library_steam.gd" "$SRC/plugin.gd" "$SRC/boxart_retroforge.gd" | wc -l)" -eq 3 ] \

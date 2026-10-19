@@ -60,6 +60,12 @@ var logger := Log.get_logger("RetroForgeEmulators", Log.LEVEL.INFO)
 var _rows: VBoxContainer
 var _focus_group: FocusGroup
 var _busy := {}  # emulator id -> true while an install or remove runs
+## Emulator id -> the row showing its running download's progress. The page builds new rows when the
+## player comes back to it (_reload), so the poll looks the row up on every tick: a row it was bound
+## to is freed by then, and Godot refuses a freed object for a typed argument before the function
+## can check it ("Cannot convert argument 2 from Object to Object", every tick, the shown progress
+## frozen: HW, Pocket FIT, 2026-10-19).
+var _progress_rows := {}
 var _inside := false  # this page's state is the current one (it has the focus)
 var _generation := 0  # refresh() calls: only the latest one builds rows
 var _checks := {}  # emulator id -> its `retroforge-emu check` answer ({"latest", "error"})
@@ -292,6 +298,8 @@ func _add_action_row(id: String, name_text: String, emu: Dictionary, spec: Dicti
 		row.button_up.connect(_check.bind(id, name_text, row))
 	else:
 		row.button_up.connect(_install.bind(id, name_text, args, emu, row))
+		if _busy.has(id) and _progress_row(id) == null:
+			_progress_rows[id] = row
 	_rows.add_child(row)
 	if _busy.has(id):
 		row.disabled = true
@@ -304,6 +312,7 @@ func _install(id: String, name_text: String, args: Array, emu: Dictionary, row: 
 	if _busy.has(id):
 		return
 	_busy[id] = true
+	_progress_rows[id] = row
 	row.disabled = true
 	row.description = "Downloading..."
 	var before = emu.get("installed")
@@ -322,13 +331,14 @@ func _install(id: String, name_text: String, args: Array, emu: Dictionary, row: 
 	poll.wait_time = PROGRESS_POLL
 	add_child(poll)
 	if emu.get("progress") != null:  # Steam: steam-install writes the percentage to a file
-		poll.timeout.connect(_show_progress_file.bind(str(emu.get("progress")), row))
+		poll.timeout.connect(_show_progress_file.bind(str(emu.get("progress")), id))
 	else:
-		poll.timeout.connect(_show_progress.bind(part, int(emu.get("size", 0)), row))
+		poll.timeout.connect(_show_progress.bind(part, int(emu.get("size", 0)), id))
 	poll.start()
 	var code := await cmd.finished as int
 	poll.queue_free()
 	_busy.erase(id)
+	_progress_rows.erase(id)
 	if code == 0 and before != null and _installed(id) == before:
 		_notify(name_text + " is up to date")
 	elif code == 0:
@@ -374,16 +384,24 @@ func _installed(id: String) -> Variant:
 	return _list().get(id, {}).get("installed")
 
 
-func _show_progress(part: String, size: int, row: Control) -> void:
-	if size <= 0 or not is_instance_valid(row):
+## The row now showing `id`'s download, or null (the page is not shown, or is being rebuilt).
+func _progress_row(id: String) -> Control:
+	var row = _progress_rows.get(id)
+	return row if is_instance_valid(row) else null
+
+
+func _show_progress(part: String, size: int, id: String) -> void:
+	var row := _progress_row(id)
+	if size <= 0 or not row:
 		return
 	var f := FileAccess.open(part, FileAccess.READ)
 	if f:
 		row.description = "Downloading %d%%" % mini(99, f.get_length() * 100 / size)
 
 
-func _show_progress_file(path: String, row: Control) -> void:
-	if not is_instance_valid(row):
+func _show_progress_file(path: String, id: String) -> void:
+	var row := _progress_row(id)
+	if not row:
 		return
 	var f := FileAccess.open(path, FileAccess.READ)
 	if f:
