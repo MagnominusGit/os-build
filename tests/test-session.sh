@@ -158,6 +158,140 @@ else
   bad "0002 does not rename custom_maximum_size in both dialogs and scenes"
 fi
 
+# 0018: joining Wi-Fi saved a mistyped password that the UI could neither show nor undo (HW, Air X,
+# 2026-10-18). Each line below is one of the faults it fixes; the profile helper is run further down.
+P18="$PKG/patches/0018-network-one-working-profile-connected-means-activated-forget.patch"
+# One file of the tree as 0018 leaves it, hunk by hunk (context and added lines; a new file whole).
+newside() { python3 - "$P18" "$1" <<'PY'
+import sys
+out, on = [], False
+for line in open(sys.argv[1], encoding="utf-8"):
+    if line.startswith("diff --git "):
+        on = line.rstrip().endswith("b/" + sys.argv[2])
+    elif on and line[:1] in " +" and not line.startswith("+++"):
+        out.append(line[1:])
+sys.stdout.write("".join(out))
+PY
+}
+MENU="$(newside core/ui/common/settings/network_settings_menu.gd)"
+TREE="$(newside core/ui/components/wifi_network_tree.gd)"
+printf '%s\n' "$MENU" | python3 -c '
+import re, sys
+s = sys.stdin.read()
+body = lambda f: re.search(r"^func %s\(.*?(?=^func |\Z)" % f, s, re.S | re.M).group(0)
+close, challenge = body("_close_dialog"), body("_on_wifi_challenge")
+ok = "password_input.text = \"\"" in close and "secret = true" in close and challenge.split("\n")[1].strip() == "_close_dialog()"
+sys.exit(0 if ok else 1)' \
+  && ok "0018: every password dialog opens on an empty, hidden field (the last one's text was resubmitted)" \
+  || bad "0018: the password dialog no longer starts from an empty field"
+printf '%s\n' "$MENU" | grep -q 'pressed.disconnect(_pending_submit)' \
+  && ok "0018: a dialog left unsubmitted drops its submit handler (the next Submit joined that network too)" \
+  || bad "0018: stale submit handlers are not disconnected"
+printf '%s\n' "$MENU" | grep -q '"Show password"' && printf '%s\n' "$MENU" | grep -q 'secret = not on' \
+  && ok "0018: Show password reveals what was typed" || bad "0018: no Show password toggle in the dialog"
+printf '%s\n' "$MENU" | grep -q '"Forget network"' && printf '%s\n' "$MENU" | grep -q 'wifi_tree.forget(' \
+  && ok "0018: a saved network can be forgotten from its dialog" || bad "0018: no Forget network"
+printf '%s\n' "$MENU" | grep -q 'back_watcher.set_process_input(false)' \
+  && ok "0018: B closes the dialog instead of leaving the page" || bad "0018: B still leaves the page from the dialog"
+printf '%s\n' "$TREE" | grep -q 'state == NetworkActiveConnection.NM_ACTIVE_CONNECTION_STATE_ACTIVATED' \
+  && ok "0018: a join succeeds on its own activation's state, not the device's previous one" \
+  || bad "0018: a join no longer waits for its activation to be ACTIVATED"
+printf '%s\n' "$TREE" | python3 -c '
+import re, sys
+s = sys.stdin.read()
+f = re.search(r"^static func status_text\(.*?(?=^\S)", s, re.S | re.M).group(0)
+sys.exit(0 if f.count("\"Connected\"") == 1 and "== NetworkDevice.NM_DEVICE_STATE_ACTIVATED:\n\t\treturn \"Connected\"" in f else 1)' \
+  && grep -q '^-			item.set_text(4, "Connected")' "$P18" \
+  && ok "0018: a row says Connected only for an activated device (not for an access point still tried)" \
+  || bad "0018: Connected is shown for something other than an activated device"
+printf '%s\n' "$TREE" | grep -q 'NetworkProfiles.stale_after_join(saved_before, saved_now, failure.is_empty())' \
+  && ok "0018: a join keeps one profile per network (the new one once it works, else the old ones)" \
+  || bad "0018: joins pile up profiles again"
+newside core/ui/card_ui/ootbe/network_select.gd | grep -q '^	wifi_pass_box.text = ""' \
+  && ok "0018: the first-boot password popup opens empty too" || bad "0018: the first-boot popup keeps the last text"
+newside core/systems/network/network_manager.gd | grep -q 'fresh.take_over_path(instance.resource_path)' \
+  && ok "0018: a core instance that lost the Wi-Fi device is replaced (after a NetworkManager restart)" \
+  || bad "0018: after a NetworkManager restart the Wi-Fi settings find no device again"
+
+# -------------------------------------------------------------------------------------------------
+# network_profiles.gd, as 0018 ships it, against a fake nmcli. It has no OGUI types, so a stock
+# Godot runs it (RETROFORGE_GODOT=<godot 4 binary>, or godot on PATH; skipped without).
+CASE="Wi-Fi saved profiles (OGUI 0018)"
+GODOT="${RETROFORGE_GODOT:-$(command -v godot || true)}"
+if [ -z "$GODOT" ]; then
+  printf '  skip %s -- no Godot (set RETROFORGE_GODOT to a Godot 4 binary)\n' "$CASE"
+else
+  T16="$(mktemp -d)" && [ -d "$T16" ] || { echo "mktemp -d failed" >&2; exit 1; }
+  newside core/systems/network/network_profiles.gd > "$T16/network_profiles.gd"
+  # Profiles are "uuid|type|ssid" lines in $T16/nm; every call is logged to $T16/calls.
+  cat > "$T16/nmcli" <<'SH'
+#!/bin/bash
+D="$(dirname "$0")"
+printf '%s\n' "$*" >> "$D/calls"
+[ -e "$D/fail" ] && exit 8
+case "$*" in
+  "-t -f UUID,TYPE connection show") while IFS='|' read -r u t s; do echo "$u:$t"; done < "$D/nm" ;;
+  "-e no -g 802-11-wireless.ssid connection show uuid "*)
+    u="${!#}"; line="$(grep "^$u|" "$D/nm")" || exit 10; printf '%s\n' "${line#*|*|}" ;;
+  "connection delete uuid "*)
+    u="${!#}"; grep -q "^$u|" "$D/nm" || exit 10; grep -v "^$u|" "$D/nm" > "$D/nm.new"; mv "$D/nm.new" "$D/nm" ;;
+  *) exit 2 ;;
+esac
+SH
+  chmod +x "$T16/nmcli"
+  printf '%s\n' 'u1|802-11-wireless|home' 'u2|802-3-ethernet|home' 'u3|802-11-wireless|home2' \
+    'u4|802-11-wireless|home' 'u5|802-11-wireless|a:b\c' 'u6|802-11-wireless|cafe ' 'u7|802-11-wireless|cafe' > "$T16/nm"
+  cat > "$T16/profiles_test.gd" <<GD
+extends SceneTree
+
+const P := preload("$T16/network_profiles.gd")
+var failed := 0
+
+func check(what: String, got, want) -> void:
+	if got == want:
+		print("  ok   $CASE -- ", what)
+	else:
+		failed += 1
+		print("  FAIL $CASE -- ", what, ": got ", got, ", want ", want)
+
+func calls() -> int:
+	return FileAccess.get_file_as_string("$T16/calls").count("\n")
+
+func _init() -> void:
+	P.nmcli = "$T16/nmcli"
+	check("every Wi-Fi profile of the network, and only those", P.uuids_for("home"), PackedStringArray(["u1", "u4"]))
+	check("SSIDs are compared as they are (':' and '\\\\' unescaped, spaces kept)",
+		[P.uuids_for("a:b\\\\c"), P.uuids_for("cafe "), P.uuids_for("cafe")],
+		[PackedStringArray(["u5"]), PackedStringArray(["u6"]), PackedStringArray(["u7"])])
+	var before := calls()
+	check("no SSID, no profile and no nmcli call", [P.uuids_for(""), calls() - before], [PackedStringArray(), 0])
+	check("delete counts what NetworkManager deleted", P.delete(PackedStringArray(["u1", "nope"])), 1)
+	check("...and the profile is gone", P.uuids_for("home"), PackedStringArray(["u4"]))
+	check("after a join that worked, the profiles saved before it go",
+		P.stale_after_join(PackedStringArray(["old"]), PackedStringArray(["old", "new"]), true), PackedStringArray(["old"]))
+	check("after a join that failed, the profile it added goes",
+		P.stale_after_join(PackedStringArray(["old"]), PackedStringArray(["old", "new"]), false), PackedStringArray(["new"]))
+	check("a first join that worked keeps its profile",
+		P.stale_after_join(PackedStringArray(), PackedStringArray(["new"]), true), PackedStringArray())
+	DirAccess.open("$T16").make_dir("fail")
+	check("nmcli failing: nothing found, nothing deleted", [P.uuids_for("home"), P.delete(PackedStringArray(["u4"]))], [PackedStringArray(), 0])
+	quit(1 if failed else 0)
+GD
+  out="$(XDG_CONFIG_HOME="$T16/config" timeout 60 "$GODOT" --headless --script "$T16/profiles_test.gd" 2>&1)"; rc=$?
+  printf '%s\n' "$out" | grep -E '^  (ok|FAIL) '
+  n_ok="$(printf '%s\n' "$out" | grep -c '^  ok ')"; n_bad="$(printf '%s\n' "$out" | grep -c '^  FAIL ')"
+  PASS=$((PASS + n_ok)); FAIL=$((FAIL + n_bad))
+  if [ "$rc" -ne 0 ] && [ "$n_bad" -eq 0 ]; then
+    bad "Godot failed (rc $rc): $(printf '%s\n' "$out" | grep -E 'ERROR|error' | head -3)"
+  fi
+  # Godot exits 0 when a preloaded script does not compile: the checks using it just never run.
+  if printf '%s\n' "$out" | grep -q 'SCRIPT ERROR'; then
+    bad "a script did not compile: $(printf '%s\n' "$out" | grep 'SCRIPT ERROR' | head -3)"
+  fi
+  [ "$n_ok" -eq 9 ] || bad "ran $n_ok of 9 checks"
+  rm -rf "$T16"
+fi
+
 # =================================================================================================
 CASE="no self-updater on a RAUC root"
 for row in usr/lib/systemd/user/systemd-sysext-updater.service \

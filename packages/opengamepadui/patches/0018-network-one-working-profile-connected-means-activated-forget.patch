@@ -1,0 +1,726 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Sun, 18 Oct 2026 10:00:00 +0200
+Subject: [PATCH] fix(network): a join keeps one working profile, Connected
+ means activated, networks can be forgotten
+
+Joining a network from Settings > Network saved a password one character
+longer than the real one, and nothing in the UI could undo it (HW, MANGMI
+Air X, 2026-10-18). What NetworkManager stored was exactly what the dialog
+held: the dialog still held those 15 characters hours later. Faults:
+
+ - The password field was never cleared. It kept what was typed for the
+   last dialog, behind dots, so a mistyped password was submitted again on
+   every later try; and nothing showed what had been typed.
+ - Every join added a profile (the core's connect() always calls
+   AddConnection) next to the ones already saved, so a corrected password
+   sat beside the wrong one, and a failed join left its profile for
+   NetworkManager to retry in the background. Nothing could forget a
+   network.
+ - "Connected" was shown for the access point NetworkManager was only
+   trying (it becomes the active one at the first association attempt),
+   and a join could read the previous connection's ACTIVATED right after
+   the call.
+ - A dialog left without submitting kept its one-shot submit handler, so
+   the next Submit also joined that earlier network with the new password.
+ - After NetworkManager restarted, the core instance had missed the
+   devices exported in its first moments (it knew only the Wi-Fi P2P
+   device), and every join silently did nothing until OGUI restarted.
+
+The dialog now opens empty and hidden, with a Show password toggle, B
+closes it, and a saved network can be forgotten (all its profiles are
+deleted, through nmcli: the core has no call for it). A join is followed
+by its own activation state and keeps exactly one profile: the new one
+replaces the old ones once it works, and is deleted if it does not. The
+status column says Connected only for an activated device. The
+NetworkManager node replaces an instance that lost its Wi-Fi device. The
+first-boot network screen gets the same field and submit fixes.
+---
+ core/systems/network/network_manager.gd       |  49 +++-
+ core/systems/network/network_profiles.gd      |  61 +++++
+ core/systems/network/network_profiles.gd.uid  |   1 +
+ core/ui/card_ui/ootbe/network_select.gd       |  30 ++-
+ .../common/settings/network_settings_menu.gd  |  99 +++++++-
+ core/ui/components/wifi_network_tree.gd       | 232 +++++++++++++-----
+ 6 files changed, 394 insertions(+), 78 deletions(-)
+ create mode 100644 core/systems/network/network_profiles.gd
+ create mode 100644 core/systems/network/network_profiles.gd.uid
+
+diff --git a/core/systems/network/network_manager.gd b/core/systems/network/network_manager.gd
+index 6dab85b..7e12e6d 100644
+--- a/core/systems/network/network_manager.gd
++++ b/core/systems/network/network_manager.gd
+@@ -6,6 +6,13 @@ class_name NetworkManager
+ ##
+ ## The [NetworkManager] class is responsible for loading a [NetworkManagerInstance] and
+ ## calling its 'process()' method each frame.
++##
++## The instance learns NetworkManager's devices when it is created and then follows its signals,
++## which miss whatever a restarted NetworkManager exports in its first moments: after a restart it
++## knew only the Wi-Fi P2P device, so the Wi-Fi settings logged "No wifi devices found" and every
++## join silently did nothing until OGUI restarted (HW, Air X, 2026-10-18). When the instance no
++## longer knows the Wi-Fi device it knew before, a new one takes over the resource path (code that
++## loads it again gets the new one). The replaced instance is still processed: its signals queue.
+ 
+ const bar_0 := preload("res://assets/ui/icons/wifi-none.svg")
+ const bar_1 := preload("res://assets/ui/icons/wifi-low.svg")
+@@ -16,6 +23,15 @@ const ethernet := preload("res://assets/ui/icons/mdi--ethernet.svg")
+ 
+ @export var instance: NetworkManagerInstance = load("res://core/systems/network/network_manager.tres") as NetworkManagerInstance
+ 
++## Seconds between two looks for an instance that lost its Wi-Fi device.
++const RECHECK_SECS := 5.0
++## New instances tried, one per look, before a vanished Wi-Fi device counts as really gone.
++const MAX_RETRIES := 6
++var _replaced: Array[NetworkManagerInstance] = []
++var _since_check := 0.0
++var _had_wifi := false
++var _retries := 0
++
+ 
+ ## Returns the texture reflecting the given wifi strength
+ static func get_strength_texture(strength: int) -> Texture2D:
+@@ -28,7 +44,38 @@ static func get_strength_texture(strength: int) -> Texture2D:
+ 	return bar_0
+ 
+ 
+-func _process(_delta: float) -> void:
++func _process(delta: float) -> void:
+ 	if not instance:
+ 		return
+ 	instance.process()
++	for old in _replaced:
++		old.process()
++	_since_check += delta
++	if _since_check < RECHECK_SECS:
++		return
++	_since_check = 0.0
++	if has_wifi(instance) or not _had_wifi:
++		_had_wifi = has_wifi(instance)
++		return
++	if not instance.is_running():
++		return  # stopped: look again once it is back
++	var fresh := NetworkManagerInstance.new()
++	if not has_wifi(fresh):
++		# Still starting up, or the device is really gone: give up after a few looks.
++		_retries += 1
++		if _retries >= MAX_RETRIES:
++			_had_wifi = false
++			_retries = 0
++		return
++	_retries = 0
++	fresh.take_over_path(instance.resource_path)
++	_replaced.append(instance)
++	instance = fresh
++
++
++## Whether the given instance knows a Wi-Fi device.
++static func has_wifi(manager: NetworkManagerInstance) -> bool:
++	for device in manager.get_devices():
++		if device.wireless != null:
++			return true
++	return false
+diff --git a/core/systems/network/network_profiles.gd b/core/systems/network/network_profiles.gd
+new file mode 100644
+index 0000000..3122494
+--- /dev/null
++++ b/core/systems/network/network_profiles.gd
+@@ -0,0 +1,61 @@
++extends RefCounted
++
++## NetworkManager's saved Wi-Fi profiles for one SSID, through nmcli.
++##
++## The core's NetworkAccessPoint.connect() adds a new profile on every join, and nothing in the
++## core lists or deletes profiles. So a second join with a corrected password left the first
++## profile, wrong password and all, next to the new one, and a network could never be forgotten
++## from the UI. NetworkManager authorizes these calls for the active local session, as it does the
++## core's AddConnection.
++##
++## Every call blocks on nmcli (each bounded by TIMEOUT): run them off the main thread.
++
++## The nmcli to run (tests point this at a fake).
++static var nmcli := "nmcli"
++## Seconds before an nmcli call is given up on (NetworkManager not answering).
++const TIMEOUT := "10"
++
++
++## UUIDs of the saved Wi-Fi profiles for the given SSID.
++static func uuids_for(ssid: String) -> PackedStringArray:
++	var found := PackedStringArray()
++	if ssid.is_empty():
++		return found
++	var out := []
++	if _run(["-t", "-f", "UUID,TYPE", "connection", "show"], out) != 0:
++		return found
++	for line in (out[0] as String).split("\n", false):
++		var fields := line.split(":")
++		if fields.size() != 2 or fields[1] != "802-11-wireless":
++			continue
++		# -e no: the SSID as it is, not with ':' and '\' escaped.
++		var value := []
++		if _run(["-e", "no", "-g", "802-11-wireless.ssid", "connection", "show", "uuid", fields[0]], value) != 0:
++			continue
++		if (value[0] as String).trim_suffix("\n") == ssid:
++			found.append(fields[0])
++	return found
++
++
++## The profiles to delete after a join, from the SSID's profiles before and after it: once it
++## worked, the ones saved before it (the new password replaces them); if it did not, the one it
++## added (a mistyped password is not kept, nor retried by NetworkManager in the background).
++static func stale_after_join(saved_before: PackedStringArray, saved_now: PackedStringArray, joined: bool) -> PackedStringArray:
++	var stale := PackedStringArray()
++	for uuid in saved_now:
++		if (uuid in saved_before) == joined:
++			stale.append(uuid)
++	return stale
++
++
++## Deletes the given profiles. Returns how many NetworkManager deleted.
++static func delete(uuids: PackedStringArray) -> int:
++	var deleted := 0
++	for uuid in uuids:
++		if _run(["connection", "delete", "uuid", uuid], []) == 0:
++			deleted += 1
++	return deleted
++
++
++static func _run(args: Array, out: Array) -> int:
++	return OS.execute("timeout", [TIMEOUT, nmcli] + args, out)
+diff --git a/core/systems/network/network_profiles.gd.uid b/core/systems/network/network_profiles.gd.uid
+new file mode 100644
+index 0000000..a78cca0
+--- /dev/null
++++ b/core/systems/network/network_profiles.gd.uid
+@@ -0,0 +1 @@
++uid://ddiubjm11sxka
+diff --git a/core/ui/card_ui/ootbe/network_select.gd b/core/ui/card_ui/ootbe/network_select.gd
+index c87c6bb..98cacfc 100644
+--- a/core/ui/card_ui/ootbe/network_select.gd
++++ b/core/ui/card_ui/ootbe/network_select.gd
+@@ -1,5 +1,7 @@
+ extends MarginContainer
+ 
++const toggle_scene := preload("res://core/ui/components/toggle.tscn")
++
+ var network_manager := load("res://core/systems/network/network_manager.tres") as NetworkManagerInstance
+ var state_machine := load("res://assets/state/state_machines/first_boot_state_machine.tres") as StateMachine
+ var no_networking_state := load("res://assets/state/states/first_boot_finished.tres") as State
+@@ -7,6 +9,9 @@ var network_state_machine := load("res://assets/state/state_machines/first_boot_
+ var password_popup_state := load("res://assets/state/states/first_boot_network_password.tres") as State
+ 
+ var logger := Log.get_logger("NetworkSelect")
++## Submit handler of the password popup: one at a time (see network_settings_menu.gd).
++var _pending_submit: Callable
++var _show_password: Toggle
+ 
+ @onready var next_button := $%NextButton as CardButton
+ @onready var wifi_tree := $%WifiNetworkTree as WifiNetworkTree
+@@ -19,6 +24,14 @@ func _ready() -> void:
+ 	next_button.button_up.connect(_on_next_button)
+ 	wifi_tree.challenge_required.connect(_on_challenge_required)
+ 
++	# The dots hid a mistyped password with no way to check it: a toggle shows what was typed.
++	var box := wifi_pass_box.get_parent() as Control
++	_show_password = toggle_scene.instantiate() as Toggle
++	_show_password.text = "Show password"
++	box.add_child(_show_password)
++	box.move_child(_show_password, wifi_pass_box.get_index() + 1)
++	_show_password.toggled.connect(func(on: bool): wifi_pass_box.secret = not on)
++
+ 
+ func _on_next_button() -> void:
+ 	# Determine the next state to go to
+@@ -36,13 +49,22 @@ func _on_next_button() -> void:
+ # If a wifi password is needed, this method will be called. The callback
+ # function should be called with the password entered by the user.
+ func _on_challenge_required(callback: Callable) -> void:
++	# A fresh, hidden field for every popup: what was typed for the last one stayed in it, so a
++	# mistyped password was submitted again on every later try.
++	wifi_pass_box.text = ""
++	wifi_pass_box.secret = true
++	_show_password.button_pressed = false
++
+ 	# Show the password popup prompt and focus it
+ 	network_state_machine.set_state([password_popup_state])
+ 
+ 	# Connect to the submit button so we can invoke the callback
+ 	# with the entered password
+-	var on_submit := func():
++	if _pending_submit.is_valid() and wifi_pass_button.button_up.is_connected(_pending_submit):
++		wifi_pass_button.button_up.disconnect(_pending_submit)
++	_pending_submit = func():
+ 		# Execute the challenge callback with the entered password.
+-		callback.call(wifi_pass_box.text)
+-		
+-	wifi_pass_button.button_up.connect(on_submit, CONNECT_ONE_SHOT)
++		var password := wifi_pass_box.text as String
++		wifi_pass_box.text = ""
++		callback.call(password)
++	wifi_pass_button.button_up.connect(_pending_submit, CONNECT_ONE_SHOT)
+diff --git a/core/ui/common/settings/network_settings_menu.gd b/core/ui/common/settings/network_settings_menu.gd
+index 1788bd4..1901f79 100644
+--- a/core/ui/common/settings/network_settings_menu.gd
++++ b/core/ui/common/settings/network_settings_menu.gd
+@@ -1,8 +1,19 @@
+ extends Control
+ 
++const toggle_scene := preload("res://core/ui/components/toggle.tscn")
++const button_scene := preload("res://core/ui/components/card_button.tscn")
++
+ var network_manager := load("res://core/systems/network/network_manager.tres") as NetworkManagerInstance
+ 
+ var connecting := false
++## Submit handler of the open password dialog. One at a time: a dialog left without submitting kept
++## its handler connected, and the next Submit ran it as well -- joining that earlier network with
++## the password typed for the new one.
++var _pending_submit: Callable
++## The network the open password dialog is for.
++var _dialog_ssid := ""
++var _show_password: Toggle
++var _forget_button: CardButton
+ @onready var no_net_label := $%NoNetworkLabel
+ @onready var wifi_tree := $%WifiNetworkTree as WifiNetworkTree
+ @onready var wireless_toggle := $%WirelessEnableToggle as Toggle
+@@ -13,6 +24,8 @@ var connecting := false
+ @onready var ip_text := $%IPAddressText as SelectableText
+ @onready var mask_text := $%SubnetText as SelectableText
+ @onready var gateway_text := $%GatewayText as SelectableText
++## B leaves the page; while the dialog is open it closes the dialog instead (see _input).
++@onready var back_watcher := get_node_or_null("InputWatcher")
+ 
+ 
+ # Called when the node enters the scene tree for the first time.
+@@ -54,6 +67,29 @@ func _ready() -> void:
+ 	password_context.submitted.connect(on_submit)
+ 	password_context.close_on_submit = true
+ 
++	# The dots hid a mistyped password with no way to check it: a toggle shows what was typed.
++	var box := password_input.get_parent() as Control
++	_show_password = toggle_scene.instantiate() as Toggle
++	_show_password.text = "Show password"
++	box.add_child(_show_password)
++	box.move_child(_show_password, password_input.get_index() + 1)
++	_show_password.toggled.connect(func(on: bool): password_input.secret = not on)
++	# A saved network can be forgotten: all of NetworkManager's profiles for it are deleted.
++	_forget_button = button_scene.instantiate() as CardButton
++	_forget_button.text = "Forget network"
++	_forget_button.visible = false
++	box.add_child(_forget_button)
++	_forget_button.pressed.connect(_on_forget)
++	# The D-pad stays in the dialog. The network list behind it was the nearest control below the
++	# field, so Down left the dialog (and A on the list opened it again, emptied).
++	var column: Array[Control] = [password_input.line_edit, _show_password, password_button, _forget_button]
++	for i in column.size():
++		var control := column[i]
++		control.focus_neighbor_top = control.get_path_to(column[maxi(i - 1, 0)])
++		control.focus_neighbor_bottom = control.get_path_to(column[mini(i + 1, column.size() - 1)])
++		control.focus_neighbor_left = control.get_path_to(control)
++		control.focus_neighbor_right = control.get_path_to(control)
++
+ 
+ func _on_connection_changed(connection: NetworkActiveConnection) -> void:
+ 	await get_tree().create_timer(3.0).timeout
+@@ -92,25 +128,72 @@ func _on_connection_changed(connection: NetworkActiveConnection) -> void:
+ 
+ 
+ func _on_visible_changed() -> void:
++	# Loaded again: replaced after a NetworkManager restart (see network_manager.gd).
++	network_manager = load("res://core/systems/network/network_manager.tres") as NetworkManagerInstance
+ 	_on_connection_changed(network_manager.primary_connection)
+ 	wifi_tree.refresh_networks()
+-	password_popup.visible = false
++	_close_dialog()
+ 
+ 
+ func _on_wifi_challenge(callback: Callable) -> void:
++	_close_dialog()
++	_dialog_ssid = wifi_tree.challenge_ssid
++	# _close_dialog() left an empty, hidden field: what was typed for the last dialog stayed in it,
++	# so a mistyped password was submitted again on every later try.
+ 	password_popup.visible = true
++	if back_watcher:
++		back_watcher.set_process_input(false)
+ 	password_input.grab_focus.call_deferred()
+ 
+-	var on_pass_submit := func():
++	_pending_submit = func():
+ 		connecting = true
+-		password_popup.visible = false
+-		wifi_tree.grab_focus.call_deferred()
+ 		var password := password_input.text as String
++		_close_dialog()
++		_close_keyboard.call_deferred()
++		wifi_tree.grab_focus.call_deferred()
+ 		callback.call(password)
+-	password_button.pressed.connect(on_pass_submit, CONNECT_ONE_SHOT)
++	password_button.pressed.connect(_pending_submit, CONNECT_ONE_SHOT)
++
++	var ssid := _dialog_ssid
++	var saved: bool = await wifi_tree.is_saved(ssid)
++	if password_popup.visible and _dialog_ssid == ssid:
++		_forget_button.visible = saved
++
++
++func _on_forget() -> void:
++	var ssid := _dialog_ssid
++	_close_dialog()
++	_close_keyboard()
++	wifi_tree.grab_focus.call_deferred()
++	await wifi_tree.forget(ssid)
++	wifi_tree.refresh_networks()
++
++
++## Hides the password dialog, dropping what was typed and its pending submit.
++func _close_dialog() -> void:
++	if _pending_submit.is_valid() and password_button.pressed.is_connected(_pending_submit):
++		password_button.pressed.disconnect(_pending_submit)
++	_pending_submit = Callable()
++	password_input.text = ""
++	password_input.secret = true
++	if _show_password:
++		_show_password.button_pressed = false
++	if _forget_button:
++		_forget_button.visible = false
++	password_popup.visible = false
++	if back_watcher:
++		back_watcher.set_process_input(is_visible_in_tree())
+ 
+ 
+-# Intercept back input when the password dialog is open
++## Closes the on-screen keyboard if it still types into the (now hidden) password field. Deferred
++## after a submit: a submit from the keyboard's Enter closes it itself once its handlers return.
++func _close_keyboard() -> void:
++	if password_input.keyboard.context == password_input.keyboard_context:
++		password_input.keyboard.close()
++
++
++# B closes the password dialog, one step at a time: the keyboard first (it closes itself on B and
++# consumes it), then the dialog.
+ func _input(event: InputEvent) -> void:
+ 	if not visible:
+ 		return
+@@ -118,5 +201,7 @@ func _input(event: InputEvent) -> void:
+ 		return
+ 	if not event.is_action("ogui_east"):
+ 		return
+-	password_input.grab_focus.call_deferred()
+ 	get_viewport().set_input_as_handled()
++	if event.is_released() and password_input.keyboard.context != password_input.keyboard_context:
++		_close_dialog()
++		wifi_tree.grab_focus.call_deferred()
+diff --git a/core/ui/components/wifi_network_tree.gd b/core/ui/components/wifi_network_tree.gd
+index a3a70d4..c710ffb 100644
+--- a/core/ui/components/wifi_network_tree.gd
++++ b/core/ui/components/wifi_network_tree.gd
+@@ -1,7 +1,14 @@
+ extends Tree
+ class_name WifiNetworkTree
+ 
+-var network_manager := load("res://core/systems/network/network_manager.tres") as NetworkManagerInstance
++const NetworkProfiles := preload("res://core/systems/network/network_profiles.gd")
++const NETWORK_MANAGER_PATH := "res://core/systems/network/network_manager.tres"
++## Half-second polls of a join before it counts as failed (SAE retries plus DHCP can take 30 s).
++const ACTIVATION_POLLS := 90
++## Status of a join that failed before the device got past authentication, with a password given.
++const WRONG_PASSWORD := "Check the password"
++
++var network_manager := load(NETWORK_MANAGER_PATH) as NetworkManagerInstance
+ 
+ ## Emitted when a password is needed to connect. The given callable should be
+ ## invoked by a listener with the password. E.g. callback.call(password)
+@@ -10,6 +17,10 @@ signal refresh_started
+ signal refresh_completed
+ 
+ var connecting := false
++## The network the last challenge_required asked a password for.
++var challenge_ssid := ""
++## The network a join in progress is for: its row's status is network_connect()'s.
++var _connecting_ssid := ""
+ var logger := Log.get_logger("WifiNetworkTree")
+ 
+ 
+@@ -37,11 +48,30 @@ func _on_wifi_selected() -> void:
+ 	var ssid := item.get_metadata(0) as String
+ 	var has_security := item.get_metadata(2) as bool
+ 	if has_security:
++		challenge_ssid = ssid
+ 		challenge_required.emit(network_connect.bind(ssid))
+ 		return
+ 	network_connect("", ssid)
+ 
+ 
++## Status column text for the network a device in the given state is using. NetworkManager makes
++## an access point the active one as soon as it starts associating with it, so only an activated
++## device is "Connected".
++static func status_text(device_state: int) -> String:
++	if device_state == NetworkDevice.NM_DEVICE_STATE_ACTIVATED:
++		return "Connected"
++	if device_state in [NetworkDevice.NM_DEVICE_STATE_PREPARE, NetworkDevice.NM_DEVICE_STATE_CONFIG]:
++		return "Connecting"
++	if device_state == NetworkDevice.NM_DEVICE_STATE_NEED_AUTH:
++		return "Authenticating"
++	if device_state in [NetworkDevice.NM_DEVICE_STATE_IP_CONFIG, NetworkDevice.NM_DEVICE_STATE_IP_CHECK,
++			NetworkDevice.NM_DEVICE_STATE_SECONDARIES]:
++		return "Acquiring IP address"
++	if device_state == NetworkDevice.NM_DEVICE_STATE_DEACTIVATING:
++		return "Disconnecting"
++	return ""
++
++
+ ## Connect to the given wireless network
+ func network_connect(password: String, ssid: String) -> void:
+ 	if connecting:
+@@ -49,73 +79,99 @@ func network_connect(password: String, ssid: String) -> void:
+ 		return
+ 	logger.info("Connecting to SSID: " + ssid)
+ 	connecting = true
++	_connecting_ssid = ssid
++	var item := _item_for(ssid)
+ 
+-	# Find the wireless device
+-	var devices := network_manager.get_devices()
+-	var wifi_devices := devices.filter(func(device: NetworkDevice): return device.wireless != null)
+-	if wifi_devices.is_empty():
++	var device := _wifi_device()
++	if not device:
+ 		logger.warn("No wifi devices found")
+-		connecting = false
++		_set_status(item, "Wi-Fi unavailable")
++		_end_connect()
+ 		return
+-	var device := wifi_devices[0] as NetworkDevice
+-	
++
+ 	# Find the access point to connect to
+ 	var access_points := device.wireless.access_points
+ 	var valid_access_points := access_points.filter(func(ap: NetworkAccessPoint): return ap.ssid == ssid)
+ 	if valid_access_points.is_empty():
+ 		logger.warn("Unable to find access point with SSID:", ssid)
+-		connecting = false
++		_set_status(item, "Not found")
++		_end_connect()
+ 		return
+ 	var access_point := valid_access_points[0] as NetworkAccessPoint
+-	
+-	# Try to connect to the access point
+-	access_point.connect(device, password)
+-	
+-	# Update the tree item's status
+-	var item := get_selected()
+-	item.set_text(4, "Connecting")
+-
+-	# Wait for the connection to be established
+-	for i in range(60):
+-		logger.info("Device state: " + str(device.state))
+-		match device.state:
+-			device.NM_DEVICE_STATE_ACTIVATED:
+-				logger.info("Successfully connected to", ssid)
+-				item.set_text(4, "Connected")
+-				connecting = false
+-				refresh_networks()
+-				return
+-			device.NM_DEVICE_STATE_NEED_AUTH:
+-				logger.info("Authentication required")
+-				item.set_text(4, "Authentication required")
+-				connecting = false
+-				challenge_required.emit(network_connect.bind(ssid))
+-				return
+-			device.NM_DEVICE_STATE_CONFIG:
+-				logger.info("Connecting...")
+-				item.set_text(4, "Connecting")
+-			device.NM_DEVICE_STATE_IP_CONFIG:
+-				logger.info("Acquiring IP address...")
+-				item.set_text(4, "Acquiring IP address")
+-			device.NM_DEVICE_STATE_DEACTIVATING:
+-				logger.info("Deactivation connection...")
+-				item.set_text(4, "Deactivating connection")
+-			device.NM_DEVICE_STATE_DISCONNECTED:
+-				logger.info("Disconnected")
+-				item.set_text(4, "Disconnected")
+-				connecting = false
+-				return
+-			device.NM_DEVICE_STATE_FAILED:
+-				logger.info("Failed to connect")
+-				item.set_text(4, "Failed to connect")
+-				connecting = false
+-				return
+-		# Use a timer to wait between tries
++
++	# connect() saves a new profile on every join, next to any saved before: a corrected password
++	# sat beside the wrong one. One profile is kept, the one that works (stale_after_join).
++	_set_status(item, "Connecting")
++	var saved_before: PackedStringArray = await _off_thread(func(): return NetworkProfiles.uuids_for(ssid))
++	var active := access_point.connect(device, password)
++	var failure := await _wait_for_activation(active, device, item, not password.is_empty())
++	var saved_now: PackedStringArray = await _off_thread(func(): return NetworkProfiles.uuids_for(ssid))
++	var drop := NetworkProfiles.stale_after_join(saved_before, saved_now, failure.is_empty())
++	if not drop.is_empty():
++		var deleted: int = await _off_thread(func(): return NetworkProfiles.delete(drop))
++		logger.info("Deleted %d saved profile(s) of %s" % [deleted, ssid])
++
++	if failure.is_empty():
++		logger.info("Successfully connected to", ssid)
++		_set_status(item, "Connected")
++		_end_connect()
++		refresh_networks()
++		return
++	logger.info("Failed to connect to", ssid)
++	_set_status(item, failure)
++	_end_connect()
++	if failure == WRONG_PASSWORD:
++		challenge_ssid = ssid
++		challenge_required.emit(network_connect.bind(ssid))
++
++
++## Follows the activation connect() started until it is up or gone. Right after the call the device
++## can still report the previous connection's state (ACTIVATED), and the access point is the active
++## one from the first association attempt, so neither means connected: the activation's own state
++## does. Returns "" once activated, otherwise the status to show.
++func _wait_for_activation(active: NetworkActiveConnection, device: NetworkDevice, item: TreeItem,
++		with_password: bool) -> String:
++	if not active:
++		return "Failed to connect"
++	var authenticated := false
++	var gone := 0
++	for i in range(ACTIVATION_POLLS):
+ 		await get_tree().create_timer(0.5).timeout
++		var state := active.state
++		var device_state := device.state
++		logger.info("Activation state: %d, device state: %d" % [state, device_state])
++		if state == NetworkActiveConnection.NM_ACTIVE_CONNECTION_STATE_ACTIVATED:
++			return ""
++		if device_state >= NetworkDevice.NM_DEVICE_STATE_IP_CONFIG and device_state <= NetworkDevice.NM_DEVICE_STATE_SECONDARIES:
++			authenticated = true
++		# NetworkManager removes a failed activation: its state then reads UNKNOWN.
++		if state in [NetworkActiveConnection.NM_ACTIVE_CONNECTION_STATE_DEACTIVATING,
++				NetworkActiveConnection.NM_ACTIVE_CONNECTION_STATE_DEACTIVATED]:
++			break
++		gone = gone + 1 if state == NetworkActiveConnection.NM_ACTIVE_CONNECTION_STATE_UNKNOWN else 0
++		if gone >= 2:
++			break
++		# Until then the device may still be in, or leaving, the previous connection.
++		var text := status_text(device_state)
++		_set_status(item, "Connecting" if text in ["", "Connected", "Disconnecting"] else text)
++	if with_password and not authenticated:
++		return WRONG_PASSWORD
++	return "Failed to connect"
+ 
+-	connecting = false
+-	logger.info("Timed out waiting to connect")
+-	item.set_text(4, "Failed to connect")
++
++## Deletes every saved profile of the given network, disconnecting from it if it is in use.
++## Returns how many NetworkManager deleted.
++func forget(ssid: String) -> int:
++	var deleted: int = await _off_thread(func(): return NetworkProfiles.delete(NetworkProfiles.uuids_for(ssid)))
++	logger.info("Forgot %s: %d saved profile(s) deleted" % [ssid, deleted])
++	_set_status(_item_for(ssid), "")
++	return deleted
++
++
++## Whether NetworkManager has a saved profile for the given network.
++func is_saved(ssid: String) -> bool:
++	var uuids: PackedStringArray = await _off_thread(func(): return NetworkProfiles.uuids_for(ssid))
++	return not uuids.is_empty()
+ 
+ 
+ ## Refreshes the available wifi networks
+@@ -124,17 +180,20 @@ func refresh_networks() -> void:
+ 	refresh_started.emit()
+ 
+ 	# Find the wireless device
+-	var devices := network_manager.get_devices()
+-	var wifi_devices := devices.filter(func(device: NetworkDevice): return device.wireless != null)
+-	if wifi_devices.is_empty():
++	var device := _wifi_device()
++	if not device:
+ 		logger.warn("No wifi devices found")
++		# Nothing below can tell what these rows say any more.
++		for item in get_root().get_children():
++			if not (connecting and item.get_metadata(0) == _connecting_ssid):
++				item.set_text(4, "")
++		refresh_completed.emit()
+ 		return
+-	var device := wifi_devices[0] as NetworkDevice
+-	
++
+ 	# Request a scan
+ 	device.wireless.request_scan()
+ 	await get_tree().create_timer(0.5).timeout
+-	
++
+ 	# Fetch all the available access points
+ 	var tree := self as Tree
+ 	var root := tree.get_root()
+@@ -155,6 +214,7 @@ func refresh_networks() -> void:
+ 		root.remove_child(item)
+ 
+ 	var active_ap := device.wireless.active_access_point
++	var active_status := status_text(device.state)
+ 
+ 	# Look at the current APs to see if any tree items need to be created
+ 	# or updated
+@@ -171,7 +231,7 @@ func refresh_networks() -> void:
+ 		var security_texture: Texture2D
+ 		if has_security:
+ 			security_texture = load("res://assets/ui/icons/material-symbols--lock.svg")
+-		
++
+ 		var bitrate = (ap.max_bitrate / 1024.0)
+ 		bitrate = int(round(bitrate))
+ 
+@@ -183,10 +243,50 @@ func refresh_networks() -> void:
+ 		item.set_expand_right(2, false)
+ 		item.set_metadata(2, has_security)
+ 		item.set_text(3, str(bitrate) + " Mb/s")
+-		if active_ap and active_ap.ssid == ap.ssid:
+-			item.set_text(4, "Connected")
++		if connecting and ap.ssid == _connecting_ssid:
++			pass
++		elif active_ap and active_ap.ssid == ap.ssid:
++			item.set_text(4, active_status)
+ 		else:
+ 			item.set_text(4, "")
+-	
++
+ 	logger.info("Refresh completed")
+ 	refresh_completed.emit()
++
++
++## The first Wi-Fi device. The instance is loaded again each time: after NetworkManager restarts,
++## the NetworkManager node replaces it with one that knows the new devices.
++func _wifi_device() -> NetworkDevice:
++	network_manager = load(NETWORK_MANAGER_PATH) as NetworkManagerInstance
++	for device in network_manager.get_devices():
++		if device.wireless != null:
++			return device
++	return null
++
++
++## The row of the given network. Looked up by name: the selection can move during a join.
++func _item_for(ssid: String) -> TreeItem:
++	for item in get_root().get_children():
++		if item.get_metadata(0) == ssid:
++			return item
++	return null
++
++
++func _set_status(item: TreeItem, text: String) -> void:
++	if item and is_instance_valid(item):
++		item.set_text(4, text)
++
++
++func _end_connect() -> void:
++	connecting = false
++	_connecting_ssid = ""
++
++
++## Runs job on a worker thread (nmcli blocks) and returns what it returned.
++func _off_thread(job: Callable) -> Variant:
++	var result := []
++	var task := WorkerThreadPool.add_task(func(): result.append(job.call()))
++	while not WorkerThreadPool.is_task_completed(task):
++		await get_tree().process_frame
++	WorkerThreadPool.wait_for_task_completion(task)
++	return result[0] if not result.is_empty() else null

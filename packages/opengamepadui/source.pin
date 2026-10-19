@@ -75,6 +75,19 @@
 #         which a first Proton launch always hits (driver query, prefix setup, windowless install
 #         scripts: DirectX, PhysX, EOS). A launch now counts as alive while Steam's own
 #         "reaper SteamLaunch" runs (HW, Pocket ACE, 2026-10-17, Trine on Proton 11 arm64).
+#   0018  ours, for upstream: joining Wi-Fi from Settings > Network saved a password one character
+#         too long and the UI could not undo it (HW, Air X, 2026-10-18). NetworkManager stored
+#         exactly what the dialog held, and the dialog never cleared its field: a mistyped password
+#         stayed behind the dots and went out again on every retry. Every join also added a profile
+#         beside the saved ones (a corrected password sat next to the wrong one; a failed join stayed
+#         for NetworkManager to retry), nothing could forget a network, "Connected" showed for an
+#         access point still being tried, and a dialog left unsubmitted kept its submit handler (the
+#         next Submit joined that network too). Now: a fresh hidden field per dialog with Show
+#         password, B closes it, Forget network (all its profiles, via nmcli), a join that follows
+#         its own activation and keeps one profile (the new one once it works, else the old ones),
+#         Connected only when activated, and a new core instance once the old one loses the Wi-Fi
+#         device (after a NetworkManager restart it knew only the P2P device, so every join did
+#         nothing). First boot: same field/submit fixes.
 #
 # The earlier 0006/0007 (plugin store URL as a project setting, set to "" for RetroForge) were dropped on
 # 2026-10-06: with the store off, OGUI's first-start screen showed an empty catalog. RetroForge has no
@@ -92,4 +105,4 @@
 name: opengamepadui
 pkgbuild_local: PKGBUILD
 pkgrel_suffix: 1
-patches: 0001-hardware-manager-no-dmi.patch 0002-install-dialogs-rename-custom-maximum-size.patch 0003-performance-menu-hide-unsupported-controls.patch 0004-running-app-exit-before-window.patch 0005-performance-manager-save-default-profiles.patch 0006-performance-menu-power-profiles-without-tdp.patch 0007-performance-manager-profile-key-app-id.patch 0008-animated-effects-setting.patch 0009-library-banner-clip-with-a-scissor-not-a-canvas-group.patch 0010-inputplumber-signal-handlers-deferred.patch 0011-settings-unset-keys-and-offline-store-quiet.patch 0012-input-icons-mangmi-digital-triggers.patch 0013-hardware-manager-single-gpu-no-glxinfo.patch 0014-home-recents-and-icon-device-name-quiet.patch 0015-running-game-card-name-without-library-item.patch 0016-thread-pool-start-on-first-use.patch 0017-running-app-steam-launch-alive-while-steam-reaper-runs.patch
+patches: 0001-hardware-manager-no-dmi.patch 0002-install-dialogs-rename-custom-maximum-size.patch 0003-performance-menu-hide-unsupported-controls.patch 0004-running-app-exit-before-window.patch 0005-performance-manager-save-default-profiles.patch 0006-performance-menu-power-profiles-without-tdp.patch 0007-performance-manager-profile-key-app-id.patch 0008-animated-effects-setting.patch 0009-library-banner-clip-with-a-scissor-not-a-canvas-group.patch 0010-inputplumber-signal-handlers-deferred.patch 0011-settings-unset-keys-and-offline-store-quiet.patch 0012-input-icons-mangmi-digital-triggers.patch 0013-hardware-manager-single-gpu-no-glxinfo.patch 0014-home-recents-and-icon-device-name-quiet.patch 0015-running-game-card-name-without-library-item.patch 0016-thread-pool-start-on-first-use.patch 0017-running-app-steam-launch-alive-while-steam-reaper-runs.patch 0018-network-one-working-profile-connected-means-activated-forget.patch
