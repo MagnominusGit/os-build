@@ -28,6 +28,12 @@
 # on the A73/A53 cluster, a performance choice ROCKNIX made for this SoC).
 # No irqaffinity: the default IRQ spread is kept until the SM6115 tuning pass
 # measures otherwise (ROCKNIX pins GPU/MDSS to cpu3 from userspace).
+# SM8750 (Oryon 2+6) rows use irqaffinity=0-1 and nothing else: Oryon has no
+# 32-bit EL0 (so no allow_mismatched), and neither board has a USB gamepad
+# (so no 045e:028e). The Odin 3 row carries its stick calibration as rsinput
+# module params (min/max ±1024, deadzone 70 — ROCKNIX SM8750 1300's values):
+# the peer patch changes the driver's global defaults, which would recalibrate
+# every rsinput board in our combined kernel; the cmdline scopes it per board.
 ayaneo-pocket-ace	AYANEO Pocket ACE	qcs8550-ayaneo-pocketace	allow_mismatched_32bit_el0 fw_devlink.strict=1 pcie_ports=compat irqaffinity=0-2 usbcore.interrupt_interval_override=045e:028e:2
 ayaneo-pocket-dmg	AYANEO Pocket DMG	qcs8550-ayaneo-pocketdmg	allow_mismatched_32bit_el0 fw_devlink.strict=1 pcie_ports=compat irqaffinity=0-2 usbcore.interrupt_interval_override=045e:028e:2
 ayaneo-pocket-ds	AYANEO Pocket DS	qcs8550-ayaneo-pocketds	allow_mismatched_32bit_el0 fw_devlink.strict=1 pcie_ports=compat irqaffinity=0-2 usbcore.interrupt_interval_override=045e:028e:2
@@ -38,9 +44,11 @@ ayaneo-pocket-s2k	AYANEO Pocket S 2K	qcs8550-ayaneo-pockets2k	allow_mismatched_3
 ayn-odin-2	AYN Odin 2	qcs8550-ayn-odin2	allow_mismatched_32bit_el0 fw_devlink.strict=1 pcie_ports=compat irqaffinity=0-2
 ayn-odin-2-mini	AYN Odin 2 Mini	qcs8550-ayn-odin2mini	allow_mismatched_32bit_el0 fw_devlink.strict=1 pcie_ports=compat irqaffinity=0-2
 ayn-odin-2-portal	AYN Odin 2 Portal	qcs8550-ayn-odin2portal	allow_mismatched_32bit_el0 fw_devlink.strict=1 pcie_ports=compat irqaffinity=0-2
+ayn-odin-3	AYN Odin 3	cq8725s-ayn-odin3	irqaffinity=0-1 rsinput.axis_leftx_min=-1024 rsinput.axis_leftx_max=1024 rsinput.axis_leftx_deadzone=70 rsinput.axis_lefty_min=-1024 rsinput.axis_lefty_max=1024 rsinput.axis_lefty_deadzone=70 rsinput.axis_rightx_min=-1024 rsinput.axis_rightx_max=1024 rsinput.axis_rightx_deadzone=70 rsinput.axis_righty_min=-1024 rsinput.axis_righty_max=1024 rsinput.axis_righty_deadzone=70
 ayn-thor	AYN Thor	qcs8550-ayn-thor	allow_mismatched_32bit_el0 fw_devlink.strict=1 pcie_ports=compat irqaffinity=0-2
 ayn-thor-lite	AYN Thor Lite	sm8250-ayn-thorlite
 konkr-pocket-fit	KONKR Pocket FIT	sm8650-konkr-pf	irqaffinity=0-1 usbcore.interrupt_interval_override=045e:028e:2
+konkr-pocket-fit-elite	KONKR Pocket FIT Elite	sm8750-konkr-pf-elite	irqaffinity=0-1
 mangmi-air-x-mq65	MANGMI Air X MQ65	sm6115-mangmi-air-x-mq65	gpt ssbd=force-off kpti=off
 mangmi-air-x-mq66	MANGMI Air X MQ66	sm6115-mangmi-air-x-mq66	gpt ssbd=force-off kpti=off
 mangmi-air-x-mq66b	MANGMI Air X MQ66B	sm6115-mangmi-air-x-mq66b	gpt ssbd=force-off kpti=off
