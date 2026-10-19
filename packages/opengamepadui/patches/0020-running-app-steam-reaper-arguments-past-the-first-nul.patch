@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Mon, 19 Oct 2026 10:40:00 -0700
+Subject: [PATCH] fix(RunningApp): read Steam's reaper arguments past the
+ first NUL
+
+_steam_launch_running() (0017) tells Steam's reaper for a launch apart by
+its arguments, read from /proc/<pid>/cmdline, which separates them with
+NULs. In Godot 4.7.1 get_string_from_utf8() stops at the first NUL
+("Unexpected NUL character"), so only argv[0] came out, argv.size() < 2
+for every reaper, and the check never found one. A Steam game started
+from the library with Steam not yet running was then cut off: Steam sets
+up Proton's prefix in a run of its own, its windows go, and 4 seconds
+later OGUI stopped Steam while the game's own launch was starting (HW,
+KONKR Pocket FIT, 2026-10-19: Hades, three times). The NULs become
+newlines before the decode. Checked on the device with Godot 4.7.1 and
+the check's own code: Steam's reaper found, OGUI's own reaper and no
+reaper not.
+
+---
+ core/systems/launcher/running_app.gd | 7 ++++++-
+ 1 file changed
+
+--- a/core/systems/launcher/running_app.gd
++++ b/core/systems/launcher/running_app.gd
+@@ -346,7 +346,12 @@
+ 		var data := PackedByteArray()
+ 		while not file.eof_reached():
+ 			data.append_array(file.get_buffer(4096))
+-		var argv := data.get_string_from_utf8().split(char(0))
++		# The arguments are NUL-separated, and get_string_from_utf8() stops at the first NUL
++		# ("Unexpected NUL character"): only argv[0] came out, so no reaper ever matched.
++		for i in data.size():
++			if data[i] == 0:
++				data[i] = 10
++		var argv := data.get_string_from_utf8().split("\n")
+ 		if argv.size() < 2 or argv[1] != "SteamLaunch":
+ 			continue
+ 		if argv[0].begins_with("/usr/share/opengamepadui/"):

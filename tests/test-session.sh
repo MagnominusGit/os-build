@@ -180,6 +180,21 @@ if [ -f "$P19" ]; then
 else
   bad "0019: $P19 is missing"
 fi
+# 0020: 0017's reaper check never found Steam's reaper: get_string_from_utf8() stops at the first
+# NUL of /proc/<pid>/cmdline (Godot 4.7.1), and Steam was stopped mid-launch (HW, Pocket FIT, 2026-10-19).
+P20="$PKG/patches/0020-running-app-steam-reaper-arguments-past-the-first-nul.patch"
+if [ -f "$P20" ]; then
+  files20="$(grep -E '^\+\+\+ b/' "$P20" | sed 's#^+++ b/##' | sort -u)"
+  [ "$files20" = "core/systems/launcher/running_app.gd" ] && ok "0020: changes running_app.gd only" || bad "0020 touches: $files20"
+  grep -qE '^-\s+var argv := data.get_string_from_utf8\(\).split\(char\(0\)\)' "$P20" \
+    && grep -qE '^\+\s+data\[i\] = 10' "$P20" && grep -qE '^\+\s+var argv := data.get_string_from_utf8\(\).split\("\\n"\)' "$P20" \
+    && ok "0020: the reaper's arguments are split on NULs turned into newlines, not decoded up to the first NUL" \
+    || bad "0020: the cmdline is still decoded up to its first NUL"
+  grep -q "0019-launch-focus-a-focusable-window-of-the-app.patch 0020-running-app-steam-reaper-arguments-past-the-first-nul.patch" "$PKG/source.pin" \
+    && ok "0020: listed in source.pin, after 0019" || bad "0020: not in source.pin's patches"
+else
+  bad "0020: $P20 is missing"
+fi
 # One file of the tree as 0018 leaves it, hunk by hunk (context and added lines; a new file whole).
 newside() { python3 - "$P18" "$1" <<'PY'
 import sys
