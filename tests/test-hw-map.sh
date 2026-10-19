@@ -182,8 +182,12 @@ for conf in "$DEV"/*.conf; do
             "$RETROFORGE_HW_THERMAL_CPU" "$RETROFORGE_HW_THERMAL_GPU" "$RETROFORGE_HW_FAN" "$RETROFORGE_HW_GPU_DEVFREQ" \
             "$RETROFORGE_HW_THERMAL_BATTERY" "$RETROFORGE_HW_THERMAL_SKIN" "$RETROFORGE_HW_LED_GROUPS" )
     IFS='|' read -r b c bl tc tg f g tb ts leds <<<"$vals"
-    if [ -n "$b" ] && [ -n "$c" ] && [ -n "$bl" ] && [ -n "$tc" ] && [ -n "$tg" ] && [ -n "$f" ] && [ -n "$g" ]; then
-        ok "$id pins battery, charger, backlight, cpu/gpu zones, fan, devfreq"
+    # Backlight is not in the required set: empty = hw-map detects it (defaults.conf), and that is
+    # the deliberate state on a single-backlight board whose name is a register address (the
+    # Odin 3's icna35xx registers the DSI dev name). Boards where detection sorts wrong (the Thor's
+    # two backlights) still pin theirs; this suite can't tell those apart from a conf.
+    if [ -n "$b" ] && [ -n "$c" ] && [ -n "$tc" ] && [ -n "$tg" ] && [ -n "$f" ] && [ -n "$g" ]; then
+        ok "$id pins battery, charger, cpu/gpu zones, fan, devfreq"
     else bad "$id leaves a pin empty: $vals"; fi
     zbad=""
     for z in "$tc" "$tg" "$tb" "$ts"; do
@@ -194,7 +198,11 @@ for conf in "$DEV"/*.conf; do
     [ -z "$zbad" ] && ok "$id zone types well-formed" || bad "$id zone types:$zbad"
     lbad=""
     for spec in $leds; do case $spec in [a-z]*=?*) ;; *) lbad="$lbad $spec";; esac; done
-    [ -n "$leds" ] && [ -z "$lbad" ] && ok "$id LED groups well-formed" || bad "$id LED groups: '$leds'$lbad"
+    # Empty is valid: a board with no LED surface (the PF Elite: sysbtn RGB stripped) declares no
+    # groups and hw-map falls back to power=power-led when that LED exists.
+    if [ -z "$leds" ]; then ok "$id declares no LED groups (power-led fallback)"
+    elif [ -z "$lbad" ]; then ok "$id LED groups well-formed"
+    else bad "$id LED groups:$lbad"; fi
 done
 # device-env exports the pins (the Thor: the backlight detection would get wrong)
 out=$(RETROFORGE_DEVICE_DIR="$DEV" RETROFORGE_MODEL="AYN Thor" bash "$ENV_SCRIPT")
