@@ -175,7 +175,25 @@ BOOTSTRAP_PKGS=(base)
 #                       that check does not depend on rsync keeping it around.
 #   fuse-overlayfs      lays our x86 Mesa (/usr/lib/retroforge/x86-mesa) over that RootFS, read-only,
 #                       as the player (/usr/lib/retroforge/steam-x86-guest).
-PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-mesa-layers vulkan-tools retroforge-gpu-priority mesa gamescope seatd mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit e2fsprogs xorg-xwayland noto-fonts noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl opengamepadui powerstation which fuse3 ksmbd-tools avahi sdl2_ttf sdl2_image sdl2_mixer squashfuse mesa-utils unzip openal libtheora rmtfs xxhash fuse-overlayfs)
+#   Valve's arm64 Steam client, which Main menu > Emulators > Steam Client downloads into the home,
+#   run raw on the host by /usr/bin/steam, as Nova-Deck does, rather than inside Valve's Steam
+#   Runtime container (games' own pressure-vessel cannot start nested inside it):
+#   gtk2                steamui.so links libgtk-x11-2.0 and libgdk_pixbuf-2.0. Back in the root for
+#                       it (dropped 2026-10-03): ~96 MiB installed with its new deps before the trim
+#                       (gtk2 38, glycin 17, librsvg 10, adwaita-fonts 7), measured 2026-10-17.
+#   libibus             steamwebhelper (CEF) links libibus-1.0.so.5: without it the helper does not
+#                       load at all (tested 2026-10-17 under qemu; Nova-Deck saw the same). The library
+#                       alone, 3.7 MiB and no new deps; `ibus` itself would bring gtk3, gtk4 and
+#                       llvm-libs (142 MB download).
+#   lsof                the client maps each localhost connection to a process with `lsof` and
+#                       rejects its own UI's websocket when it cannot ("WebUITransport: Connection
+#                       rejected", then an "Unexpected Transport Error" dialog and no UI). HW
+#                       2026-10-17 on the ACE: with lsof on PATH it reaches the sign-in. 392 KiB,
+#                       glibc + libtirpc only (Nova-Deck ships it too).
+#                       Every library the client's arm64 ELFs link resolves against PKGS + gtk2 and
+#                       libibus (checked in the builder 2026-10-17); no ffmpeg, the client ships its
+#                       own libav*.
+PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-mesa-layers vulkan-tools retroforge-gpu-priority mesa gamescope seatd mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit e2fsprogs xorg-xwayland noto-fonts noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl opengamepadui powerstation which fuse3 ksmbd-tools avahi sdl2_ttf sdl2_image sdl2_mixer squashfuse mesa-utils unzip openal libtheora rmtfs xxhash fuse-overlayfs gtk2 libibus lsof)
 
 # Dev-only packages — installed ONLY under RETROFORGE_DEV=1, NEVER in a release base.
 # On-device bring-up tools: evtest reads raw /dev/input events; usbutils provides lsusb.

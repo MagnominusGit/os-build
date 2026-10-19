@@ -18,12 +18,14 @@
 # image: rootfs/conf/seal.list declares them, rootfs/seal-rootfs.sh removes them.
 abseil-cpp 20260107.1-1 aarch64 snapshot 42ad317599c41c8df479118d88f27f2ff41a50ba194988d444ac74b591928751
 acl 2.3.2-1.2 aarch64 snapshot 57dd0cf474187d1584f2894b1da10449c42cbf24228aceae8eefc253c70029a0
+adwaita-fonts 50.0-1 any snapshot af34f61cdd9f87d608cc00552d8ddc3f5986fc054e76b09e2fad9aabc7592221
 alsa-card-profiles 1:1.6.1-1.1 aarch64 retroforge a8359ed77368fdd88bf7d2006bfc646f0840cf2811bc2254e872135b83dd642a
 alsa-lib 1.2.15.3-2 aarch64 snapshot f48baeec41f769dc6d6eeaebfbc0c7e9921bc285138131badd62a3be9295eeb8
 alsa-topology-conf 1.2.5.1-4 any snapshot a76b237e24973099b3cee9d3c89f4f8b46d9133411f0992bd46a5131e4427a0c
 alsa-ucm-conf 1.2.15.3-1 any snapshot 85d06ec267eeb68c82afe811b812127eef90aace15f0dae3876d76e36099bb5d
 aom 3.13.2-1 aarch64 snapshot d4cebc64eac8c7b53858e2b1dbafd1ec71b9a106ebdfdbd38f5f4de63abdc3ce
 archlinux-keyring 20260323-1 any stripped 78fbfc4032ec163d7ffd7cd5b3b009cc4651fd97a55ecfc29ea0a769210069bc
+at-spi2-core 2.58.4-1 aarch64 snapshot 9a77bd9227bd159337d16172a832d72934f97bff75b0e23a4f374b24d9201a79
 attr 2.5.2-1.2 aarch64 snapshot 128ba6da6d6d17392c9c7894f3fe8af994d64e70235714b1a96d55f4d9f0d932
 audit 4.1.4-2 aarch64 snapshot 5c7f8209c5271a42660f34dcd27304f63fb387b789954a0abfcc25a76bace09f
 avahi 1:0.9rc3-1 aarch64 snapshot 599cbe0eb72ba984f842ec7fce6d998cd96020632c052bec6638e96e301ee068
@@ -36,6 +38,7 @@ bluez-utils 5.86-4 aarch64 snapshot 9e4763b2985029f68a4a028db6f53249a27a57701cb4
 brightnessctl 0.5.1-1.1 aarch64 retroforge 5c9376c67b32c4b0fbce12ae6dd38ef337a161bc91f5e13a39703c30f949b6b8
 brotli 1.2.0-1 aarch64 snapshot f97a489112a09abd9d0fdacbf47a3b26dc50e683a4f7dd97f3cf121d64edee9d
 btrfs-progs 6.19.1-1 aarch64 snapshot 1a142c41102dffb1124d1b8901991b86972d9a62083145881400fa13de928bcf
+bubblewrap 0.11.1-1 aarch64 snapshot 9dafdf74851dffef7901ff365684753afdd1194e84d539602ea3b1e7135ce98e
 bzip2 1.0.8-6 aarch64 snapshot d3811e3340bc406f40f4c59d9ea815e46091ba362226f8aa6ce0ee3eaa63ea6c
 ca-certificates 20240618-1 any snapshot 982005bd5ecc998c05f561b57bb58b4457407779727e3c3d59e926d34a8b0712
 ca-certificates-mozilla 3.122-1 aarch64 snapshot 7fa4f8a043729b6c881999325cf7f58968afa80fa705c79019e7ba10893aeded
@@ -51,6 +54,7 @@ dbus-broker-units 37-3 aarch64 snapshot 7e432ffde73ef74ce86e7eb1fe5d97e0cda93b3d
 dbus-units 37-3 aarch64 snapshot 4d9a5f303a739d6d7a2239108de588083bf1a7d0746e0acf561f5f0e6d7fbf83
 dconf 0.49.0-1 aarch64 snapshot 2a1ab3161420deb4abd5dcfbd4ebba62211fd4923ed407359535b4a750868d3a
 default-cursors 3-1 any snapshot ae52028372c3b2f66547baab41f1614b25472489d927b1a50b596bb8df7c056e
+desktop-file-utils 0.28-1 aarch64 snapshot ba2a87da6581763019780c9bdaa47ba0b7e24dee3e186f973e76d2041fb5a237
 device-mapper 2.03.39-1 aarch64 snapshot b7091ced4c5347f2cca26ab526147a6e34d8435fef25a1cb8c2a63302e1c8a99
 duktape 2.7.0-7 aarch64 snapshot 24807fc3fa8d08db6ae5b8fd262ffcbb957a2380ed6113e5f30dccd5e1ff1935
 e2fsprogs 1.47.4-1 aarch64 snapshot 3b00f47b84219d26d3425e9c433b80d290d85afe0be948e95dcaf87cb7e65c4b
@@ -75,11 +79,13 @@ gamescope 3.16.31-1.1 aarch64 retroforge f12d6329cb85762a76a3ceac80c21958fa0ad76
 gawk 5.4.0-1 aarch64 snapshot 379dcf5aeb42ea4b59e457692c6c91a2d974484539f122467e75a683f98b6821
 gcc-libs 15.2.1+r604+g0b99615a8aef-1 aarch64 snapshot 5d388c5810ed8e58197352a2141f17e79f81d0073ebfaa0ce3de0e72bb006db6
 gdbm 1.26-2 aarch64 snapshot 942d709434f29db679927ac2dcddc3f3ebb9009764bdd4fc307b2b1ac1131d81
+gdk-pixbuf2 2.44.4-1 aarch64 snapshot b02cb85da7c997dc976d0e58b97d878cdf85b7e246c940e09749f5fa1a5cb164
 gettext 1.0-2 aarch64 snapshot ad32d69989678e8eb5a3def2ecd02a7daec27372bad866afe19a5a168a8a240e
 giflib 5.2.2-2 aarch64 snapshot d097293bb54b251d309f4061164b7fe698bd5e8549ac34bec538ad2fa2cd3fa8
 glfw 1:3.4-1 aarch64 snapshot cdda900f31382c418ae620910e625090e3cbc82d21fe55d39887f22c572d7355
 glib2 2.86.4-1 aarch64 snapshot eae151d685b8145a8ba33d09915363252031be62a720ecd7dd18f52f4d68de20
 glibc 2.43+r5+g856c426a7534-1 aarch64 snapshot 01161ead0058cac0a99b86b70a92f86652ab2434f3cf6e52b3c3fd2538f67e74
+glycin 2.0.8-1 aarch64 snapshot 4bb79cadbef9f51ed1dd08d5645d1df206efa0c6ed36ec4256a87450742cb0ee
 gmp 6.3.0-3 aarch64 snapshot ce2594803e2f7176ad1ffe8f17f322be47bb7a41d40d8de31e1827a65df2d820
 gnulib-l10n 20241231-1 any snapshot 86e6ea818cb331171018bef6e4486c1176064655e0d459bcecc9cc9c2bb74a2c
 gnupg 2.4.9-1 aarch64 stripped b29edda628e9106b6cc1affd85a53e96694319173cd6f99e044c3420c1ad977b
@@ -90,7 +96,11 @@ gpgme 2.0.1-3 aarch64 snapshot 2c0eeb3015b498dfa93f690105efef34ba45d233a45cfebb5
 gpm 1.20.7.r38.ge82d1a6-6 aarch64 snapshot 3e6233c680baab5204a11099256715c897178dfc123031dd3a462e99daee5701
 graphite 1:1.3.14-6 aarch64 snapshot c4aa3d60382bc73b3b345386b8c0a6619bd4f25c10ea61a673cf0c616133f585
 grep 3.12-2.2 aarch64 snapshot 0915f2004376a6600d9d07ca1cdb7982fa012636b813eaa79f3d40e74ab6b448
+gsettings-desktop-schemas 49.1-1 any snapshot d8c9f6ee16566bbb178eadea307e337a62e19fc6c1c0fed75a355f9d257a8ac0
+gsettings-system-schemas 49.1-1 any snapshot 46c1684fb36b7601f60d5aca1ac3552b0d9a042278b30fdc393c1dae40303c5d
 gtest 1.17.0-2 aarch64 snapshot 0adf06d5520c0d388cdab238764eba91d31fd2ea639a1b423c4f0bdddb7e5a0b
+gtk-update-icon-cache 1:4.20.4-1 aarch64 snapshot 1519354ef0e6eda38322a1f6f4ac5fa3f48bfb61bc347f8b5686301ffdef116d
+gtk2 2.24.33-5 aarch64 snapshot 5b262393bbeff8c3e1e322d5b5e74c89f6a8003eaaa476b3db92a217bd42fb3f
 gzip 1.14-2.2 aarch64 snapshot e3d1fccd7eab31ab853ebf90d6ae467cfc05f4d6e5c15bc985ed8dfc2c1d2994
 harfbuzz 13.2.1-1 aarch64 snapshot 5e16466309d5e1a00aaac7d8fe8d40f240a0919f6bab99a8fb482298fd2a14b6
 hicolor-icon-theme 0.18-1 any snapshot 22ec69012b9a55e276b5891f916366f692541dce3793bff3e85a28a10b91990a
@@ -137,6 +147,7 @@ libbpf 1.6.2-1 aarch64 snapshot f13ecaa0892c6477aef2be27ddc564cd50430e59f0221e4e
 libbytesize 2.12-3 aarch64 snapshot bb43d47d9e52e9c6e0dff8d50df4a7fb32430b62bb48718d2e8949e954048863
 libcap 2.77-1 aarch64 snapshot 18ff910f9c42ec0a2f5b6212b7858355d187990540996a943fd472804d12fc4f
 libcap-ng 0.9.2-1 aarch64 snapshot 62307e740fadaae9f9c9fc23d59a91180bc98462e583892ec26c2202bd8a178e
+libcups 2:2.4.16-2 aarch64 snapshot b4ec11d7d0529d0528cb47b74bf55cbb6b233e961b10845e17ff36c80e6fe455
 libdaemon 0.14-6 aarch64 snapshot 2b87acae2cfa1ee3bc1f54304ff88bbbf860dc3c0a5a17d7a6cb721593187fc7
 libdatrie 0.2.14-1 aarch64 snapshot 9fd43f430c658410e7936360e54fc2d4ea7091d98e41066c22dc1bfe1de750eb
 libdecor 0.2.5-1 aarch64 snapshot 4c8ec0a49902346de675387f0d06d909813b0a95bcb3f2d4f2216993624ae5a4
@@ -162,6 +173,7 @@ libglvnd 1.7.0-3 aarch64 snapshot 071bbab48c59c4a546be845ad7ea29d4bd51624b961a7e
 libgomp 15.2.1+r604+g0b99615a8aef-1 aarch64 snapshot 3d36f210f22b065e93d1213a82995e711cc7c4b652e974a0a4a68f42636a78a5
 libgpg-error 1.59-1 aarch64 snapshot 3be40a07777e548875abc614ea408cbfa6ac1bdc442b7f4e47e14e33dc4a2542
 libgudev 238-3 aarch64 snapshot 97bb9ff56b0f600c7083a57ea6579491c1a9d612a48ffb92e68e7420524c5d58
+libibus 1.5.33-3 aarch64 snapshot bd88ecbc51920e25e151ba1cd9f62d2e0db2986372380d827c34bfff5be6eb03
 libice 1.1.2-1 aarch64 snapshot 022758604c9357e31116fe22841cf05b1984d1b3e1baaa57b0a56fc1ce46568c
 libidn2 2.3.8-1 aarch64 snapshot 4da80bd4dfafff46d8716be4e0e13c70cfc42bd06bb30753e091b044e34c3013
 libiio 0.26-5 aarch64 snapshot 0ec3a5a139bf525be5d617b5ce7e99dfe4f5edad9c4c2649c6608766d266b36c
@@ -205,6 +217,7 @@ libpng 1.6.56-1 aarch64 snapshot 88e05a122f32fd7971bcee7d9d56093109357fc7c48849c
 libpsl 0.21.5-2 aarch64 snapshot 196b48fdd464d5a9fa3e6e6a8092193447b5f0ce8d59ed238d6b66a8b90fb656
 libpulse 17.0+r98+gb096704c0-1 aarch64 snapshot 10aed2501067bb152e861eb49df41964a0d60b8c9ea043d5edb21d3da7dd8b95
 libquadmath 15.2.1+r604+g0b99615a8aef-1 aarch64 snapshot 380dd6e4e149c7dc8f31d18e2f907383346e22fa3f6e970a1d8265a7ee43e087
+librsvg 2:2.61.4-1 aarch64 snapshot 95904727e69e0ecb3fc01eedad8bd7416ff361c063d036eb2b770913c05eb96e
 libsasl 2.1.28-5.2 aarch64 snapshot 4261db0a05f370beec55bcb5e253ffac3dbfb81fa85e00746f775c8a46ceffbf
 libseccomp 2.6.0-1 aarch64 snapshot 3f932df299e9494371c4a3fbfc6d1a0fa3803593ea379bbd150aa7df7e1aa92a
 libsecret 0.21.7-1 aarch64 snapshot d57c064e66bba839a5457646d4635390f698fb61aae271ebcd45e72d8ba9e07f
@@ -267,6 +280,7 @@ lilv 0.26.4-1 aarch64 snapshot 197d48ff17d7f25c36f047af29f29e089b110e3822b1c9f21
 linux-api-headers 6.19-1 aarch64 snapshot 4ccdbc34178cbc11faf9a93f06a7f70d13bf24f29e5311271a59c74b7db8ce0d
 lm_sensors 1:3.6.2-1.2 aarch64 snapshot 0227689b3ff48c3f9bf51eca86334c9dd1cf408efc60fa0867681cb177fa5a85
 lmdb 0.9.35-1 aarch64 snapshot 2677fe6cc90b893185b0e9db27e4a47deeb19320993a231446abb4cd2550b4c0
+lsof 4.99.6-1 aarch64 snapshot 10262d605adcdc0477d749baa4098d46da1df010d11abe7035372a370fcf2422
 lua 5.5.0-2 aarch64 snapshot 4b0cd39441cb73a00468704102b3949bdb6d0dc0435780648eb42105521896bd
 lua54 5.4.8-6 aarch64 snapshot 19cb0e9e28371e138d2f59782ed040800c98fd70c1ec6e5a77ecb4b8c2453953
 luajit 2.1.1774896198+18b087c-1 aarch64 snapshot 15aee2ec52f21bf174a37082445818335ff3abd41896ae2909f6193277437d51
@@ -338,6 +352,7 @@ seatd 0.9.3-1 aarch64 snapshot c827edc127c633fa3d6290fd0242ff2f680b8788a0dc7b294
 sed 4.9-3 aarch64 snapshot a26361ef76878c9d599d2d5df8dd25c4cd331a915f2992512e689cde362fe6f9
 serd 0.32.8-1 aarch64 snapshot c4ec312829f30a155ab87233f36eb8ef5e2af7832b8f47e7a82c5d9eab9c9e42
 shadow 4.18.0-1 aarch64 snapshot 14d1768924550f181fbd14113cabe19e2395d6eb8db98dbec0f4eaad3ecfe424
+shared-mime-info 2.4-3 aarch64 snapshot faa22b81250ced5d125456dec5531e0b74bb4519e82a756387f4b79ed03d04eb
 slang 2.3.3-4 aarch64 snapshot efa9b7759db82e6ece8cccabfbc22cfda4faa5a9e07ae2cbf812ccb8a37db8a9
 sord 0.16.22-1 aarch64 snapshot ee21371e27dd7d8b28aabc8a85ab73513cd39fb015f88515eaf0d29c6d273198
 spandsp 0.0.6-7 aarch64 snapshot 67238acb545164b2f7c1f92d242c2fe09af01dd145003abca14c0b94cdc2e0dc
@@ -379,6 +394,7 @@ xorg-fonts-encodings 1.1.0-1 any snapshot 2999e3fe140bc7b0d3b31b48f0ebcabfe63710
 xorg-server-common 21.1.21-1 aarch64 snapshot 7563770f053c62f700efb71d41fb82f3b4372d5a783917ef2cf8244217a65d0a
 xorg-setxkbmap 1.3.5-1 aarch64 snapshot 3a9199977bf63db0054d2519c4bc7015dc4c849941f729740187f4c1f80c363b
 xorg-xkbcomp 1.5.0-1 aarch64 snapshot a9b7f3d98b21edf4713f4f89ec2ee58d05da7216cf607aa78537076241fd3231
+xorg-xprop 1.2.8-1 aarch64 snapshot bdf2eb4cc1bf9650bd4404557e66562e9dfa644d612a12470c46c9b595efdc8a
 xorg-xwayland 24.1.9-1 aarch64 snapshot bfb9cfd9681bb23f4fcc615636b3e19b4c3850978cd7068d7cc81cdbbf851e33
 xorgproto 2025.1-1 any snapshot fae26e457170620dd69f377eb834e210c3cabbef98e711a4611b08f379280bf0
 xxhash 0.8.3-1 aarch64 snapshot fae23d561dce242dd191c2eba70306ff1d1946c13fc5482f5373357c152c602c
