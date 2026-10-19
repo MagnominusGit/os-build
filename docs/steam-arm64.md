@@ -142,6 +142,33 @@ Not yet seen: the 42 restart from a real client, an x86-only Linux game. Nor, he
 `-steamdeck` keeps `package/beta` on `steamdeck_stable` through a client update: that was measured
 upstream, not on this tree.
 
+## Installed games in OGUI's library, without a second sign-in
+
+The OGUI Steam plugin fills the library from its own sign-in, through steamcmd (next section), on
+top of the client's. The RetroForge plugin lists the games installed in the client instead, from
+the client's own files, so signing into Steam Client is enough (`apps/ogui-retroforge-plugin`:
+`steam_apps.gd`, `library_steam.gd`):
+
+- **Games**: one app manifest per installed app, `steamapps/appmanifest_<appid>.acf`, in the
+  client's root and every other folder `steamapps/libraryfolders.vdf` names (an SD card). An app is
+  listed once its `StateFlags` has the fully-installed bit (4). Valve's tools install the same way
+  (Proton, the Steam Linux Runtimes, Steamworks Common Redistributables, FEX) and are left out by app
+  id and name: a manifest does not say what an app is, only the binary `appinfo.vdf` does.
+- **Launch**: `steam -gamepadui -steamos3 -steampal -steamdeck -silent steam://rungameid/<appid>`,
+  as the Steam plugin starts them. OGUI takes the Steam app id from that argument, so gamescope
+  focuses the game's window and OGUI's Steam handling (and patch 0017) applies.
+- **Art**: what the client cached for its own library, `appcache/librarycache/<appid>/`
+  (`library_600x900.jpg` for cards, `header.jpg`, `library_hero.jpg`, `logo.png`). A game the client
+  has cached nothing for yet shows OGUI's placeholder; nothing is downloaded for it.
+- **Refresh**: the plugin polls the manifests every 5 s, as it polls `~/roms`, and reloads the list
+  once a change has settled, never while a game runs. Steam's own UI counts as one, so a game
+  installed in Steam shows once Steam is closed.
+- The games get a Steam tab beside the systems' tabs, and show in OGUI's Installed and All Games.
+
+Only installed games: what the player owns but has not installed is known to Steam's servers, not
+to these files. Installing and uninstalling happen in Steam's UI (Emulators > Steam Client > Open).
+With the Steam plugin installed too, OGUI shows a game both list as one card with two launch items.
+
 ## steamcmd
 
 The OGUI Steam plugin uses `steamcmd` for the library, installs and updates, not the client. Valve

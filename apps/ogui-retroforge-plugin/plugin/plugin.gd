@@ -8,6 +8,9 @@ extends Plugin
 ## tabs are added from library_loaded, which fires after the UI's first reload_library().
 
 const LIBRARY_ID := "retroforge-roms"
+## The installed Steam games (library_steam.gd, no second sign-in), and their tab.
+const STEAM_LIBRARY_ID := "retroforge-steam"
+const STEAM_TAB := "steam"
 ## Seconds between two looks at ~/roms (rom_watch.gd): a copied ROM shows up 5-10 s after the
 ## copy ends.
 const RESCAN_INTERVAL := 5.0
@@ -22,7 +25,8 @@ var card_scene := load("res://core/ui/components/card.tscn") as PackedScene
 var scroller_scene := load("res://core/systems/input/scroller_joystick.tscn") as PackedScene
 
 var roms  # our Library subclass; untyped so roms.SYSTEMS resolves at runtime
-## system -> {"tab": ScrollContainer, "grid": HFlowContainer}
+var steam  # library_steam.gd
+## system (or STEAM_TAB) -> {"tab": ScrollContainer, "grid": HFlowContainer}
 var _tabs := {}
 var _emulators_button: Control
 var _emulators_screen: Control
@@ -43,8 +47,10 @@ var _art_fetch: RefCounted  # art_fetch.gd: new ROMs' art, fetched when their ca
 var _os: Resource  # retroforge_os.gd, installed as OGUI's platform.os
 var _sarek: RefCounted  # steam_sarek.gd
 var _watch: RefCounted  # rom_watch.gd
+var _steam_watch: RefCounted  # steam_watch.gd
 var _rescan_timer: Timer
 var _rescanning := false
+var _steam_rescanning := false
 
 
 # No _init override: Plugin._init adds the node to the "plugin" group.
@@ -52,6 +58,8 @@ func _ready() -> void:
 	logger = Log.get_logger("RetroForge", Log.LEVEL.INFO)
 	roms = load(plugin_base.path_join("library_roms.gd")).new()
 	add_library(roms)
+	steam = load(plugin_base.path_join("library_steam.gd")).new()
+	add_library(steam)
 	# Before the library loads: the first ROM cards already ask for their art.
 	_art_fetch = load(plugin_base.path_join("art_fetch.gd")).new()
 	var art = load(plugin_base.path_join("boxart_retroforge.gd")).new()
@@ -60,6 +68,7 @@ func _ready() -> void:
 	library_manager.library_loaded.connect(_on_library_loaded)
 	logger.info("ROM library registered: %s" % library_manager.has_library(LIBRARY_ID))
 	_watch = load(plugin_base.path_join("rom_watch.gd")).new().setup(roms.roms_dir(), roms.SYSTEMS.keys(), roms.dir_markers())
+	_steam_watch = load(plugin_base.path_join("steam_watch.gd")).new().watch_steam(steam.steam_root())
 	_rescan_timer = Timer.new()
 	_rescan_timer.wait_time = RESCAN_INTERVAL
 	_rescan_timer.timeout.connect(_on_rescan_timer)
@@ -205,32 +214,43 @@ func _add_emulators_screen() -> void:
 	logger.info("Main menu > Emulators added")
 
 
-## Automatic rescan: reload our library once ~/roms changed and settled (rom_watch.gd). Never
-## while a game runs, nor while our own reload is still going.
+## Automatic rescan: reload our library once ~/roms changed and settled (rom_watch.gd), and the
+## Steam games once the client's app manifests did (steam_watch.gd). Never while a game runs (Steam's
+## own UI counts), nor while our own reload of that library is still going.
 func _on_rescan_timer() -> void:
-	var busy := _rescanning or not launch_manager.get_running().is_empty()
-	if not _watch.poll(busy):
-		return
-	logger.info("ROM folders changed: rescanning")
-	_rescanning = true
-	library_manager.load_library(LIBRARY_ID)
+	var running := not launch_manager.get_running().is_empty()
+	if _watch.poll(_rescanning or running):
+		logger.info("ROM folders changed: rescanning")
+		_rescanning = true
+		library_manager.load_library(LIBRARY_ID)
+	if _steam_watch.poll(_steam_rescanning or running):
+		logger.info("Installed Steam games changed: rescanning")
+		_steam_rescanning = true
+		library_manager.load_library(STEAM_LIBRARY_ID)
 
 
 func _on_library_loaded(library_id: String) -> void:
+	# Any load counts (start, Refresh Library, ours): it read what is on disk now.
+	if library_id == STEAM_LIBRARY_ID:
+		_steam_watch.mark_loaded()
+		_steam_rescanning = false
+		_refresh_system(STEAM_TAB)
+		return
 	if library_id != LIBRARY_ID:
 		return
-	# Any load counts (start, Refresh Library, ours): it read what is on disk now.
 	_watch.mark_loaded()
 	_rescanning = false
 	for system in roms.SYSTEMS:
 		_refresh_system(system)
 
 
-## Library items whose retroforge-roms launch item belongs to the given system, sorted by name.
+## Library items of one tab, sorted by name: the ROMs whose retroforge-roms launch item is tagged
+## with the system, or for STEAM_TAB the installed Steam games.
 func _items_for(system: String) -> Array[LibraryItem]:
+	var library := STEAM_LIBRARY_ID if system == STEAM_TAB else LIBRARY_ID
 	var items: Array[LibraryItem] = []
 	for item in library_manager.get_library_items():
-		var launch := item.get_launch_item(LIBRARY_ID)
+		var launch := item.get_launch_item(library)
 		if launch and system in launch.tags:
 			items.append(item)
 	return items
@@ -256,7 +276,7 @@ func _refresh_system(system: String) -> void:
 
 
 func _tab_text(system: String) -> String:
-	return roms.SYSTEMS[system]["name"]
+	return "Steam" if system == STEAM_TAB else roms.SYSTEMS[system]["name"]
 
 
 ## Same node layout as the library menu's AllGamesTab: library_menu.gd focuses the first card of a

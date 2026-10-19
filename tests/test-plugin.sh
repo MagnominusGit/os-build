@@ -85,6 +85,12 @@ grep -q '^extends OSPlatform$' "$SRC/retroforge_os.gd" && ok "retroforge_os.gd e
 grep -q 'load(plugin_base.path_join("boxart_retroforge.gd"))' "$SRC/plugin.gd" && grep -q 'add_boxart(art)' "$SRC/plugin.gd" \
   && grep -q '^	provider_id = "retroforge"$' "$SRC/boxart_retroforge.gd" \
   && ok "the art provider is added, with an id (BoxArtManager refuses an empty one)" || bad "boxart_retroforge.gd is not added by plugin.gd, or has no provider_id"
+# The installed Steam games' library id is spelled in three files: a mismatch leaves the Steam tab
+# empty (plugin.gd) or its cards without art (boxart_retroforge.gd).
+[ "$(grep -ho '"retroforge-steam"' "$SRC/library_steam.gd" "$SRC/plugin.gd" "$SRC/boxart_retroforge.gd" | wc -l)" -eq 3 ] \
+  && grep -q 'add_library(steam)' "$SRC/plugin.gd" \
+  && ok "the Steam games' library is added, under the id the tab and the art provider look for" \
+  || bad "library_steam.gd is not added, or its id differs between library_steam.gd, plugin.gd and boxart_retroforge.gd"
 
 # =================================================================================================
 CASE="zip"
@@ -120,6 +126,8 @@ const EmuOptions := preload("$SRC/emu_options.gd")
 const EmuState := preload("$SRC/emu_state.gd")
 const ArtPaths := preload("$SRC/art_paths.gd")
 const UpdateStates := preload("$SRC/update_states.gd")
+const SteamApps := preload("$SRC/steam_apps.gd")
+const SteamWatch := preload("$SRC/steam_watch.gd")
 const SYSTEMS := {"psx": "PlayStation", "ps2": "PlayStation 2"}
 var failed := 0
 
@@ -214,6 +222,7 @@ func _init() -> void:
 	test_emu_state()
 	test_art_paths()
 	test_update_states()
+	test_steam_apps()
 	quit(1 if failed else 0)
 
 # Settings > General > Updates (retroforge_os.gd): retroforge-update's answers -> what is shown.
@@ -564,6 +573,71 @@ func test_emu_options() -> void:
 	LaunchArgs.set_emulator_fast_cores("duckstation", false)
 	check("emulator choice: back to the emulator's setting", EmuOptions.emulator_choice("duckstation", aspect), "")
 
+
+## Installed Steam games from the client's own files (library_steam.gd): no second sign-in, as the
+## OGUI Steam plugin's steamcmd needs. Steam's tools install as apps too and are no games.
+func acf(appid: String, name: String, flags: int, dir: String, nested_first := false) -> String:
+	var nested := '\t"UserConfig"\n\t{\n\t\t"name"\t\t"not this one"\n\t}\n'
+	var top := '\t"appid"\t\t"%s"\n\t"name"\t\t"%s"\n\t"StateFlags"\t\t"%d"\n\t"installdir"\t\t"%s"\n' % [appid, name, flags, dir]
+	return '"AppState"\n{\n' + (nested + top if nested_first else top + nested) + '}\n'
+
+func test_steam_apps() -> void:
+	var root := "$T/steam"
+	var sd := "$T/sdcard/SteamLibrary"
+	var apps := root + "/steamapps"
+	write(apps + "/libraryfolders.vdf", '"libraryfolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t\t"apps"\n\t\t{\n\t\t\t"1145360"\t\t"1"\n\t\t}\n\t}\n\t"1"\n\t{\n\t\t"path"\t\t"%s/"\n\t}\n}\n' % [root, sd])
+	write(apps + "/appmanifest_1145360.acf", acf("1145360", "Hades", 4, "Hades"))
+	write(apps + "/appmanifest_367520.acf", acf("367520", "Hollow Knight", 6, "Hollow Knight", true))
+	write(apps + "/appmanifest_504230.acf", acf("504230", "Celeste", 1026, "Celeste"))
+	write(apps + "/appmanifest_4628740.acf", acf("4628740", "Proton 11.0 (ARM64)", 4, "Proton 11.0 (ARM64)"))
+	write(apps + "/appmanifest_2805730.acf", acf("2805730", "Proton 9.0", 4, "Proton 9.0"))
+	write(apps + "/appmanifest_4185400.acf", acf("4185400", "Steam Linux Runtime 4.0 - Arm64", 4, "SteamLinuxRuntime_4-arm64"))
+	write(apps + "/appmanifest_9999999.acf", acf("9999999", "Steam Linux Runtime 5.0", 4, "SteamLinuxRuntime_5"))
+	write(apps + "/appmanifest_3127680.acf", acf("3127680", "FEX", 4, "FEX"))
+	write(apps + "/appmanifest_228980.acf", acf("228980", "Steamworks Common Redistributables", 4, "Steamworks Shared"))
+	write(apps + "/appmanifest_1.acf", acf("", "No Id", 4, "NoId"))
+	var bs := char(92)
+	write(apps + "/appmanifest_220.acf", acf("220", "Tom" + bs + '"s Quest', 4, "TQ"))
+	write(sd + "/steamapps/appmanifest_268910.acf", acf("268910", "Cuphead", 4, "Cuphead"))
+	write(sd + "/steamapps/appmanifest_1145360.acf", acf("1145360", "Hades", 4, "Hades"))
+	check("steam: library folders are the client's root, then libraryfolders.vdf's other paths, once",
+		SteamApps.library_dirs(root), PackedStringArray([root, sd]))
+	var games := SteamApps.installed(root)
+	var names := []
+	for g in games:
+		names.append(g["name"])
+	check("steam: installed games, sorted; no tools, nothing still downloading, a game in two folders once",
+		names, ["Cuphead", "Hades", "Hollow Knight", 'Tom"s Quest'])
+	check("steam: a game's folder is <library>/steamapps/common/<installdir>, in its own library",
+		[games[0]["dir"], games[1]["dir"]], [sd + "/steamapps/common/Cuphead", apps + "/common/Hades"])
+	check("steam: the app id comes along as a number", games[1]["appid"], 1145360)
+	check("steam: a nested section's name is not the game's", games[2]["name"], "Hollow Knight")
+	check("steam: tools by id, by name prefix, and FEX; a game whose name only starts like one is a game",
+		[SteamApps.is_steam_tool(4628740, "x"), SteamApps.is_steam_tool(1, "Proton 9.0"), SteamApps.is_steam_tool(2, "FEX"), SteamApps.is_steam_tool(3, "Protonic Mayhem")],
+		[true, true, true, false])
+	check("steam: launched as the OGUI Steam plugin does, with the rungameid OGUI takes the app id from",
+		SteamApps.launch_args(1145360),
+		PackedStringArray(["-gamepadui", "-steamos3", "-steampal", "-steamdeck", "-silent", "steam://rungameid/1145360"]))
+	var cache := root + "/appcache/librarycache"
+	write(cache + "/1145360/library_600x900.jpg", "p")
+	write(cache + "/1145360/0a1b2c/logo.png", "l")
+	write(cache + "/268910_header.jpg", "h")
+	check("steam art: the client's cached art per OGUI layout: in the app's folder, one folder down, or flat (older clients)",
+		[SteamApps.art_path(root, 1145360, 0), SteamApps.art_path(root, 1145360, 3), SteamApps.art_path(root, 268910, 1)],
+		[cache + "/1145360/library_600x900.jpg", cache + "/1145360/0a1b2c/logo.png", cache + "/268910_header.jpg"])
+	check("steam art: none cached, or a layout OGUI does not have: none",
+		[SteamApps.art_path(root, 268910, 2), SteamApps.art_path(root, 1145360, 7)], ["", ""])
+	var watch = SteamWatch.new().watch_steam(root)
+	check("steam rescan: nothing before OGUI's first library load", [watch.poll(false), watch.poll(false)], [false, false])
+	watch.mark_loaded()
+	check("steam rescan: nothing while the manifests match the library", [watch.poll(false), watch.poll(false)], [false, false])
+	write(sd + "/steamapps/appmanifest_413150.acf", acf("413150", "Stardew Valley", 4, "Stardew Valley"))
+	check("steam rescan: a game installed (another library folder too) is due once two polls agree",
+		[watch.poll(false), watch.poll(false)], [false, true])
+	watch.mark_loaded()
+	DirAccess.remove_absolute(apps + "/appmanifest_1145360.acf")
+	check("steam rescan: never while a game (or Steam's UI) runs", [watch.poll(true), watch.poll(true)], [false, false])
+	check("steam rescan: an uninstall is due after it", [watch.poll(false), watch.poll(false)], [false, true])
 
 func write(path: String, text: String) -> void:
 	DirAccess.make_dir_recursive_absolute(path.get_base_dir())

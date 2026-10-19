@@ -14,9 +14,15 @@ extends BoxArtProvider
 ## other layout's decode (1280 px fan art), runs on a WorkerThreadPool task while OGUI keeps
 ## drawing. Our tabs do not await a card's art (plugin.gd _build_card), so their cards load in
 ## parallel; OGUI's own grids await each card, one frame or so apiece, but never freeze.
+##
+## Installed Steam games (library_steam.gd) get the art the Steam client cached for its own library
+## (steam_apps.gd art_path), decoded on a worker thread the same way. A game the client has no art
+## for yet has none here: nothing is fetched for it.
 
 const ArtPaths := preload("art_paths.gd")
+const SteamApps := preload("steam_apps.gd")
 const LIBRARY_ID := "retroforge-roms"
+const STEAM_LIBRARY_ID := "retroforge-steam"
 
 var fetcher: RefCounted  # art_fetch.gd, set by plugin.gd; none: no fetching
 
@@ -32,7 +38,7 @@ func _ready() -> void:
 func get_boxart(item: LibraryItem, kind: LAYOUT) -> Texture2D:
 	var launch: LibraryLaunchItem = item.get_launch_item(LIBRARY_ID)
 	if not launch:
-		return null
+		return await _steam_art(item, kind)
 	var system := str(launch.metadata.get("system", ""))
 	var rom := str(launch.metadata.get("rom", ""))
 	var path := ArtPaths.path_for(ArtPaths.media_dir(), system, rom, kind)
@@ -46,6 +52,21 @@ func get_boxart(item: LibraryItem, kind: LAYOUT) -> Texture2D:
 		image = await _off_main_thread(_card.bind(path, ArtPaths.card_cache_path(ArtPaths.cards_dir(), system, rom)))
 	else:
 		image = await _off_main_thread(ArtPaths.load_image.bind(path))
+	if not image:
+		logger.warn("Unreadable art: " + path)
+		return null
+	return ImageTexture.create_from_image(image)
+
+
+## The Steam client's own art for an installed Steam game, or null.
+func _steam_art(item: LibraryItem, kind: LAYOUT) -> Texture2D:
+	var launch: LibraryLaunchItem = item.get_launch_item(STEAM_LIBRARY_ID)
+	if not launch:
+		return null
+	var path := SteamApps.art_path(SteamApps.steam_root(), int(launch.metadata.get("steam_app", 0)), kind)
+	if path == "":
+		return null
+	var image := await _off_main_thread(ArtPaths.load_image.bind(path))
 	if not image:
 		logger.warn("Unreadable art: " + path)
 		return null
