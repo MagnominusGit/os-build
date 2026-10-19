@@ -18,7 +18,8 @@ Two firmware sources:
   carries the SM6115 MANGMI blobs (zap, cDSP, modem/WLAN, ath10k board files, Himax touch,
   AW88261 amp, WCN3950 Bluetooth) taken from [ROCKNIX/extra-firmware](https://github.com/ROCKNIX/extra-firmware).
 
-Which class a given blob falls in is **per-SoC, not fixed**. SM8550/SM8650 boards each need
+Which class a given blob falls in is **per-SoC, not fixed**. SM8550/SM8650/SM8750 boards each
+need
 their own vendor-signed `adsp`/`cdsp`; every SM8250 board is served by the generic open pair
 in `linux-firmware`. Two SM8250 blobs are missing from both sources and are documented as
 open gaps at the bottom of `QCOM_FW.pin`.

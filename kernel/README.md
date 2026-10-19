@@ -39,7 +39,7 @@ Two rules when editing it:
 
 ## Key decision: 4K pages
 `CONFIG_ARM64_4K_PAGES=y` is set deliberately — **userland and emulator JITs assume 4K
-pages.** Standardized across all four SoCs.
+pages.** Standardized across all five SoCs.
 
 ## Status (Phase 1)
 - ✅ Source pinned to the 7.2 series — `kernel/SOURCE.pin` is the authority for the exact

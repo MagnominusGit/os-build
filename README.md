@@ -21,10 +21,12 @@ a liveness placeholder (`vkcube`) where the shell will be. Not yet a usable prod
 | 4 | A ROM library in the shell |
 | 5 | Release infrastructure: signing CA, update server, release channel |
 
-You need an **unlockable bootloader**, a spare **SD card**, and the device already running the
-**[ROCKNIX ABL](https://github.com/ROCKNIX/abl)** — the custom bootloader that can start a Linux
-system on these handhelds at all. RetroForge does not ship one; on a stock Android bootloader a card
-simply does nothing. RetroForge runs from the card and does not touch your Android install.
+You need an **unlockable bootloader**, a spare **SD card**, and the device already running
+**[OpenABL](https://github.com/OpenHandheldCollective/OpenABL)** — the custom bootloader that can
+start a Linux system on these handhelds at all (the community continuation of the ROCKNIX ABL; if
+you already run ROCKNIX you have a compatible one). RetroForge does not ship one; on a stock Android
+bootloader a card simply does nothing. RetroForge runs from the card and does not touch your Android
+install.
 
 ## Supported devices
 
@@ -32,6 +34,8 @@ simply does nothing. RetroForge runs from the card and does not touch your Andro
 
 | Board | SoC | Profile |
 |---|---|---|
+| AYN Odin 3 | SM8750 | `ayn-odin-3` |
+| KONKR Pocket FIT Elite | SM8750 | `konkr-pocket-fit-elite` |
 | AYANEO Pocket S2 | SM8650 | `ayaneo-pocket-s2` |
 | KONKR Pocket FIT | SM8650 | `konkr-pocket-fit` |
 | AYANEO Pocket ACE | SM8550 | `ayaneo-pocket-ace` |
@@ -78,7 +82,7 @@ One image serves every device: the running system identifies the board and confi
 ### What it is
 
 An immutable, A/B-updatable aarch64 Linux distribution built on SteamOS 3 "Holo" packages, on
-Qualcomm mobile silicon (**SM6115 / SM8250 / SM8550 / SM8650**). The root is read-only, bootstrapped from
+Qualcomm mobile silicon (**SM6115 / SM8250 / SM8550 / SM8650 / SM8750**). The root is read-only, bootstrapped from
 packages into a sealed Btrfs image; updates are RAUC bundles installed to the inactive slot behind a
 custom `retroforge-bootctl` bootloader backend. No Steam client, no x86 emulation, no Android container.
 
