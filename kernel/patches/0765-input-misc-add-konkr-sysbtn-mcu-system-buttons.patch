@@ -11,7 +11,7 @@ MCU-persisted).
 From ROCKNIX SM8750 0069, STRIPPED of its RGB-LED half (the
 konkr:rgb:joysticks multicolor LED, the "effect" sysfs mode selector and
 the PM notifier that blanked/replayed the rings around system sleep):
-novadeck has no surface that controls stick-ring LEDs and no kernel sleep,
+retroforge has no surface that controls stick-ring LEDs and no kernel sleep,
 so all of it would be dead code here. The tx_inhibited plumbing went with
 the notifier; tx_lock stays, it orders the enable frame against the
 key-config exchanges.
@@ -55,7 +55,7 @@ diff -Naur a/drivers/input/misc/konkr_sysbtn.c b/drivers/input/misc/konkr_sysbtn
 + *    are not part of the SPI gamepad.
 + *
 + * The same UART carries the version frame (F7/E7 55 AA xx ED), the
-+ * analog-stick RGB frames (not driven here: novadeck has no surface that
++ * analog-stick RGB frames (not driven here: retroforge has no surface that
 + * controls stick-ring LEDs) and the controller-config protocols; none of
 + * those bytes form a valid 8-run, so the decoder ignores them.
 + */
