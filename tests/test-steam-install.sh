@@ -50,17 +50,27 @@ for p in 10 50 100; do echo "steam-x86-guest: \$p% of 1296 MB" >&2; done
 mkdir -p "$GUEST"; echo sqsh >"$GUEST/img.sqsh"; ln -sfn img.sqsh "$GUEST/current"
 EOF
 # /usr/bin/steam, for the client's own update: records how it was started and the page's progress.
+# Its lines are the real client's (bootstrap_log.txt, Pocket FIT, 2026-10-19): "Verification
+# complete" at its start, before any download, then the download, then an unpack that prints nothing
+# for longer than DONE_GRACE (1 s here; over a minute on hardware), then "Update complete".
 cat >"$T/bin/steam" <<EOF
 #!/usr/bin/env bash
 { echo "args=\$*"; echo "display=\${DISPLAY-unset} wayland=\${WAYLAND_DISPLAY-unset}"
   echo "progress-file=\$(cat "$PROG_CLIENT" 2>/dev/null)"; } >>"$T/steam.log"
+echo "[2026-10-19 10:02:54] Verification complete"
 case "\${FAKE_UPD:-ok}" in
   fail) echo "Steam: cannot open display" ; exit 1 ;;
-  hang) echo "[2026-10-18] Verification complete"; trap 'exit 143' TERM; while :; do sleep 0.1; done ;;
+  hang) echo "[2026-10-19 10:06:24] Update complete, launching..."; trap 'exit 143' TERM; while :; do sleep 0.1; done ;;
+  current) echo "[2026-10-19 10:08:26] Nothing to do"; trap 'exit 143' TERM; while :; do sleep 0.1; done ;;
 esac
 for p in "100 of 1,000" "500 of 1,000" "1,000 of 1,000"; do echo "[ 50%] Downloading update (\$p KB)..."; done
+echo "[2026-10-19 10:03:09] Extracting package..."
+sleep 2
+echo "unpack-progress=\$(cat "$PROG_CLIENT" 2>/dev/null)" >>"$T/steam.log"
+echo "[2026-10-19 10:06:07] Installing update..."
 mkdir -p "$STEAM_ROOT/package"
 printf '"linuxarm64"\n{\n\t"version"\t\t"1791918634"\n}\n' >"$STEAM_ROOT/package/steam_client_steamdeck_stable_linuxarm64.installed"
+echo "[2026-10-19 10:06:24] Update complete, launching..."
 EOF
 # install-steamcmd: the stub; in install mode it puts "Valve's" steamcmd in place and updates it.
 cat >"$T/bin/install-steamcmd" <<EOF
@@ -124,7 +134,11 @@ grep -qx "fetch" "$T/guest.log" && ok "then the x86 guest's fetch, in the foregr
 grep -qx "args=-steamdeck -exitsteam" "$T/steam.log" && ok "then the client's update: steam -steamdeck -exitsteam" || bad "$(cat "$T/steam.log")"
 grep -qx "display=unset wayland=unset" "$T/steam.log" && ok "with no display (the updater window has nowhere to go)" || bad "$(grep display "$T/steam.log")"
 p="$(sed -n 's/^progress-file=//p' "$T/steam.log")"
-[ -n "$p" ] && [ "$p" -ge 60 ] && [ "$p" -le 80 ] && ok "the progress file said $p while the update ran (bootstrap and guest done)" || bad "progress file: '$p'"
+[ -n "$p" ] && [ "$p" -ge 50 ] && [ "$p" -le 65 ] && ok "the progress file said $p when the update started (bootstrap and guest done)" || bad "progress file: '$p'"
+u="$(sed -n 's/^unpack-progress=//p' "$T/steam.log")"
+[ -n "$u" ] && [ "$u" -ge 85 ] && [ "$u" -le 95 ] && ok "and $u while the client unpacked, past the download's end: the bar does not sit still" || bad "unpack progress: '$u'"
+! grep -q "did not finish" <<<"$ERR" \
+  && ok "the startup 'Verification complete' starts no grace: an unpack longer than DONE_GRACE finishes" || bad "$ERR"
 [ ! -e "$PROG_CLIENT" ] && ok "and is removed at the end" || bad "left: $(cat "$PROG_CLIENT")"
 grep -q "Steam Client is installed" <<<"$ERR" && ok "says so on stderr" || bad "$ERR"
 si -- status
@@ -138,7 +152,9 @@ si -- status; [ "$(field steam-client installed)" = '"installed"' ] && ok "insta
 
 CASE="install client, the client keeps running after its update"
 reset; start=$SECONDS; si FAKE_UPD=hang -- install client
-[ "$RC" = 0 ] && [ $((SECONDS - start)) -lt 20 ] && ok "TERMed DONE_GRACE after 'Verification complete' (no hour-long wait)" || bad "rc=$RC took $((SECONDS - start)) s"
+[ "$RC" = 0 ] && [ $((SECONDS - start)) -lt 20 ] && ok "TERMed DONE_GRACE after 'Update complete' (no hour-long wait)" || bad "rc=$RC took $((SECONDS - start)) s"
+reset; start=$SECONDS; si FAKE_UPD=current -- install client
+[ "$RC" = 0 ] && [ $((SECONDS - start)) -lt 20 ] && ok "no update ('Nothing to do'): the same grace, no hour-long wait" || bad "rc=$RC took $((SECONDS - start)) s"
 
 CASE="install client, failures"
 reset; si FAKE_BOOT=sha -- install client

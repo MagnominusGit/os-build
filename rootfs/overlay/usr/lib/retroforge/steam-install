@@ -24,10 +24,17 @@
 #      Its "NN% of MMMM MB" lines are the progress;
 #   3. the client's own update, by Valve's updater: `steam -steamdeck -exitsteam` through /usr/bin/steam
 #      (the wrapper every start goes through), which downloads the rest of the client (~600 MB: its
-#      UI, web helper, codecs and runtimes), restarts once (exit 42) and exits. Its "Downloading
-#      update (X of Y KB)" lines are the progress. It runs with no display: the updater window has
-#      nowhere to show in the shell. If it does not finish, the install still succeeds, and the client
-#      finishes its update when it is first opened (as every first start did before this stage);
+#      UI, web helper, codecs and runtimes), unpacks and installs it, restarts once (exit 42) and
+#      exits. Its "Downloading update (X of Y KB)" lines are the progress, then "Extracting
+#      package..." and "Installing update...": the unpacking prints nothing for a minute and more
+#      (~80 s on the KONKR Pocket FIT, 2026-10-19), so it has a share of the bar of its own (APPLY)
+#      instead of leaving the bar at its end. It runs with no display: the updater window has nowhere
+#      to show in the shell. The client is TERMed DONE_GRACE after "Update complete" (or "Nothing to
+#      do": no update) if it is still running then. Not after "Verification complete": the client
+#      prints that at its start too, before it downloads anything, and a grace counted from there cut
+#      the unpacking short. If the update does not finish, the install still succeeds, and the client
+#      finishes it when it is first opened, behind an updater window that shows nothing for a minute
+#      or two (its font, clientui/fonts/GoNotoKurrent-Regular.ttf, comes with that very update);
 #      stderr says so.
 # Installed = the client binary and an x86 guest image (unless the guest is turned off). The entry's
 # Open starts Steam's UI (the Emulators page does that, not this).
@@ -81,9 +88,13 @@ EXIT_OK, EXIT_USAGE, EXIT_NET, EXIT_VERIFY, EXIT_LOCAL = 0, 2, 3, 4, 5
 # Download sizes for the bar (2026-10): what each stage fetches on a fresh card.
 CLIENT_STAGES = {"bootstrap": 110 * MB, "guest": 1296 * MB, "update": 652 * MB}
 CLI_STAGES = {"fetch": 4 * MB, "update": 40 * MB}
+# The client's unpacking and install of its update, weighted for the bar like a 400 MB download (it
+# takes about as long), moved by APPLY_STEPS. Not a download: not in the size the page shows.
+APPLY_WEIGHT = 400 * MB
+APPLY_STEPS = ((re.compile(r"Extracting package"), 0.3), (re.compile(r"Installing update"), 0.8))
 
 UPDATE_LINE = re.compile(r"Downloading update \(([\d,]+) of ([\d,]+) KB\)")
-UPDATE_DONE = re.compile(r"Verification complete|Update complete")
+UPDATE_DONE = re.compile(r"Update complete|Nothing to do")
 GUEST_LINE = re.compile(r"(\d+)% of (\d+) MB")
 BOOTSTRAP_LINE = re.compile(r"steam-bootstrap: progress (\d+) (\d+)")
 
@@ -261,7 +272,7 @@ def failure_code(tail, default=EXIT_NET):
 
 
 def install_client():
-    prog = Progress("steam-client", CLIENT_STAGES)
+    prog = Progress("steam-client", dict(CLIENT_STAGES, apply=APPLY_WEIGHT))
     try:
         # 1. the client binaries
         seen = {"finished": 0, "total": 0}
@@ -304,6 +315,10 @@ def install_client():
                 done, total = (int(m.group(i).replace(",", "")) for i in (1, 2))
                 if total:
                     prog.set("update", done / total)
+            for step, fraction in APPLY_STEPS:
+                if step.search(line):
+                    prog.set("update", 1.0)
+                    prog.set("apply", fraction)
 
         env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
         code, tail = run_stage([WRAPPER, "-steamdeck", "-exitsteam"], on_update, env=env,
