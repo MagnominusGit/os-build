@@ -97,7 +97,7 @@ ctr run --rm --platform linux/amd64 \
   -e BASE_NAME="$BASE_NAME" -e BASE_VERSION="$BASE_VERSION" -e BASE_URL="$BASE_URL" \
   -e BASE_SHA256="$BASE_SHA256" \
   -e SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-}" -e MX86_SKIP_I386_EXEC="${MX86_SKIP_I386_EXEC:-0}" \
-  -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+  -e HOST_UID="$(ctr_host_owner | cut -d: -f1)" -e HOST_GID="$(ctr_host_owner | cut -d: -f2)" \
   "$IMAGE" bash /repo/packages/mesa-x86/container-compose.sh
 
 # --- the publishing limit -------------------------------------------------------------------------

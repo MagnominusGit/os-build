@@ -788,7 +788,10 @@ fi
 #   - the x86 guest Valve's FEX tool needs for x86 games and x86 Protons (ld.so, glibc, x86 Mesa;
 #     SteamOS ships it as usr/share/guestos/fex-mesa): steam-x86-guest follows FEX's ArchLinux RootFS
 #     channel (x86-guest.pin, ~1.4 GB; installed with Steam Client) and mounts it with squashfuse while
-#     Steam runs.
+#     Steam runs, with our own x86 Mesa laid over it (fuse-overlayfs). That Mesa, built by
+#     packages/mesa-x86 from packages/mesa's pin, is the image's one x86 payload:
+#     /usr/lib/retroforge/x86-mesa (rootfs/lib-assemble-x86-mesa.sh). Libraries only, run by nothing
+#     on the host.
 #     usr/share/guestos stays listed.
 #   - Proton-CachyOS arm64, for DXVK-Sarek when the player's setting is on (by default on the SM6115
 #     only): retroforge-steam-sarek has steam-compat-tools keep its newest arm64 release in the Steam

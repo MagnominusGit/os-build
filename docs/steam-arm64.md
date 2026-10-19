@@ -227,6 +227,17 @@ from that tree into another one reportedly do not work, so it has to be a real t
 (SquashFS)". FEX lists one entry per rolling distro and type, its newest, so the device takes
 whatever FEX publishes there now. Two matching entries are refused rather than guessed between.
 
+**Our Mesa over it.** FEX's RootFS carries upstream Arch Mesa. The image carries our own, built for
+x86_64 and i686 from `packages/mesa`'s pin and patches by `packages/mesa-x86` (Turnip, zink, the
+GL front ends, the VRAM layer; `make mesa-x86`, in an x86_64 Arch container locked to the guest's
+Arch snapshot), at `/usr/lib/retroforge/x86-mesa/root`, with `payload.conf` naming that snapshot.
+It is the image's one x86 payload and nothing on the host runs it. `steam-x86-guest` mounts the
+guest on `fex-guest/base` and lays the payload over it with `fuse-overlayfs` on `fex-guest/root`
+(lower layers only, so read-only): our files replace the guest's at the same paths, everything else
+is the guest's, and `graphics_provider.json` is still the guest's. A guest older than the payload's
+snapshot (it could lack the glibc the payload links against) is mounted as it is, and so is any
+guest on an image built with `RETROFORGE_X86_MESA=0`.
+
 Each entry has a `URL` (a dated directory, `.../ArchLinux/2026-08-11/ArchLinux.sqsh`) and a `Hash`.
 That hash is FEX's XXH3-64 (`XXH3_64bits`, seed 0), in hex without leading zeros, not a sha256. The
 image checks it with `xxhsum -H3`, from the `xxhash` package (`rsync` already pulls it in; it is in

@@ -1,12 +1,18 @@
-# mesa-x86: the downloadable x86 guest for Valve's FEX tool
+# mesa-x86: our Mesa for the x86 guest Valve's FEX tool runs x86 games in
 
 An x86_64 + i686 build of **our** Mesa (Turnip, plus zink for GL), from the same tarball and the
-same patches as the host driver in [`../mesa`](../mesa), laid over FEX's ArchLinux RootFS and
-published as one squashfs image. A device downloads it on demand; **it is never in the OS image.**
+same patches as the host driver in [`../mesa`](../mesa). `make mesa-x86` builds it (`build.sh`), and
+`rootfs/lib-assemble-x86-mesa.sh` puts it in the OS image at `/usr/lib/retroforge/x86-mesa/root`
+with `payload.conf` (the Arch snapshot it was built against, the Mesa version). The guest itself,
+FEX's ArchLinux RootFS, is not in the image: a device downloads it (Main menu > Emulators > Steam
+Client) and `steam-x86-guest` lays this payload over it with `fuse-overlayfs` whenever it mounts it
+(user decision 2026-10-18: built into the image, so nothing needs hosting). `RETROFORGE_X86_MESA=0`
+builds an image without it.
 
 Nothing in this directory is a pacman package or a prebuilt: there is no `source.pin`,
 `prebuilt.pin` or `PKGBUILD` here, so `build-overlay.sh` and `customize-base.sh` never see it, and
-`tests/test-fex-guest.sh` fails if one appears.
+`tests/test-fex-guest.sh` fails if one appears. The payload reaches the image through the x86-mesa
+assembler stage alone.
 
 ## Why the guest needs x86 Mesa
 
@@ -58,10 +64,11 @@ To make freedreno GL the default instead of zink, add `freedreno` to `gallium-dr
 `MESA_LOADER_DRIVER_OVERRIDE=zink`. Not done, because it puts a second, unvalidated x86 GPU driver
 in the guest.
 
-## The image
+## Checking it against a real guest (optional)
 
-`compose.sh` downloads the guest named in `guest.pin` (sha256-checked), then, in the same container
-as root (`container-compose.sh`):
+The device lays the payload over the guest at mount time; nothing here composes what it ships.
+`compose.sh` is the check that the payload works in a guest: it downloads the guest named in
+`guest.pin` (sha256-checked), then, in the same container as root (`container-compose.sh`):
 
 1. unpacks it with `unsquashfs`;
 2. lays the payload over it (`guest-overlay.py`): each file replaces the guest's at the same path,

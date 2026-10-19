@@ -524,6 +524,7 @@ declare -A STAGE_EXPECTED=(
   [scraper-login]="RetroForge's ScreenScraper developer login, when the build had it (not on the installer medium: it scrapes nothing)"
   [sigdefer-shim]="the LD_PRELOAD shim Snes9x's definition names (not on the installer medium: it runs no emulator)"
   [gptk-interpose]="the LD_PRELOAD library PortMaster's gptokeyb2 gets from mod_RetroForge.txt (not on the installer medium: it runs no port)"
+  [x86-mesa]="our x86_64 + i686 Mesa that steam-x86-guest lays over the FEX guest (not on the installer medium: it runs no Steam)"
   [hidemenu-shim]="the LD_PRELOAD shim melonDS's definition names (not on the installer medium: it runs no emulator)"
   [debug-capture]="DEBUG-ONLY journald log capture"
   [seal]="strip the package manager from the RELEASE root"

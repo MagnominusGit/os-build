@@ -257,6 +257,9 @@ fi
 # hidemenu-shim runs on EVERY build.
 . "$ROOT/rootfs/lib-assemble-hidemenu.sh"
 
+# x86-mesa runs on EVERY build, unless RETROFORGE_X86_MESA=0.
+. "$ROOT/rootfs/lib-assemble-x86-mesa.sh"
+
 # debug-capture is DEBUG-ONLY, same construction -- and independent of RETROFORGE_DEV.
 if [ "${RETROFORGE_DEBUG:-}" = "1" ]; then
   . "$ROOT/rootfs/lib-assemble-debug.sh"

@@ -5,7 +5,7 @@
 # Valve's arm64 client runs x86 games and x86 Protons through its FEX tool (Steam app 3127680). That
 # tool needs an x86_64 + i386 "graphics provider": a tree with ld.so, glibc, x86 Mesa (Turnip) and
 # graphics_provider.json at its root. SteamOS ships one at /usr/share/guestos/fex-mesa. The image ships
-# none, because a root slot is 2 GB and rootfs/guard-rootfs.sh section 9 keeps x86 out of it. The tool
+# no guest, because a root slot is 2 GB (only our x86 Mesa to lay over one: below). The tool
 # also takes STEAM_COMPAT_GRAPHICS_PROVIDER=<dir>/graphics_provider.json, and <dir> then becomes both
 # pressure-vessel's graphics provider and FEX's RootFS. It has to be a real tree (symlinks into another
 # tree do not work). So: a squashfs image, kept as one file in ~/.local/share/retroforge/fex-guest/ and
@@ -47,6 +47,15 @@
 # images happen under fex-guest/.mount.lock, so they never race; fex-guest/.mounted says which image is
 # mounted.
 #
+# OUR x86 MESA: the image carries an x86_64 + i686 build of our own Mesa (Turnip, zink, the GL front
+# ends; packages/mesa-x86) at /usr/lib/retroforge/x86-mesa/root, built against the Arch snapshot named
+# in x86-mesa/payload.conf. When it is there, the image is mounted on fex-guest/base instead, and
+# fex-guest/root is fuse-overlayfs with the payload over it (lower layers only, so read-only): every
+# file of ours replaces the guest's at the same path, the rest is the guest's. Only over a guest no
+# older than the payload's snapshot (an older one could lack the glibc it links against); otherwise,
+# and without a payload, the image is mounted on fex-guest/root as it is, and one line says why.
+# Released together: the overlay, then the base.
+#
 # squashfuse starts with TERM and INT ignored, as PortMaster's runtimes do (portmaster/bin/mount), so
 # OGUI's Exit cannot pull the tree out from under a game that is still shutting down. It ends with a
 # lazy unmount (fusermount3 -u -z): whatever still has a file open keeps it, and squashfuse exits once
@@ -57,7 +66,7 @@
 #
 # TEST SEAMS (tests/test-steam-x86-guest.sh): RETROFORGE_STEAM_X86_GUEST_DIR (also set by
 # /usr/bin/steam), RETROFORGE_STEAM_X86_GUEST_PIN, RETROFORGE_MOUNTS, RETROFORGE_SQUASHFUSE,
-# RETROFORGE_FUSERMOUNT, RETROFORGE_XXHSUM.
+# RETROFORGE_FUSERMOUNT, RETROFORGE_XXHSUM, RETROFORGE_X86_MESA, RETROFORGE_FUSE_OVERLAYFS.
 import fcntl
 import glob
 import hashlib
@@ -82,9 +91,11 @@ PIN = os.environ.get("RETROFORGE_STEAM_X86_GUEST_PIN", "/usr/share/retroforge/st
 MOUNTS = os.environ.get("RETROFORGE_MOUNTS", "/proc/self/mounts")
 SQUASHFUSE = os.environ.get("RETROFORGE_SQUASHFUSE", "squashfuse")
 FUSERMOUNT = os.environ.get("RETROFORGE_FUSERMOUNT", "fusermount3")
+FUSE_OVERLAYFS = os.environ.get("RETROFORGE_FUSE_OVERLAYFS", "fuse-overlayfs")
+MESA = os.environ.get("RETROFORGE_X86_MESA", "/usr/lib/retroforge/x86-mesa")
 XXHSUM = os.environ.get("RETROFORGE_XXHSUM", "xxhsum")
 ROOT = os.path.join(GUEST, "root")
-PROVIDER = os.path.join(ROOT, "graphics_provider.json")
+BASE = os.path.join(GUEST, "base")  # the image, under our x86 Mesa on ROOT
 CURRENT = os.path.join(GUEST, "current")
 MOUNTED = os.path.join(GUEST, ".mounted")
 USERS = os.path.join(GUEST, ".users.lock")
@@ -215,10 +226,10 @@ def unescape(field):
     return re.sub(r"\\([0-7]{3})", lambda m: chr(int(m.group(1), 8)), field)
 
 
-def mounted():
+def mounted(path=ROOT):
     try:
         with open(MOUNTS, encoding="utf-8", errors="replace") as f:
-            return any(len(fl) > 1 and unescape(fl[1]) == ROOT for fl in (line.split() for line in f))
+            return any(len(fl) > 1 and unescape(fl[1]) == path for fl in (line.split() for line in f))
     except OSError:
         return False
 
@@ -234,20 +245,79 @@ def mounted_image():
         return None
 
 
-def working():
+def working(path=ROOT):
     """A mount there that serves the tree (a killed squashfuse leaves one that fails: ENOTCONN)."""
     try:
-        return os.path.isfile(PROVIDER)
+        return os.path.isfile(os.path.join(path, "graphics_provider.json"))
     except OSError:
         return False
 
 
 def fusermount_u():
+    """Release ROOT, then the image under our x86 Mesa when one is mounted on BASE."""
+    for path in (ROOT, BASE):
+        if path == BASE and not mounted(BASE):
+            continue
+        try:
+            subprocess.run([FUSERMOUNT, "-u", "-z", path], stdin=subprocess.DEVNULL,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False)
+        except OSError as err:
+            log(f"{FUSERMOUNT}: {err}")
+
+
+def payload(image):
+    """Our x86 Mesa tree to lay over image, or None: none in the image, or the image predates the
+    snapshot the payload was built against (it could lack the glibc the payload links against)."""
+    tree = os.path.join(MESA, "root")
+    if not os.path.isdir(tree):
+        return None
+    name = os.path.basename(image)
     try:
-        subprocess.run([FUSERMOUNT, "-u", "-z", ROOT], stdin=subprocess.DEVNULL,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, check=False)
+        with open(os.path.join(MESA, "payload.conf"), encoding="utf-8") as f:
+            snap = re.search(r"^snapshot=([0-9]{4}-[0-9]{2}-[0-9]{2})$", f.read(), re.M)
+    except OSError:
+        snap = None
+    date = re.search(r"-([0-9]{4}-[0-9]{2}-[0-9]{2})(?:-[0-9a-f]+)?\.sqsh$", name)
+    if not snap or not date:
+        log(f"not laying our x86 Mesa over {name}: cannot tell its date or the payload's")
+        return None
+    if date.group(1) < snap.group(1):
+        log(f"not laying our x86 Mesa over {name}: it predates the payload's snapshot {snap.group(1)}")
+        return None
+    return tree
+
+
+def fuse(argv, what):
+    """Run a FUSE mounter with TERM and INT ignored; True when it says it mounted."""
+    # Ignored signals survive exec, and libfuse keeps them (it only replaces default handlers).
+    old = [signal.signal(s, signal.SIG_IGN) for s in (signal.SIGTERM, signal.SIGINT)]
+    try:
+        res = subprocess.run(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.PIPE, text=True)
     except OSError as err:
-        log(f"{FUSERMOUNT}: {err}")
+        log(f"could not run {argv[0]}: {err}")
+        return False
+    finally:
+        signal.signal(signal.SIGTERM, old[0])
+        signal.signal(signal.SIGINT, old[1])
+    if res.returncode != 0:
+        log(f"{argv[0]} could not mount {what}: {res.stderr.strip()}")
+        return False
+    return True
+
+
+def serving(path, what):
+    """Wait until path is mounted and serves graphics_provider.json."""
+    deadline = time.monotonic() + MOUNT_WAIT
+    while not (mounted(path) and working(path)):
+        if time.monotonic() > deadline:
+            if mounted(path):
+                log(f"{what} is mounted but has no graphics_provider.json at its root")
+            else:
+                log(f"{what} did not mount on {path}")
+            return False
+        time.sleep(0.05)
+    return True
 
 
 def do_mount(image):
@@ -257,33 +327,25 @@ def do_mount(image):
             return True
         log(f"releasing a dead mount on {ROOT}")
         fusermount_u()
+    elif mounted(BASE):  # a mount cut short between the image and the overlay
+        fusermount_u()
+    tree = payload(image)
     os.makedirs(ROOT, exist_ok=True)
-    # Ignored signals survive exec, and libfuse keeps them (it only replaces default handlers).
-    old = [signal.signal(s, signal.SIG_IGN) for s in (signal.SIGTERM, signal.SIGINT)]
-    try:
-        res = subprocess.run([SQUASHFUSE, image, ROOT], stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-    except OSError as err:
-        log(f"could not run {SQUASHFUSE}: {err}")
-        return False
-    finally:
-        signal.signal(signal.SIGTERM, old[0])
-        signal.signal(signal.SIGINT, old[1])
-    if res.returncode != 0:
-        log(f"{SQUASHFUSE} could not mount {image}: {res.stderr.strip()}")
-        return False
-    deadline = time.monotonic() + MOUNT_WAIT
-    while not (mounted() and working()):
-        if time.monotonic() > deadline:
-            if mounted():
-                log(f"{image} is mounted but has no graphics_provider.json at its root")
-            else:
-                log(f"{image} did not mount on {ROOT}")
+    if tree is None:
+        if not fuse([SQUASHFUSE, image, ROOT], image) or not serving(ROOT, image):
             return False
-        time.sleep(0.05)
+    else:
+        os.makedirs(BASE, exist_ok=True)
+        if not fuse([SQUASHFUSE, image, BASE], image) or not serving(BASE, image):
+            fusermount_u()
+            return False
+        if not fuse([FUSE_OVERLAYFS, "-o", f"lowerdir={tree}:{BASE}", ROOT], f"our x86 Mesa over {image}") \
+                or not serving(ROOT, f"our x86 Mesa over {image}"):
+            fusermount_u()
+            return False
     with open(MOUNTED, "w", encoding="utf-8") as f:
         f.write(image + "\n")
-    log(f"mounted {os.path.basename(image)} on {ROOT}")
+    log(f"mounted {os.path.basename(image)} on {ROOT}" + (", with our x86 Mesa over it" if tree else ""))
     return True
 
 
@@ -336,7 +398,7 @@ def cmd_release():
         if not mounted() or steam_running():
             return 0
         fusermount_u()
-        if mounted():
+        if mounted() or mounted(BASE):
             log(f"could not release {ROOT}")
             return 1
         # An older image kept because it was mounted can go now. A fetch that is at it tidies up itself.

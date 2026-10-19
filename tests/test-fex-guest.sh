@@ -60,10 +60,12 @@ field "$D/guest.pin" sha256 | grep -qE '^[0-9a-f]{64}$' \
   || bad "guest.pin url/sha256 malformed"
 
 echo
-echo "never in the OS image"
+echo "into the OS image only through the x86-mesa stage"
 
 # customize-base.sh installs every packages/*/prebuilt.pin; build-overlay.sh builds every
-# packages/*/source.pin. Either file here would put x86 Mesa (or the guest) into the root.
+# packages/*/source.pin. Either file here would put x86 Mesa (or the guest) into the root by a path
+# nobody audits; the payload goes in through rootfs/lib-assemble-x86-mesa.sh alone, and the guest
+# never does.
 for f in prebuilt.pin source.pin PKGBUILD; do
   [ -e "$D/$f" ] && bad "packages/mesa-x86/$f exists -- the image build would pick it up"
 done

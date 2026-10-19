@@ -1,21 +1,25 @@
 #!/usr/bin/env bash
-# Build the x86_64 + i686 Mesa (Turnip + zink GL) for the FEX guest image.
+# Build the x86_64 + i686 Mesa (Turnip + zink GL) for the FEX guest.
 #
 #   packages/mesa-x86/build.sh                     build, or reuse a build of the same inputs
 #   packages/mesa-x86/build.sh --configure-only    meson setup for both arches, then stop
 #   packages/mesa-x86/build.sh --arch x86_64       one arch only (a partial build is never cached)
 #
 # Runs ./container-build.sh in the pinned x86_64 Arch image (./builder.pin). Native on an x86_64
-# host (CI); emulated, and much slower, on an arm64 one. The result is a plain file tree, laid
-# over the guest by ./compose.sh:
+# host (CI, the build box); emulated, and much slower, on an arm64 one. The result is a plain file
+# tree that rootfs/lib-assemble-x86-mesa.sh puts in the OS image at /usr/lib/retroforge/x86-mesa/root,
+# and steam-x86-guest lays over the guest a device downloads (./compose.sh can also lay it over the
+# pinned guest and check it there, without shipping anything):
 #
 #   work/mesa-x86/out/payload/usr/lib/...      x86_64: libvulkan_freedreno.so, libgallium-*.so,
 #                                              libEGL_mesa, libGLX_mesa, libgbm, gbm/, dri/
 #   work/mesa-x86/out/payload/usr/lib32/...    the same for i686
 #   work/mesa-x86/out/payload/usr/share/...    ICDs, the VRAM layer manifest, drirc.d, glvnd
 #
-# Nothing here is a pacman package and nothing goes into the OS image: no source.pin or
-# prebuilt.pin lives in this directory, so build-overlay.sh and customize-base.sh never see it.
+#   work/mesa-x86/out/payload.conf             snapshot=<the Arch snapshot, YYYY-MM-DD>, mesa=<version>
+#
+# Nothing here is a pacman package: no source.pin or prebuilt.pin lives in this directory, so
+# build-overlay.sh and customize-base.sh never see it. `make mesa-x86` runs this.
 #
 # CACHED like build-overlay.sh's stamps: work/mesa-x86/out/.inputs.sha256 holds the digest of the
 # committed inputs, and a matching digest with a complete payload is a no-op.
@@ -77,7 +81,8 @@ complete() {
     done
   done
   [ -s "$WORKDIR/payload/usr/share/vulkan/icd.d/freedreno_icd.x86_64.json" ] &&
-  [ -s "$WORKDIR/payload/usr/share/vulkan/icd.d/freedreno_icd.i686.json" ]
+  [ -s "$WORKDIR/payload/usr/share/vulkan/icd.d/freedreno_icd.i686.json" ] &&
+  [ -s "$WORKDIR/payload.conf" ]
 }
 
 full=0
@@ -97,11 +102,13 @@ ctr run --rm --platform linux/amd64 \
   -v "$WORKDIR":/out \
   -e SNAPSHOT="$SNAPSHOT" -e PATCHES="$PATCHES" -e MESA_VERSION="$MESA_VERSION" \
   -e STAGE="$STAGE" -e ARCHES="$ARCHES" \
-  -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
+  -e HOST_UID="$(ctr_host_owner | cut -d: -f1)" -e HOST_GID="$(ctr_host_owner | cut -d: -f2)" \
   "$IMAGE" bash /repo/packages/mesa-x86/container-build.sh
 
 [ "$STAGE" = build ] || exit 0
 if [ "$full" = 1 ]; then
+  # What steam-x86-guest reads: it lays the payload only over a guest no older than this snapshot.
+  printf 'snapshot=%s\nmesa=%s\n' "${SNAPSHOT//\//-}" "$MESA_VERSION" >"$WORKDIR/payload.conf"
   complete || { echo "ERROR: the container reported success but the payload is incomplete" >&2; exit 1; }
   printf '%s\n' "$HASH" >"$MARKER"
 fi

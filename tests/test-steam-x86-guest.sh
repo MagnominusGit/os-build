@@ -81,11 +81,24 @@ cat >"$T/stub/fusermount" <<EOF
 echo "fusermount \$*" >>"$T/calls"
 m="\${!#}"; e="\$(printf '%s' "\$m" | sed 's/ /\\\\040/g')"
 M="\$e" awk '\$2 != ENVIRON["M"]' "$T/mounts" >"$T/mounts.new" && mv "$T/mounts.new" "$T/mounts"
-rm -f "\$m/graphics_provider.json" "\$m/.image"
+rm -f "\$m/graphics_provider.json" "\$m/.image" "\$m/.payload"
+EOF
+# fuse-overlayfs -o lowerdir=<payload>:<base> <root>: the base's provider and image show through,
+# .payload names the layer on top. $T/overlay-fails makes it fail.
+cat >"$T/stub/fuse-overlayfs" <<EOF
+#!/bin/bash
+echo "fuse-overlayfs \$*" >>"$T/calls"
+awk '/^SigIgn:/ { print \$2 }' /proc/\$\$/status >"$T/sigign-ovl"
+[ -e "$T/overlay-fails" ] && { echo "fuse-overlayfs: cannot mount" >&2; exit 1; }
+lower="\${2#lowerdir=}"; top="\${lower%%:*}"; base="\${lower#*:}"; m="\$3"
+echo "fuse-overlayfs \$(printf '%s' "\$m" | sed 's/ /\\\\040/g') fuse.fuse-overlayfs ro,nosuid,nodev 0 0" >>"$T/mounts"
+cp "\$base/graphics_provider.json" "\$base/.image" "\$m/"; echo "\$top" >"\$m/.payload"
 EOF
 chmod +x "$T/stub/"*
 : >"$T/mounts"
-export RETROFORGE_MOUNTS="$T/mounts" RETROFORGE_SQUASHFUSE="$T/stub/squashfuse" RETROFORGE_FUSERMOUNT="$T/stub/fusermount"
+# No x86 Mesa payload unless a case gives one (the image's /usr/lib/retroforge/x86-mesa is not used).
+export RETROFORGE_MOUNTS="$T/mounts" RETROFORGE_SQUASHFUSE="$T/stub/squashfuse" RETROFORGE_FUSERMOUNT="$T/stub/fusermount" \
+       RETROFORGE_FUSE_OVERLAYFS="$T/stub/fuse-overlayfs" RETROFORGE_X86_MESA="$T/no-x86-mesa"
 
 # ---- xxhsum: the real one when installed; else a stand-in with its output and another 64-bit hash --
 if XXHSUM_REAL="$(command -v xxhsum)"; then
@@ -259,6 +272,38 @@ helper mount
   && ok "released and mounted again" || bad "rc=$RC err=$ERR calls: $(cat "$T/calls")"
 grep -q "dead mount" <<<"$ERR" && ok "and said so" || bad "stderr: $ERR"
 helper release
+
+CASE="our x86 Mesa over the guest"
+MESA_T="$T/x86-mesa"; BASE_T="$GUEST/base"
+mkdir -p "$MESA_T/root/usr/lib"; echo ours >"$MESA_T/root/usr/lib/libvulkan_freedreno.so"
+printf 'snapshot=2025-12-01\nmesa=26.2.4-retroforge1\n' >"$MESA_T/payload.conf"
+reset_calls
+RETROFORGE_X86_MESA="$MESA_T" helper mount
+[ "$RC" = 0 ] && in_table "$BASE_T" && is_mounted && [ -f "$MNT/graphics_provider.json" ] && [ "$(cat "$MNT/.payload" 2>/dev/null)" = "$MESA_T/root" ] \
+  && ok "the guest on fex-guest/base, our x86 Mesa over it on fex-guest/root, the provider still there" || bad "rc=$RC err=$ERR mounts: $(cat "$T/mounts")"
+grep -qxF "squashfuse $IMG1 $BASE_T" "$T/calls" && grep -qxF "fuse-overlayfs -o lowerdir=$MESA_T/root:$BASE_T $MNT" "$T/calls" \
+  && ok "squashfuse <image> <base>, then fuse-overlayfs lowerdir=<payload>:<base> <root> (read-only: no upper)" || bad "calls: $(cat "$T/calls")"
+ign=$((16#$(cat "$T/sigign-ovl" 2>/dev/null || echo 0)))
+(( ign & (1 << 14) )) && (( ign & (1 << 1) )) && ok "fuse-overlayfs starts with TERM and INT ignored too" || bad "SigIgn=$(cat "$T/sigign-ovl" 2>&1)"
+grep -q "with our x86 Mesa over it" <<<"$ERR" && ok "and said so" || bad "stderr: $ERR"
+reset_calls
+RETROFORGE_X86_MESA="$MESA_T" helper release
+not_mounted && ! in_table "$BASE_T" && [ "$(head -n 1 "$T/calls")" = "fusermount -u -z $MNT" ] && [ "$(calls fusermount)" = 2 ] \
+  && ok "release: the overlay first, then the base" || bad "mounts: $(cat "$T/mounts") calls: $(cat "$T/calls")"
+
+CASE="our x86 Mesa, a guest older than its snapshot"
+printf 'snapshot=2026-06-01\n' >"$MESA_T/payload.conf"; reset_calls
+RETROFORGE_X86_MESA="$MESA_T" helper mount
+[ "$RC" = 0 ] && is_mounted && [ "$(calls fuse-overlayfs)" = 0 ] && grep -qxF "squashfuse $IMG1 $MNT" "$T/calls" \
+  && ok "mounted as it is, on fex-guest/root" || bad "rc=$RC calls: $(cat "$T/calls")"
+grep -q "predates the payload's snapshot 2026-06-01" <<<"$ERR" && ok "and says why" || bad "stderr: $ERR"
+helper release
+
+CASE="our x86 Mesa, the overlay fails"
+printf 'snapshot=2025-12-01\n' >"$MESA_T/payload.conf"; touch "$T/overlay-fails"; reset_calls
+RETROFORGE_X86_MESA="$MESA_T" helper mount
+[ "$RC" = 1 ] && not_mounted && ! in_table "$BASE_T" && ok "exit 1, and the base is released again" || bad "rc=$RC mounts: $(cat "$T/mounts")"
+rm -f "$T/overlay-fails"
 
 CASE="start"
 sleep 600 & FAKESTEAM=$!; reset_calls
