@@ -394,6 +394,9 @@ class Board:
                                          "probe, so sy7758-backlight never registers")
             elif n.compatible("ayn,odin2miniled"):
                 bls["odin2miniled-backlight"] = n
+            elif n.compatible("awinic,aw99706"):
+                # mainline aw99706.c: devm_backlight_device_register(dev, "aw99706-backlight", ...)
+                bls["aw99706-backlight"] = n
             elif n.parent is not None and n.parent.compatible("qcom,mdss-dsi-ctrl") \
                     and n.strings("compatible") and n.base == "panel":
                 compat = n.strings("compatible")[0]
