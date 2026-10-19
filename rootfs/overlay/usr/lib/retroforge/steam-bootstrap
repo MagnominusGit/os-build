@@ -1,10 +1,16 @@
 #!/usr/bin/env python3
-# steam-bootstrap — set up Valve's arm64 Steam client and its runtime in the player's home, for
-# /usr/bin/steam, which runs this on every start. Prints the runtime's `run` on stdout. Everything
-# else goes to stderr.
+# steam-bootstrap — set up Valve's arm64 Steam client and its runtime in the player's home.
+#   steam-bootstrap            for /usr/bin/steam, on every start: keeps the runtime on its channel and
+#                              prints its `run` on stdout. Exit 10, downloading nothing at all, when the
+#                              client is not installed: the player installs "Steam Client" from Main
+#                              menu > Emulators (steam-install), where the download shows its progress.
+#   steam-bootstrap --install  for steam-install: the runtime and the client, each downloaded when it
+#                              is missing, then the `run` on stdout. With RETROFORGE_STEAM_PROGRESS=1
+#                              each download also logs "steam-bootstrap: progress <bytes> <total>".
+# Everything else goes to stderr.
 #
-# Nothing of it is in the image (a root slot is 2 GB; the two unpack to ~560 MB), so `steam` downloads
-# them. This is what the OpenGamepadUI Steam plugin does for steamcmd, but done here with the arm64
+# Nothing of it is in the image (a root slot is 2 GB; the two unpack to ~560 MB), so steam-install
+# downloads them. This is what the OpenGamepadUI Steam plugin does for steamcmd, but done here with the arm64
 # builds. Neither is pinned to a version: /usr/share/retroforge/steam/steam.pin names CHANNELS (why:
 # its comments), and this installs whatever Valve currently publishes on them. Every download is
 # still checked against a sha256 Valve publishes next to it.
@@ -27,7 +33,8 @@
 #     pins one snapshot instead of following the channel (the environment wins).
 #   - the CLIENT from the manifest of the pinned client channel (steam_client_<channel>_linuxarm64):
 #     its arm64 binaries (package bins_linuxarm64_linuxarm64, unpacked to <Steam root>/steamrtarm64/),
-#     checked against the sha256 the manifest gives for them. Only when they are missing: the client
+#     checked against the sha256 the manifest gives for them. Only with --install, and only when they
+#     are missing: the client
 #     updates itself from its channel when it starts, as it does after a manual install
 #     (docs/steam-arm64.md). The manifest is read when it is needed, because its package files are
 #     content-addressed and replaced on every client release.
@@ -40,9 +47,10 @@
 # Valve's client zips need care: some entries use '\' as the separator, regular files carry mode 0666
 # (no execute bits), and symlinks are Unix link entries. ELF files and #! scripts get 0755.
 #
-# Exit 0 with the run path on stdout, or 1 when Steam cannot start: no runtime installed and none
-# could be downloaded, no client and none could be downloaded, a checksum mismatch on the first
-# download, a broken pin.
+# Exit 0 with the run path on stdout; 10 when the client is not installed (without --install); 2 for
+# bad arguments; or 1 when Steam cannot start: no runtime installed and none could be downloaded, no
+# client and none could be downloaded (--install), a checksum mismatch on the first download, a
+# broken pin.
 #
 # TEST SEAMS (tests/test-steam.sh): RETROFORGE_STEAM_ROOT (also set by /usr/bin/steam),
 # RETROFORGE_STEAM_RUNTIME_DIR, RETROFORGE_STEAM_PIN, RETROFORGE_STEAM_CDN.
@@ -76,6 +84,9 @@ TIMEOUT = 60
 # A snapshot id as Valve names them (3c.0.20260824.257593). It becomes a folder name and a URL path
 # element, so nothing else is accepted: not a captive portal's HTML, not a path.
 SNAPSHOT = re.compile(r"[0-9]+[a-z]*\.[0-9]+\.[0-9]{8}\.[0-9]+")
+# steam-install sets it to read each download's progress off our stderr.
+PROGRESS = os.environ.get("RETROFORGE_STEAM_PROGRESS") == "1"
+EXIT_NOT_INSTALLED = 10
 
 
 class Failed(Exception):
@@ -127,14 +138,21 @@ def fetch(url, timeout, limit):
     return data
 
 
-def download(url, dest, sha256):
-    """url -> dest, refusing it unless its sha256 matches."""
+def download(url, dest, sha256, size=0):
+    """url -> dest, refusing it unless its sha256 matches. size, else the response's length, is the
+    total the progress lines (PROGRESS) count towards."""
     digest = hashlib.sha256()
     try:
         with urllib.request.urlopen(url, timeout=TIMEOUT) as r, open(dest, "wb") as out:
+            total = size or int(r.headers.get("Content-Length") or 0)
+            done, shown = 0, -1
             while chunk := r.read(1 << 20):
                 digest.update(chunk)
                 out.write(chunk)
+                done += len(chunk)
+                if PROGRESS and total > 0 and done * 100 // total != shown:
+                    shown = done * 100 // total
+                    log(f"progress {done} {total}")
     except (OSError, http.client.HTTPException, ValueError) as err:
         raise Failed(f"could not download {url}: {err}")
     if digest.hexdigest() != sha256.lower():
@@ -267,13 +285,14 @@ def runtime(pin):
 
 
 def manifest_package(text, name):
-    """(file, sha256) of a package in a Steam client manifest (VDF text), or None."""
+    """(file, sha256, size or 0) of a package in a Steam client manifest (VDF text), or None."""
     m = re.search(rf'\n\s*"{re.escape(name)}"\s*\{{(.*?)\}}', text, re.S)
     if not m:
         return None
     f = re.search(r'"file"\s+"([^"]+)"', m.group(1))
     s = re.search(r'"sha2"\s+"([0-9a-fA-F]{64})"', m.group(1))
-    return (f.group(1), s.group(1)) if f and s else None
+    n = re.search(r'"size"\s+"([0-9]+)"', m.group(1))
+    return (f.group(1), s.group(1), int(n.group(1)) if n else 0) if f and s else None
 
 
 def unpack_zip(path, dest):
@@ -318,7 +337,8 @@ def write_beta(channel):
 
 
 def client(channel):
-    """Valve's arm64 client binaries in STEAM_ROOT, downloaded first if they are not there."""
+    """Valve's arm64 client binaries in STEAM_ROOT, downloaded first if they are not there (main()
+    gets here without --install only when they are)."""
     if os.path.isfile(os.path.join(STEAM_ROOT, CLIENT)):
         if not os.path.lexists(os.path.join(STEAM_ROOT, "package", "beta")):
             try:
@@ -335,12 +355,12 @@ def client(channel):
     pkg = manifest_package(manifest, PACKAGE)
     if pkg is None:
         raise Failed(f"{manifest_name} lists no {PACKAGE} with a sha2")
-    file, sha = pkg
+    file, sha, size = pkg
     log(f"downloading Valve's arm64 Steam client from {channel} ({file})")
     tmp = tempfile.mkdtemp(dir=STEAM_ROOT, prefix=".retroforge-bootstrap-")
     try:
         archive = os.path.join(tmp, "client.zip")
-        download(f"{CDN}/{file}", archive, sha)
+        download(f"{CDN}/{file}", archive, sha, size)
         tree = os.path.join(tmp, "tree")
         os.mkdir(tree)
         try:
@@ -366,9 +386,17 @@ def client(channel):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def main():
+def main(argv):
+    if argv not in ([], ["--install"]):
+        log("usage: steam-bootstrap [--install]")
+        return 2
     try:
         pin = read_pin()
+        # Without --install, nothing is downloaded for a client that is not there: not even the
+        # runtime. The store's Steam Client entry is where it is installed, with its progress shown.
+        if argv != ["--install"] and not os.path.isfile(os.path.join(STEAM_ROOT, CLIENT)):
+            log("Steam Client is not installed: install it from Main menu > Emulators > Steam Client")
+            return EXIT_NOT_INSTALLED
         os.makedirs(RUNTIME_HOME, exist_ok=True)
         # One bootstrap at a time: OGUI can start `steam` again while the first one is downloading.
         with open(os.path.join(os.path.dirname(RUNTIME_HOME), "steam-bootstrap.lock"), "w") as lock:
@@ -383,4 +411,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(sys.argv[1:]))

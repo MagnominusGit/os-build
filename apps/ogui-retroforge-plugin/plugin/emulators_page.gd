@@ -15,6 +15,10 @@ extends ScrollContainer
 ## else goes through /usr/bin/retroforge-emu (list / check / install / rollback / remove); the page
 ## never downloads or verifies anything itself.
 ##
+## Steam Client and Steam CLI (retroforge-emu's "kind": "steam", installed by steam-install) show
+## only their rows from emu_state.gd: no Delete and no settings. Their progress comes from the file
+## steam-install writes (the entry's "progress"), and Open on Steam Client starts Steam's own UI.
+##
 ## Built in code on the pattern of OGUI's own settings pages (library_settings_menu.tscn): a
 ## StateWatcher on this page's State hands focus to the page's FocusGroup, and Back pops the
 ## screen's state machine to return to the list.
@@ -242,6 +246,9 @@ func _add_emulator(id: String, emu: Dictionary) -> void:
 		last = _add_action_row(id, name_text, emu, state.tested)
 	for row in state.extra:
 		last = _add_action_row(id, name_text, emu, row)
+	if emu.get("kind") == "steam":
+		last.separator_visible = true
+		return
 	if installed != null:
 		last = row_scene.instantiate()
 		last.text = "Delete"
@@ -314,7 +321,10 @@ func _install(id: String, name_text: String, args: Array, emu: Dictionary, row: 
 	var poll := Timer.new()
 	poll.wait_time = PROGRESS_POLL
 	add_child(poll)
-	poll.timeout.connect(_show_progress.bind(part, int(emu.get("size", 0)), row))
+	if emu.get("progress") != null:  # Steam: steam-install writes the percentage to a file
+		poll.timeout.connect(_show_progress_file.bind(str(emu.get("progress")), row))
+	else:
+		poll.timeout.connect(_show_progress.bind(part, int(emu.get("size", 0)), row))
 	poll.start()
 	var code := await cmd.finished as int
 	poll.queue_free()
@@ -370,6 +380,14 @@ func _show_progress(part: String, size: int, row: Control) -> void:
 	var f := FileAccess.open(part, FileAccess.READ)
 	if f:
 		row.description = "Downloading %d%%" % mini(99, f.get_length() * 100 / size)
+
+
+func _show_progress_file(path: String, row: Control) -> void:
+	if not is_instance_valid(row):
+		return
+	var f := FileAccess.open(path, FileAccess.READ)
+	if f:
+		row.description = "Downloading %d%%" % mini(99, int(f.get_as_text().strip_edges()))
 
 
 func _remove(id: String, name_text: String, row: Control) -> void:
@@ -441,6 +459,12 @@ func _open(id: String, name_text: String) -> void:
 	item.args = PackedStringArray(["--gui", id])
 	item.installed = true
 	item._provider_id = "retroforge-roms"  # its EXIT hook reports a missing emulator
+	if id == "steam-client":
+		# Steam's own UI, with the flags the Steam plugin starts it with (/usr/bin/steam).
+		item.name = "Steam"
+		item.command = "steam"
+		item.args = PackedStringArray(["-gamepadui", "-steamos3", "-steampal", "-steamdeck", "steam://open/bigpicture"])
+		item._provider_id = ""
 	launch_manager.launch(item)
 
 

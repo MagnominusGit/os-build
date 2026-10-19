@@ -206,8 +206,10 @@ CURL=curl
 # stub fails the suite instead of hanging it. Not `timeout`: that would put a process between the
 # test and the stub, and PID has to be the stub's own.
 watchdog() { ( sleep 60; kill -9 "$@" ) >/dev/null 2>&1 & DOG=$!; }
-run() {  # run <args...>: the stub as the plugin starts it. PID is the process the plugin would hold.
+run() {  # run <args...>: the stub in install mode, as steam-install starts it (Main menu > Emulators >
+  # Steam CLI). PID is the process the caller holds. STUB_INSTALL= (empty) runs it as the plugin does.
   HOME="$H" RETROFORGE_STEAMCMD_PIN="$PIN" RETROFORGE_STEAMCMD_FETCH="$FETCH_REAL" \
+    RETROFORGE_STEAMCMD_INSTALL="${STUB_INSTALL-1}" \
     RETROFORGE_STEAMCMD_CURL="$CURL" "$D/steamcmd.sh" "$@" >"$T/out" 2>"$T/err" & PID=$!
   watchdog "$PID"
   wait "$PID"; RC=$?
@@ -257,6 +259,13 @@ grep -q 'RETROFORGE_STEAMCMD_PIN:-/usr/share/retroforge/steam/steamcmd.pin}' "$S
   && ok "the helper is executable Python that compiles" || bad "steamcmd-fetch: mode $(mode "$FETCH_REAL")"
 [ ! -e "$ROOT/packages/steamcmd" ] && ! grep -q '^steamcmd ' "$ROOT/rootfs/manifest.lock" \
   && ok "no steamcmd in the image: no prebuilt pin, no lock row" || bad "packages/steamcmd or its lock row is back"
+
+CASE="not installed (the plugin runs the stub)"
+fresh; : >"$CURL_LOG"
+STUB_INSTALL= run +@ShutdownOnFailedCommand 0
+[ "$RC" = 1 ] && grep -qx "steamcmd (RetroForge): Steam CLI is not installed: install it from Main menu > Emulators > Steam CLI" <<<"$ERR" \
+  && ok "exit 1, one line saying where to install Steam CLI" || bad "rc=$RC err=$ERR"
+[ "$(calls)" = 0 ] && nothing_placed && ok "nothing downloaded, nothing placed: the stub stays" || bad "calls=$(calls) $(ls -A "$D")"
 
 CASE="first run"
 fresh
@@ -385,7 +394,7 @@ CURL="$T/bin/curl" run +quit
 
 CASE="pin"
 fresh
-RETROFORGE_STEAMCMD_PIN="$T/nowhere.pin" RETROFORGE_STEAMCMD_FETCH="$FETCH_REAL" HOME="$H" "$D/steamcmd.sh" +quit >"$T/out" 2>"$T/err"; RC=$?
+RETROFORGE_STEAMCMD_INSTALL=1 RETROFORGE_STEAMCMD_PIN="$T/nowhere.pin" RETROFORGE_STEAMCMD_FETCH="$FETCH_REAL" HOME="$H" "$D/steamcmd.sh" +quit >"$T/out" 2>"$T/err"; RC=$?
 [ "$RC" != 0 ] && grep -q "no pin at $T/nowhere.pin" "$T/err" && still_stub && ok "no pin: an error that names it; the stub stays" || bad "rc=$RC err=$(cat "$T/err")"
 printf 'name: steamcmd\nurl: file://%s/x.tar.gz\nsha256: %s\n' "$T" "$SCRIPT_SHA" >"$PIN"
 run +quit
@@ -448,7 +457,7 @@ run +quit
 
 CASE="no helper"
 fresh
-RETROFORGE_STEAMCMD_FETCH="$T/nowhere" RETROFORGE_STEAMCMD_PIN="$PIN" HOME="$H" "$D/steamcmd.sh" +quit >"$T/out" 2>"$T/err"; RC=$?
+RETROFORGE_STEAMCMD_INSTALL=1 RETROFORGE_STEAMCMD_FETCH="$T/nowhere" RETROFORGE_STEAMCMD_PIN="$PIN" HOME="$H" "$D/steamcmd.sh" +quit >"$T/out" 2>"$T/err"; RC=$?
 [ "$RC" != 0 ] && grep -q "no $T/nowhere" "$T/err" && still_stub && [ -z "$(leftovers)" ] \
   && ok "the image's helper missing: an error that names it; the stub stays" || bad "rc=$RC err=$(cat "$T/err")"
 
@@ -465,7 +474,7 @@ fresh
 pids=()
 for i in 1 2 3; do
   HOME="$H" RETROFORGE_STEAMCMD_PIN="$PIN" RETROFORGE_STEAMCMD_FETCH="$FETCH_REAL" RETROFORGE_STEAMCMD_CURL="$T/bin/curl" \
-    FAKE_CURL_SLEEP=1 "$D/steamcmd.sh" "+run$i" >"$T/out$i" 2>"$T/err$i" & pids+=($!)
+    RETROFORGE_STEAMCMD_INSTALL=1 FAKE_CURL_SLEEP=1 "$D/steamcmd.sh" "+run$i" >"$T/out$i" 2>"$T/err$i" & pids+=($!)
 done
 watchdog "${pids[@]}"
 rcs=""; for p in "${pids[@]}"; do wait "$p"; rcs+="$?"; done

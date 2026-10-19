@@ -5,7 +5,8 @@
 # missing it downloads Valve's x86 bootstrapper there, which cannot run on this machine. The image
 # ships no steamcmd (everything that can be downloaded is). It ships a stub,
 # /usr/lib/retroforge/steamcmd-stub: sitting at steamcmd.sh it stops the plugin's x86 download, and
-# the first time the plugin runs it, it downloads Valve's arm64 steamcmd into that folder (the release
+# when the player installs Steam CLI from Main menu > Emulators (steam-install runs it in install
+# mode), it downloads Valve's arm64 steamcmd into that folder (the release
 # Valve publishes at that moment: /usr/share/retroforge/steam/steamcmd.pin names a channel, which
 # /usr/lib/retroforge/steamcmd-fetch resolves and checks) and replaces itself with it.
 # retroforge-session runs this, as the player, before every start of the shell:

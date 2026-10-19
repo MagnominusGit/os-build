@@ -135,8 +135,13 @@ mkmanifest() {  # mkmanifest <client zip> [sha2] [channel]: a channel's manifest
 }
 EOF
 }
-boot() {  # boot [VAR=value...]
-  OUT="$(env -u RETROFORGE_STEAM_RUNTIME_SNAPSHOT HOME="$T/home" XDG_DATA_HOME="$DATA" \
+boot() {  # boot [VAR=value...]: `steam-bootstrap --install`, as steam-install runs it
+  OUT="$(env -u RETROFORGE_STEAM_RUNTIME_SNAPSHOT -u RETROFORGE_STEAM_PROGRESS HOME="$T/home" XDG_DATA_HOME="$DATA" \
+         RETROFORGE_STEAM_PIN="$PIN" RETROFORGE_STEAM_CDN="file://$CDN" "$@" python3 "$BOOT" --install 2>"$T/err")"; RC=$?
+  ERR="$(cat "$T/err")"
+}
+bootn() {  # bootn [VAR=value...]: plain `steam-bootstrap`, as /usr/bin/steam runs it on every start
+  OUT="$(env -u RETROFORGE_STEAM_RUNTIME_SNAPSHOT -u RETROFORGE_STEAM_PROGRESS HOME="$T/home" XDG_DATA_HOME="$DATA" \
          RETROFORGE_STEAM_PIN="$PIN" RETROFORGE_STEAM_CDN="file://$CDN" "$@" python3 "$BOOT" 2>"$T/err")"; RC=$?
   ERR="$(cat "$T/err")"
 }
@@ -158,10 +163,19 @@ for k in ("runtime_snapshot", "version", "url", "sha256"):
     assert field(k) is None, f"{k} pins a version"
 PY
 
-CASE="fresh card"
+CASE="fresh card, not installed"
 publish "$S1" v1; point "$S1"; mkpin
 mkclient "$T/client.zip"; mkmanifest "$T/client.zip"
-boot
+bootn
+[ "$RC" = 10 ] && [ -z "$OUT" ] && grep -q "Steam Client is not installed: install it from Main menu > Emulators > Steam Client" <<<"$ERR" \
+  && ok "without --install: exit 10, says where Steam Client is installed" || bad "rc=$RC out=$OUT err=$ERR"
+[ ! -e "$STEAM_ROOT/steamrtarm64" ] && [ -z "$(ls -A "$RT_DIR" 2>/dev/null)" ] \
+  && ok "and downloads nothing, not even the runtime" || bad "$(ls -la "$STEAM_ROOT" "$RT_DIR" 2>&1 | head)"
+OUT="$(python3 "$BOOT" --bogus 2>"$T/err")"; RC=$?
+[ "$RC" = 2 ] && grep -q "usage: steam-bootstrap \[--install\]" "$T/err" && ok "an unknown argument: exit 2" || bad "rc=$RC $(cat "$T/err")"
+
+CASE="fresh card"
+boot RETROFORGE_STEAM_PROGRESS=1
 [ "$RC" = 0 ] && [ "$OUT" = "$RT_DIR/$S1/$RUN" ] \
   && ok "exit 0, prints the run of the snapshot the channel names" || bad "rc=$RC out=$OUT err=$ERR"
 [ -x "$OUT" ] && [ -L "$RT_DIR/$S1/steam-runtime-steamrt-arm64/files/lib" ] \
@@ -177,6 +191,12 @@ boot
 [ -z "$(leftovers)" ] && ok "no temporary folders left" || bad "left: $(leftovers)"
 grep -q "downloading the Steam Runtime $S1 (now on $RTCHAN" <<<"$ERR" && grep -q "Steam client from $CHAN" <<<"$ERR" \
   && ok "says on stderr what it downloads, and from which channel" || bad "stderr: $ERR"
+CZ="$(wc -c <"$T/client.zip" | tr -d ' ')"
+grep -qx "steam-bootstrap: progress $CZ $CZ" <<<"$ERR" && [ "$(grep -c "^steam-bootstrap: progress " <<<"$ERR")" -ge 2 ] \
+  && ok "RETROFORGE_STEAM_PROGRESS=1: progress lines, each download ending at its total" || bad "stderr: $ERR"
+bootn
+[ "$RC" = 0 ] && [ "$OUT" = "$RT_DIR/$S1/$RUN" ] && ok "installed: a plain start (steam's) prints the run" || bad "rc=$RC out=$OUT err=$ERR"
+! grep -q "progress" <<<"$ERR" && ok "and no progress lines without the variable" || bad "stderr: $ERR"
 
 CASE="channel unchanged"
 rm -f "$RT/$S1"/*; rm -rf "$CDN"; mkdir -p "$CDN"   # only the channel pointer is left
@@ -356,6 +376,17 @@ grep -qx "cwd: $WROOT" "$W/call1" && ok "from the Steam folder (XDG default)" ||
 grep -qx "dbus: unix:path=$W/mybus" "$W/call1" && ok "our own D-Bus address is kept" || bad "$(grep dbus "$W/call1")"
 grep -qx "rt: unset" "$W/call1" && ok "STEAM_RUNTIME is unset" || bad "$(grep rt: "$W/call1")"
 [ -z "$WERR" ] && ok "nothing on stderr" || bad "stderr: $WERR"
+[ "$(readlink "$W/home/.steam/bin64")" = "$WROOT/ubuntu12_64" ] && [ "$(readlink "$W/home/.steam/bin32")" = "$WROOT/ubuntu12_32" ] \
+  && ok "~/.steam/bin64 and bin32 point at ubuntu12_64 and ubuntu12_32 (the overlay's preload paths)" || bad "links: $(ls -la "$W/home/.steam")"
+
+CASE="wrapper: Steam Client not installed"
+cp "$W/bootstrap" "$W/bootstrap.real"
+printf '#!/usr/bin/env bash\necho "steam-bootstrap: Steam Client is not installed: install it from Main menu > Emulators > Steam Client" >&2\nexit 10\n' >"$W/bootstrap"
+wrap 0 steam://rungameid/42
+[ "$WRC" = 1 ] && [ ! -e "$W/count" ] && ok "exit 1, the client is not started" || bad "rc=$WRC runs=$(cat "$W/count" 2>/dev/null)"
+[ "$(grep -c . <<<"$WERR")" = 1 ] && grep -q "Main menu > Emulators > Steam Client" <<<"$WERR" \
+  && ok "the bootstrap's one line says where to install it, and nothing more" || bad "stderr: $WERR"
+mv "$W/bootstrap.real" "$W/bootstrap"
 
 CASE="wrapper: foreign D-Bus"
 DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/0/bus" wrap 0

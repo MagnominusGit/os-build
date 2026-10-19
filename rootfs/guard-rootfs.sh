@@ -771,20 +771,24 @@ fi
 # glob over names, so a typo'd entry is visible in review.
 #
 # Steam itself is NOT shipped, and is not missing either. The OGUI Steam plugin launches games with
-# `steam ... steam://rungameid/<id>`, so the image carries /usr/bin/steam: a wrapper that downloads
-# Valve's arm64 client and Steam Runtime into the player's home the first time it runs
-# (/usr/lib/retroforge/steam-bootstrap, ~560 MB unpacked, ~3 GB after the client's own update), and
-# runs it from there. None of what it downloads is pinned to a version: steam.pin names the channels
+# `steam ... steam://rungameid/<id>`, so the image carries /usr/bin/steam: a wrapper that runs Valve's
+# arm64 client from the player's home. The client and its Steam Runtime are installed from Main menu >
+# Emulators > Steam Client (/usr/lib/retroforge/steam-install, through steam-bootstrap: ~560 MB
+# unpacked, ~3 GB after the client's own update, which the install runs too); until then the wrapper
+# downloads nothing and says where to install it. None of what is downloaded is pinned to a version:
+# steam.pin names the channels
 # (client steamdeck_stable, runtime latest-public-stable), and each download is checked against what
 # that channel publishes. Everything else Steam needs on arm64 is downloaded the same way, into the
 # player's home, by a helper whose channel pin is in usr/share/retroforge/steam/:
 #   - steamcmd for the OGUI plugin: install-steamcmd puts a stub at ~/.steam/steamcmd/steamcmd.sh, and
-#     the stub's first run installs Valve's arm64 steamcmd from its update manifest (steamcmd.pin). It
+#     installing Steam CLI from Main menu > Emulators turns it into Valve's arm64 steamcmd from its
+#     update manifest (steamcmd.pin). It
 #     used to be a prebuilt (packages/steamcmd, at usr/lib/retroforge/steamcmd), which is why that path
 #     is listed.
 #   - the x86 guest Valve's FEX tool needs for x86 games and x86 Protons (ld.so, glibc, x86 Mesa;
 #     SteamOS ships it as usr/share/guestos/fex-mesa): steam-x86-guest follows FEX's ArchLinux RootFS
-#     channel (x86-guest.pin, ~1.4 GB) and mounts it with squashfuse while Steam runs.
+#     channel (x86-guest.pin, ~1.4 GB; installed with Steam Client) and mounts it with squashfuse while
+#     Steam runs.
 #     usr/share/guestos stays listed.
 #   - Proton-CachyOS arm64, for DXVK-Sarek when the player's setting is on (by default on the SM6115
 #     only): retroforge-steam-sarek has steam-compat-tools keep its newest arm64 release in the Steam

@@ -10,7 +10,8 @@
 #
 # THE PIN NAMES CHANNELS, NOT FILES (/usr/share/retroforge/steam/steamcmd.pin). Valve publishes
 # steamcmd as an update manifest whose package files are content-addressed and replaced on every
-# release, and a pinned file would stop matching at the next one. So, at every first run:
+# release, and a pinned file would stop matching at the next one. So, at every install (Steam CLI,
+# Main menu > Emulators):
 #   1. MANIFEST. <cdn>/<manifest> (steam_cmd_linuxarm64), read fresh. Its <package>
 #      (steamcmd_linuxarm64, the one marked IsBootstrapperPackage) gives the zip's file name and its
 #      sha2 (sha256). The zip is downloaded from <cdn>/<file> and refused unless its sha256 is that

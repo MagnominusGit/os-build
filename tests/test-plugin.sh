@@ -461,6 +461,24 @@ func test_emu_state() -> void:
 	r = EmuState.rows("x", pm, {"latest": "2026.10", "error": null})
 	check("state: PortMaster installed updates itself: Open only, no Update, no Install tested",
 		[r.main.button, r.main.description, r.tested, r.extra], ["Open", "Installed. Updates itself: open it to check.", null, []])
+	# Steam Client / Steam CLI (retroforge-emu's "kind": "steam"): Valve's client and steamcmd update
+	# themselves, so a check answer is ignored and there is never an Update, Check or Revert.
+	var steam := {"kind": "steam", "installed": null, "size": 2110 * 1048576}
+	r = EmuState.rows("steam-client", steam, {"latest": "v9", "error": null})
+	check("state: Steam Client not installed: Download, no tested or extra rows",
+		[r.main.text, r.main.button, r.main.args, r.tested, r.extra],
+		["Not installed", "Download", ["install", "steam-client"], null, []])
+	check("state: ... its description gives the download's size", r.main.description.contains("about 2110 MB"), true)
+	r = EmuState.rows("steam-client", steam.merged({"installed": "1791918634"}, true), {"latest": "v9", "error": null})
+	check("state: Steam Client installed: Open (Steam's UI) and a Repair row, nothing else",
+		[r.main.text, r.main.button, r.main.args, r.tested, r.extra.map(func(e): return [e.button, e.args])],
+		["Installed", "Open", [], null, [["Repair", ["install", "steam-client"]]]])
+	r = EmuState.rows("steam-cli", {"kind": "steam", "installed": "installed", "size": 44 * 1048576}, {})
+	check("state: Steam CLI installed: nothing to open, Repair on its row",
+		[r.main.text, r.main.button, r.main.args, r.extra], ["Installed", "Repair", ["install", "steam-cli"], []])
+	r = EmuState.rows("steam-cli", {"kind": "steam", "installed": null, "size": 44 * 1048576}, {})
+	check("state: Steam CLI not installed: Download, says the Steam plugin uses it",
+		[r.main.button, r.main.description.contains("Steam plugin")], ["Download", true])
 
 ## Per-emulator options: what the pages offer from options.json, and the choice at each level.
 func test_emu_options() -> void:

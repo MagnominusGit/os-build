@@ -3,7 +3,8 @@
 #
 # Read by /usr/lib/retroforge/steamcmd-fetch, which ~/.steam/steamcmd/steamcmd.sh runs while that is
 # still RetroForge's stub (/usr/lib/retroforge/steamcmd-stub, which /usr/lib/retroforge/install-steamcmd
-# puts there before the shell starts). The first time the plugin runs steamcmd, the stub has the
+# puts there before the shell starts). When the player installs Steam CLI from Main menu > Emulators
+# (steam-install), the stub has the
 # helper find, download and check what Valve publishes today, renames it over itself and runs it.
 # From then on ~/.steam/steamcmd is Valve's own steamcmd, which updates itself from the same manifest.
 #
@@ -15,7 +16,7 @@
 # Not in the image: everything that can be downloaded is.
 #
 # WHAT IS RESOLVED, and how each piece is checked:
-#   cdn + manifest   Valve's update manifest, <cdn>/<manifest>, read fresh at every first run
+#   cdn + manifest   Valve's update manifest, <cdn>/<manifest>, read fresh at every install
 #                    (client-update.steamstatic.com serves the same bytes). Its package files are
 #                    content-addressed and replaced on every release, which is why no file is pinned.
 #   package          the manifest's IsBootstrapperPackage. Its "file" is fetched from <cdn>/ and

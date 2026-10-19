@@ -341,8 +341,9 @@ if [ -x "$RETROFORGE_PLUGIN_INSTALLER" ]; then
   "$RETROFORGE_PLUGIN_INSTALLER" || echo "retroforge-session: the RetroForge plugin could not be installed" >&2
 fi
 # The OGUI Steam plugin runs ~/.steam/steamcmd/steamcmd.sh and, when it is missing, downloads Valve's
-# x86 build there. Put RetroForge's stub there first (or over an x86 one): the first time the plugin
-# runs it, it downloads Valve's arm64 steamcmd and becomes it. Writes nothing once the stub or Valve's
+# x86 build there. Put RetroForge's stub there first (or over an x86 one): it stops that download, says
+# where to install Steam CLI (Main menu > Emulators), and that install turns it into Valve's arm64
+# steamcmd. Writes nothing once the stub or Valve's
 # arm64 copy is there. Never a reason not to start the shell either.
 : "${RETROFORGE_STEAMCMD_INSTALLER:=/usr/lib/retroforge/install-steamcmd}"
 if [ -x "$RETROFORGE_STEAMCMD_INSTALLER" ]; then

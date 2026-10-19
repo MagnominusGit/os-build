@@ -2,15 +2,17 @@
 # steam — Valve's arm64 Steam client, started the way the OpenGamepadUI Steam plugin asks for it:
 #   steam -gamepadui -steamos3 -steampal -steamdeck -silent steam://rungameid/<appid>
 #
-# The image ships no Steam (Holo's aarch64 repo has none, and the client is ~560 MB with its runtime),
-# so this:
-#   1. has /usr/lib/retroforge/steam-bootstrap download Valve's arm64 client and Steam Runtime into
-#      the player's home the first time, and get the runtime's `run`. Both come from the CHANNELS
-#      /usr/share/retroforge/steam/steam.pin names, not from pinned versions. The client channel is
-#      a steamdeck_ line because the plugin passes -steamdeck: the client repoints a line that does
-#      not match its flag, at the cost of a ~631 MB download (steam.pin). On every later start the
-#      bootstrap checks the runtime channel (one small GET) and installs a new snapshot before Steam
-#      starts when the channel moved (~52 MB); offline it uses the installed one;
+# The image ships no Steam (Holo's aarch64 repo has none, and the client is ~560 MB with its runtime).
+# The player installs it from Main menu > Emulators > Steam Client (/usr/lib/retroforge/steam-install,
+# which shows the download's progress). This:
+#   1. has /usr/lib/retroforge/steam-bootstrap get the runtime's `run`. When the client is not
+#      installed, the bootstrap says where to install it and exits 10, and so does this, with nothing
+#      downloaded. Both come from the CHANNELS /usr/share/retroforge/steam/steam.pin names, not from
+#      pinned versions. The client channel is a steamdeck_ line because the plugin passes -steamdeck:
+#      the client repoints a line that does not match its flag, at the cost of a ~631 MB download
+#      (steam.pin). On every start the bootstrap checks the runtime channel (one small GET) and
+#      installs a new snapshot before Steam starts when the channel moved (~52 MB); offline it uses
+#      the installed one;
 #   2. points ~/.steam/steam and ~/.steam/root at the client ("Steam data link does not exist,
 #      client is misconfigured" otherwise);
 #   3. drops a D-Bus session address that belongs to another user, because pressure-vessel's bwrap
@@ -51,8 +53,10 @@ MAGIC_RESTART_EXITCODE=42
 
 log() { echo "steam: $*" >&2; }
 
-run="$("$RETROFORGE_STEAM_BOOTSTRAP")"
-if [ $? -ne 0 ] || [ ! -x "$run" ]; then
+run="$("$RETROFORGE_STEAM_BOOTSTRAP")"; rc=$?
+# 10: the client is not installed, and the bootstrap has said where to install it.
+[ "$rc" -eq 10 ] && exit 1
+if [ "$rc" -ne 0 ] || [ ! -x "$run" ]; then
   log "Valve's arm64 Steam client could not be set up (see above)"
   exit 1
 fi
@@ -94,12 +98,17 @@ done
 # from the next start of Steam. Proton under FEX also needs ~/.steam/sdk32 and sdk64.
 # RETROFORGE_STEAM_X86_GUEST=0: no download, no mount, no provider.
 # TEST SEAMS (tests/test-steam-x86-guest.sh): RETROFORGE_STEAM_X86_GUEST_HELPER, RETROFORGE_STEAM_X86_GUEST_DIR.
+# bin32/bin64 are where games look for the Steam overlay's preload libraries (Nova-Deck links them
+# the same way).
 for b in 32 64; do
-  if [ -d "$HOME/.steam/sdk$b" ] && [ ! -L "$HOME/.steam/sdk$b" ]; then
-    log "$HOME/.steam/sdk$b is a directory, not a link; leaving it alone"
-  else
-    ln -sfn "$RETROFORGE_STEAM_ROOT/linux$b" "$HOME/.steam/sdk$b"
-  fi
+  for pair in "sdk$b linux$b" "bin$b ubuntu12_$b"; do
+    link="${pair% *}"; target="${pair#* }"   # not `set --`: "$@" is the client's arguments
+    if [ -d "$HOME/.steam/$link" ] && [ ! -L "$HOME/.steam/$link" ]; then
+      log "$HOME/.steam/$link is a directory, not a link; leaving it alone"
+    else
+      ln -sfn "$RETROFORGE_STEAM_ROOT/$target" "$HOME/.steam/$link"
+    fi
+  done
 done
 if [ "${RETROFORGE_STEAM_X86_GUEST:-1}" != 0 ]; then
   export RETROFORGE_STEAM_X86_GUEST_DIR="${RETROFORGE_STEAM_X86_GUEST_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/retroforge/fex-guest}"

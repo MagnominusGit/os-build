@@ -1,0 +1,405 @@
+#!/usr/bin/env python3
+# steam-install — installs Steam from the shell's Main menu > Emulators, where the player sees the
+# download's progress, instead of a first start that downloads for minutes with nothing on screen.
+#
+#     steam-install status               -> JSON on stdout: {"steam-client": {...}, "steam-cli": {...}}
+#     steam-install install client|cli   -> `N%` lines on stdout, forward-only, ending at 100%
+#
+# THE CALLER IS /usr/bin/retroforge-emu: its `list` merges our status into the emulators it lists,
+# and `retroforge-emu install steam-client|steam-cli` execs `steam-install install client|cli`. So
+# the exit statuses are retroforge-emu's: 0 ok, 2 bad invocation, 3 network, 4 verification (what
+# was downloaded is not what was published; nothing is put in place), 5 local (no space, file system,
+# another install running). The Emulators page reads progress from a file, not from our stdout: the
+# same number goes to ~/.cache/retroforge/steam-install-<id>.progress while an install runs, and the
+# file is removed when it ends. Everything else goes to stderr.
+#
+# STEAM CLIENT (`client`, entry steam-client), three stages, each counted as its share of the bytes
+# (estimates, for the bar only):
+#   1. steam-bootstrap --install: the Steam Runtime (~52 MB) and the client's arm64 binaries
+#      (~110 MB), from the channels in /usr/share/retroforge/steam/steam.pin, each checked against a
+#      sha256 Valve publishes. Its "progress <bytes> <total>" lines are the progress;
+#   2. steam-x86-guest fetch: the x86 guest Valve's FEX tool needs for x86 games (FEX's ArchLinux
+#      RootFS channel, ~1.3 GB, checked against the channel's XXH3), unless RETROFORGE_STEAM_X86_GUEST=0.
+#      Its "NN% of MMMM MB" lines are the progress;
+#   3. the client's own update, by Valve's updater: `steam -steamdeck -exitsteam` through /usr/bin/steam
+#      (the wrapper every start goes through), which downloads the rest of the client (~600 MB: its
+#      UI, web helper, codecs and runtimes), restarts once (exit 42) and exits. Its "Downloading
+#      update (X of Y KB)" lines are the progress. It runs with no display: the updater window has
+#      nowhere to show in the shell. If it does not finish, the install still succeeds, and the client
+#      finishes its update when it is first opened (as every first start did before this stage);
+#      stderr says so.
+# Installed = the client binary, a runtime with its `run`, and an x86 guest image (unless the guest
+# is turned off). The entry's Open starts Steam's UI (the Emulators page does that, not this).
+#
+# STEAM CLI (`cli`, entry steam-cli): Valve's arm64 steamcmd in ~/.steam/steamcmd, which the
+# OpenGamepadUI Steam plugin runs for the library, installs and updates. install-steamcmd puts the
+# stub there if nothing is, then the stub runs in install mode (RETROFORGE_STEAMCMD_INSTALL=1) with
+# +quit: steamcmd-fetch fetches and checks Valve's bootstrapper, the stub puts it in place, and
+# steamcmd downloads the rest of itself ("Downloading update (X of Y KB)"), restarts (42) and quits.
+# Installed = linuxarm64/steamcmd and a steamcmd.sh that is not the stub.
+#
+# Both update themselves from then on (the client on every start, steamcmd every time the plugin
+# runs it), so the entries offer no Update; the x86 guest follows its channel from every start of
+# Steam (steam-x86-guest start).
+#
+# One install at a time: a flock on ~/.cache/retroforge/steam-install.lock, waited for.
+#
+# TEST SEAMS (tests/test-steam-install.sh): RETROFORGE_STEAM_BOOTSTRAP, RETROFORGE_STEAM_X86_GUEST_HELPER,
+# RETROFORGE_STEAM_WRAPPER, RETROFORGE_STEAMCMD_INSTALLER, RETROFORGE_STEAM_ROOT,
+# RETROFORGE_STEAM_RUNTIME_DIR, RETROFORGE_STEAM_X86_GUEST_DIR, RETROFORGE_STEAMCMD_DIR,
+# RETROFORGE_STEAM_UPDATE_TIMEOUT, RETROFORGE_STEAM_DONE_GRACE.
+import fcntl
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import tempfile
+import threading
+
+DATA = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "retroforge")
+STEAM_ROOT = os.environ.get("RETROFORGE_STEAM_ROOT") or os.path.join(DATA, "Steam")
+RUNTIME_HOME = os.environ.get("RETROFORGE_STEAM_RUNTIME_DIR") or os.path.join(DATA, "retroforge", "steam-runtime")
+GUEST = os.environ.get("RETROFORGE_STEAM_X86_GUEST_DIR") or os.path.join(DATA, "retroforge", "fex-guest")
+STEAMCMD = os.environ.get("RETROFORGE_STEAMCMD_DIR") or os.path.expanduser("~/.steam/steamcmd")
+BOOTSTRAP = os.environ.get("RETROFORGE_STEAM_BOOTSTRAP", "/usr/lib/retroforge/steam-bootstrap")
+GUEST_HELPER = os.environ.get("RETROFORGE_STEAM_X86_GUEST_HELPER", "/usr/lib/retroforge/steam-x86-guest")
+WRAPPER = os.environ.get("RETROFORGE_STEAM_WRAPPER", "/usr/bin/steam")
+STEAMCMD_INSTALLER = os.environ.get("RETROFORGE_STEAMCMD_INSTALLER", "/usr/lib/retroforge/install-steamcmd")
+UPDATE_TIMEOUT = int(os.environ.get("RETROFORGE_STEAM_UPDATE_TIMEOUT", "3600"))  # s, the client's update
+# s the client may keep running after its updater said it is done, before it is TERMed: -exitsteam
+# should end it there, but a client that goes on to start its UI with no display must not hold the
+# install for the rest of UPDATE_TIMEOUT.
+DONE_GRACE = int(os.environ.get("RETROFORGE_STEAM_DONE_GRACE", "120"))
+STUB_MARKER = "# RETROFORGE_STEAMCMD_STUB"
+MB = 1 << 20
+
+EXIT_OK, EXIT_USAGE, EXIT_NET, EXIT_VERIFY, EXIT_LOCAL = 0, 2, 3, 4, 5
+
+# Download sizes for the bar (2026-10): what each stage fetches on a fresh card.
+CLIENT_STAGES = {"bootstrap": 162 * MB, "guest": 1296 * MB, "update": 652 * MB}
+CLI_STAGES = {"fetch": 4 * MB, "update": 40 * MB}
+
+UPDATE_LINE = re.compile(r"Downloading update \(([\d,]+) of ([\d,]+) KB\)")
+UPDATE_DONE = re.compile(r"Verification complete|Update complete")
+GUEST_LINE = re.compile(r"(\d+)% of (\d+) MB")
+BOOTSTRAP_LINE = re.compile(r"steam-bootstrap: progress (\d+) (\d+)")
+
+
+class Fail(Exception):
+    def __init__(self, code, msg):
+        super().__init__(msg)
+        self.code = code
+
+
+def log(msg):
+    print(f"steam-install: {msg}", file=sys.stderr, flush=True)
+
+
+def guest_on():
+    return os.environ.get("RETROFORGE_STEAM_X86_GUEST", "1") != "0"
+
+
+def progress_path(entry):
+    return os.path.join(CACHE, f"steam-install-{entry}.progress")
+
+
+# ------------------------------------------------------------------------------------------------
+# What is installed
+
+
+def runtime_run():
+    """The `run` of an installed runtime snapshot, or None."""
+    try:
+        snapshots = sorted(os.listdir(RUNTIME_HOME), reverse=True)
+    except OSError:
+        return None
+    for snap in snapshots:
+        if snap.startswith("."):
+            continue
+        top = os.path.join(RUNTIME_HOME, snap)
+        try:
+            for sub in os.listdir(top):
+                run = os.path.join(top, sub, "run")
+                if os.path.isfile(run) and os.access(run, os.X_OK):
+                    return run
+        except OSError:
+            continue
+    return None
+
+
+def client_version():
+    """The client's version from the manifest its updater last installed, "" before its first
+    update, or None when the client is not there."""
+    if not os.path.isfile(os.path.join(STEAM_ROOT, "steamrtarm64", "steam")):
+        return None
+    package = os.path.join(STEAM_ROOT, "package")
+    try:
+        markers = [n for n in os.listdir(package) if n.endswith("_linuxarm64.installed")]
+    except OSError:
+        markers = []
+    for name in sorted(markers):
+        try:
+            with open(os.path.join(package, name), errors="replace") as f:
+                m = re.search(r'"version"\s+"(\d+)"', f.read(1 << 16))
+            if m:
+                return m.group(1)
+        except OSError:
+            pass
+    return ""
+
+
+def guest_installed():
+    return os.path.isfile(os.path.join(GUEST, "current"))
+
+
+def client_installed():
+    """steam-client's installed version text, or None while any part of it is missing."""
+    version = client_version()
+    if version is None or runtime_run() is None or (guest_on() and not guest_installed()):
+        return None
+    return version or "installed"
+
+
+def is_stub(path):
+    try:
+        with open(path, errors="replace") as f:
+            return any(line.rstrip("\n") == STUB_MARKER for line in f)
+    except OSError:
+        return True
+
+
+def cli_installed():
+    script = os.path.join(STEAMCMD, "steamcmd.sh")
+    if os.path.isfile(os.path.join(STEAMCMD, "linuxarm64", "steamcmd")) and os.path.isfile(script) \
+            and not is_stub(script):
+        return "installed"
+    return None
+
+
+def cmd_status():
+    out = {
+        "steam-client": {"installed": client_installed(), "size": sum(CLIENT_STAGES.values()),
+                         "progress": progress_path("steam-client")},
+        "steam-cli": {"installed": cli_installed(), "size": sum(CLI_STAGES.values()),
+                      "progress": progress_path("steam-cli")},
+    }
+    print(json.dumps(out, sort_keys=True))
+    return EXIT_OK
+
+
+# ------------------------------------------------------------------------------------------------
+# Progress
+
+
+class Progress:
+    """Stages weighted by their bytes; one forward-only percentage, on stdout and in the file."""
+
+    def __init__(self, entry, stages):
+        self.path = progress_path(entry)
+        self.weights = stages
+        self.total = sum(stages.values())
+        self.done = {name: 0.0 for name in stages}
+        self.shown = -1
+        os.makedirs(CACHE, exist_ok=True)
+        self.show()
+
+    def set(self, stage, fraction):
+        self.done[stage] = max(self.done[stage], min(1.0, max(0.0, fraction)))
+        self.show()
+
+    def show(self, final=False):
+        pct = 100 if final else min(99, int(sum(self.weights[s] * f for s, f in self.done.items()) * 100 / self.total))
+        if pct <= self.shown:
+            return
+        self.shown = pct
+        print(f"{pct}%", flush=True)
+        try:
+            fd, tmp = tempfile.mkstemp(dir=CACHE, prefix=".steam-install-")
+            with os.fdopen(fd, "w") as f:
+                f.write(f"{pct}\n")
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+    def finish(self):
+        self.show(final=True)
+        self.clear()
+
+    def clear(self):
+        try:
+            os.unlink(self.path)
+        except OSError:
+            pass
+
+
+def run_stage(argv, on_line, env=None, timeout=None, done=None, grace=0):
+    """Run argv with stdout and stderr merged, passing each line to on_line and on to our stderr.
+    (exit status, the output's last lines). A timeout TERMs it (the wrapper passes TERM on), and so
+    does `grace` seconds after a line matching `done`, if it is still running then."""
+    try:
+        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, errors="replace", env=env)
+    except OSError as err:
+        return 127, [f"could not start {argv[0]}: {err}"]
+    tail = []
+    timer = None
+    if timeout:
+        timer = threading.Timer(timeout, lambda: proc.send_signal(signal.SIGTERM))
+        timer.start()
+    try:
+        for line in proc.stdout:
+            line = line.rstrip("\n")
+            print(line, file=sys.stderr, flush=True)
+            tail = (tail + [line])[-20:]
+            on_line(line)
+            if done is not None and done.search(line):
+                done = None
+                late = threading.Timer(grace, lambda: proc.poll() is None and proc.send_signal(signal.SIGTERM))
+                late.daemon = True
+                late.start()
+        code = proc.wait()
+    finally:
+        if timer:
+            timer.cancel()
+    return code, tail
+
+
+def failure_code(tail, default=EXIT_NET):
+    text = "\n".join(tail).lower()
+    if re.search(r"sha256 mismatch|checksum|xxh3|does not match|is not valve's|not an arm64", text):
+        return EXIT_VERIFY
+    if re.search(r"no space|free space|not enough|cannot write|could not put|read-only|permission denied", text):
+        return EXIT_LOCAL
+    return default
+
+
+# ------------------------------------------------------------------------------------------------
+# Installs
+
+
+def install_client():
+    prog = Progress("steam-client", CLIENT_STAGES)
+    try:
+        # 1. runtime + client binaries
+        seen = {"finished": 0, "total": 0}
+
+        def on_bootstrap(line):
+            m = BOOTSTRAP_LINE.search(line)
+            if not m:
+                return
+            done, total = int(m.group(1)), int(m.group(2))
+            if total != seen["total"]:  # the next download began
+                seen["finished"] += seen["total"]
+                seen["total"] = total
+            prog.set("bootstrap", (seen["finished"] + done) / max(CLIENT_STAGES["bootstrap"],
+                                                                  seen["finished"] + total))
+
+        env = dict(os.environ, RETROFORGE_STEAM_PROGRESS="1")
+        code, tail = run_stage([BOOTSTRAP, "--install"], on_bootstrap, env=env)
+        if code != 0:
+            raise Fail(failure_code(tail), "the Steam Runtime or the client could not be installed")
+        prog.set("bootstrap", 1.0)
+
+        # 2. the x86 guest
+        if guest_on():
+            def on_guest(line):
+                m = GUEST_LINE.search(line)
+                if m:
+                    prog.set("guest", int(m.group(1)) / 100)
+            code, tail = run_stage([GUEST_HELPER, "fetch"], on_guest)
+            if code != 0:
+                raise Fail(failure_code(tail), "the x86 guest could not be downloaded")
+            if not guest_installed():
+                raise Fail(EXIT_NET, "the x86 guest is not in place: another download of it may still "
+                                     "be running; try again once it is done")
+        prog.set("guest", 1.0)
+
+        # 3. the client's own update
+        def on_update(line):
+            m = UPDATE_LINE.search(line)
+            if m:
+                done, total = (int(m.group(i).replace(",", "")) for i in (1, 2))
+                if total:
+                    prog.set("update", done / total)
+
+        env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+        code, tail = run_stage([WRAPPER, "-steamdeck", "-exitsteam"], on_update, env=env,
+                               timeout=UPDATE_TIMEOUT, done=UPDATE_DONE, grace=DONE_GRACE)
+        if code != 0 or not client_version():
+            log(f"the client did not finish its own update here (exit {code}); it finishes it when "
+                "Steam is first opened")
+        if client_installed() is None:
+            raise Fail(EXIT_LOCAL, "the client is not complete after the install")
+        prog.finish()
+        log("Steam Client is installed")
+        return EXIT_OK
+    except BaseException:
+        prog.clear()
+        raise
+
+
+def install_cli():
+    prog = Progress("steam-cli", CLI_STAGES)
+    try:
+        script = os.path.join(STEAMCMD, "steamcmd.sh")
+        if not os.path.isfile(script):
+            code, tail = run_stage([STEAMCMD_INSTALLER], lambda line: None)
+            if code != 0 or not os.path.isfile(script):
+                raise Fail(EXIT_LOCAL, "the steamcmd stub could not be put in place")
+        fetched = {"yes": cli_installed() is not None}
+
+        def on_line(line):
+            if not fetched["yes"] and ("Valve's arm64 steamcmd is in place" in line):
+                fetched["yes"] = True
+                prog.set("fetch", 1.0)
+            m = UPDATE_LINE.search(line)
+            if m:
+                prog.set("fetch", 1.0)
+                done, total = (int(m.group(i).replace(",", "")) for i in (1, 2))
+                if total:
+                    prog.set("update", done / total)
+
+        env = dict(os.environ, RETROFORGE_STEAMCMD_INSTALL="1")
+        code, tail = run_stage([script, "+quit"], on_line, env=env)
+        if cli_installed() is None:
+            raise Fail(failure_code(tail), "Valve's arm64 steamcmd could not be installed")
+        if code != 0:
+            log(f"steamcmd exited {code} after it was installed; it finishes its update when the Steam "
+                "plugin first runs it")
+        prog.finish()
+        log("Steam CLI is installed")
+        return EXIT_OK
+    except BaseException:
+        prog.clear()
+        raise
+
+
+def cmd_install(what):
+    os.makedirs(CACHE, exist_ok=True)
+    with open(os.path.join(CACHE, "steam-install.lock"), "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return install_client() if what == "client" else install_cli()
+
+
+def main(argv):
+    if argv == ["status"]:
+        return cmd_status()
+    if len(argv) == 2 and argv[0] == "install" and argv[1] in ("client", "cli"):
+        return cmd_install(argv[1])
+    raise Fail(EXIT_USAGE, "usage: steam-install status | install client|cli")
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except Fail as f:
+        log(str(f))
+        sys.exit(f.code)
+    except OSError as err:
+        log(str(err))
+        sys.exit(EXIT_LOCAL)
+    except KeyboardInterrupt:
+        sys.exit(EXIT_LOCAL)

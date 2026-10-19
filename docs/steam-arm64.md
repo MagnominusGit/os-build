@@ -57,8 +57,33 @@ Test install on the Air X: `/home/player/steamtest/` (client, runtime, `lse_shim
 The OGUI Steam plugin launches games with
 `steam -gamepadui -steamos3 -steampal -steamdeck ... steam://rungameid/<appid>`. The image now has
 that `steam`, which does the five things above. Neither the client nor the runtime ships in the
-image, because a root slot is 2 GB and the two unpack to ~560 MB. `steam` downloads them into the
-player's home (`/usr/lib/retroforge/steam-bootstrap`).
+image, because a root slot is 2 GB and the two unpack to ~560 MB. They are installed into the
+player's home from the shell's store (next section); `steam` itself downloads nothing for a client
+that is not there, and says where to install it.
+
+## Installing: Main menu > Emulators
+
+Steam shows in the shell's Emulators screen as two entries, each with Download and its progress:
+
+- **Steam Client** (`/usr/lib/retroforge/steam-install install client`): the runtime and the
+  client's arm64 binaries (`steam-bootstrap --install`), the x86 guest for FEX (`steam-x86-guest
+  fetch`, below), then the client's own update by Valve's updater (`steam -steamdeck -exitsteam`
+  through the wrapper, with no display), so its first Open starts at once instead of downloading
+  ~650 MB with nothing on screen. If that update does not finish, the install still succeeds and
+  the client finishes it on its first Open. Installed, the entry offers Open (Steam's UI:
+  `steam -gamepadui -steamos3 -steampal -steamdeck steam://open/bigpicture`) and Repair (the
+  install again, fetching only what is missing). There is no Steam library card.
+- **Steam CLI** (`steam-install install cli`): Valve's arm64 steamcmd for the OGUI Steam plugin
+  (next sections): the stub in install mode with `+quit`, so steamcmd also downloads the rest of
+  itself during the install.
+
+`retroforge-emu` lists both beside the emulators (`kind: steam`, from `steam-install status`) and
+hands their install to `steam-install`, whose `N%` lines and exit statuses are its own. The page
+reads the percentage from `~/.cache/retroforge/steam-install-<entry>.progress`. Both update
+themselves, so neither has Update, Check, Revert or Delete. Before Steam Client is installed,
+`steam` exits 1 with one line pointing at it (the plugin's launches fail there); before Steam CLI
+is, the stub does the same for the plugin's steamcmd, and nothing is downloaded behind the player's
+back.
 
 No version of either is pinned. `/usr/share/retroforge/steam/steam.pin` names Valve's CHANNELS, and
 the bootstrap installs whatever Valve publishes on them when it downloads. Every download is still
@@ -129,17 +154,19 @@ demand, not shipped:
   the plugin's x86 download. It writes nothing when the stub or a working arm64 copy is already
   there. It replaces an x86 copy, a half-written copy and a stub from an older image, and leaves the
   rest of the folder alone.
-- **The first time the plugin runs steamcmd**, the stub has `/usr/lib/retroforge/steamcmd-fetch`
+- **When the player installs Steam CLI** (Main menu > Emulators: `steam-install` runs the stub with
+  `RETROFORGE_STEAMCMD_INSTALL=1`), the stub has `/usr/lib/retroforge/steamcmd-fetch`
   download whatever Valve publishes at that moment into a temporary folder inside its own (see
   below). It renames the files into place with Valve's `steamcmd.sh` last, so Valve's script
-  replaces the stub, then execs it with the plugin's arguments. steamcmd then downloads the rest of
-  itself there and restarts, as on x86. Copies that start at the same time share one download
-  (flock on the folder).
+  replaces the stub, then execs it with `+quit`. steamcmd then downloads the rest of itself there
+  and restarts, as on x86. Copies that start at the same time share one download (flock on the
+  folder). Run by the plugin before that install, the stub downloads nothing: it says where to
+  install Steam CLI and exits 1.
 - **Offline, or on a download that fails a check**, the stub says why on stderr, exits 1 and stays
-  in place. The plugin starts steamcmd once per start of the shell, so the next start tries again.
+  in place, and the Emulators page reports the failure; Download tries again.
   Players who already have steamcmd are not affected.
 
-`/usr/share/retroforge/steam/steamcmd.pin` pins a channel, not a file: every first run resolves what
+`/usr/share/retroforge/steam/steamcmd.pin` pins a channel, not a file: every install resolves what
 Valve publishes at that moment, so a new steamcmd release needs no bump. What Valve publishes
 (checked 2026-10-16, manifest version 1791918946):
 
@@ -156,7 +183,7 @@ Valve publishes at that moment, so a new steamcmd release needs no bump. What Va
 So the helper takes each piece from where it is published and checks it against something that
 vouches for it:
 
-- **Binary:** the manifest is read fresh at every first run, and the bootstrapper zip it names is
+- **Binary:** the manifest is read fresh at every install, and the bootstrapper zip it names is
   refused unless its sha256 is the manifest's `sha2`. The trust anchor is the manifest, read over
   HTTPS from Valve's update host; the helper cannot check its `kvsignatures` without Valve's key.
   The zip is unpacked like the client's: `\` read as a separator, execute bits on ELF files and
@@ -453,10 +480,10 @@ games show a Stream button in Big Picture, and nothing gates it to the Frame. It
 paths (VR streaming, pairing over the Frame's own hotspot, echo cancellation) switch on with
 `-steamframe`/`-deckard`, which we never pass. What the image adds:
 
-- **A way in.** `/usr/share/applications/retroforge-steam.desktop` is OGUI's "Steam" library card
-  (OGUI's desktop library lists Game-category entries): `steam -gamepadui ... steam://open/bigpicture`.
-  Not `steam://rungameid/`: OGUI treats that as one game and SIGTERMs Steam once only Steam's own
-  windows are left, which would end a stream.
+- **A way in.** Open on Main menu > Emulators > Steam Client (`emulators_page.gd`) starts
+  `steam -gamepadui -steamos3 -steampal -steamdeck steam://open/bigpicture`. Not `steam://rungameid/`:
+  OGUI treats that as one game and SIGTERMs Steam once only Steam's own windows are left, which would
+  end a stream. There is no Steam library card.
 - **Controllers.** Valve's `60-steam-input.rules` (steam-devices, verbatim, MIT): uaccess on the
   hidraw nodes of Steam, Sony, Nintendo, 8BitDo and other pads, so Steam Input reads them directly
   and forwards gyro, trackpads and paddles. The handheld's own controls reach Steam as InputPlumber's

@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# Offline test for /usr/lib/retroforge/steam-install: Steam Client and Steam CLI from Main menu >
+# Emulators (through retroforge-emu), with their progress.
+#
+#   tests/test-steam-install.sh
+#
+# Every stage it runs is a stand-in here (the bootstrap, the x86 guest helper, /usr/bin/steam,
+# install-steamcmd and the stub), so the suite checks steam-install's own job: the order of the
+# stages, one forward-only percentage (stdout and the progress file the page reads), the exit
+# statuses retroforge-emu's page understands, and what "installed" means. The stages themselves have
+# their own suites (test-steam.sh, test-steam-x86-guest.sh, test-steamcmd-stub.sh).
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+TOOL="$ROOT/rootfs/overlay/usr/lib/retroforge/steam-install"
+[ -f "$TOOL" ] || { echo "missing: $TOOL" >&2; exit 1; }
+
+PASS=0; FAIL=0; CASE=""
+ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
+bad() { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
+
+T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
+H="$T/home"; DATA="$H/.local/share"; CACHE="$T/cache"
+STEAM_ROOT="$DATA/Steam"; RT="$DATA/retroforge/steam-runtime"; GUEST="$DATA/retroforge/fex-guest"
+SCMD="$H/.steam/steamcmd"; PROG_CLIENT="$CACHE/retroforge/steam-install-steam-client.progress"
+mkdir -p "$T/bin"
+
+# The bootstrap: --install and RETROFORGE_STEAM_PROGRESS=1 expected; two downloads' progress lines.
+cat >"$T/bin/bootstrap" <<EOF
+#!/usr/bin/env bash
+echo "args=\$* progress=\${RETROFORGE_STEAM_PROGRESS-unset}" >>"$T/boot.log"
+case "\${FAKE_BOOT:-ok}" in
+  sha) echo "steam-bootstrap: sha256 mismatch for https://example/client.zip" >&2; exit 1 ;;
+  net) echo "steam-bootstrap: could not download https://example/runtime.tar.xz: timed out" >&2; exit 1 ;;
+esac
+for p in "26 52" "52 52" "55 110" "110 110"; do echo "steam-bootstrap: progress \$p" >&2; done
+mkdir -p "$STEAM_ROOT/steamrtarm64" "$RT/3c.0.20260824.1/steam-runtime-steamrt-arm64"
+echo elf >"$STEAM_ROOT/steamrtarm64/steam"
+printf '#!/bin/sh\n' >"$RT/3c.0.20260824.1/steam-runtime-steamrt-arm64/run"
+chmod +x "$RT/3c.0.20260824.1/steam-runtime-steamrt-arm64/run"
+echo "$RT/3c.0.20260824.1/steam-runtime-steamrt-arm64/run"
+EOF
+# The x86 guest helper's `fetch`.
+cat >"$T/bin/guest" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$T/guest.log"
+case "\${FAKE_GUEST:-ok}" in
+  space) echo "steam-x86-guest: not enough space in $GUEST: the x86 guest needs 1640 MB free" >&2; exit 1 ;;
+  noimage) exit 0 ;;
+esac
+for p in 10 50 100; do echo "steam-x86-guest: \$p% of 1296 MB" >&2; done
+mkdir -p "$GUEST"; echo sqsh >"$GUEST/img.sqsh"; ln -sfn img.sqsh "$GUEST/current"
+EOF
+# /usr/bin/steam, for the client's own update: records how it was started and the page's progress.
+cat >"$T/bin/steam" <<EOF
+#!/usr/bin/env bash
+{ echo "args=\$*"; echo "display=\${DISPLAY-unset} wayland=\${WAYLAND_DISPLAY-unset}"
+  echo "progress-file=\$(cat "$PROG_CLIENT" 2>/dev/null)"; } >>"$T/steam.log"
+case "\${FAKE_UPD:-ok}" in
+  fail) echo "Steam: cannot open display" ; exit 1 ;;
+  hang) echo "[2026-10-18] Verification complete"; trap 'exit 143' TERM; while :; do sleep 0.1; done ;;
+esac
+for p in "100 of 1,000" "500 of 1,000" "1,000 of 1,000"; do echo "[ 50%] Downloading update (\$p KB)..."; done
+mkdir -p "$STEAM_ROOT/package"
+printf '"linuxarm64"\n{\n\t"version"\t\t"1791918634"\n}\n' >"$STEAM_ROOT/package/steam_client_steamdeck_stable_linuxarm64.installed"
+EOF
+# install-steamcmd: the stub; in install mode it puts "Valve's" steamcmd in place and updates it.
+cat >"$T/bin/install-steamcmd" <<EOF
+#!/usr/bin/env bash
+mkdir -p "$SCMD"
+cat >"$SCMD/steamcmd.sh" <<'STUB'
+#!/usr/bin/env bash
+# RETROFORGE_STEAMCMD_STUB
+here="\$(dirname "\$0")"
+[ "\${RETROFORGE_STEAMCMD_INSTALL:-}" = 1 ] || { echo "steamcmd (RetroForge): Steam CLI is not installed" >&2; exit 1; }
+[ "\${FAKE_CLI:-ok}" = net ] && { echo "steamcmd (RetroForge): could not download https://example: timed out" >&2; exit 1; }
+mkdir -p "\$here/linuxarm64"; echo elf >"\$here/linuxarm64/steamcmd"
+printf '#!/usr/bin/env bash\necho "Valve steamcmd \$*"\n' >"\$here/steamcmd.sh"
+echo "steamcmd (RetroForge): Valve's arm64 steamcmd is in place; starting it" >&2
+echo "args=\$*" >>"\$here/../stub.log"
+for p in "5 of 40" "40 of 40"; do echo "[----] Downloading update (\$p KB)..."; done
+STUB
+chmod +x "$SCMD/steamcmd.sh"
+EOF
+chmod +x "$T/bin"/*
+
+ENVS=(env -u DISPLAY -u WAYLAND_DISPLAY -u RETROFORGE_STEAM_X86_GUEST HOME="$H" XDG_DATA_HOME="$DATA" XDG_CACHE_HOME="$CACHE"
+      RETROFORGE_STEAM_BOOTSTRAP="$T/bin/bootstrap" RETROFORGE_STEAM_X86_GUEST_HELPER="$T/bin/guest"
+      RETROFORGE_STEAM_WRAPPER="$T/bin/steam" RETROFORGE_STEAMCMD_INSTALLER="$T/bin/install-steamcmd"
+      RETROFORGE_STEAM_DONE_GRACE=1 DISPLAY=:1 WAYLAND_DISPLAY=gamescope-0)
+si() {  # si [VAR=value...] -- <args...>
+  local vars=(); while [ $# -gt 0 ] && [ "$1" != -- ]; do vars+=("$1"); shift; done; shift
+  OUT="$("${ENVS[@]}" "${vars[@]}" python3 "$TOOL" "$@" 2>"$T/err")"; RC=$?
+  ERR="$(cat "$T/err")"
+}
+reset() { rm -rf "$H" "$CACHE" "$T"/*.log; mkdir -p "$H"; }
+field() { python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(json.dumps(d[sys.argv[2]][sys.argv[3]]))' "$OUT" "$1" "$2"; }
+forward() {  # stdout is N% lines only, never going back, ending at 100%
+  python3 - "$OUT" <<'PY'
+import re, sys
+lines = sys.argv[1].split("\n")
+assert all(re.fullmatch(r"\d+%", l) for l in lines), lines
+n = [int(l[:-1]) for l in lines]
+assert n == sorted(set(n)) and n[-1] == 100, n
+PY
+}
+
+# ================================================================================================
+CASE="usage"
+reset; si -- bogus; [ "$RC" = 2 ] && grep -q "usage: steam-install" <<<"$ERR" && ok "unknown command: exit 2" || bad "rc=$RC $ERR"
+si -- install everything; [ "$RC" = 2 ] && ok "unknown component: exit 2" || bad "rc=$RC"
+
+CASE="status, nothing installed"
+reset; si -- status
+[ "$RC" = 0 ] && [ "$(field steam-client installed)" = null ] && [ "$(field steam-cli installed)" = null ] \
+  && ok "both null" || bad "rc=$RC out=$OUT"
+[ "$(field steam-client progress)" = "\"$PROG_CLIENT\"" ] && ok "the page's progress file, under the cache" || bad "$OUT"
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["steam-client"]["size"] > 1 << 30 > d["steam-cli"]["size"] > 0' "$OUT" \
+  && ok "sizes for the page: the client with its guest over 1 GiB, the CLI small" || bad "$OUT"
+
+CASE="install client"
+reset; si -- install client
+[ "$RC" = 0 ] && forward && ok "exit 0; stdout: forward-only percentages ending at 100%" || bad "rc=$RC out=$OUT err=$ERR"
+grep -qx "args=--install progress=1" "$T/boot.log" && ok "the bootstrap ran with --install and RETROFORGE_STEAM_PROGRESS=1" || bad "$(cat "$T/boot.log")"
+grep -qx "fetch" "$T/guest.log" && ok "then the x86 guest's fetch, in the foreground" || bad "$(cat "$T/guest.log" 2>&1)"
+grep -qx "args=-steamdeck -exitsteam" "$T/steam.log" && ok "then the client's update: steam -steamdeck -exitsteam" || bad "$(cat "$T/steam.log")"
+grep -qx "display=unset wayland=unset" "$T/steam.log" && ok "with no display (the updater window has nowhere to go)" || bad "$(grep display "$T/steam.log")"
+p="$(sed -n 's/^progress-file=//p' "$T/steam.log")"
+[ -n "$p" ] && [ "$p" -ge 60 ] && [ "$p" -le 80 ] && ok "the progress file said $p while the update ran (bootstrap and guest done)" || bad "progress file: '$p'"
+[ ! -e "$PROG_CLIENT" ] && ok "and is removed at the end" || bad "left: $(cat "$PROG_CLIENT")"
+grep -q "Steam Client is installed" <<<"$ERR" && ok "says so on stderr" || bad "$ERR"
+si -- status
+[ "$(field steam-client installed)" = '"1791918634"' ] && ok "status: installed, the client's version from its updater's manifest" || bad "$OUT"
+
+CASE="install client, the update does not finish"
+reset; si FAKE_UPD=fail -- install client
+[ "$RC" = 0 ] && forward && grep -q "finishes it when Steam is first opened" <<<"$ERR" \
+  && ok "the install still succeeds, and says the client finishes its update when first opened" || bad "rc=$RC err=$ERR"
+si -- status; [ "$(field steam-client installed)" = '"installed"' ] && ok "installed, no version yet" || bad "$OUT"
+
+CASE="install client, the client keeps running after its update"
+reset; start=$SECONDS; si FAKE_UPD=hang -- install client
+[ "$RC" = 0 ] && [ $((SECONDS - start)) -lt 20 ] && ok "TERMed DONE_GRACE after 'Verification complete' (no hour-long wait)" || bad "rc=$RC took $((SECONDS - start)) s"
+
+CASE="install client, failures"
+reset; si FAKE_BOOT=sha -- install client
+[ "$RC" = 4 ] && [ ! -e "$PROG_CLIENT" ] && [ ! -e "$T/guest.log" ] && ok "a checksum mismatch: exit 4, nothing after it, no progress file" || bad "rc=$RC err=$ERR"
+reset; si FAKE_BOOT=net -- install client; [ "$RC" = 3 ] && ok "a network failure: exit 3" || bad "rc=$RC"
+reset; si FAKE_GUEST=space -- install client; [ "$RC" = 5 ] && ok "no room for the x86 guest: exit 5" || bad "rc=$RC err=$ERR"
+reset; si FAKE_GUEST=noimage -- install client
+[ "$RC" = 3 ] && grep -q "another download of it may still be running" <<<"$ERR" && ok "a fetch that left no image: exit 3, says why" || bad "rc=$RC err=$ERR"
+[ ! -e "$T/steam.log" ] && ok "and the client's update is not started" || bad "$(cat "$T/steam.log")"
+
+CASE="install client, the x86 guest off"
+reset; si RETROFORGE_STEAM_X86_GUEST=0 -- install client
+[ "$RC" = 0 ] && [ ! -e "$T/guest.log" ] && ok "RETROFORGE_STEAM_X86_GUEST=0: no guest download" || bad "rc=$RC"
+si RETROFORGE_STEAM_X86_GUEST=0 -- status; [ "$(field steam-client installed)" != null ] && ok "and installed without it" || bad "$OUT"
+si -- status; [ "$(field steam-client installed)" = null ] && ok "with the guest on again, not installed (it is missing)" || bad "$OUT"
+
+CASE="install cli"
+reset; si -- install cli
+[ "$RC" = 0 ] && forward && ok "exit 0; forward-only percentages ending at 100%" || bad "rc=$RC out=$OUT err=$ERR"
+grep -qx "args=+quit" "$H/.steam/stub.log" && ok "the stub ran in install mode with +quit (steamcmd updates itself, then quits)" || bad "$(cat "$H/.steam/stub.log" 2>&1)"
+si -- status; [ "$(field steam-cli installed)" = '"installed"' ] && ok "status: installed (Valve's steamcmd.sh, not the stub)" || bad "$OUT"
+reset; si FAKE_CLI=net -- install cli
+[ "$RC" = 3 ] && ok "a failed download: exit 3" || bad "rc=$RC err=$ERR"
+si -- status; [ "$(field steam-cli installed)" = null ] && ok "and not installed (the stub stays)" || bad "$OUT"
+
+echo
+echo "$PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ]

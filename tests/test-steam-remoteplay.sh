@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Offline test for what Steam Remote Play needs from the image: the "Steam" library card, Valve's Steam
-# Input udev rules, and the video codec links.
+# Offline test for what Steam Remote Play needs from the image: the way into Steam's UI (Open on Main
+# menu > Emulators > Steam Client), Valve's Steam Input udev rules, and the video codec links.
 #
 #   tests/test-steam-remoteplay.sh
 #
 # WHY THIS EXISTS. Each of these fails silently on a device:
-#   - the card: OGUI's desktop library (library_desktop.gd, v0.46.1) drops an entry without Name, Exec
-#     or the Game category, and runs Exec split on spaces. A steam://rungameid/ launch is treated as one
-#     game and Steam is SIGTERMed once only its own windows remain, which would end a Remote Play
-#     stream; -steamframe/-deckard switch on Frame-only paths. "steam steam://open/friends" is OGUI's
-#     default blacklist.
+#   - the way in: the Emulators page's Open on Steam Client (emulators_page.gd) launches `steam` with
+#     the Steam plugin's flags and steam://open/bigpicture. A steam://rungameid/ launch is treated as
+#     one game and Steam is SIGTERMed once only its own windows remain, which would end a Remote Play
+#     stream; -steamframe/-deckard switch on Frame-only paths. There is no Steam library card (removed
+#     2026-10-18: Steam is installed and opened from Emulators).
 #   - Valve's rules must stay verbatim below their header (the header names the upstream blob), or a
 #     hand edit hides behind "Valve's file".
 #   - the codec links must name both drivers' decoder and encoder (iris on SM8250/8550/8650, venus on
@@ -18,10 +18,10 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-DESKTOP="$ROOT/rootfs/overlay/usr/share/applications/retroforge-steam.desktop"
+PAGE="$ROOT/apps/ogui-retroforge-plugin/plugin/emulators_page.gd"
 INPUT="$ROOT/rootfs/overlay/usr/lib/udev/rules.d/60-steam-input.rules"
 CODEC="$ROOT/rootfs/overlay/usr/lib/udev/rules.d/70-retroforge-video-codec.rules"
-for f in "$DESKTOP" "$INPUT" "$CODEC"; do [ -f "$f" ] || { echo "missing: $f" >&2; exit 1; }; done
+for f in "$PAGE" "$INPUT" "$CODEC"; do [ -f "$f" ] || { echo "missing: $f" >&2; exit 1; }; done
 
 PASS=0; FAIL=0; SKIP=0; CASE=""
 ok()   { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
@@ -37,20 +37,18 @@ blob_id() {
 }
 
 # ================================================================================================
-CASE="Steam card"
-# Parsed the way library_desktop.gd does: line prefixes, Exec split on single spaces.
-name="$(sed -n 's/^Name=//p' "$DESKTOP" | head -1)"
-exec_line="$(sed -n 's/^Exec=//p' "$DESKTOP" | head -1)"
-cats="$(sed -n 's/^Categories=//p' "$DESKTOP" | head -1)"
-read -r -a argv <<<"$exec_line"
-[ "$name" = Steam ] && ok "Name=Steam" || bad "Name='$name'"
-case ";$cats;" in *";Game;"*) ok "in the Game category (OGUI lists only those)" ;; *) bad "Categories='$cats'" ;; esac
-[ "${argv[0]-}" = steam ] && ok "runs /usr/bin/steam" || bad "command '${argv[0]-}'"
-[[ " ${argv[*]} " == *" steam://open/bigpicture "* ]] && ok "opens Big Picture" || bad "Exec='$exec_line'"
-[[ "$exec_line" != *rungameid* ]] && ok "no steam://rungameid/ (OGUI would SIGTERM Steam and end a stream)" || bad "Exec='$exec_line'"
-[[ "$exec_line" != *-steamframe* && "$exec_line" != *-deckard* ]] && ok "no Frame-only flags" || bad "Exec='$exec_line'"
-[ "$exec_line" != "steam steam://open/friends" ] && ok "not OGUI's default blacklist entry" || bad "blacklisted"
-[[ "$exec_line" != *%* && "$exec_line" != *\"* ]] && ok "no field codes or quotes (OGUI does not expand them)" || bad "Exec='$exec_line'"
+CASE="the way in"
+# The steam-client branch of _open(): its command and its PackedStringArray of arguments.
+block="$(sed -n '/if id == "steam-client":/,/launch_manager.launch/p' "$PAGE")"
+command="$(sed -n 's/.*item.command = "\([^"]*\)".*/\1/p' <<<"$block" | head -1)"
+args="$(sed -n 's/.*PackedStringArray(\[\(.*\)\]).*/\1/p' <<<"$block" | head -1 | tr -d '",')"
+[ -n "$block" ] && ok "Open on Steam Client has its own launch" || bad "no steam-client branch in _open()"
+[ "$command" = steam ] && ok "runs /usr/bin/steam" || bad "command '$command'"
+[[ " $args " == *" steam://open/bigpicture "* ]] && ok "opens Big Picture" || bad "args '$args'"
+[[ " $args " == *" -steamdeck "* ]] && ok "with -steamdeck, the client channel's flag (steam.pin)" || bad "args '$args'"
+[[ "$args" != *rungameid* ]] && ok "no steam://rungameid/ (OGUI would SIGTERM Steam and end a stream)" || bad "args '$args'"
+[[ "$args" != *-steamframe* && "$args" != *-deckard* ]] && ok "no Frame-only flags" || bad "args '$args'"
+[ ! -e "$ROOT/rootfs/overlay/usr/share/applications/retroforge-steam.desktop" ] && ok "no Steam library card" || bad "the card is back"
 
 CASE="Valve's rules"
 blob="$(sed -n 's/^# .*(git blob \([0-9a-f]\{12\}\)).*/\1/p' "$INPUT" | head -1)"

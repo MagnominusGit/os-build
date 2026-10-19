@@ -649,6 +649,45 @@ mkdir -p "$D/other"; touch "$D/other/keep"
 run remove dummy
 [ -f "$D/other/keep" ] && ok "other emulators are left alone" || bad "touched another emulator"
 
+# =================================================================================================
+# Steam Client and Steam CLI: not catalog entries. `list` adds them from steam-install status, and
+# their install is steam-install's (progress lines and exit status passed through).
+CASE="steam"
+reset; catalog v1; api v1
+cat >"$W/bin/steam-install" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$W/steam.log"
+case "\$1" in
+  status) echo '{"steam-client": {"installed": "1791918634", "size": 2212495360, "progress": "/c/p-client"},
+                 "steam-cli": {"installed": null, "size": 46137344, "progress": "/c/p-cli"}}' ;;
+  install) echo 50%; echo 100%; exit "\${FAKE_STEAM_RC:-0}" ;;
+esac
+EOF
+chmod +x "$W/bin/steam-install"; rm -f "$W/steam.log"
+srun() { RETROFORGE_STEAM_INSTALL="$W/bin/steam-install" run "$@"; }
+srun list
+python3 - "$OUT" <<'PY' && ok "list adds Steam Client and Steam CLI (kind steam, Valve, progress file) beside the emulators" || bad "rc=$RC out=$OUT err=$ERR"
+import json, sys
+e = json.loads(sys.argv[1])["emulators"]
+c, k = e["steam-client"], e["steam-cli"]
+assert "dummy" in e
+assert c["kind"] == k["kind"] == "steam" and c["name"] == "Steam Client" and k["name"] == "Steam CLI"
+assert c["installed"] == "1791918634" and k["installed"] is None
+assert c["progress"] == "/c/p-client" and k["size"] == 46137344
+assert c["author"] == "Valve" and c["licence"]["name"] == "Steam Subscriber Agreement"
+assert c["self_update"] is True and c["update"] is False and c["tested"] is None and c["systems"] == []
+PY
+run list
+! grep -q steam-client <<<"$OUT" && ok "no steam-install in the image: no Steam entries" || bad "$OUT"
+srun install steam-client
+[ "$RC" = 0 ] && pct_only && grep -qx "install client" "$W/steam.log" && ok "install steam-client: steam-install install client, its progress on stdout" || bad "rc=$RC out=$OUT log=$(cat "$W/steam.log")"
+FAKE_STEAM_RC=3 srun install steam-cli
+[ "$RC" = 3 ] && grep -qx "install cli" "$W/steam.log" && ok "install steam-cli: its exit status (3) is ours" || bad "rc=$RC"
+for args in "check steam-client" "rollback steam-cli" "remove steam-client" "install steam-client --tested"; do
+  srun $args
+  [ "$RC" = 2 ] && grep -q "Steam updates itself" <<<"$ERR" && ok "$args: exit 2" || bad "$args: rc=$RC err=$ERR"
+done
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

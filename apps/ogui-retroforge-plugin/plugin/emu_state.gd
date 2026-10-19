@@ -19,6 +19,8 @@ const Credits := preload("credits.gd")
 
 
 static func rows(id: String, emu: Dictionary, check: Dictionary) -> Dictionary:
+	if emu.get("kind") == "steam":
+		return steam_rows(id, emu)
 	var installed = emu.get("installed")
 	var tested = emu.get("tested")
 	var follows: bool = emu.get("follows_latest", false) == true
@@ -82,6 +84,34 @@ static func rows(id: String, emu: Dictionary, check: Dictionary) -> Dictionary:
 			"description": "The version RetroForge tested, %d MB." % mb,
 			"args": ["install", id, "--tested"]}
 	return {"main": main, "tested": tested_row, "extra": extra}
+
+
+## Steam Client and Steam CLI (retroforge-emu's "kind": "steam"): Download until installed, then
+## Open for the client (Steam's own UI) and Repair (the install again: it fetches only what is
+## missing). Valve's client and steamcmd update themselves, so there is no Update, Check or Revert.
+static func steam_rows(id: String, emu: Dictionary) -> Dictionary:
+	var client := id == "steam-client"
+	var mb := int(emu.get("size", 0)) / 1048576
+	var install := ["install", id]
+	var repair := {"text": "Repair", "button": "Repair", "args": install,
+		"description": "Downloads again whatever of it is missing."}
+	var main := {"button": "Open", "args": []}
+	var extra := []
+	if emu.get("installed") == null:
+		main.text = "Not installed"
+		main.button = "Download"
+		main.args = install
+		main.description = ("Valve's Steam for arm64, with what x86 games need under FEX: about %d MB. Updates itself once installed."
+			if client else "Valve's steamcmd for arm64, which the Steam plugin uses for your library, installs and updates: about %d MB.") % mb
+	elif client:
+		main.text = "Installed"
+		main.description = "Opens Steam. It updates itself."
+		extra.append(repair)
+	else:
+		main = repair.duplicate()
+		main.text = "Installed"
+		main.description = "The Steam plugin uses it. It updates itself."
+	return {"main": main, "tested": null, "extra": extra}
 
 
 static func _v(tag) -> String:

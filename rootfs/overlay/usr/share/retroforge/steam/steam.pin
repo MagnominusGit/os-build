@@ -1,4 +1,6 @@
-# Valve's arm64 Steam client and Steam Runtime: the CHANNELS /usr/bin/steam downloads them from.
+# Valve's arm64 Steam client and Steam Runtime: the CHANNELS they are downloaded from (installed from
+# Main menu > Emulators > Steam Client by steam-install; the runtime then kept on its channel by every
+# start of /usr/bin/steam).
 #
 # Read by /usr/lib/retroforge/steam-bootstrap, which /usr/bin/steam runs on every start. Neither the
 # client build nor the runtime snapshot is pinned to a version here: both channels are rolling
