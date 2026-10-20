@@ -2,7 +2,7 @@
   "notes": [
     "Cemu (Wii U): pkgforge-dev's sharun repackaging of Cemu. Binary bin/cemu: the 2.6-4 build has bin/cemu and bin/Cemu (hard links), newer builds only bin/cemu (HW 2026-10-06). Cemu finds share/Cemu from /proc/self/exe = <mount>/bin/cemu (sharun execs in userland).",
     "Catalog channel nightly (user decision 2026-10-07): v2.6, the last release, predates Cemu's AArch64 recompiler (#1556, May 2025) and dies with SIGILL in recompiled code; retroforge-emu installs pkgforge-dev's current nightly as nightly-<commit>, checked against GitHub's sha256 digest. HW-tested build: nightly-cc6fea125 (Pocket FIT, 2026-10-06).",
-    "-f before -g (boost's implicit value); -g starts the game with no game list. ROMs: .wua (best: game, update and DLC in one), .wud/.wux (need disc keys in ~/bios/wiiu/keys.txt), or an extracted game's code/<name>.rpx.",
+    "-f before -g (boost's implicit value); -g starts the game with no game list. ROMs: .wua (best: game, update and DLC in one), .wud/.wux (need disc keys in ~/bios/keys.txt), or an extracted game's code/<name>.rpx.",
     "Wii U titles never quit and Cemu has no pad menu or stop shortcut: OpenGamepadUI's Exit (SIGTERM) is the way out; Cemu handles it with an immediate _Exit(0), no dialog (games write their saves themselves).",
     "gui_args: Cemu's own window and game list (touch screen; Cemu has no pad-driven UI)."
   ],

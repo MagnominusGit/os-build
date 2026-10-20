@@ -3,7 +3,7 @@
     "xemu (Xbox): the official xemu-project aarch64 AppImage (classic linuxdeploy layout: AppRun -> usr/bin/xemu, RUNPATH $ORIGIN/../lib; SDL3 3.4.10 linked in; no bundled Mesa or Vulkan loader, so the image's Turnip and GL), mounted; its real binary is run, never AppRun.",
     "-dvd_path loads the game (an XISO: convert other dumps with extract-xiso), -full-screen. Back + Start opens xemu's own menu (Exit quits, no dialog); SIGTERM powers the Xbox off cleanly.",
     "SDL_GAMECONTROLLERCONFIG: the pad's mapping exactly as SDL builds it (SDL3 3.4.10 reads it too; raw indices of InputPlumber's virtual Xbox Elite pad) but WITHOUT guide, so Guide (OpenGamepadUI's) never opens xemu's menu. No crc field: it matches whatever the name checksum is (bus, vendor, product and version 0001 must match).",
-    "The player provides ~/bios/xbox/mcpx_1.0.bin (MCPX boot ROM, 512 bytes), ~/bios/xbox/Complex_4627.bin (flash BIOS) and ~/saves/xbox/xbox_hdd.qcow2 (xemu's pre-formatted HDD image: game saves and xemu's snapshots live in it). xemu shows its own notice when one is missing.",
+    "The player provides ~/bios/mcpx_1.0.bin (MCPX boot ROM, 512 bytes), ~/bios/Complex_4627.bin (flash BIOS) and ~/saves/xbox/xbox_hdd.qcow2 (xemu's pre-formatted HDD image: game saves and xemu's snapshots live in it). xemu shows its own notice when one is missing.",
     "gui_args: xemu's own pad-driven UI (Back + Start)."
   ],
   "format": "appimage",

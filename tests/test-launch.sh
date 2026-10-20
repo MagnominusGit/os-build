@@ -240,7 +240,7 @@ layout_has() { grep -Eq "^d[[:space:]]+%h/$1[[:space:]]" "$LAYOUT"; }
 # A scripts-format emulator's games (PortMaster's ports) keep their data in their own folders:
 # only roms/<system> for those.
 for sys in $(sed -n 's/^\([a-z0-9_]*\)=.*/\1/p' "$LAUNCH_CONF"); do
-  missing="" tops="roms bios saves states"
+  missing="" tops="roms saves states"
   emu="$(sed -n "s/^$sys=//p" "$LAUNCH_CONF" | tail -1)"
   [ "$(jget "$SEED_DIR/$emu/emulator.json" format 2>/dev/null)" = '"scripts"' ] && tops="roms"
   for top in $tops; do layout_has "$top/$sys" || missing="$missing $top/$sys"; done
@@ -253,7 +253,7 @@ layout_has roms/ports && ok "layout has ~/roms/ports (PortMaster and its ports)"
 [ "$(readlink "$ROOT/rootfs/overlay/roms" 2>/dev/null)" = /home/player/roms ] \
   && ok "the image links /roms to /home/player/roms (PortMaster's /roms/ports)" \
   || bad "rootfs/overlay/roms is not a symlink to /home/player/roms: PortMaster would look in an empty read-only /roms"
-[ "$(ini BIOS SearchDirectory)" = /home/player/bios/psx ] && [ "$(ini GameList RecursivePaths)" = /home/player/roms/psx ] \
+[ "$(ini BIOS SearchDirectory)" = /home/player/bios ] && [ "$(ini GameList RecursivePaths)" = /home/player/roms/psx ] \
   && [ "$(ini MemoryCards Directory)" = /home/player/saves/psx ] && [ "$(ini Folders SaveStates)" = /home/player/states/psx ] \
   && ok "duckstation seed: BIOS, ROMs, memory cards and states in the shared layout" \
   || bad "duckstation seed folders do not match the layout"
@@ -270,14 +270,14 @@ axini() { awk -v sec="[$1]" -v key="$2" '$0 == sec {in_s=1; next} /^\[/ {in_s=0}
 [ "$(axini AutoUpdater CheckAtStartup)" = false ] && ok "armsx2 seed: self-updater off (RetroForge ships the version)" || bad "armsx2 seed leaves ARMSX2's auto-updater on"
 [ -z "$(axini EmuCore/GS Renderer)" ] && ok "armsx2 seed: renderer left on Automatic (forcing it shows a warning at every start)" \
   || bad "armsx2 seed forces a renderer: ARMSX2 warns 'Graphics API is not set to Automatic' at every start"
-[ -z "$(axini Filenames BIOS)" ] && ok "armsx2 seed: no BIOS file named (Auto picks one from ~/bios/ps2)" || bad "armsx2 seed names a BIOS file the player may not have"
+[ -z "$(axini Filenames BIOS)" ] && ok "armsx2 seed: no BIOS file named (Auto picks one from ~/bios)" || bad "armsx2 seed names a BIOS file the player may not have"
 [ "$(axini InputSources SDL)" = true ] && [ "$(axini Pad1 Type)" = DualShock2 ] && [ "$(axini Pad1 Cross)" = SDL-0/FaceSouth ] \
   && [ "$(axini Pad1 Start)" = SDL-0/Start ] && ok "armsx2 seed: Port 1 is a DualShock 2 on the InputPlumber pad (SDL-0)" \
   || bad "armsx2 seed has no SDL-0 DualShock 2 mapping for Port 1"
 [ "$(axini Hotkeys OpenPauseMenu)" = "SDL-0/Back & SDL-0/Start" ] && ok "armsx2 seed: Select+Start opens the pause menu" \
   || bad "armsx2 seed: no controller binding for OpenPauseMenu"
 grep -q 'SDL-0/Guide' "$AX_SEED" && bad "armsx2 seed binds Guide, which OpenGamepadUI owns" || ok "armsx2 seed leaves Guide to OGUI"
-[ "$(axini Folders Bios)" = /home/player/bios/ps2 ] && [ "$(axini GameList RecursivePaths)" = /home/player/roms/ps2 ] \
+[ "$(axini Folders Bios)" = /home/player/bios ] && [ "$(axini GameList RecursivePaths)" = /home/player/roms/ps2 ] \
   && [ "$(axini Folders MemoryCards)" = /home/player/saves/ps2 ] && [ "$(axini Folders Savestates)" = /home/player/states/ps2 ] \
   && ok "armsx2 seed: BIOS, ROMs, memory cards and states in the shared layout" || bad "armsx2 seed folders do not match the layout"
 AX_DEF="$SEED_DIR/armsx2/emulator.json"
@@ -449,7 +449,7 @@ has rpcs3/CurrentSettings.ini 'confirmationBoxExitGame=false' "no exit confirmat
   && ok "rpcs3: SDL's signal handlers off, so OGUI's Exit (SIGTERM) ends it (its SDL3 swallowed it)" \
   || bad "rpcs3 env: $(jget "$SEED_DIR/rpcs3/emulator.json" env)"
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); i=d["install"]
-sys.exit(not (i == [{"from": "bios/ps3/PS3UPDAT.PUP", "unless": ".config/rpcs3/dev_flash/vsh/etc/version.txt", "args": ["--headless", "--installfw", "{file}"]}]))' \
+sys.exit(not (i == [{"from": "bios/PS3UPDAT.PUP", "unless": ".config/rpcs3/dev_flash/vsh/etc/version.txt", "args": ["--headless", "--installfw", "{file}"]}]))' \
   "$SEED_DIR/rpcs3/emulator.json" && ok "rpcs3: the player's PS3UPDAT.PUP is installed headless before the first game" || bad "rpcs3: firmware install step missing or changed"
 
 # =================================================================================================
@@ -624,21 +624,21 @@ CASE="one-time install (emulator.json install)"
 # RPCS3 needs the player's PS3 firmware imported before any game: emulator.json "install" runs the
 # emulator's own binary once, from the mount, when its marker file is missing.
 INST="$T/data-install"; mkdir -p "$INST/duckstation"; cp "$DS_SEED" "$INST/duckstation/"
-python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["install"] = [{"from": "bios/psx/fw.bin",
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["install"] = [{"from": "bios/fw.bin",
   "unless": ".config/fake/fw-ok", "args": ["--fake-install", "{file}"]}]; json.dump(d, open(sys.argv[2], "w"))' \
   "$DS_DEF" "$INST/duckstation/emulator.json"
 ST="$T/launch.status"; reset_logs
 rc=$(RETROFORGE_EMU_DATA_DIR="$INST" RETROFORGE_LAUNCH_STATUS="$ST" code psx "$ROM")
-[ "$rc" = 3 ] && [ "$(cat "$ST" 2>/dev/null)" = "missing-file duckstation bios/psx/fw.bin" ] && [ ! -e "$T/emu.log" ] \
+[ "$rc" = 3 ] && [ "$(cat "$ST" 2>/dev/null)" = "missing-file duckstation bios/fw.bin" ] && [ ! -e "$T/emu.log" ] \
   && ok "the player's file is missing: exit 3, status 'missing-file <emu> <path>', no game started" \
   || bad "missing install file: rc=$rc status='$(cat "$ST" 2>/dev/null)' emu ran=$([ -e "$T/emu.log" ] && echo yes || echo no)"
 RETROFORGE_EMU_DATA_DIR="$INST" "$LAUNCH" --gui duckstation 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
 wait_for emu_up && [ ! -e "$T/install.log" ] && ok "--gui opens without it (and installs nothing)" || bad "--gui did not start without the install file"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
-mkdir -p "$HOME/bios/psx"; : > "$HOME/bios/psx/fw.bin"
+mkdir -p "$HOME/bios"; : > "$HOME/bios/fw.bin"
 rc=$(RETROFORGE_EMU_DATA_DIR="$INST" RETROFORGE_LAUNCH_STATUS="$ST" code psx "$ROM")
 [ "$rc" = 3 ] && [ "$(cat "$ST" 2>/dev/null)" = "install-failed duckstation" ] && ! emu_up \
-  && grep -q "^install --fake-install $HOME/bios/psx/fw.bin$" "$T/install.log" \
+  && grep -q "^install --fake-install $HOME/bios/fw.bin$" "$T/install.log" \
   && ok "the install ran (binary from the mount, {file} = ~/<from>) but left no marker: install-failed, no game" \
   || bad "failed install: rc=$rc status='$(cat "$ST" 2>/dev/null)' log='$(cat "$T/install.log" 2>/dev/null)'"
 [ ! -s "$T/mounts" ] && ok "and the mount is released" || bad "a failed install left the mount: $(cat "$T/mounts")"
@@ -652,7 +652,7 @@ RETROFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
 # RPCS3's installer installs the firmware, then aborts (SIGABRT) on its way out: the marker is
 # what counts, so the game starts; and installs never leave a core file (HW 2026-10-07).
-python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["install"] = [{"from": "bios/psx/fw.bin",
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["install"] = [{"from": "bios/fw.bin",
   "unless": ".config/fake/fw-ok", "args": ["--fake-install", "{file}"]}]; json.dump(d, open(sys.argv[2], "w"))' \
   "$DS_DEF" "$INST/duckstation/emulator.json"
 rm -rf "$HOME/.config/fake"; : > "$T/install.log"; touch "$T/install-crash"; reset_logs
@@ -689,7 +689,7 @@ python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["gui_args"] = ["{
   "$DS_DEF" "$INST/duckstation/emulator.json"
 [ "$(RETROFORGE_EMU_DATA_DIR="$INST" code --gui duckstation)" = 2 ] && ok "{system} in gui_args is refused (exit 2): Open has no system" || bad "gui_args with {system} accepted"
 # OGUI's Exit during the install: no game afterwards, no status (the player chose to leave).
-python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["args"] = ["{rom}"]; d["install"] = [{"from": "bios/psx/fw.bin",
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["args"] = ["{rom}"]; d["install"] = [{"from": "bios/fw.bin",
   "unless": ".config/fake/slow-ok", "args": ["--fake-install", "{file}"]}]; json.dump(d, open(sys.argv[2], "w"))' \
   "$DS_DEF" "$INST/duckstation/emulator.json"
 touch "$T/install-slow"; rm -f "$ST" "$T/install-running"; reset_logs

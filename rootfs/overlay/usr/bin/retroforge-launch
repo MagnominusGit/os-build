@@ -29,7 +29,7 @@
 #    "core_dumps": false,                          no core file when it crashes (default true; below)
 #    "seed": [{"file": "x.ini", "to": ".config/x/x.ini"}],   first-run settings (below)
 #    "sync": [{"file": "x.txt", "to": "roms/x/x.txt"}],      RetroForge's own files, kept current (below)
-#    "install": [{"from": "bios/x/fw.bin",          a one-time step with the emulator's own binary
+#    "install": [{"from": "bios/fw.bin",            a one-time step with the emulator's own binary
 #                 "unless": ".config/x/fw/ok",       (below); paths under $HOME
 #                 "args": ["--installfw", "{file}"]}],
 #    "setup_args": ["--assign-controller", "1"],   run the emulator's binary with these arguments

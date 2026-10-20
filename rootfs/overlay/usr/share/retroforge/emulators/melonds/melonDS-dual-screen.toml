@@ -4,7 +4,7 @@
 # - JIT.Enable: the ARM64 JIT (off by default; the interpreter is too slow on these SoCs).
 # - Emu.ExternalBIOSEnable = false: melonDS's built-in FreeBIOS and generated firmware, so games
 #   boot with no files. The DS.* paths are pre-filled for a player who drops real dumps in
-#   ~/bios/nds and turns External BIOS on (it refuses to boot when they are missing).
+#   ~/bios and turns External BIOS on (it refuses to boot when they are missing).
 # - Mouse.Hide: no cursor over the game (touch still works on the bottom screen).
 # - Mic.InputType = 2 (noise): holding L3 "blows" into the mic (Nintendogs, Spirit Tracks...).
 # - Instance0: the pad is SDL device INDEX 0 (melonDS never uses a name or GUID); cartridge saves in
@@ -34,9 +34,9 @@ Enable = true
 ExternalBIOSEnable = false
 
 [DS]
-BIOS9Path = "/home/player/bios/nds/bios9.bin"
-BIOS7Path = "/home/player/bios/nds/bios7.bin"
-FirmwarePath = "/home/player/bios/nds/firmware.bin"
+BIOS9Path = "/home/player/bios/bios9.bin"
+BIOS7Path = "/home/player/bios/bios7.bin"
+FirmwarePath = "/home/player/bios/firmware.bin"
 
 [Mouse]
 Hide = true

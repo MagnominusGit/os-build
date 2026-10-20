@@ -6,7 +6,7 @@
 # - games_dir: the Games list in xemu's menu (Back + Start) shows ~/roms/xbox.
 # - renderer VULKAN (Turnip); the default is OpenGL.
 # - show_menubar = false: no menu bar over the game.
-# - sys.files: the player supplies the MCPX boot ROM and flash BIOS in ~/bios/xbox and xemu's
+# - sys.files: the player supplies the MCPX boot ROM and flash BIOS in ~/bios and xemu's
 #   pre-formatted HDD image in ~/saves/xbox (it holds the game saves AND xemu's snapshots, so
 #   ~/states/xbox stays empty); the EEPROM is generated there at the first boot.
 # - Controller: nothing here. No port binding + auto_bind (the default) puts the one pad on port 1
@@ -26,7 +26,7 @@ renderer = 'VULKAN'
 show_menubar = false
 
 [sys.files]
-bootrom_path = '/home/player/bios/xbox/mcpx_1.0.bin'
-flashrom_path = '/home/player/bios/xbox/Complex_4627.bin'
+bootrom_path = '/home/player/bios/mcpx_1.0.bin'
+flashrom_path = '/home/player/bios/Complex_4627.bin'
 hdd_path = '/home/player/saves/xbox/xbox_hdd.qcow2'
 eeprom_path = '/home/player/saves/xbox/eeprom.bin'

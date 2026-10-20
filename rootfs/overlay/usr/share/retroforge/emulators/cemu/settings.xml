@@ -13,7 +13,7 @@
        (HW 2026-10-06, Pocket FIT).
      - Not set: fullscreen (-f does it for games; Open stays windowed) and open_pad (the separate
        GamePad window must stay closed: a second window under gamescope). keys.txt has no setting:
-       ~/.local/share/Cemu/keys.txt is a link to ~/bios/wiiu/keys.txt (retroforge-home.conf). -->
+       ~/.local/share/Cemu/keys.txt is a link to ~/bios/keys.txt (retroforge-home.conf). -->
 <content>
     <mlc_path>/home/player/saves/wiiu</mlc_path>
     <check_update>false</check_update>
