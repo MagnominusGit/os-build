@@ -128,22 +128,22 @@
         "url": "https://github.com/flyinghead/flycast/blob/master/LICENSE"
       }
     },
-    "gopher64": {
-      "name": "gopher64",
-      "author": "loganmc10 and the gopher64 contributors",
+    "rmg": {
+      "name": "RMG",
+      "author": "Rosalie and the RMG contributors; AppImage by pkgforge-dev",
       "systems": [
         "n64"
       ],
-      "github": "gopher64/gopher64",
-      "tag": "v1.1.42",
-      "tag_pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
-      "asset": "^gopher64-linux-aarch64$",
-      "sha256": "1232b3a20bb8b742547c355970e815dd5123d05df3ead3db95fbea45000ff502",
-      "size": 60297392,
-      "homepage": "https://github.com/gopher64/gopher64",
+      "github": "pkgforge-dev/RMG-AppImage-Enhanced",
+      "tag": "0.9.0-1@2026-10-01_1790876458",
+      "tag_pattern": "^[0-9][0-9.]*(-[0-9]+)?@[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]+$",
+      "asset": "^RMG-[0-9][0-9.]*(-[0-9]+)?-anylinux-aarch64\\.AppImage$",
+      "sha256": "1046f5f3dbac97e7580f64d38bfb34e8bab5502af586a015c97e0bd6db2df616",
+      "size": 92737586,
+      "homepage": "https://github.com/Rosalie241/RMG",
       "licence": {
         "name": "GPL-3.0",
-        "url": "https://github.com/gopher64/gopher64/blob/main/LICENSE"
+        "url": "https://github.com/Rosalie241/RMG/blob/master/LICENSE"
       }
     },
     "melonds": {

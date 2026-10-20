@@ -207,15 +207,34 @@ grep -qx 'psx=duckstation' "$LAUNCH_CONF" && ok "launch.conf maps psx to ducksta
   && ok "duckstation: an AppImage, its real binary (not AppRun)" || bad "duckstation emulator.json format/binary: $(jget "$DS_DEF" format) $(jget "$DS_DEF" binary)"
 [ "$(jget "$DS_DEF" args)" = '["-batch", "-fullscreen", "--", "{rom}"]' ] \
   && ok "duckstation args: -batch (back to OGUI on close), -- before the ROM" || bad "duckstation args: $(jget "$DS_DEF" args)"
-G64_DEF="$SEED_DIR/gopher64/emulator.json"
-grep -qx 'n64=gopher64' "$LAUNCH_CONF" && ok "launch.conf maps n64 to gopher64" || bad "launch.conf does not map n64=gopher64"
-[ "$(jget "$G64_DEF" format)" = '"binary"' ] && [ "$(jget "$G64_DEF" binary)" = '"current"' ] \
-  && ok "gopher64: a plain binary, run in place" || bad "gopher64 emulator.json format/binary: $(jget "$G64_DEF" format) $(jget "$G64_DEF" binary)"
-[ "$(jget "$G64_DEF" setup_args)" = '["--assign-controller", "1", "--port", "1"]' ] \
-  && ok "gopher64 setup: the pad re-assigned at every start (a fresh config has none; the stored path is this boot's)" \
-  || bad "gopher64 setup_args: $(jget "$G64_DEF" setup_args)"
-python3 -c 'import json,sys; sys.exit(json.load(open(sys.argv[1]))["env"].get("SDL_NO_SIGNAL_HANDLERS") != "1")' "$G64_DEF" \
-  && ok "gopher64: SDL_NO_SIGNAL_HANDLERS=1 (SDL3 would swallow OGUI Exit's SIGTERM)" || bad "gopher64 env lacks SDL_NO_SIGNAL_HANDLERS=1"
+RMG_DEF="$SEED_DIR/rmg/emulator.json"
+RMG_SEED="$SEED_DIR/rmg/mupen64plus.cfg"
+grep -qx 'n64=rmg' "$LAUNCH_CONF" && ok "launch.conf maps n64 to rmg" || bad "launch.conf does not map n64=rmg"
+[ "$(jget "$RMG_DEF" format)" = '"appimage-sharun"' ] && [ "$(jget "$RMG_DEF" binary)" = '"bin/RMG"' ] \
+  && ok "rmg: a sharun AppImage, its real binary (not AppRun)" || bad "rmg emulator.json format/binary: $(jget "$RMG_DEF" format) $(jget "$RMG_DEF" binary)"
+[ "$(jget "$RMG_DEF" args)" = '["-f", "-n", "-q", "{rom}"]' ] \
+  && ok "rmg args: fullscreen, no GUI chrome, quit when emulation ends" || bad "rmg args: $(jget "$RMG_DEF" args)"
+python3 -c 'import json,sys; sys.exit(json.load(open(sys.argv[1]))["env"].get("SDL_NO_SIGNAL_HANDLERS") != "1")' "$RMG_DEF" \
+  && ok "rmg: SDL_NO_SIGNAL_HANDLERS=1 (RMG-Input's SDL would swallow OGUI Exit's SIGTERM)" || bad "rmg env lacks SDL_NO_SIGNAL_HANDLERS=1"
+rmgini() { awk -v sec="[$1]" -v key="$2" '$0 == sec {in_s=1; next} /^\[/ {in_s=0}
+  in_s { split($0, kv, " = "); if (kv[1] == key) { print kv[2]; exit } }' "$RMG_SEED"; }
+[ "$(rmgini "Rosalie's Mupen GUI" ConfirmExitWhileInGame)" = False ] \
+  && ok "rmg seed: no exit confirmation (OGUI's Exit would hang on 'are you sure?')" \
+  || bad "rmg seed lacks ConfirmExitWhileInGame = False"
+[ "$(rmgini "Rosalie's Mupen GUI" CheckForUpdates)" = False ] && ok "rmg seed: self-updater off (RetroForge ships the version)" \
+  || bad "rmg seed leaves RMG's update check on"
+[ "$(rmgini "Rosalie's Mupen GUI Core" GFX_Plugin)" = '"mupen64plus-video-GLideN64.so"' ] \
+  && ok "rmg seed: GLideN64 video pinned (paraLLEl-RDP does not run on A610)" \
+  || bad "rmg seed video plugin: $(rmgini "Rosalie's Mupen GUI Core" GFX_Plugin)"
+[ "$(rmgini Core SaveSRAMPath)" = '"/home/player/saves/n64"' ] && [ "$(rmgini Core SaveStatePath)" = '"/home/player/states/n64"' ] \
+  && ok "rmg seed: saves and states in the shared layout" || bad "rmg seed save paths do not match the layout"
+[ "$(rmgini "Rosalie's Mupen GUI - Input Plugin Profile 0" PluggedIn)" = True ] \
+  && [ "$(rmgini "Rosalie's Mupen GUI - Input Plugin Profile 0" DeviceType)" = 2 ] \
+  && ok "rmg seed: player 1 plugged in on the Automatic device (no profile = no pad at all)" \
+  || bad "rmg seed: no Automatic player-1 input profile"
+[ "$(rmgini "Rosalie's Mupen GUI - Input Plugin Profile 0" Hotkey_Shutdown_Data)" = '"4;6"' ] \
+  && ok "rmg seed: Select+Start stops emulation (with -q, back to OGUI)" \
+  || bad "rmg seed: no Select+Start shutdown combo"
 
 # DuckStation reads INI values as "key = value"; check the keys the hardware test needed.
 ini() { awk -v sec="[$1]" -v key="$2" '$0 == sec {in_s=1; next} /^\[/ {in_s=0}
@@ -1224,8 +1243,9 @@ grep -qx -- "-u -z $T/rt1" "$T/fusermount2.log" 2>/dev/null && ok "after the por
 rm -f "$T/bin/fusermount"
 
 # =================================================================================================
-CASE="plain binary (gopher64)"
-# gopher64's release asset is ONE plain executable, no AppImage: retroforge-emu still saves it as
+CASE="plain binary format"
+# A release asset that is ONE plain executable, no AppImage (gopher64 shipped this way until RMG
+# replaced it; the format stays for the next such emulator): retroforge-emu still saves it as
 # <tag>.AppImage and points `current` at it; the binary format runs `current` in place, no mount.
 BD="$T/defs-binary"; mkdir -p "$BD/fakebin"
 cat > "$BD/fakebin/emulator.json" <<'EOF'
@@ -1273,7 +1293,7 @@ echo "n64=badbin" > "$T/launch-badbin.conf"
 RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-badbin.conf" "$LAUNCH" n64 "$NROM" >/dev/null 2>&1; rc=$?
 [ "$rc" = 2 ] && ok "a binary definition with root is refused (root is the scripts format's)" || bad "root on binary: exit $rc"
 cat > "$BD/badbin/emulator.json" <<'EOF'
-{"format": "binary", "binary": "gopher64", "args": ["{rom}"]}
+{"format": "binary", "binary": "fakebin", "args": ["{rom}"]}
 EOF
 RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-badbin.conf" "$LAUNCH" n64 "$NROM" >/dev/null 2>&1; rc=$?
 [ "$rc" = 2 ] \
@@ -1282,10 +1302,10 @@ RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-badbin.conf" "$L
 
 # =================================================================================================
 CASE="setup runs (setup_args)"
-# gopher64 only reads a pad assigned to a port, and its assignment is the pad's /dev/input/eventN
-# path, which no board or boot guarantees: setup_args runs the emulator's binary before EVERY
-# start (game and --gui) so the emulator itself rewrites the assignment for this boot. A failed
-# setup is a warning, never a blocked game.
+# Some emulators only read state their own binary wrote for this boot (gopher64 stored the pad's
+# /dev/input/eventN path, which no board or boot guarantees): setup_args runs the emulator's binary
+# before EVERY start (game and --gui) so the emulator itself rewrites it. A failed setup is a
+# warning, never a blocked game.
 mkdir -p "$BD/fakeset"
 cat > "$BD/fakeset/emulator.json" <<'EOF'
 {"format": "binary", "binary": "current", "args": ["{rom}"], "gui_args": [],
