@@ -178,6 +178,50 @@ check("...but a parent with other children stays",
                  "Graphic/Overlay", "FPS"), "true")
 
 # ================================================================================================
+CASE = "json patcher"
+J = ('{\n  "video": {\n    "upscale": 1,\n    "ssaa": false\n  },\n'
+     '  "emulation": {\n    "overclock": false\n  }\n}\n')
+check("get: compact JSON text", eo.json_get(J, "video", "upscale"), "1")
+check("get: a bool", eo.json_get(J, "video", "ssaa"), "false")
+check("get: absent is None", eo.json_get(J, "video", "crt"), None)
+check("get: an absent parent is None", eo.json_get(J, "input/profiles", "deadzone"), None)
+out = eo.json_set(J, "video", "upscale", "4")
+check("set writes a typed number, not a string (a string resets gopher64's config)",
+      json.loads(out)["video"]["upscale"], 4)
+check("set keeps the other sections", json.loads(out)["emulation"], {"overclock": False})
+check("set a typed bool", json.loads(eo.json_set(J, "video", "ssaa", "true"))["video"]["ssaa"], True)
+check("add a key", json.loads(eo.json_set(J, "video", "crt", "true"))["video"]["crt"], True)
+check("add under missing parents", json.loads(eo.json_set(J, "a/b", "k", "1"))["a"]["b"]["k"], 1)
+check("root-level key (section '')", json.loads(eo.json_set(J, "", "version", "3"))["version"], 3)
+check("remove: the key goes",
+      "ssaa" in json.loads(eo.json_set(J, "video", "ssaa", None))["video"], False)
+check("add then remove under new parents: no empty objects left",
+      json.loads(eo.json_set(eo.json_set(J, "a/b", "k", "1"), "a/b", "k", None)), json.loads(J))
+check("remove what is not there: byte for byte unchanged", eo.json_set(J, "video", "nope", None), J)
+check("an empty document starts as {} (gopher64 before its first exit)",
+      json.loads(eo.json_set("", "video", "upscale", "2")), {"video": {"upscale": 2}})
+check("a removal that leaves nothing gives the empty document back",
+      eo.json_set('{"video": {"upscale": 2}}\n', "video", "upscale", None), "")
+check("removing from an empty document is nothing to do", eo.json_set("", "video", "nope", None), "")
+
+
+def throws(fn):
+    try:
+        fn()
+        return None
+    except eo.FILE_ERRORS as err:
+        return type(err).__name__
+
+
+check("a document that is not an object raises into FILE_ERRORS (warn, skip)",
+      throws(lambda: eo.json_set("[1, 2]", "a", "k", "1")), "JSONDecodeError")
+check("a parent that is not an object raises too",
+      throws(lambda: eo.json_set(J, "video/upscale", "x", "1")), "JSONDecodeError")
+check("...but a removal under it is nothing to do", eo.json_set(J, "video/upscale", "x", None), J)
+check("broken JSON raises on a get as well", throws(lambda: eo.json_get("{ not json", "a", "k")),
+      "JSONDecodeError")
+
+# ================================================================================================
 CASE = "options.json"
 GOOD = {"files": {"main": {"path": ".config/fake/settings.ini", "format": "ini", "separator": " = "}},
         "options": [{"id": "aspect", "label": "Aspect ratio", "description": "d",
@@ -214,7 +258,7 @@ refused("not JSON", "{")
 refused("unknown top-level key", lambda d: d.update(code="x"))
 refused("path outside $HOME", lambda d: d["files"]["main"].update(path="../etc/passwd"))
 refused("absolute path", lambda d: d["files"]["main"].update(path="/etc/passwd"))
-refused("unknown format", lambda d: d["files"]["main"].update(format="json"))
+refused("unknown format", lambda d: d["files"]["main"].update(format="conf"))
 refused("a separator on yaml", lambda d: d["files"]["main"].update(format="yaml"))
 refused("a separator that is not '='", lambda d: d["files"]["main"].update(separator=":"))
 refused("an undeclared file", lambda d: d["options"][0]["choices"][0]["set"][0].update(file="other"))
@@ -229,6 +273,26 @@ refused("a choice value with a space", lambda d: d["options"][0]["choices"][0].u
 refused("a choice with nothing to do", lambda d: d["options"][0]["choices"][0].update(set=[]))
 refused("choices writing different settings",
         lambda d: d["options"][0]["choices"][1]["set"].append({"file": "main", "section": "Display", "key": "Other", "value": "1"}))
+JGOOD = {"files": {"config": {"path": ".config/fake/config.json", "format": "json"}},
+         "options": [{"id": "upscale", "label": "Rendering size", "description": "d",
+                      "choices": [{"value": "2", "label": "2x",
+                                   "set": [{"file": "config", "section": "video", "key": "upscale", "value": "2"}]},
+                                  {"value": "4", "label": "4x",
+                                   "set": [{"file": "config", "section": "video", "key": "upscale", "value": "4"}]}]}]}
+check("a json-format file loads", load(JGOOD)["options"][0]["id"], "upscale")
+for what, value in (("a bare word", "on"), ("an unquoted string", "Native")):
+    d = json.loads(json.dumps(JGOOD))
+    d["options"][0]["choices"][0]["set"][0]["value"] = value
+    got = load(d)
+    check(f"a json value that is {what} (it would reset gopher64's config): refused",
+          isinstance(got, str) and got.startswith("refused"), True)
+d = json.loads(json.dumps(JGOOD))
+d["options"][0]["choices"][0]["set"][0]["value"] = '"name"'
+check("a json value that is a quoted string loads", load(d)["options"][0]["id"], "upscale")
+d = json.loads(json.dumps(JGOOD))
+d["files"]["config"]["separator"] = " = "
+got = load(d)
+check("a separator on json: refused", isinstance(got, str) and got.startswith("refused"), True)
 PER_SYSTEM = json.loads(json.dumps(GOOD))
 PER_SYSTEM["files"]["main"]["path"] = ".config/fake/{system}/settings.ini"
 check("a '{system}' settings folder loads", load(PER_SYSTEM)["files"]["main"]["path"], ".config/fake/{system}/settings.ini")
@@ -304,6 +368,8 @@ for emu in sorted(os.listdir(DATA)):
                         tomllib.loads(text)
                     if fdef["format"] == "xml":
                         ET.fromstring(text)
+                    if fdef["format"] == "json":
+                        json.loads(text)
             check(f"{where}: written as declared, file still valid", (ok, got), (True, []))
             eo.restore(home, f"{home}/state", emu, got.append)
             back = {p: read(os.path.join(home, p)) for n in paths for p in paths[n]}
@@ -430,6 +496,32 @@ for what, entry in (("a path outside home", {"path": "/etc/passwd"}),
     eo.restore(HOME, STATE, "x", warn)
     check(f"a journal entry with {what}: the journal is dropped, nothing written",
           (read(SETTINGS), os.path.exists(JOURNAL), bool(warnings)), (BASE, False, True))
+
+# ================================================================================================
+CASE = "json apply and restore (gopher64's config.json)"
+warnings.clear()
+JOPTS = load(JGOOD)
+CFG = f"{HOME}/.config/fake/config.json"
+GBASE = json.dumps({"video": {"upscale": 1, "ssaa": False}, "input": {"profile": "default"}}, indent=2) + "\n"
+write(CFG, GBASE)
+eo.apply(JOPTS, HOME, STATE, "g64", {"upscale": "2"}, {}, warn)
+check("emulator level: a typed number in the file", json.loads(read(CFG))["video"]["upscale"], 2)
+check("...the other sections kept", json.loads(read(CFG))["input"], {"profile": "default"})
+eo.apply(JOPTS, HOME, STATE, "g64", {"upscale": "2"}, {"upscale": "4"}, warn)
+check("game level: written for the run", json.loads(read(CFG))["video"]["upscale"], 4)
+# gopher64 rewrites config.json whole on exit, the patched value and its own formatting included:
+rewritten = json.loads(read(CFG))
+rewritten["ui"] = {"recent_roms": ["game.z64"]}
+write(CFG, json.dumps(rewritten) + "\n")
+eo.restore(HOME, STATE, "g64", warn)
+check("restore: the emulator-level value is back, what gopher64 added on exit kept",
+      (json.loads(read(CFG))["video"]["upscale"], json.loads(read(CFG))["ui"]),
+      (2, {"recent_roms": ["game.z64"]}))
+write(CFG, "{ broken by a power cut")
+eo.apply(JOPTS, HOME, STATE, "g64", {}, {"upscale": "4"}, warn)
+check("a broken config.json: a warning, never overwritten", (read(CFG), len(warnings)),
+      ("{ broken by a power cut", 1))
+warnings.clear()
 
 # ================================================================================================
 CASE = "per-system settings folders"

@@ -12,7 +12,7 @@
 # /usr/share/retroforge/emulators/<emulator>/options.json says, as DATA, what each value does:
 #
 #   {"files": {"main": {"path": ".config/x/x.ini",      relative to $HOME
-#                       "format": "ini" | "toml" | "yaml" | "xml",
+#                       "format": "ini" | "toml" | "yaml" | "xml" | "json",
 #                       "separator": " = "}},           how an added line is written (ini/toml; default "=")
 #    "options": [{"id": "aspect", "label": "Aspect ratio", "description": "...",
 #                 "choices": [{"value": "16:9", "label": "16:9", "set": [ACTION, ...]}, ...]}],
@@ -24,7 +24,10 @@
 #
 # A file action names the setting by section and key: an INI/TOML [section] ("" = before the first
 # header), a YAML mapping path ("Video/Performance Overlay"), an XML element path under the root
-# ("Graphic/Overlay"). The value is the file's text, verbatim (TOML quotes included).
+# ("Graphic/Overlay"), a JSON object path ("video", "" = the root object). The value is the file's
+# text, verbatim (TOML quotes included); for JSON it is JSON text ("2", "true", "\"name\"") and is
+# written TYPED: gopher64's serde drops every section but input bindings back to defaults over a
+# string where a number belongs, so load_options refuses a value that is not JSON.
 #
 # A path may hold "{system}" when the emulator keeps one settings folder per system (ClownMDEmu: -u
 # ~/.config/clownmdemu/<system>). The emulator level is written for every system launch.conf gives the
@@ -38,8 +41,8 @@
 # the launcher; a power cut), so one game's override never stays in the emulator's own settings. What the
 # player changes in the emulator to an overridden setting during that run is lost (user decision).
 #
-# The patchers edit lines, never re-serialise a file (XML excepted, below): comments, order and every
-# other setting are kept. Standard library only: the image's python has no YAML or TOML writer.
+# The patchers edit lines, never re-serialise a file (XML and JSON excepted, below): comments, order
+# and every other setting are kept. Standard library only: the image's python has no YAML or TOML writer.
 
 import json
 import os
@@ -48,7 +51,7 @@ import secrets
 import tomllib
 import xml.etree.ElementTree as ET
 
-FORMATS = ("ini", "toml", "yaml", "xml")
+FORMATS = ("ini", "toml", "yaml", "xml", "json")
 LINE_FORMATS = ("ini", "toml")
 OPTION_ID = re.compile(r"[a-z][a-z0-9_]*")
 FILE_NAME = re.compile(r"[a-z][a-z0-9_]*")
@@ -57,8 +60,8 @@ CHOICE_VALUE = re.compile(r"[A-Za-z0-9_.:+-]+")
 CPUS_VALUES = ("big", "all")
 SYSTEM = "{system}"  # in a file path: the system's own settings folder
 JOURNAL_VERSION = 1
-# What a settings file can throw at a patch: unreadable, not text, not XML, or TOML we would break.
-FILE_ERRORS = (OSError, UnicodeError, ET.ParseError, tomllib.TOMLDecodeError)
+# What a settings file can throw at a patch: unreadable, not text, not XML or JSON, or TOML we would break.
+FILE_ERRORS = (OSError, UnicodeError, ET.ParseError, tomllib.TOMLDecodeError, json.JSONDecodeError)
 
 
 class OptionsError(Exception):
@@ -126,6 +129,12 @@ def _check_action(action, files, where):
             raise OptionsError(f"{where}: file {action['file']!r} is not declared in files")
         if not (_one_line(action["section"], action["key"], action["value"]) and action["key"].strip()):
             raise OptionsError(f"{where}: section, key and value must be one-line strings (key not empty)")
+        if files[action["file"]].get("format") == "json":
+            try:
+                json.loads(action["value"])
+            except ValueError:
+                raise OptionsError(f"{where}: a json file's value must be JSON text ('2', 'true', '\"name\"'):"
+                                   f" {action['value']!r} is not") from None
     else:
         raise OptionsError(f"{where}: an action is {{args}}, {{env}} or {{file, section, key, value}}")
 
@@ -451,11 +460,79 @@ def xml_set(text, section, key, value):
     return (prolog or '<?xml version="1.0" encoding="UTF-8"?>') + "\n" + ET.tostring(root, encoding="unicode") + "\n"
 
 
+# -------------------------------------------------------------------------------- patchers: json --
+
+def _json_root(text):
+    """The document's object; {} for an empty document (gopher64 writes its config.json at the first
+    exit: before that there is no file). Raises json.JSONDecodeError (in FILE_ERRORS)."""
+    if not text.strip():
+        return {}
+    root = json.loads(text)
+    if not isinstance(root, dict):
+        raise json.JSONDecodeError("the document is not a JSON object", text, 0)
+    return root
+
+
+def _json_names(section):
+    return [p for p in section.split("/") if p]
+
+
+def json_get(text, section, key):
+    """The value at section/key as compact JSON text, or None (absent, or under a parent that is not
+    an object)."""
+    node = _json_root(text)
+    for name in _json_names(section):
+        node = node.get(name) if isinstance(node, dict) else None
+        if node is None:
+            return None
+    if not isinstance(node, dict) or key not in node:
+        return None
+    return json.dumps(node[key], separators=(",", ":"))
+
+
+def json_set(text, section, key, value):
+    """text with section/key holding value (JSON text: typed, never a quoted number where a number
+    belongs); None removes the key, and parent objects left empty go too. The document is
+    re-serialised (JSON holds no comments to lose; gopher64 rewrites its whole file on exit anyway);
+    a removal that leaves it with nothing returns the empty document, how gopher64 first finds it
+    (the restore of settings written before the emulator's first exit created the file)."""
+    root = _json_root(text)
+    names = _json_names(section)
+    chain = [root]
+    for name in names:
+        node = chain[-1].get(name)
+        if node is None:
+            if value is None:
+                return text
+            node = {}
+            chain[-1][name] = node
+        if not isinstance(node, dict):
+            if value is None:
+                return text
+            raise json.JSONDecodeError(f"{section} is not a JSON object", text, 0)
+        chain.append(node)
+    if value is None:
+        if key not in chain[-1]:
+            return text
+        del chain[-1][key]
+        for i in range(len(chain) - 1, 0, -1):
+            if chain[i]:
+                break
+            del chain[i - 1][names[i - 1]]
+        if not root:
+            return ""
+    else:
+        chain[-1][key] = json.loads(value)
+    return json.dumps(root, indent=2) + "\n"
+
+
 def get_setting(fmt, text, section, key):
     if fmt == "yaml":
         return yaml_get(text, section, key)
     if fmt == "xml":
         return xml_get(text, section, key)
+    if fmt == "json":
+        return json_get(text, section, key)
     return ini_get(text, section, key)
 
 
@@ -464,6 +541,8 @@ def set_setting(fmt, text, section, key, value, separator="="):
         return yaml_set(text, section, key, value)
     if fmt == "xml":
         return xml_set(text, section, key, value)
+    if fmt == "json":
+        return json_set(text, section, key, value)
     return ini_set(text, section, key, value, separator)
 
 

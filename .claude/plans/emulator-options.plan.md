@@ -117,7 +117,9 @@ game-level values, the same pattern as `retroforge-emu list`. GDScript never par
   - Azahar: `\default=false` companions;
   - Snes9x: driver fallback;
   - Cemu: graphic packs, later.
-  - Shared helpers live in one module: format-preserving ini, toml, yaml and xml key patchers, and the journal.
+  - Shared helpers live in one module: format-preserving ini, toml, yaml and xml key patchers (plus a
+    re-serialising json one, added for gopher64's config.json: values are typed JSON text, since a
+    string where serde wants a number resets gopher64's config to defaults), and the journal.
   - This replaces the "no code in definitions" rule for options only. The emulator.json formats stay data.
 - **Emulator level is persistent; game level is temporary.**
   - An emulator-level value is written into the emulator's config at every launch, the --gui included, and
