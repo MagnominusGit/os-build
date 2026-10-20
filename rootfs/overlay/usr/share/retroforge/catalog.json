@@ -128,6 +128,24 @@
         "url": "https://github.com/flyinghead/flycast/blob/master/LICENSE"
       }
     },
+    "gopher64": {
+      "name": "gopher64",
+      "author": "loganmc10 and the gopher64 contributors",
+      "systems": [
+        "n64"
+      ],
+      "github": "gopher64/gopher64",
+      "tag": "v1.1.42",
+      "tag_pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "asset": "^gopher64-linux-aarch64$",
+      "sha256": "1232b3a20bb8b742547c355970e815dd5123d05df3ead3db95fbea45000ff502",
+      "size": 60297392,
+      "homepage": "https://github.com/gopher64/gopher64",
+      "licence": {
+        "name": "GPL-3.0",
+        "url": "https://github.com/gopher64/gopher64/blob/main/LICENSE"
+      }
+    },
     "melonds": {
       "name": "melonDS",
       "author": "Arisotura and the melonDS team; AppImage by pkgforge-dev",

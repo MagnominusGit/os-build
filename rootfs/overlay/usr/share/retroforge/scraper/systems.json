@@ -1,11 +1,12 @@
 {
   "schema": 1,
-  "_source": "ScreenScraper systemeid per RetroForge system: ROCKNIX/emulationstation-next es-app/src/scrapers/ScreenScraper.cpp (MIT, (c) 2014 Alec Lofquist and contributors), each checked against ScreenScraper's systemesListe.php on 2026-10-17. exts/dirs mirror SYSTEMS in apps/ogui-retroforge-plugin/plugin/library_roms.gd (tests/test-scrape.sh compares them). ports: never scraped.",
+  "_source": "ScreenScraper systemeid per RetroForge system: ROCKNIX/emulationstation-next es-app/src/scrapers/ScreenScraper.cpp (MIT, (c) 2014 Alec Lofquist and contributors), each checked against ScreenScraper's systemesListe.php on 2026-10-17 (n64 on 2026-10-20). exts/dirs mirror SYSTEMS in apps/ogui-retroforge-plugin/plugin/library_roms.gd (tests/test-scrape.sh compares them). ports: never scraped.",
   "systems": {
     "gb": {"ss": [9], "exts": ["gb", "zip", "7z"]},
     "gbc": {"ss": [10], "exts": ["gbc", "gb", "zip", "7z"]},
     "gba": {"ss": [12], "exts": ["gba", "zip", "7z"]},
     "snes": {"ss": [4], "exts": ["sfc", "smc", "zip"]},
+    "n64": {"ss": [14], "exts": ["z64", "n64", "v64", "zip", "7z"]},
     "nds": {"ss": [15], "exts": ["nds", "zip", "7z"]},
     "3ds": {"ss": [17], "exts": ["3ds", "cci", "cxi", "3dsx", "zcci", "zcxi", "z3dsx"]},
     "gc": {"ss": [13], "exts": ["iso", "gcm", "gcz", "rvz", "ciso", "wia"]},

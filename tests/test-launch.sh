@@ -72,6 +72,11 @@ read -r _ _ _ _ pgid sid _< <(cut -d' ' -f1-7 /proc/\$\$/stat)
   echo "vram_on=\${ENABLE_MESA_VRAM_REPORT_LIMIT-}"; echo "vram_mib=\${VK_VRAM_REPORT_LIMIT_HEAP_SIZE-}"
   echo "vram_id=\${VK_VRAM_REPORT_LIMIT_DEVICE_ID-}"; echo "opt_env=\${FAKE_OPT-}"
   printf 'arg=%s\n' "\$@"; } >> "\$log"
+if [ "\${1-}" = --fake-setup ]; then  # a setup run (emulator.json "setup_args"), not a game
+  echo "setup \$*" >> "$T/setup.log"
+  [ -f "$T/setup-fails" ] && exit 9
+  exit 0
+fi
 if [ "\${1-}" = --fake-install ]; then  # an install step (emulator.json "install"), not a game
   echo "install \$*" >> "$T/install.log"
   echo "core-limit=\$(ulimit -c)" >> "$T/install.log"
@@ -196,6 +201,15 @@ grep -qx 'psx=duckstation' "$LAUNCH_CONF" && ok "launch.conf maps psx to ducksta
   && ok "duckstation: an AppImage, its real binary (not AppRun)" || bad "duckstation emulator.json format/binary: $(jget "$DS_DEF" format) $(jget "$DS_DEF" binary)"
 [ "$(jget "$DS_DEF" args)" = '["-batch", "-fullscreen", "--", "{rom}"]' ] \
   && ok "duckstation args: -batch (back to OGUI on close), -- before the ROM" || bad "duckstation args: $(jget "$DS_DEF" args)"
+G64_DEF="$SEED_DIR/gopher64/emulator.json"
+grep -qx 'n64=gopher64' "$LAUNCH_CONF" && ok "launch.conf maps n64 to gopher64" || bad "launch.conf does not map n64=gopher64"
+[ "$(jget "$G64_DEF" format)" = '"binary"' ] && [ "$(jget "$G64_DEF" binary)" = '"current"' ] \
+  && ok "gopher64: a plain binary, run in place" || bad "gopher64 emulator.json format/binary: $(jget "$G64_DEF" format) $(jget "$G64_DEF" binary)"
+[ "$(jget "$G64_DEF" setup_args)" = '["--assign-controller", "1", "--port", "1"]' ] \
+  && ok "gopher64 setup: the pad re-assigned at every start (a fresh config has none; the stored path is this boot's)" \
+  || bad "gopher64 setup_args: $(jget "$G64_DEF" setup_args)"
+python3 -c 'import json,sys; sys.exit(json.load(open(sys.argv[1]))["env"].get("SDL_NO_SIGNAL_HANDLERS") != "1")' "$G64_DEF" \
+  && ok "gopher64: SDL_NO_SIGNAL_HANDLERS=1 (SDL3 would swallow OGUI Exit's SIGTERM)" || bad "gopher64 env lacks SDL_NO_SIGNAL_HANDLERS=1"
 
 # DuckStation reads INI values as "key = value"; check the keys the hardware test needed.
 ini() { awk -v sec="[$1]" -v key="$2" '$0 == sec {in_s=1; next} /^\[/ {in_s=0}
@@ -1202,6 +1216,101 @@ grep -qx -- "-u -z $T/rt1" "$T/fusermount2.log" 2>/dev/null && ok "after the por
 ! grep -q gone "$T/fusermount2.log" 2>/dev/null && ok "a registry entry no longer mounted is skipped" || bad "unmounted something not mounted"
 [ ! -s "$REG" ] && ok "the registry is emptied" || bad "registry left: $(cat "$REG")"
 rm -f "$T/bin/fusermount"
+
+# =================================================================================================
+CASE="plain binary (gopher64)"
+# gopher64's release asset is ONE plain executable, no AppImage: retroforge-emu still saves it as
+# <tag>.AppImage and points `current` at it; the binary format runs `current` in place, no mount.
+BD="$T/defs-binary"; mkdir -p "$BD/fakebin"
+cat > "$BD/fakebin/emulator.json" <<'EOF'
+{"format": "binary", "binary": "current", "args": ["--fullscreen", "{rom}"], "gui_args": []}
+EOF
+echo "n64=fakebin" > "$T/launch-binary.conf"
+bl() { RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-binary.conf" "$LAUNCH" "$@"; }
+mkdir -p "$T/roms/n64"; NROM="$T/roms/n64/A Game (USA).z64"; : > "$NROM"
+st="$T/launch.status.binary"; rm -f "$st"
+RETROFORGE_LAUNCH_STATUS="$st" bl n64 "$NROM" >/dev/null 2>&1; rc=$?
+[ "$rc" = 3 ] && [ "$(cat "$st" 2>/dev/null)" = "not-installed fakebin" ] \
+  && ok "not installed: exit 3, status 'not-installed fakebin'" || bad "rc=$rc status=$(cat "$st" 2>/dev/null)"
+mkdir -p "$T/emus/fakebin"; cp "$T/fake-emu" "$T/emus/fakebin/v1.0.0.AppImage"
+ln -s v1.0.0.AppImage "$T/emus/fakebin/current"
+reset_logs
+bl n64 "$NROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+[ "$(field self)" = "$T/emus/fakebin/current" ] \
+  && ok "runs current in place (the download itself)" || bad "ran '$(field self)'"
+mapfile -t args < <(sed -n 's/^arg=//p' "$T/emu.log")
+[ "${args[*]}" = "--fullscreen $NROM" ] \
+  && ok "arguments are the definition's args with the ROM" || bad "args were: $(printf '[%s] ' "${args[@]}")"
+[ "$(field pid)" = "$(field sid)" ] && ok "it leads its own session" || bad "not a session leader"
+touch "$T/stop-emu"; reap_launcher "$lpid"; rc=$?
+[ "$rc" = 7 ] && ok "the launcher exits with the emulator's status" || bad "launcher exited $rc, the emulator 7"
+[ ! -s "$T/fusermount.log" ] && [ ! -s "$T/appimage.log" ] \
+  && ok "nothing mounted, nothing unmounted" || bad "mount activity for a plain binary"
+reset_logs
+bl n64 "$NROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+ogui_reap "$lpid"; reap_launcher "$lpid"
+grep -qx term "$T/emu.log" && ok "OGUI's Exit reaches the emulator" || bad "the emulator never got SIGTERM"
+reset_logs
+bl --gui fakebin 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "--gui never started: $(cat "$T/launch.err")"
+[ "$(field self)" = "$T/emus/fakebin/current" ] && [ -z "$(sed -n 's/^arg=//p' "$T/emu.log")" ] \
+  && ok "--gui runs current with the definition's (empty) gui_args" \
+  || bad "--gui ran '$(field self)' with: $(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' ' ')"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+mkdir -p "$BD/badbin"
+cat > "$BD/badbin/emulator.json" <<'EOF'
+{"format": "binary", "root": "roms/n64", "binary": "current", "args": ["{rom}"]}
+EOF
+echo "n64=badbin" > "$T/launch-badbin.conf"
+RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-badbin.conf" "$LAUNCH" n64 "$NROM" >/dev/null 2>&1; rc=$?
+[ "$rc" = 2 ] && ok "a binary definition with root is refused (root is the scripts format's)" || bad "root on binary: exit $rc"
+cat > "$BD/badbin/emulator.json" <<'EOF'
+{"format": "binary", "binary": "gopher64", "args": ["{rom}"]}
+EOF
+RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-badbin.conf" "$LAUNCH" n64 "$NROM" >/dev/null 2>&1; rc=$?
+[ "$rc" = 2 ] \
+  && ok "a binary definition whose binary is not current is refused (the download IS the program)" \
+  || bad "binary != current: exit $rc"
+
+# =================================================================================================
+CASE="setup runs (setup_args)"
+# gopher64 only reads a pad assigned to a port, and its assignment is the pad's /dev/input/eventN
+# path, which no board or boot guarantees: setup_args runs the emulator's binary before EVERY
+# start (game and --gui) so the emulator itself rewrites the assignment for this boot. A failed
+# setup is a warning, never a blocked game.
+mkdir -p "$BD/fakeset"
+cat > "$BD/fakeset/emulator.json" <<'EOF'
+{"format": "binary", "binary": "current", "args": ["{rom}"], "gui_args": [],
+ "setup_args": ["--fake-setup"]}
+EOF
+echo "n64=fakeset" > "$T/launch-setup.conf"
+stl() { RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-setup.conf" "$LAUNCH" "$@"; }
+mkdir -p "$T/emus/fakeset"; cp "$T/fake-emu" "$T/emus/fakeset/v1.0.0.AppImage"
+ln -s v1.0.0.AppImage "$T/emus/fakeset/current"
+reset_logs; rm -f "$T/setup.log" "$T/setup-fails"
+stl n64 "$NROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the game never started: $(cat "$T/launch.err")"
+grep -qx "setup --fake-setup" "$T/setup.log" 2>/dev/null \
+  && ok "the setup ran with the definition's setup_args before the game" || bad "no setup run: $(cat "$T/setup.log" 2>/dev/null)"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+reset_logs; rm -f "$T/setup.log"
+stl --gui fakeset 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "--gui never started: $(cat "$T/launch.err")"
+[ -s "$T/setup.log" ] && ok "--gui runs the setup too" || bad "--gui skipped the setup"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+reset_logs; rm -f "$T/setup.log"; : > "$T/setup-fails"
+stl n64 "$NROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up && grep -q "setup run ended with 9" "$T/launch.err" \
+  && ok "a failed setup is a warning and the game still starts" \
+  || bad "setup exit 9: game up=$(emu_up && echo yes || echo no), err: $(tail -1 "$T/launch.err" 2>/dev/null)"
+touch "$T/stop-emu"; reap_launcher "$lpid"; rm -f "$T/setup-fails"
+cat > "$BD/fakeset/emulator.json" <<'EOF'
+{"format": "binary", "binary": "current", "args": ["{rom}"], "setup_args": ["--load", "{rom}"]}
+EOF
+[ "$(RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-setup.conf" code n64 "$NROM")" = 2 ] \
+  && ok 'setup_args holding "{rom}" is refused (a setup run has no game)' || bad 'accepted {rom} in setup_args'
 
 # =================================================================================================
 CASE="stale mounts"

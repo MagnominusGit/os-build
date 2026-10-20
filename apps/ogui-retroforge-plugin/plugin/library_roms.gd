@@ -21,6 +21,7 @@ const SYSTEMS := {
 	"gbc": {"name": "Game Boy Color", "exts": ["gbc", "gb", "zip", "7z"]},
 	"gba": {"name": "Game Boy Advance", "exts": ["gba", "zip", "7z"]},
 	"snes": {"name": "Super Nintendo", "exts": ["sfc", "smc", "zip"]},
+	"n64": {"name": "Nintendo 64", "exts": ["z64", "n64", "v64", "zip", "7z"]},
 	"nds": {"name": "Nintendo DS", "exts": ["nds", "zip", "7z"]},
 	"3ds": {"name": "Nintendo 3DS", "exts": ["3ds", "cci", "cxi", "3dsx", "zcci", "zcxi", "z3dsx"]},
 	"gc": {"name": "GameCube", "exts": ["iso", "gcm", "gcz", "rvz", "ciso", "wia"]},

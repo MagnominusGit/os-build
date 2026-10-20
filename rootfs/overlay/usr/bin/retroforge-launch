@@ -13,8 +13,8 @@
 # ROM card runs. /etc/retroforge/launch.conf maps a system to its emulator (last `<system>=<emulator>`
 # line wins); /usr/share/retroforge/emulators/<emulator>/emulator.json says how to run it -- DATA ONLY:
 #
-#   {"format": "appimage" | "appimage-sharun" | "scripts",   how the download is packaged (FORMATS
-#                                                  below)
+#   {"format": "appimage" | "appimage-sharun" | "scripts" | "binary",   how the download is
+#                                                  packaged (FORMATS below)
 #    "root": "roms/ports/PortMaster",              scripts only: the folder under $HOME retroforge-emu
 #                                                  unpacked the download into
 #    "binary": "usr/bin/x",                        the program inside it (relative, no '..')
@@ -31,6 +31,8 @@
 #    "install": [{"from": "bios/x/fw.bin",          a one-time step with the emulator's own binary
 #                 "unless": ".config/x/fw/ok",       (below); paths under $HOME
 #                 "args": ["--installfw", "{file}"]}],
+#    "setup_args": ["--assign-controller", "1"],   run the emulator's binary with these arguments
+#                                                  before EVERY start, game and --gui (below)
 #    "notes": ["..."]}                             why, for people; ignored here
 #
 # Anything else in it, or a format this script does not know, is refused (exit 2): a definition that
@@ -79,6 +81,16 @@
 # <from>` in the status file, so the plugin can tell the player where to put it. --gui still opens
 # without it.
 #
+# Setup runs (setup_args): the emulator's own binary, run with these arguments and waited for before
+# EVERY start, game and --gui, windowless. For a setting that must follow the device, so no file can
+# seed it: gopher64 only reads a pad it was assigned, and the assignment it stores is the pad's
+# /dev/input/eventN path, which no board or boot guarantees -- `--assign-controller 1 --port 1` at
+# every launch makes gopher64 itself look up InputPlumber's virtual pad (the one SDL joystick on a
+# RetroForge session) and write its current path (HW 2026-10-20, Pocket ACE: fresh config = every
+# port unassigned = no controls; the hotplug handler only rebinds a GUID it already knows).
+# A setup run that fails is a warning, never a blocked game: the emulator still starts, at worst as
+# it would have without the step.
+#
 # The scripts format (PortMaster) is a folder retroforge-emu unpacked under $HOME, never mounted: --gui
 # runs <root>/<binary> in place, and a game card's ROM is ITSELF a script -- a port's own launch
 # script, which PortMaster installed beside its folder -- run with bash (args, "{rom}" = the
@@ -88,6 +100,11 @@
 # mounts RetroForge's port `mount` stand-in (/usr/lib/retroforge/portmaster/bin/mount) records in
 # $RETROFORGE_PM_MOUNTS (default $XDG_RUNTIME_DIR/retroforge-portmaster-mounts), whose squashfuse daemons
 # outlive the port's session when OGUI's Exit skips the port's own umount.
+#
+# The binary format (gopher64) is a download that is ONE plain executable: retroforge-emu names it
+# <tag>.AppImage all the same (the name is only a name; nothing checks the file is an AppImage) and
+# points `current` at it. It runs in place, nothing to mount: the definition's binary is `current`
+# itself, relative to the emulator's folder.
 #
 # Every AppImage format mounts the AppImage and runs its real binary; every rule below was found on
 # hardware (DuckStation, MANGMI Pocket Max, 2026-10-03) and each one cost a crash:
@@ -196,12 +213,13 @@ SYSTEM_VULKAN_ICD = "/usr/share/vulkan/icd.d/freedreno_icd.aarch64.json"
 UNMOUNT_TRIES = 50   # x 0.1 s for the runtime to let go of the mount after SIGHUP
 MOUNT_TIMEOUT = 30   # s for the AppImage runtime to print its mount point
 INSTALL_SETTLE = 1.0  # s to wait after an install step for OGUI's Exit to reach us too (below)
+SETUP_TIMEOUT = 20   # s for a setup run (setup_args): a hung one must not hold the launch forever
 
 USAGE = "usage: retroforge-launch <system> <rom> | --gui <emulator>"
 SYSTEM_ID = re.compile(r"[a-z0-9_]+")
 EMU_ID = re.compile(r"[a-z0-9_-]+")
 DEFINITION_KEYS = {"format", "root", "binary", "args", "gui_args", "system_args", "env", "seed",
-                   "sync", "install", "core_dumps", "exit_resend", "notes"}
+                   "sync", "install", "setup_args", "core_dumps", "exit_resend", "notes"}
 EXIT_RESEND_MAX = 30  # s: an exit_resend longer than this is a typo, not a plan
 SCRIPT_SHELL = "/bin/bash"  # what a scripts-format game card's script runs with
 ROM = "{rom}"
@@ -313,6 +331,10 @@ def load_definition(emulator):
                   "format and only for it")
     if not safe_relative(d.get("binary")):
         raise bad("binary must be a relative path inside the download, without '..'")
+    if d["format"] == "binary" and d["binary"] != "current":
+        # The download IS the program, and the not-installed check looks at `current`: any other
+        # name would pass that check and then fail to start.
+        raise bad('a binary definition runs the download itself: binary must be "current"')
     args = d.get("args")
     if not str_list(args) or args.count(ROM) != 1:
         raise bad(f'args must be a list of strings holding "{ROM}" exactly once')
@@ -352,6 +374,11 @@ def load_definition(emulator):
         raise bad('install entries must be {"from": <path under $HOME>, "unless": <path under $HOME>, '
                   f'"args": [... "{FILE}" once, no "{ROM}" or "{SYSTEM}" ...]}}, paths relative, '
                   "without '..' or whitespace")
+    setup_args = d.get("setup_args", [])
+    if not str_list(setup_args) or any(p in setup_args for p in (ROM, FILE)) \
+            or any(SYSTEM in a for a in setup_args):
+        raise bad(f'setup_args must be a list of strings without "{ROM}", "{FILE}" or "{SYSTEM}" '
+                  "(a setup run has no game)")
     core_dumps = d.get("core_dumps", True)
     if not isinstance(core_dumps, bool):
         raise bad("core_dumps must be true or false")
@@ -360,8 +387,8 @@ def load_definition(emulator):
                                         and 0 < exit_resend <= EXIT_RESEND_MAX):
         raise bad(f"exit_resend must be a number of seconds, more than 0 and at most {EXIT_RESEND_MAX}")
     return {"format": d["format"], "root": d.get("root"), "binary": d["binary"], "args": args, "gui_args": gui_args,
-            "system_args": system_args, "env": env, "seed": seed, "sync": sync, "install": install, "core_dumps": core_dumps,
-            "exit_resend": exit_resend}
+            "system_args": system_args, "env": env, "seed": seed, "sync": sync, "install": install,
+            "setup_args": setup_args, "core_dumps": core_dumps, "exit_resend": exit_resend}
 
 
 def device_field(name):
@@ -809,8 +836,29 @@ class Scripts:
             pass
 
 
+class Binary:
+    """A download that is one plain executable (gopher64): retroforge-emu names it <tag>.AppImage
+    all the same, `current` points at it, and it runs in place. Nothing to mount or release: the
+    definition's binary is `current` itself, relative to the emulator's folder."""
+
+    runs_rom = False
+
+    def __init__(self, emulator, image):
+        self.emulator, self.image = emulator, image
+
+    def prepare(self):
+        return os.path.dirname(self.image)
+
+    def env(self):
+        return {}
+
+    def release(self):
+        pass
+
+
 AppImage.runs_rom = False
-FORMATS = {"appimage": AppImage, "appimage-sharun": SharunAppImage, "scripts": Scripts}
+FORMATS = {"appimage": AppImage, "appimage-sharun": SharunAppImage, "scripts": Scripts,
+           "binary": Binary}
 
 
 # ---------------------------------------------------------------------------------------- run --
@@ -871,6 +919,28 @@ def run_installs(emulator, binary, env, todo, interrupted):
         if rc != 0:
             log(f"{emulator}: the install of ~/{step['from']} ended with {rc}, but "
                 f"~/{step['unless']} is there: installed")
+
+
+def run_setup(emulator, binary, env, setup_args, interrupted):
+    """The definition's setup run (setup_args above): the emulator's binary, before every start,
+    waited for. A failure is a warning, never a blocked game: the emulator starts at worst as it
+    would have without the step."""
+    if not setup_args:
+        return
+    log(f"{emulator}: setup: {binary} {' '.join(setup_args)}")
+    try:
+        rc = subprocess.run([binary] + setup_args, env=env, start_new_session=True,
+                            preexec_fn=no_core_dumps, timeout=SETUP_TIMEOUT).returncode
+    except subprocess.TimeoutExpired:
+        log(f"warning: {emulator}: the setup run did not finish in {SETUP_TIMEOUT} s")
+    except (OSError, ValueError) as err:
+        log(f"warning: {emulator}: could not run the setup: {err}")
+    else:
+        if rc != 0:
+            log(f"warning: {emulator}: the setup run ended with {rc}")
+    # OGUI's Exit reached the setup run (and us): the player left; never start the game after that.
+    if interrupted:
+        raise Exit(128 + interrupted[0], f"{emulator}: interrupted during setup; not starting")
 
 
 def no_core_dumps():
@@ -972,6 +1042,7 @@ def run(argv):
         env = {**inherited, **gpu_priority_env(), **vram_limit_env(), **package.env(), **definition["env"],
                **opt_env}
         run_installs(emulator, binary, env, todo, interrupted)
+        run_setup(emulator, binary, env, definition["setup_args"], interrupted)
         program = SCRIPT_SHELL if package.runs_rom and rom is not None else binary
         log(f"{system or 'gui'} -> {emulator}: {program} {' '.join(args)}")
         try:
