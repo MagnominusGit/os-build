@@ -15,7 +15,7 @@
     "psx": {"ss": [57], "exts": ["chd", "cue", "pbp", "m3u", "iso"]},
     "ps2": {"ss": [58], "exts": ["chd", "iso", "cso", "zso", "gz", "cue"]},
     "psp": {"ss": [61], "exts": ["iso", "cso", "chd", "pbp"]},
-    "ps3": {"ss": [59], "exts": ["iso"], "dirs": ["PS3_GAME/USRDIR/EBOOT.BIN", "USRDIR/EBOOT.BIN"]},
+    "ps3": {"ss": [59], "exts": ["iso", "psn"], "dirs": ["PS3_GAME/USRDIR/EBOOT.BIN", "USRDIR/EBOOT.BIN"]},
     "md": {"ss": [1], "exts": ["md", "gen", "bin", "zip"]},
     "segacd": {"ss": [20], "exts": ["chd", "cue"]},
     "dc": {"ss": [23], "exts": ["chd", "gdi", "cdi", "cue"]},

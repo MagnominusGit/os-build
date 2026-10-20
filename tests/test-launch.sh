@@ -77,6 +77,12 @@ if [ "\${1-}" = --fake-setup ]; then  # a setup run (emulator.json "setup_args")
   [ -f "$T/setup-fails" ] && exit 9
   exit 0
 fi
+if [ "\${1-}" = --headless ] && [ "\${2-}" = --installpkg ]; then  # the PSN inbox (--psn-install)
+  echo "psn-install \$*" >> "$T/psn.log"
+  echo "RPCS3-LOG-NOISE"  # RPCS3 logs to stdout: it must never land on the result lines
+  [ -f "$T/psn-fake.sh" ] && . "$T/psn-fake.sh"
+  exit 0  # RPCS3's --installpkg exits 0 even when it failed: success is per file, on disk
+fi
 if [ "\${1-}" = --fake-install ]; then  # an install step (emulator.json "install"), not a game
   echo "install \$*" >> "$T/install.log"
   echo "core-limit=\$(ulimit -c)" >> "$T/install.log"
@@ -1311,6 +1317,398 @@ cat > "$BD/fakeset/emulator.json" <<'EOF'
 EOF
 [ "$(RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-setup.conf" code n64 "$NROM")" = 2 ] \
   && ok 'setup_args holding "{rom}" is refused (a setup run has no game)' || bad 'accepted {rom} in setup_args'
+
+# =================================================================================================
+CASE="stub ROMs (PSN .psn -> %RPCS3_GAMEID%:<id>)"
+# A .psn card is a stub the PSN installer wrote: its first line is the title id, and the
+# definition's "stub" maps the extension to what the emulator boots in its place. Only the command
+# line gets the target; the stub path stays the game's identity (card name, per-game conf).
+mkdir -p "$BD/fakestub"
+cat > "$BD/fakestub/emulator.json" <<'EOF'
+{"format": "binary", "binary": "current", "args": ["--no-gui", "{rom}"], "gui_args": [],
+ "stub": {"psn": "%RPCS3_GAMEID%:{text}"}}
+EOF
+echo "ps3=fakestub" > "$T/launch-stub.conf"
+sbl() { RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-stub.conf" "$LAUNCH" "$@"; }
+mkdir -p "$T/emus/fakestub"; cp "$T/fake-emu" "$T/emus/fakestub/v1.0.0.AppImage"
+ln -s v1.0.0.AppImage "$T/emus/fakestub/current"
+mkdir -p "$T/roms/ps3"; SROM="$T/roms/ps3/A PSN Game.psn"
+printf 'NPUB30024\n' > "$SROM"
+reset_logs
+sbl ps3 "$SROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the game never started: $(cat "$T/launch.err")"
+mapfile -t args < <(sed -n 's/^arg=//p' "$T/emu.log")
+[ "${args[*]}" = "--no-gui %RPCS3_GAMEID%:NPUB30024" ] \
+  && ok "the stub's first line replaces {text}, the result replaces {rom}" || bad "args were: $(printf '[%s] ' "${args[@]}")"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+printf 'NPUB30024\nsecond line ignored\n' > "$SROM"; reset_logs
+sbl ps3 "$SROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the game never started: $(cat "$T/launch.err")"
+[ "$(sed -n 's/^arg=//p' "$T/emu.log" | tail -1)" = "%RPCS3_GAMEID%:NPUB30024" ] \
+  && ok "only the first line is the id" || bad "args were: $(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' ' ')"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+st="$T/launch.status.stub"
+# The id is strictly [A-Za-z0-9_]{1,64}: a path (../), an option (-x), control characters, a BOM
+# or whitespace must never reach the emulator's command line (the id feeds RPCS3's VFS lookup).
+for broken in "" " " "NPUB 30024" "../NPUB30024" "-flag" "$(printf 'NPUB\x1b30024')" \
+              "$(printf '\xef\xbb\xbfNPUB30024')" "$(printf 'N%.0s' $(seq 65))"; do
+  printf '%s\n' "$broken" > "$SROM"; reset_logs; rm -f "$st"
+  RETROFORGE_LAUNCH_STATUS="$st" sbl ps3 "$SROM" >/dev/null 2>&1; rc=$?
+  [ "$rc" = 3 ] && [ "$(cat "$st" 2>/dev/null)" = "bad-stub fakestub" ] && [ ! -e "$T/emu.log" ] \
+    && ok "a stub with first line '${broken:0:20}': exit 3, status 'bad-stub fakestub', no game" \
+    || bad "stub '${broken:0:20}': rc=$rc status='$(cat "$st" 2>/dev/null)' emu ran=$([ -e "$T/emu.log" ] && echo yes || echo no)"
+done
+head -c 512 /dev/urandom > "$SROM"; printf '\x00\xff\xfe' >> "$SROM"; reset_logs; rm -f "$st"
+RETROFORGE_LAUNCH_STATUS="$st" sbl ps3 "$SROM" >/dev/null 2>&1; rc=$?
+[ "$rc" = 3 ] && [ "$(cat "$st" 2>/dev/null)" = "bad-stub fakestub" ] && [ ! -e "$T/emu.log" ] \
+  && ok "a binary file named .psn: bad-stub, never mojibake on the command line" \
+  || bad "binary stub: rc=$rc status='$(cat "$st" 2>/dev/null)' emu ran=$([ -e "$T/emu.log" ] && echo yes || echo no)"
+# A symlinked stub works (the share may present links); a DIRECTORY named .psn is no stub and
+# falls through as an ordinary ROM path (a disc-dump folder may carry any name).
+printf 'NPUB30024\n' > "$SROM"; ln -sf "$SROM" "$T/roms/ps3/Link Game.psn"; reset_logs
+sbl ps3 "$T/roms/ps3/Link Game.psn" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the game never started: $(cat "$T/launch.err")"
+[ "$(sed -n 's/^arg=//p' "$T/emu.log" | tail -1)" = "%RPCS3_GAMEID%:NPUB30024" ] \
+  && ok "a symlinked stub resolves" || bad "args were: $(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' ' ')"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+mkdir -p "$T/roms/ps3/Dir Game.psn"; reset_logs
+sbl ps3 "$T/roms/ps3/Dir Game.psn" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the game never started: $(cat "$T/launch.err")"
+[ "$(sed -n 's/^arg=//p' "$T/emu.log" | tail -1)" = "$T/roms/ps3/Dir Game.psn" ] \
+  && ok "a directory named .psn passes through as an ordinary ROM" || bad "args were: $(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' ' ')"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+printf 'NPUB30024\n' > "$SROM"; rm -f "$st"
+RETROFORGE_LAUNCH_STATUS="$st" RETROFORGE_EMU_DIR="$T/none" sbl ps3 "$SROM" >/dev/null 2>&1
+[ "$(cat "$st" 2>/dev/null)" = "not-installed fakestub" ] \
+  && ok "a missing emulator wins over the stub (checked first)" || bad "status was '$(cat "$st" 2>/dev/null)'"
+# An extension the definition does not map is an ordinary ROM: the path itself is the target.
+DROM="$T/roms/ps3/Disc Game.iso"; : > "$DROM"; reset_logs
+sbl ps3 "$DROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the game never started: $(cat "$T/launch.err")"
+[ "$(sed -n 's/^arg=//p' "$T/emu.log" | tail -1)" = "$DROM" ] \
+  && ok "a non-stub extension passes the ROM path through" || bad "args were: $(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' ' ')"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+# A definition without "stub" treats a .psn file as a plain ROM path.
+reset_logs
+bl n64 "$SROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the game never started: $(cat "$T/launch.err")"
+[ "$(sed -n 's/^arg=//p' "$T/emu.log" | tail -1)" = "$SROM" ] \
+  && ok "a definition without stub passes a .psn path through" || bad "args were: $(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' ' ')"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+for broken in \
+  '{"stub": {"psn": "%RPCS3_GAMEID%:"}}' \
+  '{"stub": {"psn": "{text} and {text}"}}' \
+  '{"stub": {"psn": "{text} with {rom}"}}' \
+  '{"stub": {"PSN": "{text}"}}' \
+  '{"stub": {".psn": "{text}"}}' \
+  '{"stub": ["psn"]}'; do
+  python3 -c 'import json,sys; d={"format": "binary", "binary": "current", "args": ["{rom}"]};
+d.update(json.loads(sys.argv[1])); json.dump(d, open(sys.argv[2], "w"))' "$broken" "$BD/fakestub/emulator.json"
+  [ "$(RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-stub.conf" code ps3 "$SROM")" = 2 ] \
+    && ok "stub refused (exit 2): $broken" || bad "stub accepted: $broken"
+done
+cat > "$BD/fakestub/emulator.json" <<'EOF'
+{"format": "scripts", "root": "roms/fakestub", "binary": "run.sh", "args": ["{rom}"],
+ "stub": {"psn": "{text}"}}
+EOF
+[ "$(RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-stub.conf" code ps3 "$SROM")" = 2 ] \
+  && ok "stub on the scripts format is refused (a scripts ROM is run, not passed)" || bad "stub on scripts accepted"
+# The image's RPCS3 definition boots a .psn stub by game id, VFS-resolved.
+RPCS3_DEF="$SEED_DIR/rpcs3/emulator.json"
+[ "$(jget "$RPCS3_DEF" stub)" = '{"psn": "%RPCS3_GAMEID%:{text}"}' ] \
+  && ok "rpcs3: .psn stubs boot as %RPCS3_GAMEID%:<id>" || bad "rpcs3 stub: $(jget "$RPCS3_DEF" stub)"
+
+# =================================================================================================
+CASE="PSN inbox (--psn-install)"
+# The player drops .pkg and .rap files into ~/roms/ps3/psn/; the verb runs the emulator once,
+# headless, on the whole folder, verifies each file on disk (RPCS3 exits 0 even on failure),
+# writes a .psn stub per base game and CONSUMES what succeeded. One tab-separated result line per
+# file on stdout for the plugin.
+mkdir -p "$BD/fakepsn"
+INBOX="$HOME/roms/ps3/psn"; HDD0="$HOME/saves/ps3/dev_hdd0"; EXDATA="$HDD0/home/00000001/exdata"
+cat > "$BD/fakepsn/emulator.json" <<'EOF'
+{"format": "binary", "binary": "current", "args": ["--no-gui", "{rom}"], "gui_args": [],
+ "seed": [{"file": "vfs.yml", "to": ".config/rpcs3/vfs.yml"}]}
+EOF
+printf '/games/: %s/roms/ps3/\n/dev_hdd0/: %s/\n' "$HOME" "$HDD0" > "$BD/fakepsn/vfs.yml"
+echo "ps3=fakepsn" > "$T/launch-psn.conf"
+mkdir -p "$T/emus/fakepsn"; cp "$T/fake-emu" "$T/emus/fakepsn/v1.0.0.AppImage"
+ln -s v1.0.0.AppImage "$T/emus/fakepsn/current"
+pl() { RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-psn.conf" \
+       RETROFORGE_PSN_LOCK="$T/psn.lock" "$LAUNCH" --psn-install; }
+# A minimal retail .pkg header: the magic, the content id at 0x30 (title id = its chars 7..15).
+make_pkg() { python3 -c '
+import sys
+h = bytearray(0x60); h[0:4] = b"\x7fPKG"
+cid = sys.argv[2].encode(); h[0x30:0x30 + len(cid)] = cid
+open(sys.argv[1], "wb").write(bytes(h))' "$1" "$2"; }
+# A minimal PARAM.SFO holding CATEGORY and TITLE (format 0x0204 = UTF-8 string).
+make_sfo() { python3 -c '
+import struct, sys
+entries = [("CATEGORY", sys.argv[3]), ("TITLE", sys.argv[2])]
+keys = data = index = b""
+for k, v in entries:
+    raw = v.encode() + b"\0"
+    index += struct.pack("<HHIII", len(keys), 0x0204, len(raw), len(raw), len(data))
+    keys += k.encode() + b"\0"; data += raw
+key_start = 20 + 16 * len(entries)
+header = b"\0PSF" + struct.pack("<I", 0x101) + struct.pack("<III", key_start, key_start + len(keys), len(entries))
+open(sys.argv[1], "wb").write(header + index + keys + data)' "$1" "$2" "$3"; }
+# A minimal ICON0.PNG the box seed accepts: PNG signature + an IHDR with sane dimensions.
+make_icon() { python3 -c '
+import struct, sys
+ihdr = struct.pack(">II", 320, 176) + b"\x08\x02\x00\x00\x00"
+open(sys.argv[1], "wb").write(b"\x89PNG\r\n\x1a\n" + struct.pack(">I", len(ihdr)) + b"IHDR" + ihdr + b"\0\0\0\0")' "$1"; }
+rm -rf "$INBOX" "$HDD0" "$HOME/.config/rpcs3"; mkdir -p "$INBOX"
+out="$(pl 2>"$T/launch.err")"; rc=$?
+[ "$rc" = 0 ] && [ "$out" = "nothing-to-do" ] && [ ! -e "$T/psn.log" ] \
+  && ok "an empty inbox: 'nothing-to-do', exit 0, the emulator never runs" || bad "empty inbox: rc=$rc out='$out'"
+echo "drop your .pkg files here" > "$INBOX/README.txt"
+out="$(pl 2>"$T/launch.err")"; rc=$?
+[ "$rc" = 0 ] && [ "$out" = "nothing-to-do" ] \
+  && ok "an inbox with only the README: 'nothing-to-do'" || bad "README-only inbox: rc=$rc out='$out'"
+# The happy path: a base game (HG) with its licence. The fake "installs" by copying a staged
+# game dir into dev_hdd0 and the inbox's raps into exdata, as RPCS3's one dir-install call does.
+make_pkg "$INBOX/A Game.pkg" "UP0001-NPUB30024_00-AGAME00000000000"
+echo "fake licence" > "$INBOX/UP0001-NPUB30024_00-AGAME00000000000.rap"
+STAGE="$T/psn-stage"; rm -rf "$STAGE"; mkdir -p "$STAGE/NPUB30024/USRDIR"
+make_sfo "$STAGE/NPUB30024/PARAM.SFO" "Mario's Adventure: Go/Stop" HG
+: > "$STAGE/NPUB30024/USRDIR/EBOOT.BIN"
+make_icon "$STAGE/NPUB30024/ICON0.PNG"
+cat > "$T/psn-fake.sh" <<EOF
+mkdir -p "$HDD0/game" "$EXDATA"
+cp -r "$STAGE/." "$HDD0/game/"
+for f in "\$3"/*.rap; do [ -f "\$f" ] && cp "\$f" "$EXDATA/"; done
+EOF
+out="$(pl 2>"$T/launch.err")"; rc=$?
+STUB="$HOME/roms/ps3/Mario's Adventure: Go Stop.psn"
+[ "$rc" = 0 ] && ok "a base game and its rap: exit 0" || bad "happy path: rc=$rc out='$out' err: $(tail -2 "$T/launch.err")"
+grep -q "^psn-install --headless --installpkg $INBOX\$" "$T/psn.log" \
+  && ok "one headless --installpkg run on the whole inbox" || bad "psn.log: $(cat "$T/psn.log" 2>/dev/null)"
+[ -f "$HOME/.config/rpcs3/vfs.yml" ] \
+  && ok "the emulator's seed ran first (vfs.yml places dev_hdd0 before the first install)" || bad "vfs.yml was not seeded"
+printf '%s\n' "$out" | grep -qP "^ok\tA Game\.pkg\tNPUB30024\tMario's Adventure: Go Stop\.psn$" \
+  && ok "pkg result line: ok, title id, stub named from PARAM.SFO's TITLE (sanitized)" || bad "out was: $out"
+printf '%s\n' "$out" | grep -qP "^ok\tUP0001-NPUB30024_00-AGAME00000000000\.rap\t-\t-$" \
+  && ok "rap result line: ok" || bad "out was: $out"
+[ "$(cat "$STUB" 2>/dev/null)" = "NPUB30024" ] && ok "the stub holds the title id" || bad "stub: '$(cat "$STUB" 2>/dev/null)'"
+[ ! -e "$INBOX/A Game.pkg" ] && [ ! -e "$INBOX/UP0001-NPUB30024_00-AGAME00000000000.rap" ] \
+  && ok "the inbox is consumed (pkg and rap deleted)" || bad "inbox still holds: $(ls "$INBOX")"
+[ -f "$INBOX/README.txt" ] && ok "the README survives, with no result line" || bad "the README was deleted"
+printf '%s\n' "$out" | grep -q README && bad "the README got a result line" || true
+# A new card's box art: the game's own ICON0.PNG, seeded into the scraper's media folder (a
+# digital-only title often has no box scan on ScreenScraper, which left the card blank).
+BOX="$HOME/.local/share/retroforge/media/ps3/Mario's Adventure: Go Stop.psn-box.png"
+cmp -s "$BOX" "$STAGE/NPUB30024/ICON0.PNG" \
+  && ok "the stub's box art is seeded from the game's ICON0.PNG" || bad "box seed missing or differs"
+# An update for the same game: installed and consumed, the existing stub kept (never a second
+# card), and an existing box (a real ScreenScraper one, say) is never clobbered by the seed.
+make_pkg "$INBOX/A Game Update.pkg" "UP0001-NPUB30024_00-AGAMEPATCH000000"
+echo "a real box from ScreenScraper" > "$BOX"
+out="$(pl 2>"$T/launch.err")"; rc=$?
+[ "$rc" = 0 ] && printf '%s\n' "$out" | grep -qP "^ok\tA Game Update\.pkg\tNPUB30024\tMario's Adventure: Go Stop\.psn$" \
+  && [ "$(ls "$HOME/roms/ps3/"*.psn | wc -l)" = 1 ] \
+  && ok "an update pkg reuses the existing stub (one card)" || bad "update: rc=$rc out='$out'"
+[ "$(cat "$BOX" 2>/dev/null)" = "a real box from ScreenScraper" ] \
+  && ok "an existing box survives the seed (real art wins)" || bad "box clobbered: '$(cat "$BOX" 2>/dev/null)'"
+# A mixed batch: a DLC-style pkg with no EBOOT.BIN (GD: no card), a pkg the install never
+# produced (failed, stays), a garbage .pkg (failed, stays), a rap the install did not copy
+# (failed, stays). Exit 3: something failed.
+make_pkg "$INBOX/Game Data.pkg" "UP0001-NPUB77777_00-SOMEGAMEDATA0000"
+mkdir -p "$STAGE/NPUB77777"; make_sfo "$STAGE/NPUB77777/PARAM.SFO" "Some Game Data" GD
+make_pkg "$INBOX/Broken.pkg" "UP0001-NPUB11111_00-NEVERINSTALLS000"
+echo "not a package" > "$INBOX/Garbage.pkg"
+echo "fake licence" > "$INBOX/Orphan.rap"
+cat > "$T/psn-fake.sh" <<EOF
+mkdir -p "$HDD0/game" "$EXDATA"
+cp -r "$STAGE/NPUB77777" "$HDD0/game/"
+EOF
+out="$(pl 2>"$T/launch.err")"; rc=$?
+[ "$rc" = 3 ] && ok "a batch with failures: exit 3" || bad "mixed batch: rc=$rc out='$out'"
+printf '%s\n' "$out" | grep -qP "^ok\tGame Data\.pkg\tNPUB77777\t-$" && [ ! -e "$INBOX/Game Data.pkg" ] \
+  && ok "a GD pkg (update/DLC data): installed, consumed, no stub" || bad "GD pkg: $out"
+printf '%s\n' "$out" | grep -qP "^failed\tBroken\.pkg\tNPUB11111\t-$" && [ -f "$INBOX/Broken.pkg" ] \
+  && ok "a pkg the install did not produce: failed, stays in the inbox" || bad "broken pkg: $out"
+printf '%s\n' "$out" | grep -qP "^failed\tGarbage\.pkg\t-\t-$" && [ -f "$INBOX/Garbage.pkg" ] \
+  && ok "a file that is no package: failed, stays" || bad "garbage pkg: $out"
+printf '%s\n' "$out" | grep -qP "^failed\tOrphan\.rap\t-\t-$" && [ -f "$INBOX/Orphan.rap" ] \
+  && ok "a rap the install did not copy: failed, stays" || bad "orphan rap: $out"
+printf '%s\n' "$out" | grep -q "RPCS3-LOG-NOISE" \
+  && bad "the emulator's stdout leaked onto the result lines" || ok "the emulator's stdout stays off the result lines"
+rm -f "$INBOX"/*.pkg "$INBOX/Orphan.rap"
+# A re-dropped pkg whose game is ALREADY installed from an earlier run: the stale install must
+# not verify it (RPCS3 exits 0 even on failure; only a dir this run touched counts).
+make_pkg "$INBOX/Stale.pkg" "UP0001-NPUB77777_00-SOMEGAMEDATA0000"
+: > "$T/psn-fake.sh"
+out="$(pl 2>"$T/launch.err")"; rc=$?
+[ "$rc" = 3 ] && printf '%s\n' "$out" | grep -qP "^failed\tStale\.pkg\tNPUB77777\t-$" && [ -f "$INBOX/Stale.pkg" ] \
+  && ok "a pkg 'verified' only by a stale earlier install: failed, stays" || bad "stale re-drop: rc=$rc out='$out'"
+rm -f "$INBOX/Stale.pkg"
+# A name collision (another game, the same TITLE) and a missing TITLE.
+make_pkg "$INBOX/Clone.pkg" "UP0001-NPUB22222_00-ACLONE0000000000"
+mkdir -p "$STAGE/NPUB22222/USRDIR"; : > "$STAGE/NPUB22222/USRDIR/EBOOT.BIN"
+make_sfo "$STAGE/NPUB22222/PARAM.SFO" "Mario's Adventure: Go/Stop" HG
+make_pkg "$INBOX/Nameless.pkg" "UP0001-NPUB33333_00-NAMELESS00000000"
+mkdir -p "$STAGE/NPUB33333/USRDIR"; : > "$STAGE/NPUB33333/USRDIR/EBOOT.BIN"
+make_sfo "$STAGE/NPUB33333/PARAM.SFO" "" HG
+cat > "$T/psn-fake.sh" <<EOF
+mkdir -p "$HDD0/game" "$EXDATA"
+cp -r "$STAGE/NPUB22222" "$STAGE/NPUB33333" "$HDD0/game/"
+EOF
+out="$(pl 2>"$T/launch.err")"; rc=$?
+[ "$rc" = 0 ] \
+  && [ "$(cat "$HOME/roms/ps3/Mario's Adventure: Go Stop (NPUB22222).psn" 2>/dev/null)" = "NPUB22222" ] \
+  && ok "a taken name gets ' (<id>)' appended" || bad "collision: rc=$rc out='$out' stubs: $(ls "$HOME/roms/ps3/")"
+[ "$(cat "$HOME/roms/ps3/NPUB33333.psn" 2>/dev/null)" = "NPUB33333" ] \
+  && ok "a missing TITLE falls back to the title id" || bad "nameless: $(ls "$HOME/roms/ps3/")"
+[ ! -e "$HOME/.local/share/retroforge/media/ps3/NPUB33333.psn-box.png" ] \
+  && ok "a game without ICON0.PNG seeds no box (the scraper may still find one)" \
+  || bad "a box appeared with no ICON0.PNG"
+# Seeding is COSMETIC by contract: a junk ICON0 (not a PNG — a seed the scraper would mistake for
+# real art), an oversized one, or an unwritable media folder each log to stderr and change nothing
+# about the install itself.
+MEDIA="$HOME/.local/share/retroforge/media"
+make_pkg "$INBOX/Junk Icon.pkg" "UP0001-NPUB88855_00-JUNKICON00000000"
+mkdir -p "$STAGE/NPUB88855/USRDIR"; : > "$STAGE/NPUB88855/USRDIR/EBOOT.BIN"
+make_sfo "$STAGE/NPUB88855/PARAM.SFO" "Junk Icon Game" HG
+echo "not a png" > "$STAGE/NPUB88855/ICON0.PNG"
+make_pkg "$INBOX/Big Icon.pkg" "UP0001-NPUB88856_00-BIGICON000000000"
+mkdir -p "$STAGE/NPUB88856/USRDIR"; : > "$STAGE/NPUB88856/USRDIR/EBOOT.BIN"
+make_sfo "$STAGE/NPUB88856/PARAM.SFO" "Big Icon Game" HG
+make_icon "$STAGE/NPUB88856/ICON0.PNG"; truncate -s 2M "$STAGE/NPUB88856/ICON0.PNG"
+cat > "$T/psn-fake.sh" <<EOF
+mkdir -p "$HDD0/game"
+cp -r "$STAGE/NPUB88855" "$STAGE/NPUB88856" "$HDD0/game/"
+EOF
+out="$(pl 2>"$T/launch.err")"; rc=$?
+[ "$rc" = 0 ] && [ ! -e "$MEDIA/ps3/Junk Icon Game.psn-box.png" ] && [ ! -e "$MEDIA/ps3/Big Icon Game.psn-box.png" ] \
+  && [ "$(grep -c "could not seed card art" "$T/launch.err")" = 2 ] \
+  && ok "a junk or oversized ICON0: no seed, a log each, the installs still ok" \
+  || bad "junk/big icon: rc=$rc out='$out' err: $(grep seed "$T/launch.err")"
+make_pkg "$INBOX/Shy Icon.pkg" "UP0001-NPUB88857_00-SHYICON000000000"
+mkdir -p "$STAGE/NPUB88857/USRDIR"; : > "$STAGE/NPUB88857/USRDIR/EBOOT.BIN"
+make_sfo "$STAGE/NPUB88857/PARAM.SFO" "Shy Icon Game" HG
+make_icon "$STAGE/NPUB88857/ICON0.PNG"
+cat > "$T/psn-fake.sh" <<EOF
+mkdir -p "$HDD0/game"
+cp -r "$STAGE/NPUB88857" "$HDD0/game/"
+EOF
+mv "$MEDIA" "$MEDIA.keep"; : > "$MEDIA"
+out="$(pl 2>"$T/launch.err")"; rc=$?
+rm -f "$MEDIA"; mv "$MEDIA.keep" "$MEDIA"
+[ "$rc" = 0 ] && grep -q "could not seed card art" "$T/launch.err" \
+  && printf '%s\n' "$out" | grep -qP "^ok\tShy Icon\.pkg\tNPUB88857\tShy Icon Game\.psn$" \
+  && ok "an unwritable media folder: logged, the install and its result line stay ok" \
+  || bad "unwritable media: rc=$rc out='$out'"
+# A hostile TITLE (path traversal) and an oversized one (NAME_MAX is bytes, TITLE is characters).
+make_pkg "$INBOX/Evil.pkg" "UP0001-NPUB66666_00-EVIL000000000000"
+mkdir -p "$STAGE/NPUB66666/USRDIR"; : > "$STAGE/NPUB66666/USRDIR/EBOOT.BIN"
+make_sfo "$STAGE/NPUB66666/PARAM.SFO" "../../evil" HG
+make_pkg "$INBOX/Long.pkg" "UP0001-NPUB55555_00-LONG000000000000"
+mkdir -p "$STAGE/NPUB55555/USRDIR"; : > "$STAGE/NPUB55555/USRDIR/EBOOT.BIN"
+make_sfo "$STAGE/NPUB55555/PARAM.SFO" "$(python3 -c "print('ゲ' * 120)")" HG
+cat > "$T/psn-fake.sh" <<EOF
+mkdir -p "$HDD0/game" "$EXDATA"
+cp -r "$STAGE/NPUB66666" "$STAGE/NPUB55555" "$HDD0/game/"
+EOF
+out="$(pl 2>"$T/launch.err")"; rc=$?
+[ "$rc" = 0 ] && [ "$(cat "$HOME/roms/ps3/evil.psn" 2>/dev/null)" = "NPUB66666" ] \
+  && [ ! -e "$HOME/roms/evil.psn" ] && [ ! -e "$HOME/evil.psn" ] \
+  && ok "a traversal TITLE is neutralised: the stub lands in ~/roms/ps3" \
+  || bad "traversal: rc=$rc stubs: $(ls "$HOME/roms/ps3/" | tr '\n' ' ')"
+long_stub="$(cd "$HOME/roms/ps3" && ls ゲ*.psn 2>/dev/null | head -1)"
+[ -n "$long_stub" ] && [ "$(printf %s "$long_stub" | wc -c)" -le 200 ] \
+  && [ "$(cat "$HOME/roms/ps3/$long_stub")" = "NPUB55555" ] \
+  && ok "an oversized TITLE is truncated by bytes (the stub still writes)" \
+  || bad "long title: stub '$long_stub' ($(printf %s "$long_stub" | wc -c) bytes)"
+# A name the result lines cannot carry (a carriage return) is left alone.
+: > "$INBOX/$(printf 'cr\rname.pkg')"
+out="$(pl 2>"$T/launch.err")"; rc=$?
+[ "$rc" = 0 ] && [ "$out" = "nothing-to-do" ] && [ -e "$INBOX/$(printf 'cr\rname.pkg')" ] \
+  && ok "a control-character file name is skipped, never printed" || bad "cr name: rc=$rc out='$out'"
+rm -f "$INBOX/$(printf 'cr\rname.pkg')"
+# A second install at the same time: refused (two emulators would write one dev_hdd0). The lock
+# is held by an fd holder that SIGNALS when it truly has it (a timed `flock -c sleep` races the
+# test on a slow machine, and a lapsed one would run a real launch and hang the suite).
+psn_hold() {
+  rm -f "$T/psn.held" "$T/psn.release"
+  ( exec 9>"$T/psn.lock"; flock 9; : > "$T/psn.held"
+    while [ ! -e "$T/psn.release" ]; do sleep 0.05; done ) & hlpid=$!
+  echo "$hlpid" >> "$T/pids"
+  wait_for '[ -e "$T/psn.held" ]' || bad "the test's lock holder never took the lock"
+}
+psn_release() { touch "$T/psn.release"; wait "$hlpid" 2>/dev/null; }
+make_pkg "$INBOX/Late.pkg" "UP0001-NPUB44444_00-LATE000000000000"
+psn_hold
+out="$(pl 2>"$T/launch.err")"; rc=$?
+[ "$rc" = 3 ] && [ -z "$out" ] && [ -f "$INBOX/Late.pkg" ] && grep -q "already running" "$T/launch.err" \
+  && ok "a concurrent install is refused (flock)" || bad "lock: rc=$rc out='$out' err: $(tail -1 "$T/launch.err")"
+psn_release
+# The emulator missing: exit 3 before anything is touched.
+out="$(RETROFORGE_EMU_DIR="$T/none" pl 2>"$T/launch.err")"; rc=$?
+[ "$rc" = 3 ] && [ -z "$out" ] && [ -f "$INBOX/Late.pkg" ] \
+  && ok "ps3's emulator not installed: exit 3, nothing consumed" || bad "not installed: rc=$rc out='$out'"
+rm -f "$INBOX/Late.pkg" "$T/psn-fake.sh" "$T/psn.log"
+# Launch vs install: a ps3 GAME takes the installer's lock too (one RPCS3 at a time — shared
+# dev_hdd0, and two do not fit in a handheld's RAM). Other systems are untouched.
+printf 'ps3=fakepsn\npsx=fakepsn\n' > "$T/launch-psn.conf"
+plg() { RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-psn.conf" \
+        RETROFORGE_PSN_LOCK="$T/psn.lock" "$LAUNCH" "$@"; }
+DISC="$HOME/roms/ps3/Disc Game.iso"; : > "$DISC"
+st="$T/launch.status.psn"
+psn_hold
+reset_logs; rm -f "$st"
+RETROFORGE_LAUNCH_STATUS="$st" plg ps3 "$DISC" >/dev/null 2>"$T/launch.err"; rc=$?
+[ "$rc" = 3 ] && [ "$(cat "$st" 2>/dev/null)" = "psn-installing fakepsn" ] && [ ! -e "$T/emu.log" ] \
+  && ok "a ps3 launch while the installer holds the lock: exit 3, 'psn-installing', no game" \
+  || bad "launch vs install: rc=$rc status='$(cat "$st" 2>/dev/null)' emu ran=$([ -e "$T/emu.log" ] && echo yes || echo no)"
+reset_logs
+plg psx "$DISC" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the psx game never started: $(cat "$T/launch.err")"
+ok "the lock guards only ps3: a psx launch starts while it is held"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+psn_release
+# The other direction: a RUNNING ps3 game holds the lock, so --psn-install is refused while it
+# plays (the lock is taken before the inventory, so even an empty inbox answers 'already
+# running') and works again once the game exits.
+reset_logs
+plg ps3 "$DISC" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the ps3 game never started: $(cat "$T/launch.err")"
+out="$(pl 2>"$T/launch.err")"; rc=$?
+[ "$rc" = 3 ] && [ -z "$out" ] && grep -q "already running" "$T/launch.err" \
+  && ok "--psn-install while a ps3 game runs: refused on the game's lock" \
+  || bad "install vs game: rc=$rc out='$out' err: $(tail -1 "$T/launch.err")"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+out="$(pl 2>"$T/launch.err")"; rc=$?
+[ "$rc" = 0 ] && [ "$out" = "nothing-to-do" ] \
+  && ok "the game's exit releases the lock: the next install runs" || bad "lock not released: rc=$rc out='$out'"
+# A broken lock PATH is a system problem, not contention: the installer refuses with the real
+# error (never "already running"), a game launch logs it and runs UNGUARDED (the guard must not
+# brick every ps3 launch).
+badlock() { RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-psn.conf" \
+            RETROFORGE_PSN_LOCK="$T/no-such-dir/psn.lock" "$LAUNCH" "$@"; }
+out="$(badlock --psn-install 2>"$T/launch.err")"; rc=$?
+[ "$rc" = 3 ] && grep -q "cannot take the PSN install lock" "$T/launch.err" \
+  && ! grep -q "already running" "$T/launch.err" \
+  && ok "an unwritable lock path: the installer refuses with the real error" \
+  || bad "bad lock path (install): rc=$rc err: $(tail -1 "$T/launch.err")"
+reset_logs
+badlock ps3 "$DISC" 2>"$T/launch.err" & lpid=$!
+echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the game never started on a bad lock path: $(cat "$T/launch.err")"
+grep -q "launching unguarded" "$T/launch.err" \
+  && ok "an unwritable lock path: a ps3 launch logs it and still starts" \
+  || bad "bad lock path (launch): no 'launching unguarded' in: $(tail -1 "$T/launch.err")"
+touch "$T/stop-emu"; reap_launcher "$lpid"
+rm -f "$DISC"
+# The image ships the inbox and its README: the folder from the first session (before any rpcs3
+# launch, so tmpfiles, not the launcher's sync), the README following image updates (C+, not C).
+layout_has roms/ps3/psn && ok "layout has ~/roms/ps3/psn (the PSN inbox)" || bad "layout lacks ~/roms/ps3/psn"
+grep -Eq '^C\+[[:space:]]+%h/roms/ps3/psn/README\.txt[[:space:]].*rpcs3/psn-readme\.txt$' "$LAYOUT" \
+  && ok "layout keeps the inbox README current (C+)" || bad "layout lacks the README C+ row"
+[ -s "$SEED_DIR/rpcs3/psn-readme.txt" ] && grep -q "DELETED" "$SEED_DIR/rpcs3/psn-readme.txt" \
+  && ok "the README ships beside the rpcs3 seeds and states the consumed-on-install contract" \
+  || bad "psn-readme.txt is missing or silent about deletion"
 
 # =================================================================================================
 CASE="stale mounts"

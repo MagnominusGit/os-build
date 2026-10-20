@@ -770,6 +770,90 @@ GD
     bad "a script did not compile: $(printf '%s\n' "$out" | grep 'SCRIPT ERROR' | head -3)"
   fi
 
+  # psn_runner.gd runs `retroforge-launch --psn-install` on a worker thread (plan psn-pkg Phase 3);
+  # here against a fake verb that prints tab-separated result lines, noise on stderr, and exits as
+  # the real one does (0 all ok, 3 when something failed).
+  CASE="psn runner"
+  cat >"$T/fake-psn" <<'SH'
+#!/bin/bash
+# $FAKE_PSN_MODE: ok | mixed | empty
+echo "retroforge-launch: psn-install: dev_hdd0 at /x" >&2
+case $FAKE_PSN_MODE in
+  ok)    printf 'ok\tA Game.pkg\tNPUB30024\tA Game.psn\n'; printf 'ok\tA.rap\t-\t-\n'; exit 0 ;;
+  mixed) printf 'ok\tUpdate.pkg\tNPUB30024\t-\n'; printf 'failed\tBroken.pkg\tNPUB11111\t-\n'
+         echo "retroforge-launch: psn-install: Broken.pkg: no PARAM.SFO" >&2; exit 3 ;;
+  empty) echo "nothing-to-do"; exit 0 ;;
+esac
+SH
+  chmod +x "$T/fake-psn"
+  cat >"$T/psn_runner_test.gd" <<GD
+extends SceneTree
+
+const PsnRunner := preload("$SRC/psn_runner.gd")
+var failed := 0
+
+func check(what: String, got, want) -> void:
+	if got == want:
+		print("  ok   $CASE -- ", what)
+	else:
+		failed += 1
+		print("  FAIL $CASE -- ", what, ": got ", got, ", want ", want)
+
+func _initialize() -> void:
+	run()
+
+func job(mode: String) -> Dictionary:
+	OS.set_environment("FAKE_PSN_MODE", mode)
+	var r := PsnRunner.new()
+	r.tool = "$T/fake-psn"
+	check(mode + ": starts", r.start(), true)
+	check(mode + ": a second start while running is refused", r.start(), false)
+	var res: Array = await r.finished
+	return {"code": res[0], "results": res[1], "error": res[2], "running": r.running}
+
+func run() -> void:
+	check("line: ok", PsnRunner.parse_line("ok\tA Game.pkg\tNPUB30024\tA Game.psn"),
+		{"status": "ok", "file": "A Game.pkg", "title_id": "NPUB30024", "stub": "A Game.psn"})
+	check("line: anything else is ignored",
+		[PsnRunner.parse_line("nothing-to-do"), PsnRunner.parse_line("noise"), PsnRunner.parse_line("ok\tx\ty")],
+		[{}, {}, {}])
+	check("results text", PsnRunner.results_text([
+		{"status": "ok", "file": "A.pkg", "stub": "A.psn"}, {"status": "ok", "file": "B.PKG", "stub": "-"},
+		{"status": "ok", "file": "A.rap", "stub": "-"}, {"status": "failed", "file": "C.pkg", "stub": "-"}]),
+		"Installed 2 packages. 1 licence. 1 failed and stays in roms/ps3/psn.")
+	check("results text: empty inbox", PsnRunner.results_text([]), "Nothing to install: the PSN folder is empty.")
+	check("a stub means the library reloads", [PsnRunner.any_stub([{"status": "ok", "stub": "A.psn"}]),
+		PsnRunner.any_stub([{"status": "ok", "stub": "-"}, {"status": "failed", "stub": "x.psn"}])], [true, false])
+	check("failure: concurrent", PsnRunner.failure_text(3, "retroforge-launch: another PSN install is already running"),
+		"A PSN install is already running.")
+	check("failure: rpcs3 missing", "Emulators" in PsnRunner.failure_text(3, "retroforge-launch: rpcs3 is not installed (x)"), true)
+
+	var a := await job("ok")
+	check("ok: exit 0, both result lines, stderr noise is not the error",
+		[a.code, a.results.size(), a.error, a.running], [0, 2, "", false])
+	var b := await job("mixed")
+	check("mixed: exit 3, the last stderr line is the error",
+		[b.code, b.results.size(), "Broken.pkg" in b.error], [3, 2, true])
+	var c := await job("empty")
+	check("empty: exit 0 with no results", [c.code, c.results], [0, []])
+	var r := PsnRunner.new()
+	r.tool = "$T/no-such-tool"
+	r.start()
+	var f: Array = await r.finished
+	check("a tool that cannot start: exit -1", f[0], -1)
+	quit(1 if failed else 0)
+GD
+  out="$(XDG_CONFIG_HOME="$T/config" timeout 60 "$GODOT" --headless --script "$T/psn_runner_test.gd" 2>&1)"; rc=$?
+  printf '%s\n' "$out" | grep -E '^  (ok|FAIL) '
+  n_ok="$(printf '%s\n' "$out" | grep -c '^  ok ')"; n_bad="$(printf '%s\n' "$out" | grep -c '^  FAIL ')"
+  PASS=$((PASS + n_ok)); FAIL=$((FAIL + n_bad))
+  if [ "$rc" -ne 0 ] && [ "$n_bad" -eq 0 ]; then
+    bad "Godot failed (rc $rc): $(printf '%s\n' "$out" | grep -E 'ERROR|error' | head -3)"
+  fi
+  if printf '%s\n' "$out" | grep -q 'SCRIPT ERROR'; then
+    bad "a script did not compile: $(printf '%s\n' "$out" | grep 'SCRIPT ERROR' | head -3)"
+  fi
+
   # =================================================================================================
   # Settings > General > Updates (retroforge_os.gd) in OGUI's own settings scene, against a fake
   # retroforge-update: OGUI's updater goes, the one button walks Check -> Install -> Restart now, the

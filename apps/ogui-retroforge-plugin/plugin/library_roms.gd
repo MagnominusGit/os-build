@@ -30,7 +30,7 @@ const SYSTEMS := {
 	"psx": {"name": "PlayStation", "exts": ["chd", "cue", "pbp", "m3u", "iso"]},
 	"ps2": {"name": "PlayStation 2", "exts": ["chd", "iso", "cso", "zso", "gz", "cue"]},
 	"psp": {"name": "PSP", "exts": ["iso", "cso", "chd", "pbp"]},
-	"ps3": {"name": "PlayStation 3", "exts": ["iso"], "dirs": ["PS3_GAME/USRDIR/EBOOT.BIN", "USRDIR/EBOOT.BIN"]},
+	"ps3": {"name": "PlayStation 3", "exts": ["iso", "psn"], "dirs": ["PS3_GAME/USRDIR/EBOOT.BIN", "USRDIR/EBOOT.BIN"]},
 	"md": {"name": "Mega Drive", "exts": ["md", "gen", "bin", "zip"]},
 	"segacd": {"name": "Mega CD", "exts": ["chd", "cue"]},
 	"dc": {"name": "Dreamcast", "exts": ["chd", "gdi", "cdi", "cue"]},
@@ -217,6 +217,12 @@ class LaunchFailure extends AppLifecycleHook:
 						% [name, words[2].get_file(), words[2].get_base_dir()]
 			"install-failed":
 				msg = "%s could not install its firmware or system files.\nCheck the file in the bios folder, then try again." % name
+			"bad-stub":
+				# retroforge-launch: a .psn card whose file does not hold a game id any more.
+				msg = "This game's .psn file in roms/ps3 is damaged.\nPut the game's .pkg in roms/ps3/psn and install it again (Settings > Library)."
+			"psn-installing":
+				# retroforge-launch: the PSN installer holds the one-RPCS3 lock right now.
+				msg = "PSN packages are installing.\nWait for the install to finish, then launch the game again."
 			_:
 				return
 		logger.info("%s: %s %s" % [item.name, words[0], words[1]])
