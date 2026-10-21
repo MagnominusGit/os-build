@@ -8,7 +8,7 @@ extends Plugin
 ## tabs are added from library_loaded, which fires after the UI's first reload_library().
 
 const LIBRARY_ID := "retroforge-roms"
-## The installed Steam games (library_steam.gd, no second sign-in), and their tab.
+## The Steam games, owned and installed (library_steam.gd, no second sign-in), and their tab.
 const STEAM_LIBRARY_ID := "retroforge-steam"
 const STEAM_TAB := "steam"
 ## Seconds between two looks at ~/roms (rom_watch.gd): a copied ROM shows up 5-10 s after the

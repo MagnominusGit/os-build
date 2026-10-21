@@ -1,11 +1,11 @@
 {
   "plugin.id": "retroforge",
   "plugin.name": "RetroForge",
-  "plugin.version": "0.1.67",
+  "plugin.version": "0.1.68",
   "plugin.min-api-version": "2.0.0",
   "plugin.link": "https://github.com/retroforge-linux/os-build",
   "plugin.source": "https://github.com/retroforge-linux/os-build/tree/main/apps/ogui-retroforge-plugin",
-  "plugin.description": "ROM library, installed Steam games and emulator manager for RetroForge",
+  "plugin.description": "ROM library, Steam games and emulator manager for RetroForge",
   "author": "RetroForge",
   "entrypoint": "plugin.gd",
   "store.tags": ["library"],

@@ -85,11 +85,11 @@
 # CATALOG: $RETROFORGE_CATALOG, else the image's (/usr/share/retroforge/catalog.json). There is no
 # online catalog (plan emulator-latest D7): an OTA bundle is how tested pins and tag patterns change.
 #
-# STEAM (steam-client, steam-cli): not catalog entries, because they are not GitHub releases. `list`
-# adds them from /usr/lib/retroforge/steam-install status ("kind": "steam", plus the file the page
-# reads their progress from), and `install steam-client|steam-cli` execs steam-install, whose
-# progress lines and exit statuses are this tool's. Valve's client and steamcmd update themselves, so
-# check, rollback and remove refuse them (exit 2), and so does install --tested.
+# STEAM (steam-client): not a catalog entry, because it is not a GitHub release. `list` adds it from
+# /usr/lib/retroforge/steam-install status ("kind": "steam", plus the file the page reads its
+# progress from), and `install steam-client` execs steam-install, whose progress lines and exit
+# statuses are this tool's. Valve's client updates itself, so check, rollback and remove refuse it
+# (exit 2), and so does install --tested.
 #
 # TEST SEAMS (tests/test-emu.sh runs this file): RETROFORGE_CURL, RETROFORGE_EMU_DIR, RETROFORGE_CATALOG,
 # RETROFORGE_STEAM_INSTALL.
@@ -112,7 +112,7 @@ EXIT_OK, EXIT_USAGE, EXIT_NET, EXIT_VERIFY, EXIT_LOCAL, EXIT_RATE = 0, 2, 3, 4, 
 CURL = os.environ.get("RETROFORGE_CURL", "curl")
 STEAM_INSTALL = os.environ.get("RETROFORGE_STEAM_INSTALL", "/usr/lib/retroforge/steam-install")
 # id -> (steam-install's name for it, the name the player reads)
-STEAM = {"steam-client": ("client", "Steam Client"), "steam-cli": ("cli", "Steam CLI")}
+STEAM = {"steam-client": ("client", "Steam Client")}
 EMU_DIR = os.environ.get("RETROFORGE_EMU_DIR", "/home/player/emulators")
 CATALOGS = [os.environ.get("RETROFORGE_CATALOG", ""), "/usr/share/retroforge/catalog.json"]
 GITHUB_API = "https://api.github.com"

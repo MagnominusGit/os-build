@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Offline test for /usr/lib/retroforge/steam-install: Steam Client and Steam CLI from Main menu >
-# Emulators (through retroforge-emu), with their progress.
+# Offline test for /usr/lib/retroforge/steam-install: Steam Client from Main menu > Emulators
+# (through retroforge-emu), with its progress.
 #
 #   tests/test-steam-install.sh
 #
-# Every stage it runs is a stand-in here (the bootstrap, the x86 guest helper, /usr/bin/steam,
-# install-steamcmd and the stub), so the suite checks steam-install's own job: the order of the
+# Every stage it runs is a stand-in here (the bootstrap, the x86 guest helper, /usr/bin/steam), so
+# the suite checks steam-install's own job: the order of the
 # stages, one forward-only percentage (stdout and the progress file the page reads), the exit
 # statuses retroforge-emu's page understands, and what "installed" means. The stages themselves have
-# their own suites (test-steam.sh, test-steam-x86-guest.sh, test-steamcmd-stub.sh).
+# their own suites (test-steam.sh, test-steam-x86-guest.sh).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,7 +22,7 @@ bad() { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
 T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
 H="$T/home"; DATA="$H/.local/share"; CACHE="$T/cache"
 STEAM_ROOT="$DATA/Steam"; GUEST="$DATA/retroforge/fex-guest"
-SCMD="$H/.steam/steamcmd"; PROG_CLIENT="$CACHE/retroforge/steam-install-steam-client.progress"
+PROG_CLIENT="$CACHE/retroforge/steam-install-steam-client.progress"
 mkdir -p "$T/bin"
 
 # The bootstrap: --install and RETROFORGE_STEAM_PROGRESS=1 expected; the client download's progress lines.
@@ -72,29 +72,11 @@ mkdir -p "$STEAM_ROOT/package"
 printf '"linuxarm64"\n{\n\t"version"\t\t"1791918634"\n}\n' >"$STEAM_ROOT/package/steam_client_steamdeck_stable_linuxarm64.installed"
 echo "[2026-10-19 10:06:24] Update complete, launching..."
 EOF
-# install-steamcmd: the stub; in install mode it puts "Valve's" steamcmd in place and updates it.
-cat >"$T/bin/install-steamcmd" <<EOF
-#!/usr/bin/env bash
-mkdir -p "$SCMD"
-cat >"$SCMD/steamcmd.sh" <<'STUB'
-#!/usr/bin/env bash
-# RETROFORGE_STEAMCMD_STUB
-here="\$(dirname "\$0")"
-[ "\${RETROFORGE_STEAMCMD_INSTALL:-}" = 1 ] || { echo "steamcmd (RetroForge): Steam CLI is not installed" >&2; exit 1; }
-[ "\${FAKE_CLI:-ok}" = net ] && { echo "steamcmd (RetroForge): could not download https://example: timed out" >&2; exit 1; }
-mkdir -p "\$here/linuxarm64"; echo elf >"\$here/linuxarm64/steamcmd"
-printf '#!/usr/bin/env bash\necho "Valve steamcmd \$*"\n' >"\$here/steamcmd.sh"
-echo "steamcmd (RetroForge): Valve's arm64 steamcmd is in place; starting it" >&2
-echo "args=\$*" >>"\$here/../stub.log"
-for p in "5 of 40" "40 of 40"; do echo "[----] Downloading update (\$p KB)..."; done
-STUB
-chmod +x "$SCMD/steamcmd.sh"
-EOF
 chmod +x "$T/bin"/*
 
 ENVS=(env -u DISPLAY -u WAYLAND_DISPLAY -u RETROFORGE_STEAM_X86_GUEST HOME="$H" XDG_DATA_HOME="$DATA" XDG_CACHE_HOME="$CACHE"
       RETROFORGE_STEAM_BOOTSTRAP="$T/bin/bootstrap" RETROFORGE_STEAM_X86_GUEST_HELPER="$T/bin/guest"
-      RETROFORGE_STEAM_WRAPPER="$T/bin/steam" RETROFORGE_STEAMCMD_INSTALLER="$T/bin/install-steamcmd"
+      RETROFORGE_STEAM_WRAPPER="$T/bin/steam"
       RETROFORGE_STEAM_DONE_GRACE=1 DISPLAY=:1 WAYLAND_DISPLAY=gamescope-0)
 si() {  # si [VAR=value...] -- <args...>
   local vars=(); while [ $# -gt 0 ] && [ "$1" != -- ]; do vars+=("$1"); shift; done; shift
@@ -117,14 +99,15 @@ PY
 CASE="usage"
 reset; si -- bogus; [ "$RC" = 2 ] && grep -q "usage: steam-install" <<<"$ERR" && ok "unknown command: exit 2" || bad "rc=$RC $ERR"
 si -- install everything; [ "$RC" = 2 ] && ok "unknown component: exit 2" || bad "rc=$RC"
+si -- install cli; [ "$RC" = 2 ] && ok "no Steam CLI any more (the library reads the client itself): exit 2" || bad "rc=$RC"
 
 CASE="status, nothing installed"
 reset; si -- status
-[ "$RC" = 0 ] && [ "$(field steam-client installed)" = null ] && [ "$(field steam-cli installed)" = null ] \
-  && ok "both null" || bad "rc=$RC out=$OUT"
+[ "$RC" = 0 ] && [ "$(field steam-client installed)" = null ] && [ "$(python3 -c 'import json,sys; print(sorted(json.loads(sys.argv[1])))' "$OUT")" = "['steam-client']" ] \
+  && ok "Steam Client alone, not installed" || bad "rc=$RC out=$OUT"
 [ "$(field steam-client progress)" = "\"$PROG_CLIENT\"" ] && ok "the page's progress file, under the cache" || bad "$OUT"
-python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["steam-client"]["size"] > 1 << 30 > d["steam-cli"]["size"] > 0' "$OUT" \
-  && ok "sizes for the page: the client with its guest over 1 GiB, the CLI small" || bad "$OUT"
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["steam-client"]["size"] > 1 << 30' "$OUT" \
+  && ok "its size for the page: the client with its guest, over 1 GiB" || bad "$OUT"
 
 CASE="install client"
 reset; si -- install client
@@ -170,15 +153,6 @@ reset; si RETROFORGE_STEAM_X86_GUEST=0 -- install client
 [ "$RC" = 0 ] && [ ! -e "$T/guest.log" ] && ok "RETROFORGE_STEAM_X86_GUEST=0: no guest download" || bad "rc=$RC"
 si RETROFORGE_STEAM_X86_GUEST=0 -- status; [ "$(field steam-client installed)" != null ] && ok "and installed without it" || bad "$OUT"
 si -- status; [ "$(field steam-client installed)" = null ] && ok "with the guest on again, not installed (it is missing)" || bad "$OUT"
-
-CASE="install cli"
-reset; si -- install cli
-[ "$RC" = 0 ] && forward && ok "exit 0; forward-only percentages ending at 100%" || bad "rc=$RC out=$OUT err=$ERR"
-grep -qx "args=+quit" "$H/.steam/stub.log" && ok "the stub ran in install mode with +quit (steamcmd updates itself, then quits)" || bad "$(cat "$H/.steam/stub.log" 2>&1)"
-si -- status; [ "$(field steam-cli installed)" = '"installed"' ] && ok "status: installed (Valve's steamcmd.sh, not the stub)" || bad "$OUT"
-reset; si FAKE_CLI=net -- install cli
-[ "$RC" = 3 ] && ok "a failed download: exit 3" || bad "rc=$RC err=$ERR"
-si -- status; [ "$(field steam-cli installed)" = null ] && ok "and not installed (the stub stays)" || bad "$OUT"
 
 echo
 echo "$PASS passed, $FAIL failed"

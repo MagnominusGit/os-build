@@ -69,7 +69,7 @@ that is not there, and says where to install it.
 
 ## Installing: Main menu > Emulators
 
-Steam shows in the shell's Emulators screen as two entries, each with Download and its progress:
+Steam shows in the shell's Emulators screen as one entry, with Download and its progress:
 
 - **Steam Client** (`/usr/lib/retroforge/steam-install install client`): the client's arm64
   binaries (`steam-bootstrap --install`), the x86 guest for FEX (`steam-x86-guest
@@ -79,17 +79,16 @@ Steam shows in the shell's Emulators screen as two entries, each with Download a
   the client finishes it on its first Open. Installed, the entry offers Open (Steam's UI:
   `steam -gamepadui -steamos3 -steampal -steamdeck steam://open/bigpicture`) and Repair (the
   install again, fetching only what is missing). There is no Steam library card.
-- **Steam CLI** (`steam-install install cli`): Valve's arm64 steamcmd for the OGUI Steam plugin
-  (next sections): the stub in install mode with `+quit`, so steamcmd also downloads the rest of
-  itself during the install.
 
-`retroforge-emu` lists both beside the emulators (`kind: steam`, from `steam-install status`) and
-hands their install to `steam-install`, whose `N%` lines and exit statuses are its own. The page
-reads the percentage from `~/.cache/retroforge/steam-install-<entry>.progress`. Both update
-themselves, so neither has Update, Check, Revert or Delete. Before Steam Client is installed,
-`steam` exits 1 with one line pointing at it (the plugin's launches fail there); before Steam CLI
-is, the stub does the same for the plugin's steamcmd, and nothing is downloaded behind the player's
-back.
+`retroforge-emu` lists it beside the emulators (`kind: steam`, from `steam-install status`) and
+hands its install to `steam-install`, whose `N%` lines and exit statuses are its own. The page
+reads the percentage from `~/.cache/retroforge/steam-install-steam-client.progress`. The client
+updates itself, so it has no Update, Check, Revert or Delete. Before Steam Client is installed,
+`steam` exits 1 with one line pointing at it, and nothing is downloaded behind the player's back.
+
+There is no Steam CLI (Valve's steamcmd, for the OGUI Steam plugin's own sign-in): the RetroForge
+plugin reads the player's Steam games from the client itself (next section). Earlier builds of this
+branch installed Valve's arm64 steamcmd as a second entry; nothing needs it any more.
 
 No version is pinned. `/usr/share/retroforge/steam/steam.pin` names Valve's client CHANNEL, and
 the bootstrap installs whatever Valve publishes on it when it downloads, still checked against the
@@ -142,101 +141,48 @@ Not yet seen: the 42 restart from a real client, an x86-only Linux game. Nor, he
 `-steamdeck` keeps `package/beta` on `steamdeck_stable` through a client update: that was measured
 upstream, not on this tree.
 
-## Installed games in OGUI's library, without a second sign-in
+## Steam games in OGUI's library, without a second sign-in
 
-The OGUI Steam plugin fills the library from its own sign-in, through steamcmd (next section), on
-top of the client's. The RetroForge plugin lists the games installed in the client instead, from
-the client's own files, so signing into Steam Client is enough (`apps/ogui-retroforge-plugin`:
-`steam_apps.gd`, `library_steam.gd`):
+The OGUI Steam plugin fills the library from a sign-in of its own, through steamcmd, on top of the
+client's. The RetroForge plugin lists the player's Steam games from the signed-in client's own files
+instead, so signing into Steam Client is enough (`apps/ogui-retroforge-plugin`: `library_steam.gd`,
+`steam_apps.gd`; `/usr/lib/retroforge/steam-library` reads the files):
 
-- **Games**: one app manifest per installed app, `steamapps/appmanifest_<appid>.acf`, in the
-  client's root and every other folder `steamapps/libraryfolders.vdf` names (an SD card). An app is
-  listed once its `StateFlags` has the fully-installed bit (4). Valve's tools install the same way
-  (Proton, the Steam Linux Runtimes, Steamworks Common Redistributables, FEX) and are left out by app
-  id and name: a manifest does not say what an app is, only the binary `appinfo.vdf` does.
+- **Owned games**: the account's licenses, as the client caches them in `appcache/packageinfo.vdf`
+  (binary VDF): each package lists its app ids. Package 0 is left out: every account has it, and it
+  holds Valve's default free apps (Team Fortress 2, Dota 2, the Spacewar test app). Of those apps,
+  the ones `appcache/appinfo.vdf` (binary VDF, v27-v29) types as a game, named from there: no DLC,
+  demos, tools (Proton, the Steam Linux Runtimes, FEX), applications or soundtracks. A delisted or
+  shut-down game the player owns stays, as in Steam's own library. Measured on a real account (a Mac
+  client's caches, same formats, 2026-10-21): 64 packages, 349 apps, 66 owned games, in 0.04 s; only
+  the owned and installed apps' entries of `appinfo.vdf` are parsed, and the list is cached in
+  `~/.cache/retroforge/steam-library.json` until either file changes.
+- **Installed**: one app manifest per installed app, `steamapps/appmanifest_<appid>.acf`, in the
+  client's root and every other folder `steamapps/libraryfolders.vdf` names (an SD card), with the
+  fully-installed bit (4) in its `StateFlags`. An installed game the licenses do not list (shared by
+  family) is listed too. Before the client has signed in once, only the installed games are listed.
 - **Launch**: `steam -gamepadui -steamos3 -steampal -steamdeck -silent steam://rungameid/<appid>`,
   as the Steam plugin starts them. OGUI takes the Steam app id from that argument, so gamescope
-  focuses the game's window and OGUI's Steam handling (and patch 0017) applies.
+  focuses the game's window and OGUI's Steam handling (and patches 0017 and 0020) applies.
+- **Install and Uninstall** (OGUI's own buttons on a game): handed to Steam, `steam
+  -gamepadui -steamos3 -steampal -steamdeck steam://install/<appid>` (or `uninstall`), which opens
+  Steam's own dialog in Big Picture, started as Emulators > Steam Client > Open starts it. The game's
+  app manifest then gives the download's progress (`BytesDownloaded` of `BytesToDownload`) and its
+  end (fully installed, nothing still going). Steam downloads while it runs: closing Steam first ends
+  the install in OGUI as failed, and Steam carries on with it at its next start. Steam updates
+  installed games itself.
 - **Art**: what the client cached for its own library, `appcache/librarycache/<appid>/`
-  (`library_600x900.jpg` for cards, `header.jpg`, `library_hero.jpg`, `logo.png`). A game the client
-  has cached nothing for yet shows OGUI's placeholder; nothing is downloaded for it.
-- **Refresh**: the plugin polls the manifests every 5 s, as it polls `~/roms`, and reloads the list
-  once a change has settled, never while a game runs. Steam's own UI counts as one, so a game
-  installed in Steam shows once Steam is closed.
+  (`library_600x900.jpg` for cards, `header.jpg`, `library_hero.jpg`, `logo.png`), else the same file
+  from Valve's CDN (`steamcdn-a.akamaihd.net/steam/apps/<appid>/`, what the Steam plugin fetches),
+  kept in `~/.cache/retroforge/steam-art/`. Art the CDN does not have is not asked for again for a
+  day.
+- **Refresh**: the plugin polls the manifests and the two caches every 5 s, as it polls `~/roms`,
+  and reloads the list once a change has settled, never while a game runs. Steam's own UI counts as
+  one, so a game installed, uninstalled or bought shows once Steam is closed.
 - The games get a Steam tab beside the systems' tabs, and show in OGUI's Installed and All Games.
 
-Only installed games: what the player owns but has not installed is known to Steam's servers, not
-to these files. Installing and uninstalling happen in Steam's UI (Emulators > Steam Client > Open).
-With the Steam plugin installed too, OGUI shows a game both list as one card with two launch items.
-
-## steamcmd
-
-The OGUI Steam plugin uses `steamcmd` for the library, installs and updates, not the client. Valve
-publishes an arm64 build next to the x86 one (update manifest `steam_cmd_linuxarm64`, installer
-`steamcmd_linuxarm64.tar.gz`). The plugin runs `~/.steam/steamcmd/steamcmd.sh`, and only when that
-file is missing does it download the x86 one there. Like the client, steamcmd is downloaded on
-demand, not shipped:
-
-- **Before the shell starts**, `retroforge-session` runs `/usr/lib/retroforge/install-steamcmd`. It
-  puts a stub (`/usr/lib/retroforge/steamcmd-stub`) at `~/.steam/steamcmd/steamcmd.sh`, which stops
-  the plugin's x86 download. It writes nothing when the stub or a working arm64 copy is already
-  there. It replaces an x86 copy, a half-written copy and a stub from an older image, and leaves the
-  rest of the folder alone.
-- **When the player installs Steam CLI** (Main menu > Emulators: `steam-install` runs the stub with
-  `RETROFORGE_STEAMCMD_INSTALL=1`), the stub has `/usr/lib/retroforge/steamcmd-fetch`
-  download whatever Valve publishes at that moment into a temporary folder inside its own (see
-  below). It renames the files into place with Valve's `steamcmd.sh` last, so Valve's script
-  replaces the stub, then execs it with `+quit`. steamcmd then downloads the rest of itself there
-  and restarts, as on x86. Copies that start at the same time share one download (flock on the
-  folder). Run by the plugin before that install, the stub downloads nothing: it says where to
-  install Steam CLI and exits 1.
-- **Offline, or on a download that fails a check**, the stub says why on stderr, exits 1 and stays
-  in place, and the Emulators page reports the failure; Download tries again.
-  Players who already have steamcmd are not affected.
-
-`/usr/share/retroforge/steam/steamcmd.pin` pins a channel, not a file: every install resolves what
-Valve publishes at that moment, so a new steamcmd release needs no bump. What Valve publishes
-(checked 2026-10-16, manifest version 1791918946):
-
-- The manifest lists four packages. The one marked `IsBootstrapperPackage`, `steamcmd_linuxarm64`,
-  is a 3.7 MB zip holding `linuxarm64/steamcmd` alone (stored 0666, no execute bit). Run on its own,
-  that binary downloads the rest from the same manifest (`steamcmd_bins_linuxarm64`:
-  `steamclient.so`, `crashhandler.so`, `steamerrorreporter` and more, plus `public/` and
-  `siteserverui/`, 23.5 MB). It then exits 42 for its launcher to start it again.
-- That launcher, `steamcmd.sh`, is in no manifest package, arm64 or x86, and steamcmd never writes
-  it. It is only in the installer tarball, at an unversioned URL Valve replaces in place. The
-  tarball's binaries lag the manifest: on 2026-10-16 it still held the 2026-07-27 build. So the
-  tarball cannot be checked against the manifest. The x86 tarball has not changed since 2018.
-
-So the helper takes each piece from where it is published and checks it against something that
-vouches for it:
-
-- **Binary:** the manifest is read fresh at every install, and the bootstrapper zip it names is
-  refused unless its sha256 is the manifest's `sha2`. The trust anchor is the manifest, read over
-  HTTPS from Valve's update host; the helper cannot check its `kvsignatures` without Valve's key.
-  The zip is unpacked like the client's: `\` read as a separator, execute bits on ELF files and
-  scripts, no path out of the folder.
-- **Launcher:** `steamcmd.sh` alone is taken from the installer tarball, and only if its own sha256
-  is the pin's `script_sha256`. The tarball's binaries are never used, so Valve republishing it with
-  new binaries changes nothing. If the bootstrapper zip ever carries a `steamcmd.sh`, that one is
-  used (the manifest vouches for it) and the tarball is not downloaded.
-- **Shape:** `linuxarm64/steamcmd` must be an arm64 ELF, and `steamcmd.sh` must pick `linuxarm64`
-  and must not be the stub.
-
-The one fixed value left is `script_sha256`, the 2.5 kB launcher. If Valve edits it, a player who
-has not run steamcmd yet gets "Valve's steamcmd.sh has changed" and no steamcmd until the pin is
-bumped and shipped. For a reproducible install, the pin also takes `fixed_file` + `fixed_sha256`,
-one package file, instead of the manifest. They are commented out, because nothing says how long
-Valve keeps an old package file.
-
-Against Valve's servers on 2026-10-16, as a non-root player in a pty (linux/arm64 container): the
-stub resolved manifest version 1791918946, downloaded and checked the zip and the launcher, became
-Valve's `steamcmd.sh`, and steamcmd updated itself (23.5 MB), restarted, and reached "Loading Steam
-API...OK" in 6 s. The next `install-steamcmd` left that copy alone. With the update host
-unreachable, the stub exited 1 and stayed in place, and the next start succeeded.
-
-It is built like the client: ~300 unguarded LSE atomics in the bootstrapper alone, so the same
-`0025` applies.
+With the OGUI Steam plugin installed too, OGUI shows a game both list as one card with two launch
+items; the plugin is not needed, and its steamcmd (x86, downloaded by the plugin) cannot run here.
 
 ## x86 games: the FEX guest
 
@@ -557,6 +503,6 @@ at 720p60, its decoder's ceiling with 1080p30.
 - One `steamwebhelper` child segfaulted once at startup (Chromium restarted it).
 - Integration: who owns the Guide button when OGUI launches Steam -- with Big Picture in front,
   Steam's input takes the quick-bar chord.
-- Whether the client finds games `steamcmd` installed (the plugin sets no install folder), and
-  whether `steamcmd` and the client can stay signed in to the same account at once.
+- On hardware: the owned list from the device's own caches, and Install and Uninstall through
+  Steam's dialog (the formats were checked on a Mac client's caches).
 - x86 games need FEX, which is a separate question on ARMv8.0.

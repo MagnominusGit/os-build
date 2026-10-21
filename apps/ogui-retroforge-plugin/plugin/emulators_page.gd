@@ -15,9 +15,9 @@ extends ScrollContainer
 ## else goes through /usr/bin/retroforge-emu (list / check / install / rollback / remove); the page
 ## never downloads or verifies anything itself.
 ##
-## Steam Client and Steam CLI (retroforge-emu's "kind": "steam", installed by steam-install) show
-## only their rows from emu_state.gd: no Delete and no settings. Their progress comes from the file
-## steam-install writes (the entry's "progress"), and Open on Steam Client starts Steam's own UI.
+## Steam Client (retroforge-emu's "kind": "steam", installed by steam-install) shows only its rows
+## from emu_state.gd: no Delete and no settings. Its progress comes from the file steam-install writes
+## (the entry's "progress"), and Open starts Steam's own UI.
 ##
 ## Built in code on the pattern of OGUI's own settings pages (library_settings_menu.tscn): a
 ## StateWatcher on this page's State hands focus to the page's FocusGroup, and Back pops the

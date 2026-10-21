@@ -472,9 +472,8 @@ test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-catalog.sh
 	bash $(TESTS_DIR)/test-plugin.sh
 	bash $(TESTS_DIR)/test-plugin-install.sh
-	bash $(TESTS_DIR)/test-steamcmd-install.sh
-	bash $(TESTS_DIR)/test-steamcmd-stub.sh
 	bash $(TESTS_DIR)/test-steam.sh
+	bash $(TESTS_DIR)/test-steam-library.sh
 	bash $(TESTS_DIR)/test-steam-install.sh
 	bash $(TESTS_DIR)/test-steam-x86-guest.sh
 	bash $(TESTS_DIR)/test-steam-compat-tools.sh

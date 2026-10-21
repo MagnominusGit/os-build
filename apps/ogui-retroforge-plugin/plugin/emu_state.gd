@@ -86,11 +86,10 @@ static func rows(id: String, emu: Dictionary, check: Dictionary) -> Dictionary:
 	return {"main": main, "tested": tested_row, "extra": extra}
 
 
-## Steam Client and Steam CLI (retroforge-emu's "kind": "steam"): Download until installed, then
-## Open for the client (Steam's own UI) and Repair (the install again: it fetches only what is
-## missing). Valve's client and steamcmd update themselves, so there is no Update, Check or Revert.
+## Steam Client (retroforge-emu's "kind": "steam"): Download until installed, then Open (Steam's own
+## UI) and Repair (the install again: it fetches only what is missing). Valve's client updates
+## itself, so there is no Update, Check or Revert.
 static func steam_rows(id: String, emu: Dictionary) -> Dictionary:
-	var client := id == "steam-client"
 	var mb := int(emu.get("size", 0)) / 1048576
 	var install := ["install", id]
 	var repair := {"text": "Repair", "button": "Repair", "args": install,
@@ -101,16 +100,11 @@ static func steam_rows(id: String, emu: Dictionary) -> Dictionary:
 		main.text = "Not installed"
 		main.button = "Download"
 		main.args = install
-		main.description = ("Valve's Steam for arm64, with what x86 games need under FEX: about %d MB. Updates itself once installed."
-			if client else "Valve's steamcmd for arm64, which the Steam plugin uses for your library, installs and updates: about %d MB.") % mb
-	elif client:
+		main.description = "Valve's Steam for arm64, with what x86 games need under FEX: about %d MB. Updates itself once installed." % mb
+	else:
 		main.text = "Installed"
 		main.description = "Opens Steam. It updates itself."
 		extra.append(repair)
-	else:
-		main = repair.duplicate()
-		main.text = "Installed"
-		main.description = "The Steam plugin uses it. It updates itself."
 	return {"main": main, "tested": null, "extra": extra}
 
 

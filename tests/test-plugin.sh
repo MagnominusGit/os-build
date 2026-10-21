@@ -478,8 +478,8 @@ func test_emu_state() -> void:
 	r = EmuState.rows("x", pm, {"latest": "2026.10", "error": null})
 	check("state: PortMaster installed updates itself: Open only, no Update, no Install tested",
 		[r.main.button, r.main.description, r.tested, r.extra], ["Open", "Installed. Updates itself: open it to check.", null, []])
-	# Steam Client / Steam CLI (retroforge-emu's "kind": "steam"): Valve's client and steamcmd update
-	# themselves, so a check answer is ignored and there is never an Update, Check or Revert.
+	# Steam Client (retroforge-emu's "kind": "steam"): Valve's client updates itself, so a check
+	# answer is ignored and there is never an Update, Check or Revert.
 	var steam := {"kind": "steam", "installed": null, "size": 2110 * 1048576}
 	r = EmuState.rows("steam-client", steam, {"latest": "v9", "error": null})
 	check("state: Steam Client not installed: Download, no tested or extra rows",
@@ -490,12 +490,6 @@ func test_emu_state() -> void:
 	check("state: Steam Client installed: Open (Steam's UI) and a Repair row, nothing else",
 		[r.main.text, r.main.button, r.main.args, r.tested, r.extra.map(func(e): return [e.button, e.args])],
 		["Installed", "Open", [], null, [["Repair", ["install", "steam-client"]]]])
-	r = EmuState.rows("steam-cli", {"kind": "steam", "installed": "installed", "size": 44 * 1048576}, {})
-	check("state: Steam CLI installed: nothing to open, Repair on its row",
-		[r.main.text, r.main.button, r.main.args, r.extra], ["Installed", "Repair", ["install", "steam-cli"], []])
-	r = EmuState.rows("steam-cli", {"kind": "steam", "installed": null, "size": 44 * 1048576}, {})
-	check("state: Steam CLI not installed: Download, says the Steam plugin uses it",
-		[r.main.button, r.main.description.contains("Steam plugin")], ["Download", true])
 
 ## Per-emulator options: what the pages offer from options.json, and the choice at each level.
 func test_emu_options() -> void:
@@ -582,12 +576,13 @@ func test_emu_options() -> void:
 	check("emulator choice: back to the emulator's setting", EmuOptions.emulator_choice("duckstation", aspect), "")
 
 
-## Installed Steam games from the client's own files (library_steam.gd): no second sign-in, as the
-## OGUI Steam plugin's steamcmd needs. Steam's tools install as apps too and are no games.
-func acf(appid: String, name: String, flags: int, dir: String, nested_first := false) -> String:
-	var nested := '\t"UserConfig"\n\t{\n\t\t"name"\t\t"not this one"\n\t}\n'
+## The Steam games, from the signed-in client's own files (library_steam.gd, steam_apps.gd): no
+## second sign-in, as the OGUI Steam plugin's steamcmd needs. Which games is steam-library's to say
+## (tests/test-steam-library.sh); here its JSON, an install's progress, launching, art and rescans.
+func acf(appid: String, name: String, flags: int, dir: String, extra := "") -> String:
+	var nested := '\t"UserConfig"\n\t{\n\t\t"StateFlags"\t\t"999"\n\t}\n'
 	var top := '\t"appid"\t\t"%s"\n\t"name"\t\t"%s"\n\t"StateFlags"\t\t"%d"\n\t"installdir"\t\t"%s"\n' % [appid, name, flags, dir]
-	return '"AppState"\n{\n' + (nested + top if nested_first else top + nested) + '}\n'
+	return '"AppState"\n{\n' + nested + top + extra + '}\n'
 
 func test_steam_apps() -> void:
 	var root := "$T/steam"
@@ -595,37 +590,26 @@ func test_steam_apps() -> void:
 	var apps := root + "/steamapps"
 	write(apps + "/libraryfolders.vdf", '"libraryfolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t\t"apps"\n\t\t{\n\t\t\t"1145360"\t\t"1"\n\t\t}\n\t}\n\t"1"\n\t{\n\t\t"path"\t\t"%s/"\n\t}\n}\n' % [root, sd])
 	write(apps + "/appmanifest_1145360.acf", acf("1145360", "Hades", 4, "Hades"))
-	write(apps + "/appmanifest_367520.acf", acf("367520", "Hollow Knight", 6, "Hollow Knight", true))
-	write(apps + "/appmanifest_504230.acf", acf("504230", "Celeste", 1026, "Celeste"))
-	write(apps + "/appmanifest_4628740.acf", acf("4628740", "Proton 11.0 (ARM64)", 4, "Proton 11.0 (ARM64)"))
-	write(apps + "/appmanifest_2805730.acf", acf("2805730", "Proton 9.0", 4, "Proton 9.0"))
-	write(apps + "/appmanifest_4185400.acf", acf("4185400", "Steam Linux Runtime 4.0 - Arm64", 4, "SteamLinuxRuntime_4-arm64"))
-	write(apps + "/appmanifest_9999999.acf", acf("9999999", "Steam Linux Runtime 5.0", 4, "SteamLinuxRuntime_5"))
-	write(apps + "/appmanifest_3127680.acf", acf("3127680", "FEX", 4, "FEX"))
-	write(apps + "/appmanifest_228980.acf", acf("228980", "Steamworks Common Redistributables", 4, "Steamworks Shared"))
-	write(apps + "/appmanifest_1.acf", acf("", "No Id", 4, "NoId"))
-	var bs := char(92)
-	write(apps + "/appmanifest_220.acf", acf("220", "Tom" + bs + '"s Quest', 4, "TQ"))
-	write(sd + "/steamapps/appmanifest_268910.acf", acf("268910", "Cuphead", 4, "Cuphead"))
-	write(sd + "/steamapps/appmanifest_1145360.acf", acf("1145360", "Hades", 4, "Hades"))
 	check("steam: library folders are the client's root, then libraryfolders.vdf's other paths, once",
 		SteamApps.library_dirs(root), PackedStringArray([root, sd]))
-	var games := SteamApps.installed(root)
-	var names := []
-	for g in games:
-		names.append(g["name"])
-	check("steam: installed games, sorted; no tools, nothing still downloading, a game in two folders once",
-		names, ["Cuphead", "Hades", "Hollow Knight", 'Tom"s Quest'])
-	check("steam: a game's folder is <library>/steamapps/common/<installdir>, in its own library",
-		[games[0]["dir"], games[1]["dir"]], [sd + "/steamapps/common/Cuphead", apps + "/common/Hades"])
-	check("steam: the app id comes along as a number", games[1]["appid"], 1145360)
-	check("steam: a nested section's name is not the game's", games[2]["name"], "Hollow Knight")
-	check("steam: tools by id, by name prefix, and FEX; a game whose name only starts like one is a game",
-		[SteamApps.is_steam_tool(4628740, "x"), SteamApps.is_steam_tool(1, "Proton 9.0"), SteamApps.is_steam_tool(2, "FEX"), SteamApps.is_steam_tool(3, "Protonic Mayhem")],
-		[true, true, true, false])
+	var games := SteamApps.parse_library('{"games": [{"appid": 1145360, "name": "Hades", "installed": true, "dir": "/x/Hades"}, {"appid": 413150, "name": "Stardew Valley", "installed": false, "dir": ""}, {"appid": "x", "name": "No Id"}, {"appid": 9, "name": ""}], "owned_known": true}')
+	check("steam library: steam-library's games, installed or not; an entry without an id or a name dropped",
+		games, [{"appid": 1145360, "name": "Hades", "installed": true, "dir": "/x/Hades"}, {"appid": 413150, "name": "Stardew Valley", "installed": false, "dir": ""}])
+	check("steam library: anything that is not its JSON is no games",
+		[SteamApps.parse_library(""), SteamApps.parse_library("[1]"), SteamApps.parse_library('{"games": 3}')], [[], [], []])
+	write(sd + "/steamapps/appmanifest_268910.acf", acf("268910", "Cuphead", 1026, "Cuphead", '\t"BytesToDownload"\t\t"4000"\n\t"BytesDownloaded"\t\t"1000"\n'))
+	check("steam install: progress from the manifest, in any library folder (a nested section's flags are not the app's)",
+		SteamApps.app_state(root, 268910), {"flags": 1026, "done": 1000, "total": 4000})
+	check("steam install: no manifest yet, no state", SteamApps.app_state(root, 413150), {})
+	check("steam install: done once fully installed with nothing still going",
+		[SteamApps.install_complete(4), SteamApps.install_complete(6), SteamApps.install_complete(1026), SteamApps.install_complete(4 | 0x100000), SteamApps.install_complete(0)],
+		[true, false, false, false, false])
 	check("steam: launched as the OGUI Steam plugin does, with the rungameid OGUI takes the app id from",
 		SteamApps.launch_args(1145360),
 		PackedStringArray(["-gamepadui", "-steamos3", "-steampal", "-steamdeck", "-silent", "steam://rungameid/1145360"]))
+	check("steam: an install or uninstall opens Steam's own UI at the steam:// URI, not silent",
+		SteamApps.ui_args("steam://install/413150"),
+		PackedStringArray(["-gamepadui", "-steamos3", "-steampal", "-steamdeck", "steam://install/413150"]))
 	var cache := root + "/appcache/librarycache"
 	write(cache + "/1145360/library_600x900.jpg", "p")
 	write(cache + "/1145360/0a1b2c/logo.png", "l")
@@ -635,12 +619,31 @@ func test_steam_apps() -> void:
 		[cache + "/1145360/library_600x900.jpg", cache + "/1145360/0a1b2c/logo.png", cache + "/268910_header.jpg"])
 	check("steam art: none cached, or a layout OGUI does not have: none",
 		[SteamApps.art_path(root, 268910, 2), SteamApps.art_path(root, 1145360, 7)], ["", ""])
+	# Valve's CDN, played by a folder: <cdn>/<appid>/<file>.
+	var cdn := "$T/cdn"
+	var art := "$T/steam-art"
+	OS.set_environment("RETROFORGE_STEAM_ART_CDN", "file://" + cdn)
+	write(cdn + "/413150/library_600x900.jpg", "card")
+	var got := SteamApps.fetch_art(art, 413150, 0)
+	check("steam art fetch: an owned game's card art from Valve's CDN, kept in the cache",
+		[got, FileAccess.get_file_as_string(got)], [art + "/413150/library_600x900.jpg", "card"])
+	DirAccess.remove_absolute(cdn + "/413150/library_600x900.jpg")
+	check("steam art fetch: kept art is not fetched again", SteamApps.fetch_art(art, 413150, 0), art + "/413150/library_600x900.jpg")
+	check("steam art fetch: art the CDN does not have: none, and a mark", [SteamApps.fetch_art(art, 413150, 3), FileAccess.file_exists(art + "/413150/logo.png.missing")], ["", true])
+	write(cdn + "/413150/logo.png", "logo")
+	check("steam art fetch: not asked again for a day", SteamApps.fetch_art(art, 413150, 3), "")
+	check("steam art fetch: no app id or no such layout: nothing asked", [SteamApps.fetch_art(art, 0, 0), SteamApps.fetch_art(art, 413150, 9)], ["", ""])
+	OS.set_environment("RETROFORGE_STEAM_ART_CDN", "")
 	var watch = SteamWatch.new().watch_steam(root)
 	check("steam rescan: nothing before OGUI's first library load", [watch.poll(false), watch.poll(false)], [false, false])
 	watch.mark_loaded()
-	check("steam rescan: nothing while the manifests match the library", [watch.poll(false), watch.poll(false)], [false, false])
+	check("steam rescan: nothing while the client's files match the library", [watch.poll(false), watch.poll(false)], [false, false])
 	write(sd + "/steamapps/appmanifest_413150.acf", acf("413150", "Stardew Valley", 4, "Stardew Valley"))
 	check("steam rescan: a game installed (another library folder too) is due once two polls agree",
+		[watch.poll(false), watch.poll(false)], [false, true])
+	watch.mark_loaded()
+	write(root + "/appcache/packageinfo.vdf", "licenses")
+	check("steam rescan: a new license in the client's cache (a game bought elsewhere) is due",
 		[watch.poll(false), watch.poll(false)], [false, true])
 	watch.mark_loaded()
 	DirAccess.remove_absolute(apps + "/appmanifest_1145360.acf")

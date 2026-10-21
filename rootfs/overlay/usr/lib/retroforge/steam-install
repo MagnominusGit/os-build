@@ -2,11 +2,11 @@
 # steam-install — installs Steam from the shell's Main menu > Emulators, where the player sees the
 # download's progress, instead of a first start that downloads for minutes with nothing on screen.
 #
-#     steam-install status               -> JSON on stdout: {"steam-client": {...}, "steam-cli": {...}}
-#     steam-install install client|cli   -> `N%` lines on stdout, forward-only, ending at 100%
+#     steam-install status               -> JSON on stdout: {"steam-client": {...}}
+#     steam-install install client       -> `N%` lines on stdout, forward-only, ending at 100%
 #
 # THE CALLER IS /usr/bin/retroforge-emu: its `list` merges our status into the emulators it lists,
-# and `retroforge-emu install steam-client|steam-cli` execs `steam-install install client|cli`. So
+# and `retroforge-emu install steam-client` execs `steam-install install client`. So
 # the exit statuses are retroforge-emu's: 0 ok, 2 bad invocation, 3 network, 4 verification (what
 # was downloaded is not what was published; nothing is put in place), 5 local (no space, file system,
 # another install running). The Emulators page reads progress from a file, not from our stdout: the
@@ -39,22 +39,15 @@
 # Installed = the client binary and an x86 guest image (unless the guest is turned off). The entry's
 # Open starts Steam's UI (the Emulators page does that, not this).
 #
-# STEAM CLI (`cli`, entry steam-cli): Valve's arm64 steamcmd in ~/.steam/steamcmd, which the
-# OpenGamepadUI Steam plugin runs for the library, installs and updates. install-steamcmd puts the
-# stub there if nothing is, then the stub runs in install mode (RETROFORGE_STEAMCMD_INSTALL=1) with
-# +quit: steamcmd-fetch fetches and checks Valve's bootstrapper, the stub puts it in place, and
-# steamcmd downloads the rest of itself ("Downloading update (X of Y KB)"), restarts (42) and quits.
-# Installed = linuxarm64/steamcmd and a steamcmd.sh that is not the stub.
-#
-# Both update themselves from then on (the client on every start, steamcmd every time the plugin
-# runs it), so the entries offer no Update; the x86 guest follows its channel from every start of
-# Steam (steam-x86-guest start).
+# The client updates itself from then on, on every start, so the entry offers no Update; the x86
+# guest follows its channel from every start of Steam (steam-x86-guest start). There is no Steam
+# CLI entry: the RetroForge plugin's library reads the Steam games from the client itself
+# (/usr/lib/retroforge/steam-library), so nothing needs Valve's steamcmd.
 #
 # One install at a time: a flock on ~/.cache/retroforge/steam-install.lock, waited for.
 #
 # TEST SEAMS (tests/test-steam-install.sh): RETROFORGE_STEAM_BOOTSTRAP, RETROFORGE_STEAM_X86_GUEST_HELPER,
-# RETROFORGE_STEAM_WRAPPER, RETROFORGE_STEAMCMD_INSTALLER, RETROFORGE_STEAM_ROOT,
-# RETROFORGE_STEAM_X86_GUEST_DIR, RETROFORGE_STEAMCMD_DIR,
+# RETROFORGE_STEAM_WRAPPER, RETROFORGE_STEAM_ROOT, RETROFORGE_STEAM_X86_GUEST_DIR,
 # RETROFORGE_STEAM_UPDATE_TIMEOUT, RETROFORGE_STEAM_DONE_GRACE.
 import fcntl
 import json
@@ -70,24 +63,20 @@ DATA = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "retroforge")
 STEAM_ROOT = os.environ.get("RETROFORGE_STEAM_ROOT") or os.path.join(DATA, "Steam")
 GUEST = os.environ.get("RETROFORGE_STEAM_X86_GUEST_DIR") or os.path.join(DATA, "retroforge", "fex-guest")
-STEAMCMD = os.environ.get("RETROFORGE_STEAMCMD_DIR") or os.path.expanduser("~/.steam/steamcmd")
 BOOTSTRAP = os.environ.get("RETROFORGE_STEAM_BOOTSTRAP", "/usr/lib/retroforge/steam-bootstrap")
 GUEST_HELPER = os.environ.get("RETROFORGE_STEAM_X86_GUEST_HELPER", "/usr/lib/retroforge/steam-x86-guest")
 WRAPPER = os.environ.get("RETROFORGE_STEAM_WRAPPER", "/usr/bin/steam")
-STEAMCMD_INSTALLER = os.environ.get("RETROFORGE_STEAMCMD_INSTALLER", "/usr/lib/retroforge/install-steamcmd")
 UPDATE_TIMEOUT = int(os.environ.get("RETROFORGE_STEAM_UPDATE_TIMEOUT", "3600"))  # s, the client's update
 # s the client may keep running after its updater said it is done, before it is TERMed: -exitsteam
 # should end it there, but a client that goes on to start its UI with no display must not hold the
 # install for the rest of UPDATE_TIMEOUT.
 DONE_GRACE = int(os.environ.get("RETROFORGE_STEAM_DONE_GRACE", "120"))
-STUB_MARKER = "# RETROFORGE_STEAMCMD_STUB"
 MB = 1 << 20
 
 EXIT_OK, EXIT_USAGE, EXIT_NET, EXIT_VERIFY, EXIT_LOCAL = 0, 2, 3, 4, 5
 
 # Download sizes for the bar (2026-10): what each stage fetches on a fresh card.
 CLIENT_STAGES = {"bootstrap": 110 * MB, "guest": 1296 * MB, "update": 652 * MB}
-CLI_STAGES = {"fetch": 4 * MB, "update": 40 * MB}
 # The client's unpacking and install of its update, weighted for the bar like a 400 MB download (it
 # takes about as long), moved by APPLY_STEPS. Not a download: not in the size the page shows.
 APPLY_WEIGHT = 400 * MB
@@ -154,28 +143,10 @@ def client_installed():
     return version or "installed"
 
 
-def is_stub(path):
-    try:
-        with open(path, errors="replace") as f:
-            return any(line.rstrip("\n") == STUB_MARKER for line in f)
-    except OSError:
-        return True
-
-
-def cli_installed():
-    script = os.path.join(STEAMCMD, "steamcmd.sh")
-    if os.path.isfile(os.path.join(STEAMCMD, "linuxarm64", "steamcmd")) and os.path.isfile(script) \
-            and not is_stub(script):
-        return "installed"
-    return None
-
-
 def cmd_status():
     out = {
         "steam-client": {"installed": client_installed(), "size": sum(CLIENT_STAGES.values()),
                          "progress": progress_path("steam-client")},
-        "steam-cli": {"installed": cli_installed(), "size": sum(CLI_STAGES.values()),
-                      "progress": progress_path("steam-cli")},
     }
     print(json.dumps(out, sort_keys=True))
     return EXIT_OK
@@ -336,55 +307,19 @@ def install_client():
         raise
 
 
-def install_cli():
-    prog = Progress("steam-cli", CLI_STAGES)
-    try:
-        script = os.path.join(STEAMCMD, "steamcmd.sh")
-        if not os.path.isfile(script):
-            code, tail = run_stage([STEAMCMD_INSTALLER], lambda line: None)
-            if code != 0 or not os.path.isfile(script):
-                raise Fail(EXIT_LOCAL, "the steamcmd stub could not be put in place")
-        fetched = {"yes": cli_installed() is not None}
-
-        def on_line(line):
-            if not fetched["yes"] and ("Valve's arm64 steamcmd is in place" in line):
-                fetched["yes"] = True
-                prog.set("fetch", 1.0)
-            m = UPDATE_LINE.search(line)
-            if m:
-                prog.set("fetch", 1.0)
-                done, total = (int(m.group(i).replace(",", "")) for i in (1, 2))
-                if total:
-                    prog.set("update", done / total)
-
-        env = dict(os.environ, RETROFORGE_STEAMCMD_INSTALL="1")
-        code, tail = run_stage([script, "+quit"], on_line, env=env)
-        if cli_installed() is None:
-            raise Fail(failure_code(tail), "Valve's arm64 steamcmd could not be installed")
-        if code != 0:
-            log(f"steamcmd exited {code} after it was installed; it finishes its update when the Steam "
-                "plugin first runs it")
-        prog.finish()
-        log("Steam CLI is installed")
-        return EXIT_OK
-    except BaseException:
-        prog.clear()
-        raise
-
-
 def cmd_install(what):
     os.makedirs(CACHE, exist_ok=True)
     with open(os.path.join(CACHE, "steam-install.lock"), "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        return install_client() if what == "client" else install_cli()
+        return install_client()
 
 
 def main(argv):
     if argv == ["status"]:
         return cmd_status()
-    if len(argv) == 2 and argv[0] == "install" and argv[1] in ("client", "cli"):
-        return cmd_install(argv[1])
-    raise Fail(EXIT_USAGE, "usage: steam-install status | install client|cli")
+    if argv == ["install", "client"]:
+        return cmd_install("client")
+    raise Fail(EXIT_USAGE, "usage: steam-install status | install client")
 
 
 if __name__ == "__main__":

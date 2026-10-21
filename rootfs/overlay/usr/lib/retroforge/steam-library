@@ -1,0 +1,328 @@
+#!/usr/bin/env python3
+# steam-library — the Steam games of the player's signed-in Steam client, for the RetroForge OGUI
+# plugin's library: every game the account owns, and whether it is installed, read from the client's
+# own files. No sign-in of its own (the OGUI Steam plugin needs a second one, through steamcmd), and
+# no network.
+#
+#     steam-library   -> JSON on stdout:
+#                        {"games": [{"appid": 1145360, "name": "Hades", "installed": true,
+#                                    "dir": "<library>/steamapps/common/Hades"}, ...],
+#                         "owned_known": true}
+#
+# OWNED: the account's licenses, as the client caches them in appcache/packageinfo.vdf (binary VDF,
+# v27/v28): each package lists its app ids. Package 0 is left out: every account has it, and it
+# holds Valve's default free apps (Team Fortress 2, Dota 2, the Spacewar test app), not the player's.
+# A delisted or shut-down game the player owns stays, as in Steam's own library. Of those apps, the
+# ones appcache/appinfo.vdf (binary VDF, v27/v28/v29) types as a game, with its name from there:
+# no DLC, demo, tool (Proton, the Steam Linux Runtimes, FEX), application or soundtrack. Before the
+# client has signed in once the two files are not there: owned_known is false and only the installed
+# games are listed.
+#
+# INSTALLED: one app manifest per installed app, steamapps/appmanifest_<appid>.acf, in the client's
+# root and every folder steamapps/libraryfolders.vdf names, with the fully-installed bit (4) in its
+# StateFlags (set too while an update is pending). An installed app is listed when appinfo.vdf types
+# it as a game or demo, or, when appinfo.vdf does not know it, unless its name is one of Steam's tools.
+#
+# appinfo.vdf is the client's cache of every app it has looked at, tens of MB on a large account:
+# only the owned and installed apps' entries are parsed, the others skipped by their size. The owned
+# list is cached in ~/.cache/retroforge/steam-library.json until either file changes (the client
+# rewrites them as it runs, so a game bought on another device shows once Steam has run here).
+#
+# Exit 0 with the JSON, also when there is no Steam (an empty list); 2 for bad arguments. A cache
+# file that cannot be read is told on stderr, and only the installed games are listed.
+#
+# TEST SEAMS (tests/test-steam-library.sh): RETROFORGE_STEAM_ROOT, XDG_DATA_HOME, XDG_CACHE_HOME.
+import json
+import os
+import re
+import struct
+import sys
+import tempfile
+
+DATA = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "retroforge")
+STEAM_ROOT = os.environ.get("RETROFORGE_STEAM_ROOT") or os.path.join(DATA, "Steam")
+CACHE_FILE = os.path.join(CACHE, "steam-library.json")
+CACHE_VERSION = 1
+
+# appinfo.vdf: v27 keys inline and one sha1; v28 adds the binary data's sha1; v29 keys by index into a
+# string table at the offset after the universe.
+APPINFO_MAGIC = {0x07564427: 27, 0x07564428: 28, 0x07564429: 29}
+# packageinfo.vdf: v28 adds a PICS token after the change number.
+PACKAGEINFO_MAGIC = {0x06565527: 27, 0x06565528: 28}
+FULLY_INSTALLED = 4
+# Names of Steam's tools, for an installed app appinfo.vdf does not know.
+TOOL_NAMES = ("Proton ", "Proton-", "Steam Linux Runtime", "Steamworks Common Redistributables")
+
+
+def log(msg):
+    print(f"steam-library: {msg}", file=sys.stderr, flush=True)
+
+
+class Unreadable(Exception):
+    pass
+
+
+# ------------------------------------------------------------------------------------------------
+# Binary VDF
+
+
+class BinaryKV:
+    """One binary KeyValues tree: type byte, key (a string, or an index into a string table),
+    value; 0x00 opens a subtree and 0x08 (or 0x0B) closes it."""
+
+    def __init__(self, data, pos, names=None):
+        self.data, self.pos, self.names = data, pos, names
+
+    def _u32(self):
+        value = struct.unpack_from("<I", self.data, self.pos)[0]
+        self.pos += 4
+        return value
+
+    def _cstr(self):
+        end = self.data.index(b"\0", self.pos)
+        text = self.data[self.pos:end].decode("utf-8", "replace")
+        self.pos = end + 1
+        return text
+
+    def _key(self):
+        return self.names[self._u32()] if self.names is not None else self._cstr()
+
+    def node(self):
+        out = {}
+        while True:
+            kind = self.data[self.pos]
+            self.pos += 1
+            if kind in (0x08, 0x0B):
+                return out
+            key = self._key()
+            if kind == 0x00:
+                out[key] = self.node()
+            elif kind == 0x01:
+                out[key] = self._cstr()
+            elif kind in (0x02, 0x04, 0x06):  # int32, pointer, color
+                out[key] = struct.unpack_from("<i", self.data, self.pos)[0]
+                self.pos += 4
+            elif kind == 0x03:
+                out[key] = struct.unpack_from("<f", self.data, self.pos)[0]
+                self.pos += 4
+            elif kind == 0x07:
+                out[key] = struct.unpack_from("<Q", self.data, self.pos)[0]
+                self.pos += 8
+            elif kind == 0x0A:
+                out[key] = struct.unpack_from("<q", self.data, self.pos)[0]
+                self.pos += 8
+            else:
+                raise Unreadable(f"unknown value type {kind:#x} at byte {self.pos - 1}")
+
+
+def read_packages(path):
+    """{packageid: [appid, ...]} from packageinfo.vdf."""
+    with open(path, "rb") as f:
+        data = f.read()
+    try:
+        magic = struct.unpack_from("<I", data, 0)[0]
+        version = PACKAGEINFO_MAGIC.get(magic)
+        if version is None:
+            raise Unreadable(f"unknown packageinfo.vdf format {magic:#x}")
+        pos, packages = 8, {}
+        while True:
+            packageid = struct.unpack_from("<I", data, pos)[0]
+            if packageid == 0xFFFFFFFF:
+                return packages
+            kv = BinaryKV(data, pos + 4 + 20 + 4 + (8 if version >= 28 else 0))
+            root = kv.node()
+            info = root.get(str(packageid), root)
+            packages[packageid] = [int(v) for v in info.get("appids", {}).values()
+                                   if isinstance(v, int) or str(v).isdigit()]
+            pos = kv.pos
+    except (struct.error, IndexError, ValueError) as err:
+        raise Unreadable(f"packageinfo.vdf is cut short or damaged: {err}")
+
+
+def read_apps(path, wanted):
+    """{appid: (type, name)} from appinfo.vdf, for the app ids in `wanted` only."""
+    with open(path, "rb") as f:
+        data = f.read()
+    try:
+        magic = struct.unpack_from("<I", data, 0)[0]
+        version = APPINFO_MAGIC.get(magic)
+        if version is None:
+            raise Unreadable(f"unknown appinfo.vdf format {magic:#x}")
+        names, pos = None, 8
+        if version >= 29:
+            table = struct.unpack_from("<q", data, 8)[0]
+            count, p = struct.unpack_from("<I", data, table)[0], table + 4
+            names = []
+            for _ in range(count):
+                end = data.index(b"\0", p)
+                names.append(data[p:end].decode("utf-8", "replace"))
+                p = end + 1
+            pos = 16
+        # After appid and size: info state, last updated, PICS token, sha1, change number, and
+        # from v28 the binary data's sha1.
+        header = 4 + 4 + 8 + 20 + 4 + (20 if version >= 28 else 0)
+        apps = {}
+        while True:
+            appid = struct.unpack_from("<I", data, pos)[0]
+            if appid == 0:
+                return apps
+            size = struct.unpack_from("<I", data, pos + 4)[0]
+            if appid in wanted:
+                root = BinaryKV(data, pos + 8 + header, names).node()
+                common = root.get("appinfo", root).get("common", {})
+                apps[appid] = (str(common.get("type", "")).lower(), str(common.get("name", "")).strip())
+            pos += 8 + size
+    except (struct.error, IndexError, ValueError) as err:
+        raise Unreadable(f"appinfo.vdf is cut short or damaged: {err}")
+
+
+# ------------------------------------------------------------------------------------------------
+# Text VDF: app manifests and libraryfolders.vdf
+
+PAIR = re.compile(r'^\s*"([^"]+)"\s+"((?:[^"\\]|\\.)*)"\s*$')
+
+
+def vdf_pairs(text):
+    """[(depth, key, value)] of a text VDF's "key" "value" lines, depth counting braces."""
+    pairs, depth = [], 0
+    for line in text.splitlines():
+        s = line.strip()
+        if s == "{":
+            depth += 1
+        elif s == "}":
+            depth -= 1
+        else:
+            m = PAIR.match(line)
+            if m:
+                pairs.append((depth, m.group(1), m.group(2).replace('\\"', '"').replace("\\\\", "\\")))
+    return pairs
+
+
+def read_text(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def library_dirs(root):
+    """The client's root, then each "path" of steamapps/libraryfolders.vdf, each once."""
+    dirs = [root.rstrip("/")]
+    for depth, key, value in vdf_pairs(read_text(os.path.join(root, "steamapps", "libraryfolders.vdf"))):
+        path = value.rstrip("/")
+        if depth == 2 and key == "path" and path and path not in dirs:
+            dirs.append(path)
+    return dirs
+
+
+def installed_apps(root):
+    """{appid: {"name", "dir"}} of the fully installed apps; an app id in two folders, the first."""
+    apps = {}
+    for lib in library_dirs(root):
+        steamapps = os.path.join(lib, "steamapps")
+        try:
+            files = sorted(os.listdir(steamapps))
+        except OSError:
+            continue
+        for file in files:
+            if not (file.startswith("appmanifest_") and file.endswith(".acf")):
+                continue
+            fields = {}
+            for depth, key, value in vdf_pairs(read_text(os.path.join(steamapps, file))):
+                if depth == 1 and key in ("appid", "name", "StateFlags", "installdir") and key not in fields:
+                    fields[key] = value
+            appid, name, flags = fields.get("appid", ""), fields.get("name", "").strip(), fields.get("StateFlags", "0")
+            if not appid.isdigit() or not name or not flags.isdigit() or not int(flags) & FULLY_INSTALLED:
+                continue
+            if int(appid) not in apps:
+                apps[int(appid)] = {"name": name,
+                                    "dir": os.path.join(steamapps, "common", fields.get("installdir", ""))}
+    return apps
+
+
+# ------------------------------------------------------------------------------------------------
+# Owned games, cached
+
+
+def cache_key(paths):
+    key = []
+    for path in paths:
+        st = os.stat(path)
+        key.append([path, st.st_size, st.st_mtime_ns])
+    return key
+
+
+def owned_games(root):
+    """[{"appid", "name"}] of the owned games, or None when the client's caches are not there."""
+    appinfo = os.path.join(root, "appcache", "appinfo.vdf")
+    packageinfo = os.path.join(root, "appcache", "packageinfo.vdf")
+    try:
+        key = cache_key([appinfo, packageinfo])
+    except OSError:
+        return None
+    try:
+        with open(CACHE_FILE, encoding="utf-8") as f:
+            cached = json.load(f)
+        if cached.get("version") == CACHE_VERSION and cached.get("key") == key:
+            return cached["owned"]
+    except (OSError, ValueError, KeyError, AttributeError):
+        pass
+    packages = read_packages(packageinfo)
+    wanted = {appid for pid, appids in packages.items() if pid != 0 for appid in appids}
+    apps = read_apps(appinfo, wanted)
+    owned = [{"appid": appid, "name": name} for appid, (kind, name) in sorted(apps.items())
+             if kind == "game" and name]
+    try:
+        os.makedirs(CACHE, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=CACHE, prefix=".steam-library-")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"version": CACHE_VERSION, "key": key, "owned": owned}, f)
+        os.replace(tmp, CACHE_FILE)
+    except OSError as err:
+        log(f"could not cache the owned games: {err}")
+    return owned
+
+
+def library(root):
+    installed = installed_apps(root)
+    try:
+        owned = owned_games(root)
+    except (OSError, Unreadable) as err:
+        log(f"{err}; listing the installed games only")
+        owned = None
+    games = {}
+    for game in owned or []:
+        games[game["appid"]] = {"appid": game["appid"], "name": game["name"], "installed": False, "dir": ""}
+    # Types for the installed apps the owned list does not have (a tool, a demo, a game shared by
+    # family): from appinfo.vdf when it knows them.
+    types = {}
+    unknown = set(installed) - set(games)
+    if unknown:
+        try:
+            types = read_apps(os.path.join(root, "appcache", "appinfo.vdf"), unknown)
+        except (OSError, Unreadable):
+            types = {}
+    for appid, app in installed.items():
+        if appid in games:
+            games[appid].update(installed=True, dir=app["dir"])
+            continue
+        kind = types.get(appid, ("", ""))[0]
+        if kind not in ("game", "demo") and (kind or app["name"].startswith(TOOL_NAMES) or app["name"] == "FEX"):
+            continue
+        games[appid] = {"appid": appid, "name": app["name"], "installed": True, "dir": app["dir"]}
+    listed = sorted(games.values(), key=lambda g: (g["name"].casefold(), g["appid"]))
+    return {"games": listed, "owned_known": owned is not None}
+
+
+def main(argv):
+    if argv:
+        log("usage: steam-library")
+        return 2
+    print(json.dumps(library(STEAM_ROOT)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

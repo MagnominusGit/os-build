@@ -1,41 +1,35 @@
 extends RefCounted
 
-## The Steam games installed in the player's Steam client, read from the client's own files: no
-## sign-in of its own. No OGUI types, so tests/test-plugin.sh runs it in a stock headless Godot.
+## The player's Steam games, from the Steam client they signed into (Main menu > Emulators > Steam
+## Client): no sign-in of its own, as the OGUI Steam plugin's steamcmd needs. No OGUI types, so
+## tests/test-plugin.sh runs it in a stock headless Godot.
 ##
-## The OGUI Steam plugin builds its library from a second sign-in, through steamcmd. The client the
-## player already signed into (Main menu > Emulators > Steam Client) keeps one app manifest per
-## installed app, steamapps/appmanifest_<appid>.acf, in each of its library folders
-## (steamapps/libraryfolders.vdf), and the art its library shows in appcache/librarycache/<appid>/.
-## That gives the installed games only: what the player owns but has not installed is known to
-## Steam's servers, not to these files. Installs and uninstalls happen in Steam's own UI.
-##
-## A manifest does not say whether the app is a game or one of Steam's tools (Proton, the Steam
-## Linux Runtimes, the redistributables, Valve's FEX): that is in appinfo.vdf, a binary cache. Tools
-## are told apart by app id and by name instead (TOOL_APPS, TOOL_NAMES).
+## Which games, owned and installed, is /usr/lib/retroforge/steam-library's to say (it reads the
+## client's binary caches); parse_library() takes its JSON. This file has what the plugin needs
+## besides: how a game is launched, its install's progress from its app manifest, its art (what the
+## client cached, else Valve's CDN), and what a rescan depends on.
 
-## Valve's tools that install as apps beside the games (seen on the KONKR Pocket FIT, 2026-10-19,
-## and Valve's other runtimes and Protons).
-const TOOL_APPS := [
-	228980,  # Steamworks Common Redistributables
-	1070560, 1391110, 1628350, 4183110, 4185400,  # Steam Linux Runtime 1.0, 2.0, 3.0, 4.0, 4.0 - Arm64
-	1493710, 2180100, 4628740,  # Proton Experimental, Proton Hotfix, Proton 11.0 (ARM64)
-	1161040, 1826330,  # Proton BattlEye Runtime, Proton EasyAntiCheat Runtime
-	3127680,  # FEX, Valve's x86 compat tool for arm64
-]
-## Name prefixes of tools with ids not listed above (every numbered Proton, a newer runtime).
-const TOOL_NAMES := ["Proton ", "Proton-", "Steam Linux Runtime", "Steamworks Common Redistributables"]
-## StateFlags bit: the app is fully installed (set too while an update is pending or running).
-const FULLY_INSTALLED := 4
-## As the OGUI Steam plugin starts a game (/usr/bin/steam): -silent keeps Steam's own UI hidden.
+## The flags /usr/bin/steam gets for Steam's own UI, as the OGUI Steam plugin starts it.
+const UI_ARGS := ["-gamepadui", "-steamos3", "-steampal", "-steamdeck"]
+## A game is started as the OGUI Steam plugin starts it: -silent keeps Steam's own UI hidden.
 const LAUNCH_ARGS := ["-gamepadui", "-steamos3", "-steampal", "-steamdeck", "-silent"]
-## OGUI's BoxArtProvider.LAYOUT (GRID_PORTRAIT, GRID_LANDSCAPE, BANNER, LOGO) -> the client's files.
+## StateFlags bits of an app manifest: fully installed (also while an update is pending), and the
+## ones that say an install or update is still going (update required/running/paused/started,
+## downloading, staging, committing).
+const FULLY_INSTALLED := 4
+const STILL_GOING := 2 | 256 | 512 | 1024 | 0x100000 | 0x200000 | 0x400000
+## OGUI's BoxArtProvider.LAYOUT (GRID_PORTRAIT, GRID_LANDSCAPE, BANNER, LOGO) -> the client's files;
+## the first of each is also the file's name on Valve's CDN.
 const ART := [
 	["library_600x900.jpg", "library_600x900_2x.jpg"],
 	["header.jpg", "library_header.jpg"],
 	["library_hero.jpg"],
 	["logo.png"],
 ]
+## Where Valve serves every app's library art (what the OGUI Steam plugin fetches too).
+const ART_CDN := "https://steamcdn-a.akamaihd.net/steam/apps"
+## s before art that could not be fetched is tried again.
+const ART_RETRY := 86400
 
 
 ## Where /usr/bin/steam keeps the client: $XDG_DATA_HOME/Steam, else ~/.local/share/Steam.
@@ -44,6 +38,22 @@ static func steam_root() -> String:
 	if data == "":
 		data = OS.get_environment("HOME").path_join(".local/share")
 	return data.path_join("Steam")
+
+
+## steam-library's JSON -> [{"appid": int, "name": String, "installed": bool, "dir": String}], the
+## entries without an app id or a name dropped; [] for anything that is not its JSON.
+static func parse_library(text: String) -> Array:
+	var parsed = JSON.parse_string(text)
+	if not parsed is Dictionary or not parsed.get("games") is Array:
+		return []
+	var games := []
+	for g in parsed["games"]:
+		# JSON numbers come back as floats.
+		if not g is Dictionary or not typeof(g.get("appid")) in [TYPE_INT, TYPE_FLOAT] or str(g.get("name", "")) == "":
+			continue
+		games.append({"appid": int(g["appid"]), "name": str(g["name"]), "installed": g.get("installed") == true,
+				"dir": str(g.get("dir", ""))})
+	return games
 
 
 ## Every "key" "value" line of a text VDF (an .acf is one) as [depth, key, value], depth counting
@@ -80,59 +90,37 @@ static func library_dirs(root: String) -> PackedStringArray:
 	return dirs
 
 
-## An app manifest's top-level fields: appid, name, StateFlags, installdir ({} if unreadable).
-static func manifest(path: String) -> Dictionary:
-	if not FileAccess.file_exists(path):
-		return {}
-	var fields := {}
-	for pair in vdf_pairs(FileAccess.get_file_as_string(path)):
-		if pair[0] == 1 and pair[1] in ["appid", "name", "StateFlags", "installdir"] and not fields.has(pair[1]):
-			fields[pair[1]] = pair[2]
-	return fields
-
-
-static func is_steam_tool(appid: int, name: String) -> bool:
-	if appid in TOOL_APPS or name == "FEX":
-		return true
-	for prefix in TOOL_NAMES:
-		if name.begins_with(prefix):
-			return true
-	return false
-
-
-## The installed games, sorted by name: [{"appid": int, "name": String, "dir": String}], dir being
-## the game's folder. An app still downloading, a tool, or a manifest without an id or a name is
-## left out; an app id in two library folders counts once (the first folder).
-static func installed(root: String) -> Array:
-	var games := []
-	var seen := {}
+## An app's install as its manifest says it, in any library folder: {"flags", "done", "total"}, the
+## last two being its download's bytes (0 when not downloading); {} while it has no manifest.
+static func app_state(root: String, appid: int) -> Dictionary:
 	for lib in library_dirs(root):
-		var apps := lib.path_join("steamapps")
-		if not DirAccess.dir_exists_absolute(apps):
+		var path := lib.path_join("steamapps/appmanifest_%d.acf" % appid)
+		if not FileAccess.file_exists(path):
 			continue
-		for file in DirAccess.get_files_at(apps):
-			if not (file.begins_with("appmanifest_") and file.ends_with(".acf")):
-				continue
-			var m := manifest(apps.path_join(file))
-			var id_text: String = m.get("appid", "")
-			var name: String = m.get("name", "").strip_edges()
-			if not id_text.is_valid_int() or name == "":
-				continue
-			var appid := id_text.to_int()
-			var flags: String = m.get("StateFlags", "0")
-			if appid in seen or is_steam_tool(appid, name):
-				continue
-			if not flags.is_valid_int() or (flags.to_int() & FULLY_INSTALLED) == 0:
-				continue
-			seen[appid] = true
-			games.append({"appid": appid, "name": name, "dir": apps.path_join("common").path_join(str(m.get("installdir", "")))})
-	games.sort_custom(func(a, b): return a["name"].naturalnocasecmp_to(b["name"]) < 0)
-	return games
+		var fields := {}
+		for pair in vdf_pairs(FileAccess.get_file_as_string(path)):
+			if pair[0] == 1 and pair[1] in ["StateFlags", "BytesDownloaded", "BytesToDownload"] and not fields.has(pair[1]):
+				fields[pair[1]] = str(pair[2]).to_int()
+		return {"flags": fields.get("StateFlags", 0), "done": fields.get("BytesDownloaded", 0),
+				"total": fields.get("BytesToDownload", 0)}
+	return {}
+
+
+## True once an install has ended: fully installed, nothing still going.
+static func install_complete(flags: int) -> bool:
+	return flags & FULLY_INSTALLED != 0 and flags & STILL_GOING == 0
 
 
 static func launch_args(appid: int) -> PackedStringArray:
 	var args := PackedStringArray(LAUNCH_ARGS)
 	args.append("steam://rungameid/%d" % appid)
+	return args
+
+
+## Steam's own UI, opened at a steam:// URI (steam://install/<appid>, steam://uninstall/<appid>).
+static func ui_args(uri: String) -> PackedStringArray:
+	var args := PackedStringArray(UI_ARGS)
+	args.append(uri)
 	return args
 
 
@@ -158,13 +146,53 @@ static func art_path(root: String, appid: int, kind: int) -> String:
 	return ""
 
 
-## What a rescan depends on, for steam_watch.gd: libraryfolders.vdf and every app manifest, as
-## "path size mtime", sorted. Steam rewrites a manifest when an install starts, progresses and ends.
+## Where fetched art is kept: $XDG_CACHE_HOME/retroforge/steam-art, else ~/.cache/...
+static func art_cache_dir() -> String:
+	var cache := OS.get_environment("XDG_CACHE_HOME")
+	if cache == "":
+		cache = OS.get_environment("HOME").path_join(".cache")
+	return cache.path_join("retroforge/steam-art")
+
+
+## An app's art for a layout from Valve's CDN, kept in cache_dir/<appid>/<file>: its path, or "" when
+## it could not be fetched (not tried again for ART_RETRY: a game without that art stays without it).
+## Blocks for the download: call it off the main thread. TEST SEAM: RETROFORGE_STEAM_ART_CDN.
+static func fetch_art(cache_dir: String, appid: int, kind: int) -> String:
+	if kind < 0 or kind >= ART.size() or appid <= 0:
+		return ""
+	var file: String = ART[kind][0]
+	var dest := cache_dir.path_join(str(appid)).path_join(file)
+	if FileAccess.file_exists(dest):
+		return dest
+	var missing := dest + ".missing"
+	if FileAccess.file_exists(missing) and Time.get_unix_time_from_system() - FileAccess.get_modified_time(missing) < ART_RETRY:
+		return ""
+	DirAccess.make_dir_recursive_absolute(dest.get_base_dir())
+	var base := OS.get_environment("RETROFORGE_STEAM_ART_CDN")
+	if base == "":
+		base = ART_CDN
+	var part := dest + ".part"
+	var code := OS.execute("curl", ["-fsSL", "--max-time", "20", "-o", part, "%s/%d/%s" % [base, appid, file]])
+	if code == 0 and FileAccess.file_exists(part) and FileAccess.get_size(part) > 0:
+		DirAccess.rename_absolute(part, dest)
+		DirAccess.remove_absolute(missing)
+		return dest
+	DirAccess.remove_absolute(part)
+	var mark := FileAccess.open(missing, FileAccess.WRITE)
+	if mark:
+		mark.close()
+	return ""
+
+
+## What a rescan depends on, for steam_watch.gd, as "path size mtime", sorted: the client's caches
+## of the account's licenses and apps (a game bought elsewhere), libraryfolders.vdf, and every app
+## manifest (Steam rewrites one when an install starts, progresses and ends).
 static func snapshot(root: String) -> PackedStringArray:
 	var lines := PackedStringArray()
-	var vdf := root.path_join("steamapps/libraryfolders.vdf")
-	if FileAccess.file_exists(vdf):
-		lines.append("%s %d %d" % [vdf, FileAccess.get_size(vdf), FileAccess.get_modified_time(vdf)])
+	for file in ["appcache/packageinfo.vdf", "appcache/appinfo.vdf", "steamapps/libraryfolders.vdf"]:
+		var path := root.path_join(file)
+		if FileAccess.file_exists(path):
+			lines.append("%s %d %d" % [path, FileAccess.get_size(path), FileAccess.get_modified_time(path)])
 	for lib in library_dirs(root):
 		var apps := lib.path_join("steamapps")
 		if not DirAccess.dir_exists_absolute(apps):

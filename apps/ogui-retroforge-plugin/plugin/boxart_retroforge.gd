@@ -15,9 +15,10 @@ extends BoxArtProvider
 ## drawing. Our tabs do not await a card's art (plugin.gd _build_card), so their cards load in
 ## parallel; OGUI's own grids await each card, one frame or so apiece, but never freeze.
 ##
-## Installed Steam games (library_steam.gd) get the art the Steam client cached for its own library
-## (steam_apps.gd art_path), decoded on a worker thread the same way. A game the client has no art
-## for yet has none here: nothing is fetched for it.
+## Steam games (library_steam.gd) get the art the Steam client cached for its own library
+## (steam_apps.gd art_path), else the same file from Valve's CDN, kept in ~/.cache/retroforge/steam-art
+## (fetch_art: an owned game the client never showed has none cached). Fetched and decoded on a
+## worker thread, as above.
 
 const ArtPaths := preload("art_paths.gd")
 const SteamApps := preload("steam_apps.gd")
@@ -58,19 +59,22 @@ func get_boxart(item: LibraryItem, kind: LAYOUT) -> Texture2D:
 	return ImageTexture.create_from_image(image)
 
 
-## The Steam client's own art for an installed Steam game, or null.
+## A Steam game's art, or null.
 func _steam_art(item: LibraryItem, kind: LAYOUT) -> Texture2D:
 	var launch: LibraryLaunchItem = item.get_launch_item(STEAM_LIBRARY_ID)
 	if not launch:
 		return null
-	var path := SteamApps.art_path(SteamApps.steam_root(), int(launch.metadata.get("steam_app", 0)), kind)
+	var appid := int(launch.metadata.get("steam_app", 0))
+	var image := await _off_main_thread(_steam_image.bind(SteamApps.steam_root(), SteamApps.art_cache_dir(), appid, kind))
+	return ImageTexture.create_from_image(image) if image else null
+
+
+## What the client cached, else fetched from Valve's CDN (worker thread: it may download).
+static func _steam_image(root: String, cache_dir: String, appid: int, kind: int) -> Image:
+	var path := SteamApps.art_path(root, appid, kind)
 	if path == "":
-		return null
-	var image := await _off_main_thread(ArtPaths.load_image.bind(path))
-	if not image:
-		logger.warn("Unreadable art: " + path)
-		return null
-	return ImageTexture.create_from_image(image)
+		path = SteamApps.fetch_art(cache_dir, appid, kind)
+	return ArtPaths.load_image(path) if path != "" else null
 
 
 ## A card image: the cached one, else composed from the box and cached (worker thread).
