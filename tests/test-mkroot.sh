@@ -119,7 +119,7 @@ done
 # same thing at build time; this is the copy that runs in `make test`, where a pin bump is reviewed.
 CASE="prebuilt pins"
 pin_field() { sed -n "s/^$2:[[:space:]]*//p" "$1" | head -1; }
-for pin in "$ROOT/packages/inputplumber/prebuilt.pin" "$ROOT/installer/pygame-ce.pin"; do
+for pin in "$ROOT/installer/pygame-ce.pin"; do
   rel="${pin#"$ROOT"/}"
   if [ ! -f "$pin" ]; then bad "$rel is missing — mkroot.sh names it explicitly"; continue; fi
   ok "$rel is present"
@@ -129,6 +129,10 @@ for pin in "$ROOT/packages/inputplumber/prebuilt.pin" "$ROOT/installer/pygame-ce
       || bad "$rel declares dep '$dep', which pkgs.list does not carry"
   done
 done
+# InputPlumber comes from the overlay repo since its 0.82.0 bump (was the second pin): the
+# installer's input path must stay identical to the shipped image's, so pkgs.list must carry it.
+has_pkg inputplumber && ok "pkgs.list carries inputplumber (the medium's input path)" \
+  || bad "pkgs.list lost inputplumber — the installer UI would stop on 'No controller'"
 # Every `prebuilt` row in either lock is a pure function of a pin file: rootfs/genmanifest.sh walks
 # packages/*/prebuilt.pin directly, and installer/genlock.sh reads the marker installer/mkroot.sh
 # wrote from the same fields. So a pin bump that skipped `make relock` leaves a lock claiming a
@@ -137,7 +141,8 @@ done
 # (they are tarballs, not pacman packages).
 #
 # Driven from the LOCK ROWS outward, not from the pins: the two images carry different prebuilt
-# SETS — the medium takes inputplumber + the pygame-ce wheel, the OS root takes all of packages/*
+# SETS — the medium takes the pygame-ce wheel only (inputplumber moved from a pin to the overlay
+# repo with its 0.82.0 bump), the OS root takes all of packages/*
 # and not the wheel — so "every pin has a row" is true of rootfs/manifest.lock only, and is
 # asserted separately below.
 find_pin() {   # a lock row names a prebuilt; locate the pin that declares it, wherever it lives

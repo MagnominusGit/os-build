@@ -1,0 +1,97 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/device_profile_v1.json
+#
+# Guide-modifier hotkeys for Snes9x — the HW testbed for input layers (InputPlumber 0.82.0 +
+# upstream PR #757, packages/inputplumber). retroforge-launch loads this profile into every
+# composite device when the definition names it (emulator.json "gamepad_profile") and restores
+# the profile that was loaded before once the emulator exits.
+#
+# Hold Guide and the layer below overrides the base mappings: L1 quick load, R1 quick save,
+# R2 fast-forward (held), Start quits. Released, everything is the plain pad again. The layer
+# emits keyboard F1-F4; the seeded snes9x.conf [Shortcuts] binds those to QuickLoad000,
+# QuickSave000, EmuTurbo and GTK_quit (names from gtk_control.cpp b_links). F-keys because no
+# game binds them and the handhelds have no physical keyboard to collide with.
+#
+# WHY GUIDE MAPS TO ITSELF TOO: translation runs BEFORE the intercept check
+# (composite_device/mod.rs handle_event: translate_event, then is_intercept_event per translated
+# event). A Guide mapping that only targets the layer would consume Guide before InputPlumber's
+# intercept (Pass mode in-game) ever sees it — and that intercept is how OpenGamepadUI gets its
+# DBus Guide event, i.e. the in-game menu. Re-emitting Guide keeps that path: a plain tap still
+# opens the menu on release.
+#
+# KNOWN BROKEN (HW 2026-10-21, MANGMI Air X): the chords do nothing and the menu opens on release.
+# OpenGamepadUI's intercept activation is the SINGLE cap [Guide], and is_intercept_event_single
+# switches to InterceptMode::Always on the Guide PRESS — every later event goes to the DBus
+# target, which maps F1-F4 to Action::None and drops them. With InterceptMode forced to 0 by
+# busctl, Guide+R1 quick-saved: the layer is right, the intercept is the blocker. Fix pending
+# (tap-vs-chord in InputPlumber, asked upstream); .claude/plans/guide-hotkeys.plan.md.
+#
+# TARGET_DEVICES IS EXPLICIT, not omitted: omitting keeps the composite's current targets, which
+# on every board but one is already exactly this triple — but the MANGMI Pocket Max ships without
+# a keyboard target (its devices.d header: nothing in that composite produces a keyboard
+# capability), and the layer's F-keys would be dropped there. Loading this profile replaces the
+# target list, so the Max gains keyboard/mouse while the profile is live; the restore afterwards
+# loads a profile without target_devices, which leaves targets as they are — a residue on the Max
+# only, gone at reboot, harmless (an idle keyboard target).
+#
+# R2 appears twice (trigger AND button): the boards' capability maps disagree on what the right
+# trigger is post-translation — ret1 claims ABS_HAT2Y as an analog trigger, others emit a button.
+# A layer row whose source capability this board never produces simply never matches.
+version: 1
+kind: DeviceProfile
+name: RetroForge Guide hotkeys (Snes9x)
+description: Hold Guide for emulator hotkeys; plain pad otherwise
+target_devices:
+  - xbox-elite
+  - keyboard
+  - mouse
+
+mapping:
+  - name: Guide holds the hotkey layer (and stays Guide for the shell's menu)
+    source_event:
+      gamepad:
+        button: Guide
+    target_events:
+      - layer:
+          name: guide
+      - gamepad:
+          button: Guide
+
+layers:
+  - name: guide
+    mapping:
+      - name: Guide+L1 -> F1 (quick load, slot 0)
+        source_event:
+          gamepad:
+            button: LeftBumper
+        target_events:
+          - keyboard: KeyF1
+
+      - name: Guide+R1 -> F2 (quick save, slot 0)
+        source_event:
+          gamepad:
+            button: RightBumper
+        target_events:
+          - keyboard: KeyF2
+
+      - name: Guide+R2 (analog) -> F3 (fast-forward while held)
+        source_event:
+          gamepad:
+            trigger:
+              name: RightTrigger
+              deadzone: 0.2
+        target_events:
+          - keyboard: KeyF3
+
+      - name: Guide+R2 (button) -> F3 (fast-forward while held)
+        source_event:
+          gamepad:
+            button: RightTrigger
+        target_events:
+          - keyboard: KeyF3
+
+      - name: Guide+Start -> F4 (quit, SRAM written)
+        source_event:
+          gamepad:
+            button: Start
+        target_events:
+          - keyboard: KeyF4

@@ -9,8 +9,10 @@
 #
 # THE MATCH IS ON DEVICETREE `model`, not `compatible`. `mangmi,pocket-max` collides with nothing
 # upstream ships today, so either attribute would work; `model` is the one nothing upstream reads,
-# which keeps this board's claim independent of what upstream adds next. 50-ayn_thor_lite.yaml
-# matches the same way, and its header carries the fuller argument.
+# which keeps this board's claim independent of what upstream adds next. The fuller argument
+# (libudev truncates the compatible attribute at the first NUL, so a glob only ever sees the first
+# string) lived in our 50-ayn_thor_lite.yaml until upstream 0.82.0 shipped its own and ours was
+# deleted (git history has it).
 #
 # The file name is upstream's convention on purpose -- both config directories are LOADED and
 # sorted by FILE NAME across the two, first match wins, and a name TIE is the only case where

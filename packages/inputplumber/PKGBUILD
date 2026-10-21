@@ -1,0 +1,85 @@
+# inputplumber — ShadowBlip's input router/remapper daemon, built FROM SOURCE via a
+# retroforge-owned PKGBUILD (not in the holo repo; was a prebuilt.pin on the release tarball
+# until 0.82.0). Built from source for one reason: patches. 0001 is upstream PR #757
+# (shadowapex/input-layers-v2, opened 2026-10-19 against v0.82.0), which adds input layers to
+# device profiles — the mechanism behind the Guide-modifier emulator hotkeys (hold Guide:
+# L1 quick load, R1 quick save, R2 fast-forward, Start quits). Profiles are single-source
+# mappings without it; mGBA/Snes9x/melonDS cannot bind pad combos themselves. Drop the patch
+# when a release carries the PR.
+#
+# The installed file set mirrors the release tarball exactly: both are upstream's
+# `make install` (dist-archive is make install into a prefix), so the switch from prebuilt
+# to source changes no shipped path. package() calls that target rather than naming files,
+# so a bump cannot silently drop whatever upstream adds to it.
+#
+# To bump: set _tag + sha256sums together, re-apply the patches (drop any upstream merged),
+# then re-read the shipped devices/ directory against rootfs/overlay/etc/inputplumber/devices.d —
+# upstream keeps adopting boards we describe, and on a file-name TIE /etc wins and HIDES theirs.
+# The 0.81.0 bump notes with the full history of that doctrine (which boards upstream took when,
+# and what stays ours) are in this file's git history (packages/inputplumber/prebuilt.pin).
+# On this 0.82.0 bump: upstream added 50-ayn_thor_lite.yaml (5e7a186) — same sources, same ret1 +
+# ayn2 maps as ours, matching `compatible: ayn,thor-lite`, the first compatible string in our
+# sm8250-ayn-thorlite.dts — so our devices.d copy is deleted, as every superseded config before it.
+#
+# 0.82.0 dropped libiio (966be34: iio_imu reads sysfs directly), so unlike 0.81.0 nothing
+# here needs the holo libiio package: the binary's only non-base NEEDED is libudev.
+pkgname=inputplumber
+_tag=v0.82.0
+pkgver=0.82.0
+pkgrel=1
+pkgdesc="Input router and remapper daemon (the virtual gamepad every emulator sees)"
+url="https://github.com/ShadowBlip/InputPlumber"
+arch=(aarch64)
+license=(GPL-3.0-or-later)
+depends=(
+  glibc
+  gcc-libs
+  systemd-libs  # libudev.so.1 (the udev crate)
+)
+makedepends=(
+  rust          # provides cargo
+  pkgconf       # the udev crate finds libudev through pkg-config
+  git           # cargo fetches the virtual-usb-rs git dependency
+  clang         # libclang.so for bindgen (uhidrs-sys generates its uhid bindings at build time)
+)
+# makepkg's lto option puts -flto=auto in CFLAGS, so the cc crate compiles the hidapi crate's
+# bundled hid.c into GCC slim-LTO bytecode (.gnu.lto_* sections, no machine code). rustc links
+# through ld.lld, which cannot read GIMPLE — the final link dies with undefined hid_open_path /
+# hid_* although `nm` (GCC plugin) lists them in libhidapi.a. Same failure class as scx-scheds.
+options=(!lto)
+source=("$pkgname-$_tag.tar.gz::$url/archive/refs/tags/$_tag.tar.gz")
+sha256sums=('aaee9b65b47a21756169eb1c49eb258ecdd1896fb8dd4996c2b50d11af049d21')
+
+prepare() {
+  # build-overlay.sh runs makepkg with --skipinteg (for the patch sources it injects), so the
+  # sha256sums above are never checked by makepkg. Assert the tarball hash ourselves.
+  echo "${sha256sums[0]}  $srcdir/$pkgname-$_tag.tar.gz" | sha256sum -c -
+  cd "InputPlumber-$pkgver"
+  # build-overlay.sh injects `patch -p1 < "$srcdir/<patch>"` for each source.pin `patches:` entry
+  # right here, after the first `cd`. Keep this `cd` as the first statement in prepare().
+  #
+  # Fetch every crate now so build() can run --frozen: this is the one step that needs the
+  # network, and failing here is clearer than failing mid-compile.
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "InputPlumber-$pkgver"
+  export CARGO_TARGET_DIR=target
+  # NATIVE build, no --target (the powerstation precedent). Without it the binary lands at
+  # target/release/, not the Makefile's
+  # target/<TARGET_ARCH>/release/; package() bridges that with TARGET_ARCH=. so upstream's
+  # install target still owns the file list.
+  cargo build --frozen --release
+}
+
+package() {
+  cd "InputPlumber-$pkgver"
+  # Upstream's canonical file set (binary, dbus conf, polkit, systemd units, udev hwdb+rules,
+  # devices/, schema/, capability_maps/, profiles/) — the same list the release tarball is
+  # made from. TARGET_ARCH=. makes its binary path target/./release/<name>, the native layout
+  # build() produced (and the fresh file also stops `install: build` re-running cargo).
+  # NO_RELOAD guards any udevadm/systemctl step a future Makefile may grow.
+  make install PREFIX="$pkgdir/usr" TARGET_ARCH=. NO_RELOAD=true
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

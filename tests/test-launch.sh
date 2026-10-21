@@ -342,6 +342,9 @@ for def in "$SEED_DIR"/*/emulator.json; do
     || bad "$emu: emulator.json refused: $(RETROFORGE_EMU_DIR="$T/none" "$LAUNCH" --gui "$emu" 2>&1 | tail -1)"
   python3 -c 'import json,os,sys; d=json.load(open(sys.argv[1])); sys.exit(any(not os.path.isfile(os.path.join(sys.argv[2], s["file"])) for s in d.get("seed", [])))' \
     "$def" "$(dirname "$def")" && ok "$emu: every seeded file is in the image" || bad "$emu seeds a file that is not in the image"
+  python3 -c 'import json,os,sys; d=json.load(open(sys.argv[1])); p=d.get("gamepad_profile"); sys.exit(0 if p is None else 0 if os.path.isfile(os.path.join(sys.argv[2], p)) else 1)' \
+    "$def" "$(dirname "$def")" && ok "$emu: the gamepad profile, if named, is in the image" \
+    || bad "$emu names a gamepad_profile that is not in the image"
 done
 for emu in $(sed -n 's/^[a-z0-9_]*=\([a-z0-9_-]*\)$/\1/p' "$LAUNCH_CONF" | sort -u); do
   [ -f "$SEED_DIR/$emu/emulator.json" ] && ok "launch.conf's $emu has a definition" || bad "launch.conf names $emu, which has no emulator.json"
@@ -553,6 +556,8 @@ bad_def "an exit_resend of 0" 'd["exit_resend"] = 0'
 bad_def "an exit_resend that is not a number" 'd["exit_resend"] = "2"'
 bad_def "an exit_resend that is a boolean" 'd["exit_resend"] = True'
 bad_def "an exit_resend over the cap" 'd["exit_resend"] = 600'
+bad_def "a gamepad_profile that is absolute" 'd["gamepad_profile"] = "/etc/passwd"'
+bad_def "a gamepad_profile out of the image (..)" 'd["gamepad_profile"] = "../../../etc/passwd"'
 printf '{not json' > "$BAD/duckstation/emulator.json"
 [ "$(RETROFORGE_EMU_DATA_DIR="$BAD" code psx "$ROM")" = 2 ] && ok "a definition that is not JSON is refused (exit 2)" || bad "broken JSON was accepted"
 
@@ -1400,6 +1405,76 @@ cat > "$BD/fakeset/emulator.json" <<'EOF'
 EOF
 [ "$(RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-setup.conf" code n64 "$NROM")" = 2 ] \
   && ok 'setup_args holding "{rom}" is refused (a setup run has no game)' || bad 'accepted {rom} in setup_args'
+
+# =================================================================================================
+CASE="gamepad profile (emulator.json gamepad_profile -> InputPlumber)"
+# The definition's InputPlumber profile (the Guide hotkey layer) is loaded into every composite
+# device before the game starts, and whatever each device had is put back when it exits — through
+# busctl, best-effort end to end: no InputPlumber (a dev box, these tests) must still mean a game.
+mkdir -p "$BD/fakepad"
+cat > "$BD/fakepad/emulator.json" <<'EOF'
+{"format": "binary", "binary": "current", "args": ["{rom}"], "gamepad_profile": "guide.yaml"}
+EOF
+printf 'version: 1\n' > "$BD/fakepad/guide.yaml"
+echo "n64=fakepad" > "$T/launch-pad.conf"
+mkdir -p "$T/emus/fakepad"; cp "$T/fake-emu" "$T/emus/fakepad/v1.0.0.AppImage"
+ln -s v1.0.0.AppImage "$T/emus/fakepad/current"
+# The fake busctl: two composite devices, every call recorded, the "previous" profile settable.
+cat > "$T/bin/busctl" <<EOF
+#!/bin/bash
+echo "\$*" >> "$T/busctl.log"
+[ -f "$T/busctl-fails" ] && exit 1
+case "\$2" in
+  tree) printf '/org/shadowblip/InputPlumber/CompositeDevice0\n/org/shadowblip/InputPlumber/CompositeDevice1\n' ;;
+  get-property) printf 's "%s"\n' "\$(cat "$T/busctl-prev" 2>/dev/null)" ;;
+esac
+exit 0
+EOF
+chmod +x "$T/bin/busctl"
+pl() { RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-pad.conf" "$LAUNCH" "$@"; }
+
+rm -f "$T/busctl.log"; echo "/etc/inputplumber/previous.yaml" > "$T/busctl-prev"; reset_logs
+pl n64 "$NROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+loads="$(grep -c "LoadProfilePath s $BD/fakepad/guide.yaml" "$T/busctl.log" 2>/dev/null)"
+[ "$loads" = 2 ] && ok "the profile is loaded on every composite device before the game" \
+  || bad "expected 2 loads, saw ${loads:-0}: $(cat "$T/busctl.log" 2>/dev/null)"
+restores="$(grep -c "LoadProfilePath s /etc/inputplumber/previous.yaml" "$T/busctl.log" 2>/dev/null)"
+[ "$restores" = 0 ] && ok "nothing is restored while the game runs" || bad "restored mid-game"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
+restores="$(grep -c "LoadProfilePath s /etc/inputplumber/previous.yaml" "$T/busctl.log" 2>/dev/null)"
+[ "$restores" = 2 ] && ok "each device gets its previous profile back on exit" \
+  || bad "expected 2 restores, saw ${restores:-0}: $(cat "$T/busctl.log" 2>/dev/null)"
+
+# A launcher killed between load and restore leaves OUR profile as "previous" for the next run:
+# restoring that would make the leftover permanent, so the default goes back instead.
+rm -f "$T/busctl.log"; echo "$BD/fakepad/guide.yaml" > "$T/busctl-prev"; reset_logs
+pl n64 "$NROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
+restores="$(grep -c "LoadProfilePath s /usr/share/inputplumber/profiles/default.yaml" "$T/busctl.log" 2>/dev/null)"
+[ "$restores" = 2 ] && ok "a leftover of our own profile restores the default, not itself" \
+  || bad "expected 2 default restores, saw ${restores:-0}: $(cat "$T/busctl.log" 2>/dev/null)"
+
+# No InputPlumber (busctl fails): the game must start exactly as before, one line in the log.
+rm -f "$T/busctl.log"; : > "$T/busctl-fails"; reset_logs
+pl n64 "$NROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up && ok "no InputPlumber: the game still starts" \
+  || bad "a failing busctl stopped the launch: $(cat "$T/launch.err")"
+touch "$T/stop-emu"; reap_launcher "$lpid"; rc=$?
+[ "$rc" = 7 ] && ok "and the exit path is untouched" || bad "exit was $rc, the emulator 7"
+rm -f "$T/busctl-fails"
+
+# A profile the image lacks: hotkeys off, game on, no busctl traffic.
+cat > "$BD/fakepad/emulator.json" <<'EOF'
+{"format": "binary", "binary": "current", "args": ["{rom}"], "gamepad_profile": "missing.yaml"}
+EOF
+rm -f "$T/busctl.log"; reset_logs
+pl n64 "$NROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up && grep -q "gamepad profile" "$T/launch.err" && [ ! -e "$T/busctl.log" ] \
+  && ok "a profile the image lacks: a log line, no busctl call, the game starts" \
+  || bad "missing profile: up=$(emu_up && echo yes || echo no), busctl=$(cat "$T/busctl.log" 2>/dev/null), err=$(tail -1 "$T/launch.err" 2>/dev/null)"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
 
 # =================================================================================================
 CASE="stub ROMs (PSN .psn -> %RPCS3_GAMEID%:<id>)"

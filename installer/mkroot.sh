@@ -79,19 +79,20 @@ die() { echo "$*" >&2; exit 1; }
 mapfile -t PKGS < <(sed -e 's/#.*//' -e 's/[[:space:]]*$//' "$PKGSLIST" | grep -v '^$')
 [ "${#PKGS[@]}" -gt 0 ] || die "${PKGSLIST#"$ROOT"/} declares no packages"
 
-# ---- the two prebuilt pins, named rather than discovered -----------------------------------------
+# ---- the one prebuilt pin, named rather than discovered ------------------------------------------
 # rootfs/customize-base.sh globs packages/*/prebuilt.pin, which is exactly the behaviour
 # installer/pygame-ce.pin exists OUTSIDE packages/ to stay clear of -- 39 MB of Python SDL bindings
 # that only installer/ui uses would otherwise be pure weight on every shipped device. So this image
-# names its two, and the list is short enough to read:
+# names what it takes, and the list is short enough to read:
 #
-#   inputplumber  the handheld input daemon. It ships here NOT for size but so the installer's input
-#                 path is IDENTICAL to the HW-validated main-image one, rather than a second raw-
-#                 evdev stack inside the tool that has to work when the device is already broken.
 #   pygame-ce     the SDL binding installer/ui draws with. There is no python-pygame and no PySDL2 in
 #                 the holo repos (measured); the wheel vendors its own libSDL2 with the wayland
 #                 driver compiled in. See the pin for why a vendored wheel was acceptable.
-PINS=("$ROOT/packages/inputplumber/prebuilt.pin" "$ROOT/installer/pygame-ce.pin")
+#
+# InputPlumber was the second pin until its 0.82.0 bump made it a from-source overlay package
+# (packages/inputplumber, the input-layers patch): it now comes through installer/pkgs.list from
+# the overlay repo, like gamescope — still the exact daemon the shipped image runs.
+PINS=("$ROOT/installer/pygame-ce.pin")
 pin_field() { sed -n "s/^$2:[[:space:]]*//p" "$1" | head -1; }
 
 # `deps:` in a pin names holo-repo packages the prebuilt links against. The shipped bootstrap
@@ -159,8 +160,8 @@ done
 # until a user reports it.
 DEVICE_ENV="$ROOT/rootfs/overlay/usr/lib/retroforge/device-env"
 DEVICES_DIR="$ROOT/rootfs/overlay/usr/lib/retroforge/devices"
-# InputPlumber's BOARD configs, which are ours and live in the overlay — the prebuilt tarball ships
-# the daemon and its generic configs, not the per-board ones. HW-FOUND 2026-08-24: without these the
+# InputPlumber's BOARD configs, which are ours and live in the overlay — the package ships the
+# daemon and its generic configs, not the per-board ones. HW-FOUND 2026-08-24: without these the
 # daemon comes up, recognises none of the handheld MCU gamepads, SDL sees no mappable controller,
 # and the UI stops on §4d's "No controller or keyboard" screen — correctly, having been told the
 # truth. The installer ships InputPlumber precisely so its input path is IDENTICAL to the
@@ -255,9 +256,10 @@ KEYRING_SRC="$ROOT/ota/rauc/retroforge-ca.pem"
 # bootstrap learned that the hard way (twice, on the same day) by leaving its own script out of it.
 # One row per pin, sorted: `name version sha256 kind dest strip`. installer/genlock.sh reads the
 # copy of this that lands in the tree, so it is the image's own record of what was placed rather
-# than a re-walk of the pins. Every optional field carries a DEFAULT here — inputplumber's pin
-# declares neither `kind` nor `dest`, and an empty field would shift every column after it, which
-# the reader would see as a tar extracting to a path named after a checksum.
+# than a re-walk of the pins. Every optional field carries a DEFAULT here — a pin may declare
+# neither `kind` nor `dest` (inputplumber's did not, while it existed), and an empty field would
+# shift every column after it, which the reader would see as a tar extracting to a path named
+# after a checksum.
 prebuilt_manifest() {
   local pin kind dest strip
   for pin in "${PINS[@]}"; do
@@ -772,13 +774,13 @@ ctr run --rm --platform linux/arm64 \
   echo "enable seatd.service" >>/target/etc/systemd/system-preset/60-retroforge-network.preset
   ln -sf /usr/lib/systemd/system/seatd.service \
          /target/etc/systemd/system/multi-user.target.wants/seatd.service
-  # InputPlumber: the unit ships inside the prebuilt tarball, and retroforge-installer.service Wants=
-  # it. Enable it the same preset-proof way.
+  # InputPlumber: the unit ships inside the overlay package (pkgs.list), and
+  # retroforge-installer.service Wants= it. Enable it the same preset-proof way.
   if [ -f /target/usr/lib/systemd/system/inputplumber.service ]; then
     ln -sf /usr/lib/systemd/system/inputplumber.service \
            /target/etc/systemd/system/multi-user.target.wants/inputplumber.service
   else
-    echo "inputplumber.service is not in the tree — the prebuilt layout moved" >&2
+    echo "inputplumber.service is not in the tree — the package layout moved" >&2
     exit 1
   fi
 

@@ -1,0 +1,2168 @@
+From f3b98f30f2fb67f67301d865258f8dd800def057 Mon Sep 17 00:00:00 2001
+From: William Edwards <shadowapex@gmail.com>
+Date: Sun, 18 Oct 2026 17:10:11 -0700
+Subject: [PATCH] feat(Input Layers): add input layers to map button combos
+
+---
+ docs/usage.md                                 | 160 ++++++++
+ .../share/inputplumber/profiles/default.yaml  |  21 +-
+ .../inputplumber/profiles/layers_example.yaml | 114 ++++++
+ .../schema/device_profile_v1.json             |  63 ++-
+ src/config/capability_map.rs                  |  48 ++-
+ src/config/config_test.rs                     | 140 +++++++
+ src/config/mod.rs                             |  13 +
+ src/input/capability.rs                       |  34 +-
+ src/input/composite_device/layers.rs          | 360 +++++++++++++++++
+ src/input/composite_device/layers_test.rs     | 327 ++++++++++++++++
+ src/input/composite_device/mod.rs             | 361 ++++++++++++------
+ src/input/event/dbus.rs                       |   1 +
+ src/input/event/evdev.rs                      |   1 +
+ src/input/event/value.rs                      |  36 ++
+ src/input/target/client.rs                    |   4 +
+ src/input/target/mouse.rs                     |   6 +-
+ src/input/target/unified_gamepad.rs           |   3 +
+ 17 files changed, 1567 insertions(+), 125 deletions(-)
+ create mode 100644 rootfs/usr/share/inputplumber/profiles/layers_example.yaml
+ create mode 100644 src/input/composite_device/layers.rs
+ create mode 100644 src/input/composite_device/layers_test.rs
+
+diff --git a/docs/usage.md b/docs/usage.md
+index e80c2e8..99732ae 100644
+--- a/docs/usage.md
++++ b/docs/usage.md
+@@ -61,6 +61,166 @@ busctl call org.shadowblip.InputPlumber \
+   LoadProfilePath "s" /usr/share/inputplumber/profiles/mouse_keyboard_wasd.yaml
+ ```
+ 
++### Input Layers
++
++An input layer is a named set of input mappings that overrides the base mappings
++of a profile while it is active. Layers let one profile carry a whole set of
++alternative bindings (a "guide" chord layer, a mouse-mode layer, a rapid-fire
++layer) and switch between them with ordinary inputs instead of loading a
++different profile.
++
++```mermaid
++sequenceDiagram
++  autonumber
++  Composite Device->>Profile: Input Event
++  Profile->>Composite Device: Activation (layer target)
++  Composite Device->>Composite Device: Push layer on stack
++  Profile->>Composite Device: Translated Event (layer mapping wins)
++  Composite Device->>Target Device: Route to target device
++```
++
++Activating a layer is just a mapping whose target event is a `layer` target:
++`{ layer: { name: <string>, mode?: hold|toggle } }`. The `mode` describes how
++the layer deactivates:
++
++- **`hold`** (default): the layer is active while the activating input is held.
++  Releasing the input pops the layer and releases anything it produced while
++  held, so no key gets stuck.
++- **`toggle`**: one press latches the layer on, the next press of the same input
++  releases it. The layer survives the release of the activating input.
++
++Layers **stack**. The most recently activated layer wins for a given source
++event, so a layer activated later temporarily shadows an earlier one, and
++releasing it uncovers the layer underneath. Layers can be activated in any
++combination and a layer's own mappings may activate other layers. At most eight
++layers stay active at once; activating a ninth drops the oldest one.
++
++Here is a short example (see
++[`layers_example.yaml`](https://github.com/ShadowBlip/InputPlumber/blob/main/rootfs/usr/share/inputplumber/profiles/layers_example.yaml)
++for a complete profile):
++
++```yaml
++# yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/device_profile_v1.json
++version: 1
++kind: DeviceProfile
++name: Layers example
++
++# The layer outputs need a mouse and keyboard target, and the base mappings
++# need a gamepad target.
++target_devices:
++  - gamepad
++  - keyboard
++  - mouse
++
++mapping:
++  # Hold Guide to enable the mouse mode layer
++  - name: Hold Guide for mouse mode
++    source_event:
++      gamepad:
++        button: Guide
++    target_events:
++      - layer: { name: mouse_mode }
++
++  # Press QuickAccess to latch the shortcuts layer, press it again to release it
++  - name: QuickAccess latches the shortcuts layer
++    source_event:
++      gamepad:
++        button: QuickAccess
++    target_events:
++      - layer: { name: shortcuts, mode: toggle }
++
++  # Hold LeftBumper to enable the rapid layer
++  - name: LeftBumper opens the rapid layer
++    source_event:
++      gamepad:
++        button: LeftBumper
++    target_events:
++      - layer: { name: rapid }
++
++layers:
++  # Active while Guide is held: the right stick drives the mouse and the
++  # triggers click.
++  - name: mouse_mode
++    mapping:
++      - name: Guide+RightStick -> mouse
++        source_event:
++          gamepad:
++            axis:
++              name: RightStick
++        target_events:
++          - mouse:
++              motion:
++                speed_pps: 800
++
++      - name: Guide+RightTrigger -> left click
++        source_event:
++          gamepad:
++            trigger:
++              name: RightTrigger
++              deadzone: 0.2
++        target_events:
++          - mouse:
++              button: Left
++
++      - name: Guide+LeftTrigger -> right click
++        source_event:
++          gamepad:
++            trigger:
++              name: LeftTrigger
++              deadzone: 0.2
++        target_events:
++          - mouse:
++              button: Right
++
++  - name: shortcuts
++    mapping:
++      - name: QuickAccess+South -> Esc
++        source_event:
++          gamepad:
++            button: South
++        target_events:
++          - keyboard: KeyEsc
++
++  # Stacks with the layers above: because the most recently activated layer
++  # wins per source, pressing LeftBumper last makes South emit Space. If
++  # `shortcuts` was activated after LeftBumper, South still emits Esc.
++  - name: rapid
++    mapping:
++      - name: LB+South -> Space
++        source_event:
++          gamepad:
++            button: South
++        target_events:
++          - keyboard: KeySpace
++```
++
++With this profile, holding `Guide` makes the right stick move the mouse and the
++triggers click: right trigger is the left button, left trigger is the right
++button, the same binding `mouse_keyboard_wasd.yaml` uses. Latching
++`QuickAccess` and pressing `South` emits `Esc`; latching `QuickAccess`, then
++holding `LeftBumper` and pressing `South` emits `Space` (the `rapid` layer was
++activated last); releasing `LeftBumper` makes `South` emit `Esc` again. Note
++that both the `shortcuts` and `rapid` layers remap `South`, which is exactly
++what stacking is for.
++
++A profile may set `target_devices`, which **replaces** the composite device's
++target devices when the profile loads. The example sets `gamepad`, `keyboard`
++and `mouse` because its layer outputs need those targets: with no mouse target
++the mouse-mode mappings have nowhere to go, and the keyboard shortcuts are
++dropped for the same reason. Omit the section to keep whatever targets the
++composite already has, and list your usual gamepad target (e.g. `deck-uhid`)
++instead of `gamepad` if you want to keep it.
++
++Two caveats are worth knowing:
++
++- Layer mappings apply **after** the device's capability map, like base profile
++  mappings do. A layer can only remap a capability the composite device
++  publishes after translation, so a layer mapping keyed on a raw source
++  capability that the capability map renames will never match.
++- A profile that uses layers loaded by an older version of InputPlumber has its
++  `layers:` list and `layer` targets ignored silently: the older parser skips
++  unknown fields, so the profile still loads but the layers simply do nothing.
++
+ ### Intercept Mode
+ 
+ Intercept Mode is a feature of InputPlumber that can allow external applications
+diff --git a/rootfs/usr/share/inputplumber/profiles/default.yaml b/rootfs/usr/share/inputplumber/profiles/default.yaml
+index f97f495..4d300a5 100644
+--- a/rootfs/usr/share/inputplumber/profiles/default.yaml
++++ b/rootfs/usr/share/inputplumber/profiles/default.yaml
+@@ -1,4 +1,4 @@
+-# yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/device_profile_v1.json
++# yaml-language-server: $schema=../schema/device_profile_v1.json
+ # Schema version number
+ version: 1
+ 
+@@ -78,3 +78,22 @@ mapping:
+           direction: clockwise
+     target_events:
+       - keyboard: KeyBrightnessUp
++
++# Optional input layers: named sets of mappings that override the mappings above
++# while they are active. A layer is activated by mapping a source event to a
++# `layer` target event, e.g. adding
++#   target_events:
++#     - layer: { name: guide }
++# to a mapping whose source_event is the gamepad Guide button. `mode` defaults
++# to `hold` (the layer stays active while the input is held) and can be
++# `toggle` (one press latches the layer on, the next press releases it). Layers
++# stack: the most recently activated layer wins for a given source event.
++#layers:
++#  - name: guide
++#    mapping:
++#      - name: Guide+South -> Esc
++#        source_event:
++#          gamepad:
++#            button: South
++#        target_events:
++#          - keyboard: KeyEsc
+diff --git a/rootfs/usr/share/inputplumber/profiles/layers_example.yaml b/rootfs/usr/share/inputplumber/profiles/layers_example.yaml
+new file mode 100644
+index 0000000..101410f
+--- /dev/null
++++ b/rootfs/usr/share/inputplumber/profiles/layers_example.yaml
+@@ -0,0 +1,114 @@
++# yaml-language-server: $schema=../schema/device_profile_v1.json
++version: 1
++kind: DeviceProfile
++name: Layers example
++description: Profile that demonstrates input layers with hold and toggle activation
++
++# The layer outputs below need a mouse and a keyboard target, and the base
++# mapping needs a gamepad target. Loading a profile that sets this replaces the
++# composite device's current target devices, so swap "gamepad" for your usual
++# target (e.g. "deck-uhid") if you want to keep it.
++target_devices:
++  - gamepad
++  - keyboard
++  - mouse
++
++mapping:
++  # Activating a layer is just a mapping to a `layer` target event.
++  - name: Hold Guide for mouse mode
++    source_event:
++      gamepad:
++        button: Guide
++    target_events:
++      # mode defaults to hold: the layer is active while Guide is held
++      - layer:
++          name: mouse_mode
++
++  - name: QuickAccess latches the shortcuts layer
++    source_event:
++      gamepad:
++        button: QuickAccess
++    target_events:
++      # toggle: one press latches the layer, the next press releases it
++      - layer:
++          name: shortcuts
++          mode: toggle
++
++  - name: LeftBumper opens the rapid layer
++    source_event:
++      gamepad:
++        button: LeftBumper
++    target_events:
++      - layer:
++          name: rapid
++
++  # Base mappings keep their normal semantics.
++  - name: LeftTop -> LeftPaddle1
++    source_event:
++      gamepad:
++        button: LeftTop
++    target_events:
++      - gamepad:
++          button: LeftPaddle1
++
++layers:
++  # Active while Guide is held: the right stick drives the mouse and the
++  # triggers click, matching the mouse bindings in mouse_keyboard_wasd.yaml.
++  - name: mouse_mode
++    mapping:
++      - name: Guide+RightStick -> mouse
++        source_event:
++          gamepad:
++            axis:
++              name: RightStick
++        target_events:
++          - mouse:
++              motion:
++                speed_pps: 800 # default to 800pps
++
++      - name: Guide+RightTrigger -> left click
++        source_event:
++          gamepad:
++            trigger:
++              name: RightTrigger
++              deadzone: 0.2
++        target_events:
++          - mouse:
++              button: Left
++
++      - name: Guide+LeftTrigger -> right click
++        source_event:
++          gamepad:
++            trigger:
++              name: LeftTrigger
++              deadzone: 0.2
++        target_events:
++          - mouse:
++              button: Right
++
++  - name: shortcuts
++    mapping:
++      - name: QuickAccess+South -> Esc
++        source_event:
++          gamepad:
++            button: South
++        target_events:
++          - keyboard: KeyEsc
++      - name: QuickAccess+North -> Enter
++        source_event:
++          gamepad:
++            button: North
++        target_events:
++          - keyboard: KeyEnter
++
++  # Stacks with the layers above: `shortcuts` and `rapid` both remap South, and
++  # the most recently activated layer wins per source, so pressing LeftBumper
++  # last makes South emit Space.
++  - name: rapid
++    mapping:
++      - name: LB+South -> Space
++        source_event:
++          gamepad:
++            button: South
++        target_events:
++          - keyboard: KeySpace
+diff --git a/rootfs/usr/share/inputplumber/schema/device_profile_v1.json b/rootfs/usr/share/inputplumber/schema/device_profile_v1.json
+index a814f9a..8f8e853 100644
+--- a/rootfs/usr/share/inputplumber/schema/device_profile_v1.json
++++ b/rootfs/usr/share/inputplumber/schema/device_profile_v1.json
+@@ -49,6 +49,13 @@
+           "items": {
+             "$ref": "#/definitions/Mapping"
+           }
++        },
++        "layers": {
++          "type": "array",
++          "description": "Named sets of input mappings that override the base mappings while a layer is active",
++          "items": {
++            "$ref": "#/definitions/Layer"
++          }
+         }
+       },
+       "required": [
+@@ -82,6 +89,53 @@
+         "target_events"
+       ]
+     },
++    "Layer": {
++      "title": "Layer",
++      "type": "object",
++      "description": "A named set of input mappings that overrides the profile's base mappings while the layer is active. A layer declares no activator of its own; activation is a mapping whose target event is a `layer` capability.",
++      "additionalProperties": false,
++      "properties": {
++        "name": {
++          "type": "string",
++          "description": "Unique, non-empty name of the layer"
++        },
++        "mapping": {
++          "type": "array",
++          "description": "Mappings that win over the base profile while this layer is active",
++          "items": {
++            "$ref": "#/definitions/Mapping"
++          }
++        }
++      },
++      "required": [
++        "name",
++        "mapping"
++      ]
++    },
++    "LayerEvent": {
++      "title": "LayerEvent",
++      "type": "object",
++      "description": "Activates an input layer. Target-only: using a `layer` event as a source_event is rejected when the profile loads.",
++      "additionalProperties": false,
++      "properties": {
++        "name": {
++          "type": "string",
++          "description": "Name of the layer to activate"
++        },
++        "mode": {
++          "type": "string",
++          "description": "How the layer is activated. 'hold' is active while the input is held, 'toggle' latches until pressed again.",
++          "enum": [
++            "hold",
++            "toggle"
++          ],
++          "default": "hold"
++        }
++      },
++      "required": [
++        "name"
++      ]
++    },
+     "Event": {
+       "title": "Event",
+       "type": "object",
+@@ -295,6 +349,9 @@
+         },
+         "gamepad": {
+           "$ref": "#/definitions/GamepadEvent"
++        },
++        "layer": {
++          "$ref": "#/definitions/LayerEvent"
+         }
+       },
+       "required": []
+@@ -576,14 +633,14 @@
+     "DialEvent": {
+       "title": "DialEvent",
+       "type": "object",
+-      "description": "Dial or Wheel events such as LeftStick, RightStick, etc.",
++      "description": "Dial or Wheel events such as LeftStickDial, RightStickDial, etc.",
+       "additionalProperties": false,
+       "properties": {
+         "name": {
+           "type": "string",
+           "enum": [
+-            "LeftStick",
+-            "RightStick"
++            "LeftStickDial",
++            "RightStickDial"
+           ]
+         },
+         "direction": {
+diff --git a/src/config/capability_map.rs b/src/config/capability_map.rs
+index 1fed72c..5c999bd 100644
+--- a/src/config/capability_map.rs
++++ b/src/config/capability_map.rs
+@@ -1,7 +1,7 @@
+ pub mod evdev;
+ pub mod hidraw;
+ 
+-use std::{collections::HashMap, io::Read, path::Path};
++use std::{collections::HashMap, fmt, io::Read, path::Path, str::FromStr};
+ 
+ use evdev::EvdevConfig;
+ use hidraw::HidrawConfig;
+@@ -199,6 +199,52 @@ pub struct CapabilityConfig {
+     pub gyroscope: Option<SourceCapability>,
+     #[serde(skip_serializing_if = "Option::is_none")]
+     pub accelerometer: Option<SourceCapability>,
++    /// Target-only capability that activates an input layer. Using it as a
++    /// source event is rejected when a profile loads.
++    #[serde(skip_serializing_if = "Option::is_none")]
++    pub layer: Option<LayerCapability>,
++}
++
++/// A `layer` target event: names the layer to activate and how it is activated.
++#[derive(Debug, Deserialize, Serialize, Clone, JsonSchema, PartialEq)]
++#[serde(rename_all = "snake_case")]
++pub struct LayerCapability {
++    pub name: String,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub mode: Option<LayerActivationMode>,
++}
++
++/// How an activation drives the layer stack. The mode that activates a layer is
++/// the mode that deactivates it.
++#[derive(Debug, Deserialize, Serialize, Clone, Default, PartialEq, Eq, Hash, JsonSchema)]
++#[serde(rename_all = "snake_case")]
++pub enum LayerActivationMode {
++    /// Active only while the activator input is held
++    #[default]
++    Hold,
++    /// Press to activate, press again to deactivate
++    Toggle,
++}
++
++impl fmt::Display for LayerActivationMode {
++    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
++        match self {
++            LayerActivationMode::Hold => write!(f, "hold"),
++            LayerActivationMode::Toggle => write!(f, "toggle"),
++        }
++    }
++}
++
++impl FromStr for LayerActivationMode {
++    type Err = ();
++
++    fn from_str(s: &str) -> Result<Self, Self::Err> {
++        match s {
++            "hold" => Ok(LayerActivationMode::Hold),
++            "toggle" => Ok(LayerActivationMode::Toggle),
++            _ => Err(()),
++        }
++    }
+ }
+ 
+ #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema, PartialEq)]
+diff --git a/src/config/config_test.rs b/src/config/config_test.rs
+index 80ca393..0e200cd 100644
+--- a/src/config/config_test.rs
++++ b/src/config/config_test.rs
+@@ -145,3 +145,143 @@ async fn check_autostart_rules() -> Result<(), Box<dyn Error>> {
+ 
+     Ok(())
+ }
++
++use crate::config::DeviceProfile;
++use crate::input::capability::{Capability, Gamepad, GamepadButton};
++
++const PROFILE_DIR: &str = "./rootfs/usr/share/inputplumber/profiles";
++
++/// Every shipped profile must still parse, and profiles other than the layers
++/// example must keep declaring no layers.
++#[test]
++fn shipped_profiles_parse_without_layers() {
++    let entries = std::fs::read_dir(PROFILE_DIR).expect("profiles directory");
++    let mut count = 0;
++    for entry in entries {
++        let path = entry.expect("profile entry").path();
++        if path.extension().map(|ext| ext != "yaml").unwrap_or(true) {
++            continue;
++        }
++        let profile = DeviceProfile::from_yaml_file(path.display().to_string())
++            .unwrap_or_else(|e| panic!("Failed to parse profile {path:?}: {e}"));
++        if path
++            .file_name()
++            .map(|name| name == "layers_example.yaml")
++            .unwrap_or(false)
++        {
++            continue;
++        }
++        assert!(profile.layers.is_empty(), "Profile {path:?} has layers");
++        count += 1;
++    }
++    assert!(count > 0, "No profiles found in {PROFILE_DIR}");
++}
++
++/// The shipped layers example must parse with the layers the docs describe.
++#[test]
++fn shipped_layers_example_parses() {
++    let path = format!("{PROFILE_DIR}/layers_example.yaml");
++    let profile = DeviceProfile::from_yaml_file(path).expect("parse layers example profile");
++
++    let names: Vec<&str> = profile.layers.iter().map(|l| l.name.as_str()).collect();
++    assert_eq!(names, ["mouse_mode", "shortcuts", "rapid"]);
++
++    // The layer outputs need targets that a gamepad-only composite lacks.
++    let targets = profile.target_devices.unwrap_or_default();
++    for kind in ["gamepad", "keyboard", "mouse"] {
++        assert!(
++            targets.iter().any(|t| t == kind),
++            "shipped example must declare a {kind} target device"
++        );
++    }
++
++    // Both the shortcuts and rapid layers remap South.
++    let south: Capability = Capability::Gamepad(Gamepad::Button(GamepadButton::South));
++    let remaps_south = profile
++        .layers
++        .iter()
++        .filter(|layer| {
++            layer
++                .mapping
++                .iter()
++                .any(|m| Into::<Capability>::into(m.source_event.clone()) == south)
++        })
++        .count();
++    assert_eq!(remaps_south, 2);
++}
++
++/// A profile with `layers:` and `layer:` targets parses, and dumping it
++/// round-trips the layers.
++#[test]
++fn profile_with_layers_parses_and_round_trips() {
++    let yaml = r#"
++version: 1
++kind: DeviceProfile
++name: Layers example
++mapping:
++  - name: Guide opens the guide layer
++    source_event: { gamepad: { button: Guide } }
++    target_events:
++      - layer: { name: guide }
++  - name: QuickAccess latches mouse mode
++    source_event: { gamepad: { button: QuickAccess } }
++    target_events:
++      - layer: { name: mouse_mode, mode: toggle }
++layers:
++  - name: guide
++    mapping:
++      - name: Guide+South -> Esc
++        source_event: { gamepad: { button: South } }
++        target_events:
++          - keyboard: KeyEsc
++"#;
++
++    let profile = DeviceProfile::from_yaml(yaml.to_string()).expect("parse profile with layers");
++    assert_eq!(profile.layers.len(), 1);
++    assert_eq!(profile.layers[0].name, "guide");
++    assert_eq!(profile.layers[0].mapping.len(), 1);
++
++    // Activation targets resolve to the layer capability with a resolved mode.
++    let hold: Capability = profile.mapping[0].target_events[0].clone().into();
++    assert_eq!(
++        hold,
++        Capability::Layer {
++            name: "guide".to_string(),
++            mode: crate::config::capability_map::LayerActivationMode::Hold
++        }
++    );
++    let toggle: Capability = profile.mapping[1].target_events[0].clone().into();
++    assert_eq!(toggle.to_capability_string(), "Layer:mouse_mode:toggle");
++
++    // A profile without layers dumps without the key; one with layers round-trips.
++    let dumped = serde_yaml::to_string(&profile).expect("serialize profile");
++    assert!(dumped.contains("layers:"));
++    let reparsed = DeviceProfile::from_yaml(dumped).expect("re-parse dumped profile");
++    assert_eq!(reparsed.layers.len(), 1);
++    assert_eq!(reparsed.layers[0].mapping[0].name, "Guide+South -> Esc");
++
++    let source: Capability = profile.mapping[0].source_event.clone().into();
++    assert_eq!(
++        source,
++        Capability::Gamepad(Gamepad::Button(GamepadButton::Guide))
++    );
++}
++
++/// Profiles without layers must dump without a `layers:` key so existing
++/// saved profiles stay byte-identical.
++#[test]
++fn profile_without_layers_dumps_without_layers_key() {
++    let yaml = r#"
++version: 1
++kind: DeviceProfile
++name: No layers
++mapping:
++  - name: South -> A
++    source_event: { gamepad: { button: South } }
++    target_events:
++      - gamepad: { button: South }
++"#;
++    let profile = DeviceProfile::from_yaml(yaml.to_string()).expect("parse profile");
++    let dumped = serde_yaml::to_string(&profile).expect("serialize profile");
++    assert!(!dumped.contains("layers:"));
++}
+diff --git a/src/config/mod.rs b/src/config/mod.rs
+index 4a8477d..a2f06c8 100644
+--- a/src/config/mod.rs
++++ b/src/config/mod.rs
+@@ -43,6 +43,9 @@ pub struct DeviceProfile {
+     #[serde(skip_serializing_if = "Option::is_none")]
+     pub description: Option<String>,
+     pub mapping: Vec<ProfileMapping>,
++    /// Named sets of mappings that override the base mappings while active
++    #[serde(default, skip_serializing_if = "Vec::is_empty")]
++    pub layers: Vec<ProfileLayer>,
+ }
+ 
+ impl DeviceProfile {
+@@ -76,6 +79,16 @@ pub struct ProfileMapping {
+     pub target_events: Vec<CapabilityConfig>,
+ }
+ 
++/// A named set of input mappings that overrides the profile's base mappings
++/// while the layer is active. A layer declares no activator of its own;
++/// activation is an ordinary mapping whose target is a `layer` capability.
++#[derive(Debug, Deserialize, Serialize, Clone)]
++#[serde(rename_all = "snake_case")]
++pub struct ProfileLayer {
++    pub name: String,
++    pub mapping: Vec<ProfileMapping>,
++}
++
+ impl ProfileMapping {
+     /// Returns true if the given event matches this profile mapping's source
+     /// event. This method assumes that the event capability already matches, so
+diff --git a/src/input/capability.rs b/src/input/capability.rs
+index c9de417..ee8f292 100644
+--- a/src/input/capability.rs
++++ b/src/input/capability.rs
+@@ -1,6 +1,6 @@
+ use std::{fmt, str::FromStr};
+ 
+-use crate::config::capability_map::CapabilityConfig;
++use crate::config::capability_map::{CapabilityConfig, LayerActivationMode};
+ 
+ use super::event::dbus::Action;
+ 
+@@ -23,6 +23,12 @@ pub enum Capability {
+     Touchscreen(Touch),
+     Gyroscope(Source),
+     Accelerometer(Source),
++    /// Activates or deactivates an input layer. Consumed by the composite
++    /// device and never routed to a target device, like Capability::None.
++    Layer {
++        name: String,
++        mode: LayerActivationMode,
++    },
+ }
+ 
+ impl Capability {
+@@ -89,6 +95,7 @@ impl Capability {
+             },
+             Capability::Gyroscope(source) => format!("Gyroscope:{source}"),
+             Capability::Accelerometer(source) => format!("Accelerometer:{source}"),
++            Capability::Layer { name, mode } => format!("Layer:{name}:{mode}"),
+         }
+     }
+ }
+@@ -107,6 +114,7 @@ impl fmt::Display for Capability {
+             Capability::Touchscreen(_) => write!(f, "Touchscreen"),
+             Capability::Gyroscope(_) => write!(f, "Gyroscope"),
+             Capability::Accelerometer(_) => write!(f, "Accelerometer"),
++            Capability::Layer { .. } => write!(f, "Layer"),
+         }
+     }
+ }
+@@ -147,6 +155,22 @@ impl FromStr for Capability {
+             "Accelerometer" => Ok(Capability::Accelerometer(Source::from_str(
+                 parts.join(":").as_str(),
+             )?)),
++            "Layer" => {
++                // Layer:<name> or Layer:<name>:<mode>; layer names may not
++                // contain ':'.
++                let rest = parts.join(":");
++                let (name, mode) = match rest.rsplit_once(':') {
++                    Some((name, mode)) => (name, LayerActivationMode::from_str(mode)?),
++                    None => (rest.as_str(), LayerActivationMode::default()),
++                };
++                if name.is_empty() {
++                    return Err(());
++                }
++                Ok(Capability::Layer {
++                    name: name.to_string(),
++                    mode,
++                })
++            }
+             _ => Err(()),
+         }
+     }
+@@ -162,6 +186,14 @@ impl TryFrom<String> for Capability {
+ 
+ impl From<CapabilityConfig> for Capability {
+     fn from(value: CapabilityConfig) -> Self {
++        // Layer (target-only)
++        if let Some(layer) = value.layer.as_ref() {
++            return Capability::Layer {
++                name: layer.name.clone(),
++                mode: layer.mode.clone().unwrap_or_default(),
++            };
++        }
++
+         // Gamepad
+         if let Some(gamepad) = value.gamepad.as_ref() {
+             // Axis
+diff --git a/src/input/composite_device/layers.rs b/src/input/composite_device/layers.rs
+new file mode 100644
+index 0000000..0548e60
+--- /dev/null
++++ b/src/input/composite_device/layers.rs
+@@ -0,0 +1,360 @@
++use std::collections::HashMap;
++
++use crate::{
++    config::{capability_map::LayerActivationMode, DeviceProfile, ProfileMapping},
++    input::{
++        capability::Capability,
++        event::{native::NativeEvent, value::InputValue},
++    },
++};
++
++use super::index_mappings_by_source;
++
++/// Guard against pathological configs and runaway DBus clients.
++pub(crate) const MAX_ACTIVE_LAYERS: usize = 8;
++
++/// A layer currently on the stack.
++#[derive(Debug, Clone)]
++struct ActiveLayer {
++    name: String,
++    /// How the layer was activated. Decides release handling and depth-cap
++    /// eviction.
++    mode: LayerActivationMode,
++}
++
++/// Owns all input layer state for a [super::CompositeDevice]: the layer lookup
++/// tables from the loaded profile, the stack of active layers, and the inputs
++/// those layers produced. Every layer decision lives here; the composite device
++/// only applies the results. Layer state changes return the release events they
++/// oblige the caller to emit, in emission order (last output first).
++#[derive(Debug, Default)]
++pub struct LayerState {
++    /// Layer name -> map of source capability -> that layer's mappings.
++    config_maps: HashMap<String, HashMap<Capability, Vec<ProfileMapping>>>,
++    /// The active layers as a stack: bottom (activated first) to top (activated
++    /// last). Precedence for a source capability is top-down.
++    active_layers: Vec<ActiveLayer>,
++    /// Source capability -> the activations it currently holds down. A source
++    /// can drive more than one activation.
++    pressed_activators: HashMap<Capability, Vec<(String, LayerActivationMode)>>,
++    /// (source capability, layer) -> target capabilities that layer emitted for
++    /// that source, so they can be released if the layer leaves the stack while
++    /// the source is still held. Base-profile translations are deliberately not
++    /// tracked here.
++    active_inputs: HashMap<(Capability, String), Vec<Capability>>,
++}
++
++impl LayerState {
++    /// Rebuild all layer state from the given profile, resetting the stack.
++    /// Invalid config is warned about and skipped, never fatal.
++    pub fn load_profile(&mut self, profile: Option<&DeviceProfile>) {
++        self.config_maps.clear();
++        self.active_layers.clear();
++        self.pressed_activators.clear();
++        self.active_inputs.clear();
++
++        let Some(profile) = profile else {
++            return;
++        };
++
++        // Index each layer's mappings by source capability.
++        let mut names: Vec<&str> = Vec::new();
++        for layer in profile.layers.iter() {
++            if layer.name.is_empty() {
++                log::warn!("Skipping layer in profile with an empty name");
++                continue;
++            }
++            if names.contains(&layer.name.as_str()) {
++                log::warn!("Skipping duplicate layer `{}` in profile", layer.name);
++                continue;
++            }
++            names.push(layer.name.as_str());
++            self.config_maps
++                .insert(layer.name.clone(), index_mappings_by_source(&layer.mapping));
++        }
++
++        // Check every activation the profile's base mappings declare.
++        let mut modes: HashMap<&str, LayerActivationMode> = HashMap::new();
++        for mapping in profile.mapping.iter() {
++            let source_cap: Capability = mapping.source_event.clone().into();
++            for target in mapping.target_events.iter() {
++                let Some(layer) = target.layer.as_ref() else {
++                    continue;
++                };
++                if !self.config_maps.contains_key(&layer.name) {
++                    log::warn!(
++                        "Mapping `{}` activates unknown layer `{}`, ignoring activation",
++                        mapping.name,
++                        layer.name
++                    );
++                    continue;
++                }
++
++                // A layer activated with two different modes is ambiguous.
++                let mode = layer.mode.clone().unwrap_or_default();
++                match modes.get(layer.name.as_str()) {
++                    Some(existing) if *existing != mode => log::warn!(
++                        "Layer `{}` is activated with conflicting modes by mapping `{}`",
++                        layer.name,
++                        mapping.name
++                    ),
++                    None => {
++                        modes.insert(layer.name.as_str(), mode);
++                    }
++                    _ => {}
++                }
++
++                // While a layer is active its mapping wins, which hides the
++                // activation mapping for that source.
++                if self
++                    .config_maps
++                    .values()
++                    .any(|config_map| config_map.contains_key(&source_cap))
++                {
++                    log::warn!(
++                        "Layer `{}` remaps {}, which activates a layer. That activation is hidden while the layer is active.",
++                        layer.name,
++                        source_cap.to_capability_string()
++                    );
++                }
++            }
++        }
++    }
++
++    /// The active stack, bottom (first activated) to top (last activated).
++    #[cfg(test)]
++    pub fn active_names(&self) -> Vec<String> {
++        self.active_layers
++            .iter()
++            .map(|layer| layer.name.clone())
++            .collect()
++    }
++
++    /// Push a layer onto the stack by name.
++    #[cfg(test)]
++    pub fn activate(&mut self, name: &str) -> Vec<NativeEvent> {
++        self.push_layer(name, &LayerActivationMode::Hold)
++    }
++
++    /// Remove a layer from wherever it sits in the stack.
++    #[cfg(test)]
++    pub fn deactivate(&mut self, name: &str) -> Vec<NativeEvent> {
++        self.pop_layer(name)
++    }
++
++    /// Apply an activation produced by a mapping. Only presses reach here;
++    /// releases are handled by [LayerState::release_activation].
++    pub fn apply_activation(
++        &mut self,
++        source: &Capability,
++        name: &str,
++        mode: &LayerActivationMode,
++        pressed: bool,
++    ) -> Vec<NativeEvent> {
++        // A release never activates a layer, it ends a held activation. Handling
++        // it here keeps the outcome correct whichever entry point sees the
++        // release event first, and idempotent when both do.
++        if !pressed {
++            return self.release_activation(source);
++        }
++
++        if !self.config_maps.contains_key(name) {
++            log::warn!("Ignoring activation of unknown layer `{name}`");
++            return Vec::new();
++        }
++
++        // An activator that is already held down means this press repeats.
++        let repeated = self
++            .pressed_activators
++            .get(source)
++            .is_some_and(|activations| !activations.is_empty());
++        self.remember_activator(source, name, mode);
++
++        match mode {
++            LayerActivationMode::Hold => self.push_layer(name, mode),
++            // Repeats of a held activator must not toggle the layer back off.
++            LayerActivationMode::Toggle if repeated => Vec::new(),
++            LayerActivationMode::Toggle => {
++                if self.active_layers.iter().any(|layer| layer.name == name) {
++                    self.pop_layer(name)
++                } else {
++                    self.push_layer(name, mode)
++                }
++            }
++        }
++    }
++
++    /// Forget a held activator and, for a hold activation, pop the layer. This
++    /// is the single place a held activation is released, so it also covers the
++    /// case where an active layer shadows the activation mapping.
++    pub fn release_activation(&mut self, source: &Capability) -> Vec<NativeEvent> {
++        let Some(activations) = self.pressed_activators.remove(source) else {
++            return Vec::new();
++        };
++
++        let mut releases = Vec::new();
++        // Undo the most recent activation first, matching emission order.
++        for (name, mode) in activations.into_iter().rev() {
++            if mode == LayerActivationMode::Hold {
++                releases.extend(self.pop_layer(&name));
++            }
++        }
++        releases
++    }
++
++    /// Returns the winning layer for a source capability: the top-most active
++    /// layer that maps it, and that layer's mappings for it.
++    pub fn mapping_for(&self, source_cap: &Capability) -> Option<(&str, &[ProfileMapping])> {
++        for layer in self.active_layers.iter().rev() {
++            let Some(config_map) = self.config_maps.get(&layer.name) else {
++                continue;
++            };
++            if let Some(mappings) = config_map.get(source_cap) {
++                return Some((layer.name.as_str(), mappings));
++            }
++        }
++        None
++    }
++
++    /// Track what the winning layer emitted for a source event, so removing that
++    /// layer can release it while the source is still held. A release means the
++    /// output already went out through the normal event path.
++    pub fn record_outputs(
++        &mut self,
++        source: &Capability,
++        layer: Option<&str>,
++        pressed: bool,
++        events: &[NativeEvent],
++    ) {
++        if !pressed {
++            self.active_inputs
++                .retain(|(input_source, _), _| input_source != source);
++            return;
++        }
++
++        let Some(layer) = layer else {
++            return;
++        };
++
++        // Layer activations are consumed by the composite device, they can never
++        // need a release.
++        let produced: Vec<Capability> = events
++            .iter()
++            .map(|event| event.as_capability())
++            .filter(|cap| !matches!(cap, Capability::Layer { .. }))
++            .collect();
++        if produced.is_empty() {
++            return;
++        }
++
++        self.active_inputs
++            .insert((source.clone(), layer.to_string()), produced);
++    }
++
++    /// Remove a layer from anywhere in the stack and return the outputs it must
++    /// release. Outputs produced by other layers or the base profile are left
++    /// alone.
++    fn pop_layer(&mut self, name: &str) -> Vec<NativeEvent> {
++        let Some(index) = self
++            .active_layers
++            .iter()
++            .position(|layer| layer.name == name)
++        else {
++            return Vec::new();
++        };
++        self.active_layers.remove(index);
++        self.release_outputs(name)
++    }
++
++    /// Pop every active layer from the top of the stack down, returning one
++    /// combined set of releases so the caller emits a single signal.
++    pub fn clear(&mut self) -> Vec<NativeEvent> {
++        let mut releases = Vec::new();
++        while let Some(layer) = self.active_layers.last() {
++            let name = layer.name.clone();
++            releases.extend(self.pop_layer(&name));
++        }
++        releases
++    }
++
++    /// Append a layer to the top of the stack. A layer already in the stack is
++    /// moved to the top and its recorded mode is replaced.
++    fn push_layer(&mut self, name: &str, mode: &LayerActivationMode) -> Vec<NativeEvent> {
++        if let Some(index) = self
++            .active_layers
++            .iter()
++            .position(|layer| layer.name == name)
++        {
++            self.active_layers.remove(index);
++            self.active_layers.push(ActiveLayer {
++                name: name.to_string(),
++                mode: mode.clone(),
++            });
++            return Vec::new();
++        }
++
++        let mut releases = Vec::new();
++
++        // Enforce the depth cap: evict the bottom-most hold layer, since toggle
++        // layers were activated deliberately.
++        if self.active_layers.len() >= MAX_ACTIVE_LAYERS {
++            let Some(evicted) = self
++                .active_layers
++                .iter()
++                .find(|layer| layer.mode == LayerActivationMode::Hold)
++                .map(|layer| layer.name.clone())
++            else {
++                log::warn!(
++                    "Refusing to activate layer `{name}`: all {MAX_ACTIVE_LAYERS} active layers are toggle layers"
++                );
++                return releases;
++            };
++            log::warn!(
++                "Layer stack is full ({MAX_ACTIVE_LAYERS}), evicting bottom-most hold layer `{evicted}` to activate `{name}`"
++            );
++            releases.extend(self.pop_layer(&evicted));
++        }
++
++        self.active_layers.push(ActiveLayer {
++            name: name.to_string(),
++            mode: mode.clone(),
++        });
++        releases
++    }
++
++    /// Remember that the given input is holding an activation down.
++    fn remember_activator(&mut self, source: &Capability, name: &str, mode: &LayerActivationMode) {
++        let activations = self.pressed_activators.entry(source.clone()).or_default();
++        if !activations
++            .iter()
++            .any(|(layer, m)| layer == name && m == mode)
++        {
++            activations.push((name.to_string(), mode.clone()));
++        }
++    }
++
++    /// Build the release events for everything `name` produced while held.
++    fn release_outputs(&mut self, name: &str) -> Vec<NativeEvent> {
++        let held: Vec<(Capability, Vec<Capability>)> = self
++            .active_inputs
++            .iter()
++            .filter(|((_, layer), _)| layer == name)
++            .map(|((source, _), produced)| (source.clone(), produced.clone()))
++            .collect();
++
++        let mut releases = Vec::new();
++        for (source_cap, produced) in held {
++            self.active_inputs
++                .remove(&(source_cap.clone(), name.to_string()));
++            // Release in reverse emission order.
++            for target_cap in produced.iter().rev() {
++                releases.push(NativeEvent::new_translated(
++                    source_cap.clone(),
++                    target_cap.clone(),
++                    InputValue::Bool(false),
++                ));
++            }
++        }
++        releases
++    }
++}
+diff --git a/src/input/composite_device/layers_test.rs b/src/input/composite_device/layers_test.rs
+new file mode 100644
+index 0000000..6841b53
+--- /dev/null
++++ b/src/input/composite_device/layers_test.rs
+@@ -0,0 +1,327 @@
++#[cfg(test)]
++mod tests {
++    use crate::{
++        config::{capability_map::LayerActivationMode, DeviceProfile},
++        input::{
++            capability::{Capability, Gamepad, GamepadButton, Keyboard},
++            composite_device::layers::{LayerState, MAX_ACTIVE_LAYERS},
++            event::{native::NativeEvent, value::InputValue},
++        },
++    };
++
++    fn profile(yaml: &str) -> DeviceProfile {
++        DeviceProfile::from_yaml(yaml.to_string()).expect("parse profile")
++    }
++
++    fn button(name: &str) -> Capability {
++        let button = match name {
++            "Guide" => GamepadButton::Guide,
++            "QuickAccess" => GamepadButton::QuickAccess,
++            "South" => GamepadButton::South,
++            _ => panic!("unknown button {name}"),
++        };
++        Capability::Gamepad(Gamepad::Button(button))
++    }
++
++    fn key(name: &str) -> Capability {
++        let key = match name {
++            "Esc" => Keyboard::KeyEsc,
++            "Space" => Keyboard::KeySpace,
++            "Shift" => Keyboard::KeyLeftShift,
++            _ => panic!("unknown key {name}"),
++        };
++        Capability::Keyboard(key)
++    }
++
++    /// A pressed event a layer produced for a source capability.
++    fn output(source: &Capability, target: &str) -> NativeEvent {
++        NativeEvent::new_translated(source.clone(), key(target), InputValue::Bool(true))
++    }
++
++    const TEST_PROFILE: &str = r#"
++version: 1
++kind: DeviceProfile
++name: Layer state test
++mapping:
++  - name: Guide opens guide
++    source_event: { gamepad: { button: Guide } }
++    target_events:
++      - layer: { name: guide }
++  - name: QuickAccess latches mouse_mode
++    source_event: { gamepad: { button: QuickAccess } }
++    target_events:
++      - layer: { name: mouse_mode, mode: toggle }
++layers:
++  - name: guide
++    mapping:
++      - name: South -> Esc
++        source_event: { gamepad: { button: South } }
++        target_events:
++          - keyboard: KeyEsc
++  - name: rapid
++    mapping:
++      - name: South -> Space
++        source_event: { gamepad: { button: South } }
++        target_events:
++          - keyboard: KeySpace
++  - name: mouse_mode
++    mapping:
++      - name: South -> Shift
++        source_event: { gamepad: { button: South } }
++        target_events:
++          - keyboard: KeyLeftShift
++"#;
++
++    fn state() -> LayerState {
++        let mut state = LayerState::default();
++        state.load_profile(Some(&profile(TEST_PROFILE)));
++        state
++    }
++
++    /// Extra hold layers to fill the stack, all remapping South.
++    fn extra_layers(yaml: &str, count: usize) -> String {
++        let mut yaml = String::from(yaml);
++        for index in 1..=count {
++            yaml.push_str(&format!(
++                "  - name: extra{index}\n    mapping:\n      - name: m{index}\n        source_event: \
++                 {{ gamepad: {{ button: South }} }}\n        target_events:\n          - keyboard: KeyEsc\n"
++            ));
++        }
++        yaml
++    }
++
++    #[test]
++    fn hold_activation_pushes_and_pops() {
++        let mut state = state();
++        let guide = button("Guide");
++
++        state.apply_activation(&guide, "guide", &LayerActivationMode::Hold, true);
++        assert_eq!(state.active_names(), ["guide"]);
++
++        // Releasing the activator pops the layer again.
++        state.release_activation(&guide);
++        assert!(state.active_names().is_empty());
++
++        // Releasing an untracked input changes nothing.
++        let releases = state.release_activation(&guide);
++        assert!(releases.is_empty());
++        assert!(state.active_names().is_empty());
++    }
++
++    #[test]
++    fn toggle_activation_latches_across_release() {
++        let mut state = state();
++        let quick_access = button("QuickAccess");
++        let mode = LayerActivationMode::Toggle;
++
++        state.apply_activation(&quick_access, "mouse_mode", &mode, true);
++        assert_eq!(state.active_names(), ["mouse_mode"]);
++
++        // Auto-repeat while the button is still held must not toggle it back off.
++        state.apply_activation(&quick_access, "mouse_mode", &mode, true);
++        assert_eq!(state.active_names(), ["mouse_mode"]);
++
++        // The layer survives the release of the activating input.
++        let releases = state.release_activation(&quick_access);
++        assert!(releases.is_empty());
++        assert_eq!(state.active_names(), ["mouse_mode"]);
++
++        // The next press releases it.
++        state.apply_activation(&quick_access, "mouse_mode", &mode, true);
++        assert!(state.active_names().is_empty());
++    }
++
++    #[test]
++    fn top_most_active_layer_wins_per_source() {
++        let mut state = state();
++        let guide = button("Guide");
++        let rapid = button("South");
++
++        state.apply_activation(&guide, "guide", &LayerActivationMode::Hold, true);
++        assert_eq!(state.mapping_for(&rapid).unwrap().0, "guide");
++
++        // Activating `rapid` later shadows `guide` for the shared source.
++        state.activate("rapid");
++        assert_eq!(state.mapping_for(&rapid).unwrap().0, "rapid");
++
++        // Removing the top layer uncovers the layer underneath.
++        state.deactivate("rapid");
++        assert_eq!(state.mapping_for(&rapid).unwrap().0, "guide");
++
++        // Sources no layer maps have no winner.
++        assert!(state.mapping_for(&button("QuickAccess")).is_none());
++    }
++
++    #[test]
++    fn teardown_releases_held_outputs_in_reverse_order() {
++        let mut state = state();
++        let guide = button("Guide");
++        let south = button("South");
++
++        state.apply_activation(&guide, "guide", &LayerActivationMode::Hold, true);
++        state.record_outputs(
++            &south,
++            Some("guide"),
++            true,
++            &[output(&south, "Esc"), output(&south, "Shift")],
++        );
++
++        let releases = state.release_activation(&guide);
++        assert_eq!(releases.len(), 2);
++        for event in &releases {
++            assert!(!event.pressed());
++        }
++        assert_eq!(releases[0].as_capability(), key("Shift"));
++        assert_eq!(releases[1].as_capability(), key("Esc"));
++
++        // The recorded outputs are gone, so a second teardown releases nothing.
++        assert!(state.clear().is_empty());
++    }
++
++    #[test]
++    fn teardown_only_releases_outputs_of_the_popped_layer() {
++        let mut state = state();
++        let south = button("South");
++
++        state.activate("guide");
++        state.activate("rapid");
++        state.record_outputs(&south, Some("rapid"), true, &[output(&south, "Space")]);
++
++        // Popping the lower layer must not release what the upper layer holds.
++        let releases = state.deactivate("guide");
++        assert!(releases.is_empty());
++        assert_eq!(state.mapping_for(&south).unwrap().0, "rapid");
++    }
++
++    #[test]
++    fn depth_cap_evicts_bottom_most_hold_layer() {
++        let mut state = state();
++        state.load_profile(Some(&profile(&extra_layers(TEST_PROFILE, 8))));
++
++        for index in 1..=8 {
++            state.activate(&format!("extra{index}"));
++        }
++        assert_eq!(state.active_names().len(), MAX_ACTIVE_LAYERS);
++        assert_eq!(state.active_names()[0], "extra1");
++
++        // The layer being evicted holds an output, which must be released.
++        let south = button("South");
++        state.record_outputs(&south, Some("extra1"), true, &[output(&south, "Esc")]);
++
++        state.activate("guide");
++        assert_eq!(state.active_names().len(), MAX_ACTIVE_LAYERS);
++        assert_eq!(state.active_names()[0], "extra2");
++        assert_eq!(state.active_names().last().unwrap(), "guide");
++    }
++
++    /// Evicting a layer must release what it produced while held, otherwise the
++    /// target device is left with an input stuck down.
++    #[test]
++    fn evicting_a_layer_releases_its_held_outputs() {
++        let mut state = state();
++        state.load_profile(Some(&profile(&extra_layers(TEST_PROFILE, 8))));
++
++        for index in 1..=8 {
++            state.activate(&format!("extra{index}"));
++        }
++
++        let south = button("South");
++        state.record_outputs(&south, Some("extra1"), true, &[output(&south, "Esc")]);
++
++        let releases = state.activate("guide");
++        assert_eq!(releases.len(), 1);
++        assert!(!releases[0].pressed());
++        assert_eq!(releases[0].as_capability(), key("Esc"));
++    }
++
++    /// A single input can activate more than one layer, and releasing it must
++    /// undo all of the hold activations it made.
++    #[test]
++    fn releasing_a_source_undoes_every_activation_it_holds() {
++        let mut state = state();
++        let guide = button("Guide");
++        let mode = LayerActivationMode::Hold;
++
++        state.apply_activation(&guide, "guide", &mode, true);
++        state.apply_activation(&guide, "rapid", &mode, true);
++        assert_eq!(state.active_names(), ["guide", "rapid"]);
++
++        state.release_activation(&guide);
++        assert!(state.active_names().is_empty());
++    }
++
++    /// The release of a held activation reaches the state machine twice: the
++    /// guard in `process_event`, then the same event through the activation
++    /// path. The layer must stay popped.
++    #[test]
++    fn release_does_not_reactivate_a_popped_hold_layer() {
++        let mut state = state();
++        let guide = button("Guide");
++        let mode = LayerActivationMode::Hold;
++
++        state.apply_activation(&guide, "mouse_mode", &mode, true);
++        assert_eq!(state.active_names(), ["mouse_mode"]);
++
++        state.release_activation(&guide);
++
++        let releases = state.apply_activation(&guide, "mouse_mode", &mode, false);
++        assert!(releases.is_empty());
++        assert!(state.active_names().is_empty());
++    }
++
++    /// A hold layer still pops when only the activation path sees the release,
++    /// e.g. when an active layer shadows the activation mapping.
++    #[test]
++    fn release_through_activation_path_pops_hold_layer() {
++        let mut state = state();
++        let guide = button("Guide");
++        let mode = LayerActivationMode::Hold;
++
++        state.apply_activation(&guide, "mouse_mode", &mode, true);
++        state.apply_activation(&guide, "mouse_mode", &mode, false);
++        assert!(state.active_names().is_empty());
++    }
++
++    /// A release must never flip a latched toggle layer back off.
++    #[test]
++    fn release_does_not_toggle_a_latched_layer_off() {
++        let mut state = state();
++        let quick_access = button("QuickAccess");
++        let mode = LayerActivationMode::Toggle;
++
++        state.apply_activation(&quick_access, "mouse_mode", &mode, true);
++        assert_eq!(state.active_names(), ["mouse_mode"]);
++
++        state.apply_activation(&quick_access, "mouse_mode", &mode, false);
++        assert_eq!(state.active_names(), ["mouse_mode"]);
++
++        state.apply_activation(&quick_access, "mouse_mode", &mode, true);
++        assert!(state.active_names().is_empty());
++    }
++
++    #[test]
++    fn unknown_layers_are_rejected() {
++        let mut state = state();
++
++        // An activation of an unknown layer from a mapping is a no-op.
++        let guide = button("Guide");
++        let releases = state.apply_activation(&guide, "nope", &LayerActivationMode::Hold, true);
++        assert!(releases.is_empty());
++        assert!(state.active_names().is_empty());
++    }
++
++    #[test]
++    fn clear_pops_every_layer_and_releases_outputs() {
++        let mut state = state();
++        let south = button("South");
++
++        state.activate("guide");
++        state.activate("rapid");
++        state.record_outputs(&south, Some("rapid"), true, &[output(&south, "Space")]);
++
++        let releases = state.clear();
++        assert_eq!(releases.len(), 1);
++        assert!(!releases[0].pressed());
++        assert!(state.active_names().is_empty());
++    }
++}
+diff --git a/src/input/composite_device/mod.rs b/src/input/composite_device/mod.rs
+index 3cca2ba..f7bf970 100644
+--- a/src/input/composite_device/mod.rs
++++ b/src/input/composite_device/mod.rs
+@@ -1,5 +1,7 @@
+ pub mod client;
+ pub mod command;
++pub mod layers;
++pub mod layers_test;
+ pub mod targets;
+ 
+ use std::{
+@@ -18,8 +20,9 @@ use zbus::{object_server::Interface, Connection};
+ 
+ use crate::{
+     config::{
+-        capability_map::CapabilityMapConfig, path::get_profiles_path, CompositeDeviceConfig,
+-        DeviceProfile, LoadError, ProfileMapping,
++        capability_map::{CapabilityMapConfig, LayerActivationMode},
++        path::get_profiles_path,
++        CompositeDeviceConfig, DeviceProfile, LoadError, ProfileMapping,
+     },
+     dbus::interface::{
+         composite_device::CompositeDeviceInterface, force_feedback::ForceFeedbackInterface,
+@@ -101,6 +104,9 @@ pub struct CompositeDevice {
+     /// Map of profile source events to translate to one or more profile mapping
+     /// configs that define how the source event should be translated.
+     device_profile_config_map: HashMap<Capability, Vec<ProfileMapping>>,
++    /// State of the profile's input layers: what is active, what they produced,
++    /// and what removing a layer obliges this device to undo.
++    layers: layers::LayerState,
+     /// List of input capabilities that can be translated by the capability map
+     translatable_capabilities: Vec<Capability>,
+     /// List of currently "pressed" actions used to translate multiple input
+@@ -200,6 +206,7 @@ impl CompositeDevice {
+             device_profile: None,
+             device_profile_path: None,
+             device_profile_config_map: HashMap::new(),
++            layers: layers::LayerState::default(),
+             translatable_capabilities: Vec::new(),
+             translatable_active_inputs: Vec::new(),
+             translated_recent_events: HashSet::new(),
+@@ -566,6 +573,10 @@ impl CompositeDevice {
+                             self.dbus.path()
+                         );
+                         self.targets.handle_suspend().await;
++
++                        // Targets are being torn down, so drop the layer stack
++                        // without releasing inputs through them.
++                        self.layers.clear();
+                         if let Err(e) = sender.send(()).await {
+                             log::error!("Failed to send suspend response: {e:?}");
+                         }
+@@ -770,6 +781,14 @@ impl CompositeDevice {
+             return Ok(());
+         }
+ 
++        // The release of a held layer activation may no longer translate to a
++        // `layer` target, because an active layer can shadow the activation
++        // mapping. Remove the layer from the stack here instead.
++        if !event.pressed() {
++            let releases = self.layers.release_activation(&cap);
++            self.apply_layer_releases(releases).await?;
++        }
++
+         // Check if the event needs to be translated based on the
+         // capability map. Translated events will be re-enqueued, so this will
+         // return early.
+@@ -958,12 +977,20 @@ impl CompositeDevice {
+         let mut sleep_time = 0;
+ 
+         // Translate the event using the device profile.
++        let source_cap = event.as_capability();
+         let mut events = if self.device_profile.is_some() {
+-            self.translate_event(&event)
+-                .await?
++            let (events, layer) = self.translate_event(&event);
++            let events: Vec<NativeEvent> = events
+                 .into_iter()
+                 .filter_map(|event| self.filter_event(event))
+-                .collect()
++                .collect();
++
++            // Track what an active layer produced, so removing that layer can
++            // release it later while the input is still held.
++            self.layers
++                .record_outputs(&source_cap, layer.as_deref(), is_pressed, &events);
++
++            events
+         } else {
+             vec![event]
+         };
+@@ -988,6 +1015,13 @@ impl CompositeDevice {
+ 
+             // Track what is currently active so we can ignore extra events.
+             match cap {
++                // Layer activations are applied here and never reach a target
++                // device. This must come before the chord handling below, which
++                // re-enters at write_event and would skip layer handling.
++                Capability::Layer { name, mode } => {
++                    self.apply_layer_activation(&event, &name, &mode).await?;
++                    continue;
++                }
+                 Capability::None
+                 | Capability::Touchpad(_)
+                 | Capability::NotImplemented
+@@ -1122,6 +1156,12 @@ impl CompositeDevice {
+     async fn write_event(&self, event: NativeEvent) -> Result<(), Box<dyn Error>> {
+         let cap = event.as_capability();
+ 
++        // Layer activations are consumed by the composite device, they never
++        // reach a target device.
++        if matches!(cap, Capability::Layer { .. }) {
++            return Ok(());
++        }
++
+         // If this event implements the DBus capability, send the event to DBus devices
+         if matches!(cap, Capability::DBus(_)) {
+             self.targets.write_dbus_event(event).await;
+@@ -1489,102 +1529,137 @@ impl CompositeDevice {
+         Ok(())
+     }
+ 
+-    /// Translates the given event into a Vec of events based on the currently loaded
+-    /// [DeviceProfile]
+-    async fn translate_event(
++    /// Translates the given event into a Vec of events based on the currently
++    /// loaded [DeviceProfile] and any active input layers. Returns the translated
++    /// events and the name of the layer whose mappings produced them, if any.
++    fn translate_event(&self, event: &NativeEvent) -> (Vec<NativeEvent>, Option<String>) {
++        let source_cap = event.as_capability();
++
++        // Active layers win, searched top-down (most recently activated first);
++        // otherwise fall back to the base profile. An active layer can shadow an
++        // activation mapping, which the release guard in process_event handles.
++        let matched = self
++            .layers
++            .mapping_for(&source_cap)
++            .map(|(layer, mappings)| (Some(layer), mappings))
++            .or_else(|| {
++                self.device_profile_config_map
++                    .get(&source_cap)
++                    .map(|mappings| (None, mappings.as_slice()))
++            });
++
++        // No mapping found, return the original un-translated event.
++        let Some((layer, mappings)) = matched else {
++            log::trace!("No translation mapping found for event: {:?}", source_cap);
++            return (vec![event.clone()], None);
++        };
++        let layer = layer.map(|name| name.to_string());
++
++        let events = self.translate_with_mappings(event, &source_cap, mappings);
++        if events.is_empty() {
++            if let Some(layer) = layer.as_ref() {
++                log::warn!(
++                    "Layer `{layer}` matched {}, but produced no events",
++                    source_cap.to_capability_string()
++                );
++            }
++        }
++
++        (events, layer)
++    }
++    /// Translates the given event using the given profile mappings.
++    fn translate_with_mappings(
+         &self,
+         event: &NativeEvent,
+-    ) -> Result<Vec<NativeEvent>, Box<dyn Error>> {
+-        // Lookup the profile mapping associated with this event capability. If
+-        // none is found, return the original un-translated event.
+-        let source_cap = event.as_capability();
+-        if let Some(mappings) = self.device_profile_config_map.get(&source_cap) {
+-            // Find which mappings in the device profile matches this source event
+-            let matched_mappings = mappings
+-                .iter()
+-                .filter(|mapping| mapping.source_matches_properties(event));
++        source_cap: &Capability,
++        mappings: &[ProfileMapping],
++    ) -> Vec<NativeEvent> {
++        // Find which mappings in the device profile matches this source event
++        let matched_mappings = mappings
++            .iter()
++            .filter(|mapping| mapping.source_matches_properties(event));
+ 
+-            let mut events = Vec::new();
+-            // Based on all found mappings, translate the event
+-            for mapping in matched_mappings {
+-                log::trace!(
+-                    "Found translation for event {:?} in profile mapping: {}",
++        let mut events = Vec::new();
++        // Based on all found mappings, translate the event
++        for mapping in matched_mappings {
++            log::trace!(
++                "Found translation for event {:?} in profile mapping: {}",
++                source_cap,
++                mapping.name
++            );
++
++            // Translate the event into the defined target event(s)
++            for target_event in mapping.target_events.iter() {
++                // TODO: We can cache this conversion for faster translation
++                let target_cap: Capability = target_event.clone().into();
++                let result = event.get_value().translate(
+                     source_cap,
+-                    mapping.name
++                    &mapping.source_event,
++                    &target_cap,
++                    target_event,
+                 );
+-
+-                // Translate the event into the defined target event(s)
+-                for target_event in mapping.target_events.iter() {
+-                    // TODO: We can cache this conversion for faster translation
+-                    let target_cap: Capability = target_event.clone().into();
+-                    let result = event.get_value().translate(
+-                        &source_cap,
+-                        &mapping.source_event,
+-                        &target_cap,
+-                        target_event,
+-                    );
+-                    let value = match result {
+-                        Ok(v) => v,
+-                        Err(err) => {
+-                            match err {
+-                                TranslationError::NotImplemented => {
+-                                    log::warn!(
+-                                        "Translation not implemented for profile mapping '{}': {:?} -> {:?}",
+-                                        mapping.name,
+-                                        source_cap,
+-                                        target_cap,
+-                                    );
+-                                    continue;
+-                                }
+-                                TranslationError::ImpossibleTranslation(msg) => {
+-                                    log::warn!(
+-                                        "Impossible translation for profile mapping '{}': {msg}",
+-                                        mapping.name
+-                                    );
+-                                    continue;
+-                                }
+-                                TranslationError::InvalidSourceConfig(msg) => {
+-                                    log::warn!("Invalid source event config in profile mapping '{}': {msg}", mapping.name);
+-                                    continue;
+-                                }
+-                                TranslationError::InvalidTargetConfig(msg) => {
+-                                    log::warn!("Invalid target event config in profile mapping '{}': {msg}", mapping.name);
+-                                    continue;
+-                                }
+-                            }
++                let value = match result {
++                    Ok(v) => v,
++                    Err(err) => match err {
++                        TranslationError::NotImplemented => {
++                            log::warn!(
++                                    "Translation not implemented for profile mapping '{}': {:?} -> {:?}",
++                                    mapping.name,
++                                    source_cap,
++                                    target_cap,
++                                );
++                            continue;
+                         }
+-                    };
+-                    if matches!(value, InputValue::None) {
+-                        continue;
+-                    }
+-
+-                    // Some event mappings like relative->button will see only a `1` or `-1` event,
+-                    // so these require emulating a momentary button press.
+-                    if source_cap.is_momentary_translation(&target_cap) {
+-                        let event = NativeEvent::new_translated(
+-                            source_cap.clone(),
+-                            target_cap.clone(),
+-                            InputValue::Bool(true),
+-                        );
+-                        events.push(event);
+-                        let event = NativeEvent::new_translated(
+-                            source_cap.clone(),
+-                            target_cap,
+-                            InputValue::Bool(false),
+-                        );
+-                        events.push(event);
+-                        continue;
+-                    }
++                        TranslationError::ImpossibleTranslation(msg) => {
++                            log::warn!(
++                                "Impossible translation for profile mapping '{}': {msg}",
++                                mapping.name
++                            );
++                            continue;
++                        }
++                        TranslationError::InvalidSourceConfig(msg) => {
++                            log::warn!(
++                                "Invalid source event config in profile mapping '{}': {msg}",
++                                mapping.name
++                            );
++                            continue;
++                        }
++                        TranslationError::InvalidTargetConfig(msg) => {
++                            log::warn!(
++                                "Invalid target event config in profile mapping '{}': {msg}",
++                                mapping.name
++                            );
++                            continue;
++                        }
++                    },
++                };
++                if matches!(value, InputValue::None) {
++                    continue;
++                }
+ 
+-                    let event = NativeEvent::new_translated(source_cap.clone(), target_cap, value);
++                // Some event mappings like relative->button will see only a `1` or `-1` event,
++                // so these require emulating a momentary button press.
++                if source_cap.is_momentary_translation(&target_cap) {
++                    let event = NativeEvent::new_translated(
++                        source_cap.clone(),
++                        target_cap.clone(),
++                        InputValue::Bool(true),
++                    );
++                    events.push(event);
++                    let event = NativeEvent::new_translated(
++                        source_cap.clone(),
++                        target_cap,
++                        InputValue::Bool(false),
++                    );
+                     events.push(event);
++                    continue;
+                 }
++
++                let event = NativeEvent::new_translated(source_cap.clone(), target_cap, value);
++                events.push(event);
+             }
+-            return Ok(events);
+         }
+-
+-        log::trace!("No translation mapping found for event: {:?}", source_cap);
+-        Ok(vec![event.clone()])
++        events
+     }
+ 
+     /// Executed whenever a source device is added to this [CompositeDevice].
+@@ -1690,6 +1765,11 @@ impl CompositeDevice {
+         // Signal to DBus that source devices have changed
+         self.signal_sources_changed().await;
+ 
++        // The source device holding a layer activation may be gone, so clear
++        // the layer stack and release anything a layer produced while held.
++        let releases = self.layers.clear();
++        self.apply_layer_releases(releases).await?;
++
+         // Clear the state of target devices in case the source device was
+         // disconnected in the middle of an input.
+         self.targets.schedule_clear_state();
+@@ -1876,13 +1956,11 @@ impl CompositeDevice {
+         profile: Option<DeviceProfile>,
+         profile_path: Option<String>,
+     ) -> Result<(), Box<dyn Error>> {
+-        // Remove all outdated capability mappings.
+-        log::debug!("Clearing old device profile mappings");
+-        self.device_profile_config_map.clear();
+-
+         // Load the device profile
+         self.device_profile = profile;
+         self.device_profile_path = profile_path;
++        self.layers.load_profile(self.device_profile.as_ref());
++
+         let Some(profile) = self.device_profile.as_ref() else {
+             log::debug!("Unloaded device profile");
+             return Ok(());
+@@ -1893,30 +1971,8 @@ impl CompositeDevice {
+             log::info!("Loading device profile {}", profile.name);
+         }
+ 
+-        // Loop through every mapping in the profile, extract the source and target events,
+-        // and map them into our profile map.
+-        for mapping in profile.mapping.iter() {
+-            log::trace!("Loading mapping from profile: {}", mapping.name);
+-
+-            // Convert the source event configuration in the mapping into a
+-            // capability that can be easily matched on during event translation
+-            let source_event_cap: Capability = mapping.source_event.clone().into();
+-
+-            // Convert the target events configuration into a vector of capabilities
+-            // that can be easily used to create translated events.
+-            let mut target_events_caps = Vec::new();
+-            for cap_config in mapping.target_events.clone() {
+-                let cap: Capability = cap_config.into();
+-                target_events_caps.push(cap);
+-            }
+-
+-            // Insert the translation config for this event
+-            let config_map = self
+-                .device_profile_config_map
+-                .entry(source_event_cap)
+-                .or_default();
+-            config_map.push(mapping.clone());
+-        }
++        // Index every mapping in the profile by its source capability.
++        self.device_profile_config_map = index_mappings_by_source(profile.mapping.as_slice());
+ 
+         // Set the target devices to use if it is defined in the profile
+         if let Some(target_devices) = profile.target_devices.clone() {
+@@ -2140,6 +2196,51 @@ impl CompositeDevice {
+         Ok(false)
+     }
+ 
++    /// Applies a layer activation that a profile mapping produced. Only presses
++    /// reach here, releases are handled in [CompositeDevice::process_event].
++    async fn apply_layer_activation(
++        &mut self,
++        event: &NativeEvent,
++        name: &str,
++        mode: &LayerActivationMode,
++    ) -> Result<(), Box<dyn Error>> {
++        // The input that produced this activation: the pre-translation
++        // capability of a translated event, otherwise the event's own capability.
++        let source = event
++            .get_source_capability()
++            .unwrap_or_else(|| event.as_capability());
++
++        // LayerState makes every decision, the caller only applies the result.
++        let releases = self
++            .layers
++            .apply_activation(&source, name, mode, event.pressed());
++        self.apply_layer_releases(releases).await
++    }
++
++    /// Applies the side effects of a layer state change: release everything the
++    /// removed layers produced while held, and forget those capabilities so
++    /// future presses aren't dropped.
++    async fn apply_layer_releases(
++        &mut self,
++        releases: Vec<NativeEvent>,
++    ) -> Result<(), Box<dyn Error>> {
++        if releases.is_empty() {
++            return Ok(());
++        }
++
++        // Capabilities that are no longer active must be removed, otherwise
++        // `is_new_active_event` drops the next press of the same capability.
++        let caps: Vec<Capability> = releases.iter().map(|event| event.as_capability()).collect();
++
++        // Emit releases through the same delayed path used for intercept
++        // releases, so targets see a valid down/up sequence.
++        self.write_chord_events(releases).await?;
++
++        self.active_inputs.retain(|input| !caps.contains(input));
++
++        Ok(())
++    }
++
+     /// Emit a DBus signal when source devices change
+     async fn signal_sources_changed(&self) {
+         let dbus_path = self.dbus.path().to_string();
+@@ -2252,3 +2353,27 @@ impl CompositeDevice {
+         });
+     }
+ }
++
++/// Index the given profile mappings by the capability of their source event, the
++/// form matched against events during translation.
++fn index_mappings_by_source(
++    mappings: &[ProfileMapping],
++) -> HashMap<Capability, Vec<ProfileMapping>> {
++    let mut config_map: HashMap<Capability, Vec<ProfileMapping>> = HashMap::new();
++    for mapping in mappings {
++        // A `layer` event is target-only, it can never match a source event.
++        if mapping.source_event.layer.is_some() {
++            log::warn!(
++                "Mapping `{}` uses a `layer` source event, but `layer` is a target-only capability",
++                mapping.name
++            );
++            continue;
++        }
++        let source_cap: Capability = mapping.source_event.clone().into();
++        config_map
++            .entry(source_cap)
++            .or_default()
++            .push(mapping.clone());
++    }
++    config_map
++}
+diff --git a/src/input/event/dbus.rs b/src/input/event/dbus.rs
+index 2f775ea..d417f59 100644
+--- a/src/input/event/dbus.rs
++++ b/src/input/event/dbus.rs
+@@ -423,6 +423,7 @@ fn actions_from_capability(capability: Capability) -> Vec<Action> {
+         },
+         Capability::Gyroscope(_) => vec![Action::None],
+         Capability::Accelerometer(_) => vec![Action::None],
++        Capability::Layer { .. } => vec![Action::None],
+     }
+ }
+ 
+diff --git a/src/input/event/evdev.rs b/src/input/event/evdev.rs
+index fe46059..dba6817 100644
+--- a/src/input/event/evdev.rs
++++ b/src/input/event/evdev.rs
+@@ -946,6 +946,7 @@ fn event_codes_from_capability(capability: Capability) -> Vec<u16> {
+         },
+         Capability::Gyroscope(_) => vec![],
+         Capability::Accelerometer(_) => vec![],
++        Capability::Layer { .. } => vec![],
+     }
+ }
+ 
+diff --git a/src/input/event/value.rs b/src/input/event/value.rs
+index 253579d..b18df2a 100644
+--- a/src/input/event/value.rs
++++ b/src/input/event/value.rs
+@@ -185,12 +185,28 @@ impl InputValue {
+         target_cap: &Capability,
+         target_config: &CapabilityConfig,
+     ) -> Result<InputValue, TranslationError> {
++        // A `layer` target consumes the source value as a boolean, so it needs
++        // no source-specific translation.
++        if matches!(target_cap, Capability::Layer { .. }) {
++            return match self {
++                InputValue::Bool(v) => Ok(InputValue::Bool(*v)),
++                _ => Err(TranslationError::ImpossibleTranslation(
++                    "layer targets need a button-like source".to_string(),
++                )),
++            };
++        }
++
+         match source_cap {
+             // None values cannot be translated
+             Capability::None => Err(TranslationError::ImpossibleTranslation(
+                 "None events cannot be translated".to_string(),
+             )),
+ 
++            // Layer events are consumed by the composite device, never translated
++            Capability::Layer { .. } => Err(TranslationError::ImpossibleTranslation(
++                "layer events cannot be translated".to_string(),
++            )),
++
+             // NotImplemented values cannot be translated
+             Capability::NotImplemented => Ok(InputValue::None),
+ 
+@@ -252,6 +268,8 @@ impl InputValue {
+                             Capability::Gyroscope(_) => Err(TranslationError::NotImplemented),
+                             // Gamepad Button -> Accelerometer
+                             Capability::Accelerometer(_) => Err(TranslationError::NotImplemented),
++                            // Layer targets are handled by the early return in translate
++                            Capability::Layer { .. } => Err(TranslationError::NotImplemented),
+                         }
+                     }
+                     // Axis -> ...
+@@ -328,6 +346,8 @@ impl InputValue {
+                             Capability::Gyroscope(_) => Err(TranslationError::NotImplemented),
+                             // Axis -> Accelerometer
+                             Capability::Accelerometer(_) => Err(TranslationError::NotImplemented),
++                            // Layer targets are handled by the early return in translate
++                            Capability::Layer { .. } => Err(TranslationError::NotImplemented),
+                         }
+                     }
+                     // Trigger -> ...
+@@ -374,6 +394,8 @@ impl InputValue {
+                         Capability::Gyroscope(_) => Err(TranslationError::NotImplemented),
+                         // Trigger -> Accelerometer
+                         Capability::Accelerometer(_) => Err(TranslationError::NotImplemented),
++                        // Layer targets are handled by the early return in translate
++                        Capability::Layer { .. } => Err(TranslationError::NotImplemented),
+                     },
+                     // Dial mapping to -> ..
+                     Gamepad::Dial(_) => match target_cap {
+@@ -404,6 +426,8 @@ impl InputValue {
+                         },
+                         Capability::Gyroscope(_) => Err(TranslationError::NotImplemented),
+                         Capability::Accelerometer(_) => Err(TranslationError::NotImplemented),
++                        // Layer targets are handled by the early return in translate
++                        Capability::Layer { .. } => Err(TranslationError::NotImplemented),
+                     },
+                 }
+             }
+@@ -444,6 +468,8 @@ impl InputValue {
+                 Capability::Gyroscope(_) => Err(TranslationError::NotImplemented),
+                 // Keyboard Key -> Accelerometer
+                 Capability::Accelerometer(_) => Err(TranslationError::NotImplemented),
++                // Layer targets are handled by the early return in translate
++                Capability::Layer { .. } => Err(TranslationError::NotImplemented),
+             },
+ 
+             // Touchpad -> ...
+@@ -505,6 +531,8 @@ impl InputValue {
+                         Capability::Gyroscope(_) => Err(TranslationError::NotImplemented),
+                         // Touchpad Motion -> Accelerometer ...
+                         Capability::Accelerometer(_) => Err(TranslationError::NotImplemented),
++                        // Layer targets are handled by the early return in translate
++                        Capability::Layer { .. } => Err(TranslationError::NotImplemented),
+                     },
+                     Touch::Button(_) => self.translate_touch_button(target_cap, target_config),
+                 },
+@@ -565,6 +593,8 @@ impl InputValue {
+                         Capability::Gyroscope(_) => Err(TranslationError::NotImplemented),
+                         // Touchpad Motion -> Accelerometer ...
+                         Capability::Accelerometer(_) => Err(TranslationError::NotImplemented),
++                        // Layer targets are handled by the early return in translate
++                        Capability::Layer { .. } => Err(TranslationError::NotImplemented),
+                     },
+                     Touch::Button(_) => self.translate_touch_button(target_cap, target_config),
+                 },
+@@ -625,6 +655,8 @@ impl InputValue {
+                         Capability::Gyroscope(_) => Err(TranslationError::NotImplemented),
+                         // Touchpad Motion -> Accelerometer ...
+                         Capability::Accelerometer(_) => Err(TranslationError::NotImplemented),
++                        // Layer targets are handled by the early return in translate
++                        Capability::Layer { .. } => Err(TranslationError::NotImplemented),
+                     },
+                     Touch::Button(_) => self.translate_touch_button(target_cap, target_config),
+                 },
+@@ -690,6 +722,8 @@ impl InputValue {
+                     Capability::Gyroscope(_) => Err(TranslationError::NotImplemented),
+                     // Touchscreen Motion -> Accelerometer ...
+                     Capability::Accelerometer(_) => Err(TranslationError::NotImplemented),
++                    // Layer targets are handled by the early return in translate
++                    Capability::Layer { .. } => Err(TranslationError::NotImplemented),
+                 },
+                 // Touchscreen Button -> ...
+                 Touch::Button(_) => self.translate_touch_button(target_cap, target_config),
+@@ -1232,6 +1266,8 @@ impl InputValue {
+             },
+             Capability::Gyroscope(_) => Err(TranslationError::NotImplemented),
+             Capability::Accelerometer(_) => Err(TranslationError::NotImplemented),
++            // Layer targets are handled by the early return in translate
++            Capability::Layer { .. } => Err(TranslationError::NotImplemented),
+         }
+     }
+ }
+diff --git a/src/input/target/client.rs b/src/input/target/client.rs
+index e45e9d9..a1d8146 100644
+--- a/src/input/target/client.rs
++++ b/src/input/target/client.rs
+@@ -58,6 +58,10 @@ impl From<Sender<TargetCommand>> for TargetDeviceClient {
+     }
+ }
+ 
++// The `Err`-variant of these methods wraps a TargetCommand, which carries a
++// Capability. The layer capability grew the command past clippy's size
++// threshold; boxing the error here would churn every caller for no benefit.
++#[allow(clippy::result_large_err)]
+ impl TargetDeviceClient {
+     /// Create a new [TargetDeviceClient] from the given channel
+     pub fn new(tx: Sender<TargetCommand>) -> Self {
+diff --git a/src/input/target/mouse.rs b/src/input/target/mouse.rs
+index a77590c..d562931 100644
+--- a/src/input/target/mouse.rs
++++ b/src/input/target/mouse.rs
+@@ -122,7 +122,11 @@ impl MouseDevice {
+         let (x, y) = match value {
+             InputValue::Vector2 { x, y } => (x, y),
+             InputValue::Vector3 { x, y, z: _ } => (x, y),
+-            _ => (None, None),
++            // A translated motion event carrying no vector is a release
++            _ => {
++                self.clear_state();
++                return;
++            }
+         };
+ 
+         // Update the mouse velocity
+diff --git a/src/input/target/unified_gamepad.rs b/src/input/target/unified_gamepad.rs
+index 05ac759..addea5c 100644
+--- a/src/input/target/unified_gamepad.rs
++++ b/src/input/target/unified_gamepad.rs
+@@ -699,6 +699,7 @@ impl From<NativeEvent> for StateUpdate {
+ 
+                 Self { capability, value }
+             }
++            Capability::Layer { .. } => Self::default(),
+         }
+     }
+ }
+@@ -974,6 +975,7 @@ impl From<Capability> for InputCapability {
+                 Source::Right => Self::AccelerometerRight,
+                 Source::Center => Self::AccelerometerCenter,
+             },
++            Capability::Layer { .. } => Self::default(),
+         }
+     }
+ }
+@@ -1016,6 +1018,7 @@ impl From<Capability> for InputCapabilityInfo {
+             },
+             Capability::Gyroscope(_) => Self::new(capability, ValueType::Int16Vector3),
+             Capability::Accelerometer(_) => Self::new(capability, ValueType::Int16Vector3),
++            Capability::Layer { .. } => Self::default(),
+         }
+     }
+ }
+-- 
+2.55.0
+

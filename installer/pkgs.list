@@ -89,11 +89,12 @@ gamescope
 seatd
 python           # installer/ui and its three model files; the wheel above is cp314, so this pins 3.14
 
-# ---- InputPlumber's runtime dependency -------------------------------------------------------------
-# InputPlumber itself is not a repo package: it is packages/inputplumber/prebuilt.pin, a sha256'd
-# tarball that installer/mkroot.sh places by name (the release bootstrap auto-discovers every
-# packages/*/prebuilt.pin; this image takes exactly two, and pygame-ce is the other). It ships here
-# NOT for size but so the installer's input path is IDENTICAL to the HW-validated main-image one,
-# rather than a second raw-evdev stack inside the tool that has to work when the device is broken.
-# libiio is the dep its own pin declares (it links libiio.so.0), so it is a leaf of THIS list.
-libiio
+# ---- InputPlumber -----------------------------------------------------------------------------------
+# The handheld input daemon, from the retroforge overlay repo (packages/inputplumber: v0.82.0 +
+# the input-layers patch, built from source) — a prebuilt.pin tarball until that bump, when the
+# patch made a pin impossible. It ships here NOT for size but so the installer's input path is
+# IDENTICAL to the HW-validated main-image one, rather than a second raw-evdev stack inside the
+# tool that has to work when the device is broken. Its old `deps: libiio` leaf is gone with the
+# pin: 0.82.0 does not link libiio (upstream 966be34), and pacman resolves the package's real
+# depends (systemd-libs) itself.
+inputplumber

@@ -1,0 +1,17 @@
+# InputPlumber — the input daemon: reads each board's pad/MCU (devices.d + capability maps) and
+# presents one virtual X-Box Elite pad to OpenGamepadUI and every emulator. Built FROM SOURCE via
+# the local PKGBUILD since 0.82.0 (a prebuilt.pin on the release tarball before that — see git
+# history for the pin and its device-adoption notes); from source because of the patches:
+#
+#   0001  upstream PR #757 (shadowapex/input-layers-v2, 2026-10-19, based on v0.82.0 exactly):
+#         input layers in device profiles. A mapping may target `layer: {name: x}`; while the
+#         activating input is held (or latched with mode: toggle) the layer's mappings override
+#         the base ones, releases are emitted for whatever the layer produced (no stuck keys),
+#         and layers stack. This is the Guide-modifier mechanism for emulator hotkeys
+#         (Guide+L1/R1/R2/Start), asked of ShadowApex 2026-10-18, answered with this PR.
+#         Drop when a release carries it. An older InputPlumber parses a profile with layers
+#         fine and silently ignores them (unknown fields are skipped).
+name: inputplumber
+pkgbuild_local: PKGBUILD
+patches: 0001-feat-Input-Layers-add-input-layers-to-map-button-com.patch
+pkgrel_suffix: 1

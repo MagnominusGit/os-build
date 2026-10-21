@@ -28,11 +28,11 @@
 #   wireless-regdb   regulatory database — REQUIRED for 5 GHz (else channels are no-TX)
 #   mesa + vulkan-freedreno (Turnip) + vulkan-tools   GPU / Vulkan
 #   vulkan-mesa-layers  for the vram-report-limit implicit layer retroforge-launch turns on (4 GB heap)
-# Runtime deps of precompiled packages (e.g. libiio for InputPlumber) are NOT hardcoded here —
-# each packages/<name>/prebuilt.pin declares its own `deps:`, aggregated into the install list.
+# Runtime deps of precompiled packages are NOT hardcoded here — each
+# packages/<name>/prebuilt.pin declares its own `deps:`, aggregated into the install list.
 # The result lands in work/base/ — the directory rootfs/assemble-rootfs.sh consumes.
 #
-# Components NOT in the holo repo (e.g. InputPlumber, the handheld input daemon) ship as
+# Components NOT in the holo repo and not built from source here ship as
 # precompiled-package PINS: each packages/<name>/prebuilt.pin declares a tarball by
 # url + sha256 (+ tar strip-components). They are fetched + verified on the host and
 # extracted into the base here; add one by dropping a new pin file — no code change.
@@ -139,6 +139,11 @@ BOOTSTRAP_PKGS=(base)
 #   powerstation        org.shadowblip.PowerStation, the only backend OpenGamepadUI's performance menu
 #                       speaks (core count, GPU clock range). Overlay (packages/powerstation), patched
 #                       for non-SMT CPUs and devfreq SoC GPUs.
+#   inputplumber        the input daemon: each board's pad/MCU in, one virtual X-Box Elite pad out.
+#                       Overlay (packages/inputplumber) since 0.82.0 — a prebuilt.pin before that —
+#                       patched with upstream PR #757 (input layers: the Guide-modifier emulator
+#                       hotkeys). Board configs we carry beyond upstream's stay in
+#                       rootfs/overlay/etc/inputplumber/.
 #   opengamepadui       the shell. Overlay (packages/opengamepadui): upstream's aarch64 release with
 #                       the pck rebuilt from source + patches (it crash-loops on DT boards otherwise).
 #   fuse3               fusermount3 (setuid, already on guard-rootfs.sh's permit list) so emulator
@@ -193,7 +198,7 @@ BOOTSTRAP_PKGS=(base)
 #                       Every library the client's arm64 ELFs link resolves against PKGS + gtk2 and
 #                       libibus (checked in the builder 2026-10-17); no ffmpeg, the client ships its
 #                       own libav*.
-PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-mesa-layers vulkan-tools retroforge-gpu-priority mesa gamescope seatd mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit e2fsprogs xorg-xwayland noto-fonts noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl opengamepadui powerstation which fuse3 ksmbd-tools avahi sdl2_ttf sdl2_image sdl2_mixer squashfuse mesa-utils unzip openal libtheora rmtfs xxhash fuse-overlayfs gtk2 libibus lsof)
+PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-mesa-layers vulkan-tools retroforge-gpu-priority mesa gamescope seatd mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit e2fsprogs xorg-xwayland noto-fonts noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl opengamepadui powerstation inputplumber which fuse3 ksmbd-tools avahi sdl2_ttf sdl2_image sdl2_mixer squashfuse mesa-utils unzip openal libtheora rmtfs xxhash fuse-overlayfs gtk2 libibus lsof)
 
 # Dev-only packages — installed ONLY under RETROFORGE_DEV=1, NEVER in a release base.
 # On-device bring-up tools: evtest reads raw /dev/input events; usbutils provides lsusb.
@@ -256,7 +261,7 @@ EXPECTED_MANIFEST="$(prebuilt_manifest)"
 
 # Aggregate the holo-repo runtime deps each prebuilt declares (deps: in its pin). They ship in
 # every base that carries the prebuilt (release), so they extend the release install list —
-# e.g. InputPlumber links libiio.so.0, declared `deps: libiio` in its pin, not hardcoded above.
+# e.g. InputPlumber (a pin until 0.82.0) declared `deps: libiio` there, not hardcoded above.
 PREBUILT_DEPS=()
 for pin in "${PREBUILT_PINS[@]}"; do
   [ -e "$pin" ] || continue
@@ -586,8 +591,8 @@ ctr run --rm --platform linux/arm64 -v "$PREBUILT_DIR":/prebuilt:ro \
   # place each into the rootfs, then record the manifest in the base so the host reuse-check
   # detects pin changes.
   #   kind=tar  -> extract with the pin'"'"'s strip-components into `dest` (default /). Archive roots
-  #                differ, so strip is per-package (InputPlumber is rooted at inputplumber/usr ->
-  #                strip 1 lands at /usr).
+  #                differ, so strip is per-package (InputPlumber, a pin until 0.82.0, was rooted
+  #                at inputplumber/usr -> strip 1 landed at /usr).
   #   kind=zip  -> as kind=tar, but unpacked with bsdtar because GNU tar cannot read a zip.
   #   kind=file -> copy verbatim to `dest`, which is the full destination FILE path.
   # `dest` is a path in the TARGET root, so every one is prefixed here -- an unprefixed dest

@@ -73,10 +73,11 @@ else cp -a "$BASE"/. "$stage"/; fi
 # at runtime, DNS verified working on HW) and /etc/machine-id, which must stay absent so systemd
 # runs preset-all on first boot — populating it would disable our preset-based service enablement.
 #
-# NOT closed by 4c, and NOT covered by anything here: packages/inputplumber's prebuilt tarball is
-# still unpacked at `/` with strip-components=1 (rootfs/customize-base.sh), so a third-party
-# archive can still place arbitrary paths in the root. Two marker names were never a guard for
-# that; see issues #35 and #36 for the real one (assert every file is package-owned or declared).
+# NOT closed by 4c, and NOT covered by anything here: the prebuilt-pin mechanism
+# (rootfs/customize-base.sh) unpacks third-party tarballs at `dest` (default `/`), so a pin can
+# place arbitrary paths in the root. No pin uses it today — inputplumber, the last one, became a
+# from-source overlay package with the 0.82.0 bump — but the mechanism remains; see issues #35
+# and #36 for the real guard (assert every file is package-owned or declared).
 
 # STAGE kernel-boot — retroforge kernel + dtbs + initramfs under /boot. These are what the stage-2 grub.cfg boots
 # (docs/archive/phase5.md): `linux ($root)/boot/Image`, `initrd ($root)/boot/initramfs-retroforge.img`,

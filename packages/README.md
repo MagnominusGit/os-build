@@ -32,7 +32,10 @@ alongside the prebuilt (e.g. shared libraries the binary links), so a prebuilt's
 deps live with the pin instead of being hardcoded in the install list. The set of installed
 prebuilts **and their deps** is recorded in the base at `/usr/lib/retroforge/prebuilt.manifest`,
 which keys the base reuse-cache (bump a pin, or change its deps, → the base rebuilds).
-Current pins: `inputplumber/` (InputPlumber input daemon; `deps: libiio`).
+Currently there are NO pins: `inputplumber/`, the last one, moved to a from-source overlay
+package with its 0.82.0 bump (it now carries a patch — upstream PR #757, input layers — and a
+patched package must be built, not pinned). The mechanism stays for the next component that
+needs it.
 
 ## Built here, never in the image: `mesa-x86/`
 
