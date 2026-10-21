@@ -195,6 +195,19 @@ if [ -f "$P20" ]; then
 else
   bad "0020: $P20 is missing"
 fi
+# 0021: a Steam desktop shortcut started Steam's desktop mode over the game (HW, Pocket FIT, 2026-10-21).
+P21="$PKG/patches/0021-library-desktop-steam-shortcuts-start-steams-gamepad-ui.patch"
+if [ -f "$P21" ]; then
+  [ "$(grep -E '^\+\+\+ b/' "$P21" | sed 's#^+++ b/##' | sort -u)" = "core/systems/library/library_desktop.gd" ] \
+    && ok "0021: changes library_desktop.gd only" || bad "0021 touches more than library_desktop.gd"
+  grep -qE '^-\s+var args := PackedStringArray\(\["-silent"\]\)' "$P21" \
+    && grep -qE '^\+\s+var args := PackedStringArray\(\["-gamepadui", "-steamos3", "-steampal", "-steamdeck", "-silent"\]\)' "$P21" \
+    && ok "0021: a Steam shortcut gets the Steam plugin's flags, not -silent alone" || bad "0021: the quirk still adds -silent alone"
+  grep -q "0020-running-app-steam-reaper-arguments-past-the-first-nul.patch 0021-library-desktop-steam-shortcuts-start-steams-gamepad-ui.patch" "$PKG/source.pin" \
+    && ok "0021: listed in source.pin, after 0020" || bad "0021: not in source.pin's patches"
+else
+  bad "0021: $P21 is missing"
+fi
 # One file of the tree as 0018 leaves it, hunk by hunk (context and added lines; a new file whole).
 newside() { python3 - "$P18" "$1" <<'PY'
 import sys
