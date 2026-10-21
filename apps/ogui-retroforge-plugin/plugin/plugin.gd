@@ -11,6 +11,9 @@ const LIBRARY_ID := "retroforge-roms"
 ## The Steam games, owned and installed (library_steam.gd, no second sign-in), and their tab.
 const STEAM_LIBRARY_ID := "retroforge-steam"
 const STEAM_TAB := "steam"
+## OGUI's own library of .desktop files (core/systems/library/library_desktop.tscn).
+const DESKTOP_LIBRARY_ID := "desktop"
+const SteamApps := preload("steam_apps.gd")
 ## Seconds between two looks at ~/roms (rom_watch.gd): a copied ROM shows up 5-10 s after the
 ## copy ends.
 const RESCAN_INTERVAL := 5.0
@@ -60,6 +63,11 @@ func _ready() -> void:
 	add_library(roms)
 	steam = load(plugin_base.path_join("library_steam.gd")).new()
 	add_library(steam)
+	library_manager.library_launch_item_added.connect(_drop_steam_shortcut)
+	for app in library_manager.get_library_items([]):
+		var shortcut := app.get_launch_item(DESKTOP_LIBRARY_ID)
+		if shortcut:
+			_drop_steam_shortcut(shortcut)
 	# Before the library loads: the first ROM cards already ask for their art.
 	_art_fetch = load(plugin_base.path_join("art_fetch.gd")).new()
 	var art = load(plugin_base.path_join("boxart_retroforge.gd")).new()
@@ -107,6 +115,8 @@ func _ready() -> void:
 
 
 func unload() -> void:
+	if library_manager.library_launch_item_added.is_connected(_drop_steam_shortcut):
+		library_manager.library_launch_item_added.disconnect(_drop_steam_shortcut)
 	if is_instance_valid(_rescan_timer):
 		_rescan_timer.stop()
 	for system in _tabs.keys():
@@ -242,6 +252,19 @@ func _on_library_loaded(library_id: String) -> void:
 	_rescanning = false
 	for system in roms.SYSTEMS:
 		_refresh_system(system)
+
+
+## Steam writes a desktop shortcut for each game it installs (~/.local/share/applications/<Game>.desktop,
+## `steam steam://rungameid/<appid>`), and OGUI's desktop library lists it beside our Steam library's
+## entry for the same game, on the same card. The card then launched through the shortcut: Steam came
+## up in its desktop mode over the game, with a "Launching..." dialog the controller could not reach
+## (patch 0021 gives such shortcuts the gamepad flags), and Hades showed on Home twice, once without
+## its cover (HW, KONKR Pocket FIT, 2026-10-21). Our library lists every Steam game, so the shortcut's
+## entry is dropped as it arrives: one entry per Steam game, ours. Deferred: this runs inside
+## LibraryManager's own signal.
+func _drop_steam_shortcut(item: LibraryLaunchItem) -> void:
+	if item._provider_id == DESKTOP_LIBRARY_ID and item.command == "steam" and SteamApps.appid_of(item.args) > 0:
+		library_manager.remove_library_launch_item.call_deferred(DESKTOP_LIBRARY_ID, item.name)
 
 
 ## Library items of one tab, sorted by name: the ROMs whose retroforge-roms launch item is tagged

@@ -111,6 +111,16 @@ static func install_complete(flags: int) -> bool:
 	return flags & FULLY_INSTALLED != 0 and flags & STILL_GOING == 0
 
 
+## The Steam app a launch's arguments start (steam://rungameid/<appid>), or 0: our library's, the
+## shortcut Steam writes for a game, the OGUI Steam plugin's.
+static func appid_of(args: PackedStringArray) -> int:
+	for arg in args:
+		if arg.begins_with("steam://rungameid/"):
+			var id := arg.trim_prefix("steam://rungameid/")
+			return id.to_int() if id.is_valid_int() else 0
+	return 0
+
+
 static func launch_args(appid: int) -> PackedStringArray:
 	var args := PackedStringArray(LAUNCH_ARGS)
 	args.append("steam://rungameid/%d" % appid)

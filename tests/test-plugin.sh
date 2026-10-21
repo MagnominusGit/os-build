@@ -93,6 +93,15 @@ grep -q '_show_progress_file.bind(str(emu.get("progress")), id)' "$SRC/emulators
   && ! grep -qE '_show_progress(_file)?\.bind\(.*, row\)' "$SRC/emulators_page.gd" \
   && ok "the download progress poll finds its row by emulator id, not a row the page may have freed" \
   || bad "emulators_page.gd binds a row to its progress poll: it freezes once the page rebuilds its rows"
+# OGUI's desktop library lists the shortcut Steam writes for each game it installs, on the same card
+# as our entry: launched through it Steam came up in its desktop mode, and Home showed the game twice,
+# once without its cover (HW, Pocket FIT, 2026-10-21). The plugin drops those entries as they arrive,
+# deferred (LibraryManager is emitting), and sweeps the ones that came before it.
+grep -q 'library_manager.library_launch_item_added.connect(_drop_steam_shortcut)' "$SRC/plugin.gd" \
+  && grep -q 'library_manager.remove_library_launch_item.call_deferred(DESKTOP_LIBRARY_ID, item.name)' "$SRC/plugin.gd" \
+  && grep -q 'const DESKTOP_LIBRARY_ID := "desktop"' "$SRC/plugin.gd" \
+  && ok "Steam's desktop shortcuts leave the library as they arrive (deferred): one entry per Steam game, ours" \
+  || bad "plugin.gd does not drop the desktop library's Steam shortcuts"
 # The installed Steam games' library id is spelled in three files: a mismatch leaves the Steam tab
 # empty (plugin.gd) or its cards without art (boxart_retroforge.gd).
 [ "$(grep -ho '"retroforge-steam"' "$SRC/library_steam.gd" "$SRC/plugin.gd" "$SRC/boxart_retroforge.gd" | wc -l)" -eq 3 ] \
@@ -607,6 +616,10 @@ func test_steam_apps() -> void:
 	check("steam: launched as the OGUI Steam plugin does, with the rungameid OGUI takes the app id from",
 		SteamApps.launch_args(1145360),
 		PackedStringArray(["-gamepadui", "-steamos3", "-steampal", "-steamdeck", "-silent", "steam://rungameid/1145360"]))
+	check("steam: the app a launch starts, from its rungameid: ours, a Steam shortcut's, the Steam plugin's; none otherwise",
+		[SteamApps.appid_of(SteamApps.launch_args(1145360)), SteamApps.appid_of(PackedStringArray(["-silent", "steam://rungameid/413150"])),
+		 SteamApps.appid_of(PackedStringArray(["steam://open/bigpicture"])), SteamApps.appid_of(PackedStringArray(["steam://rungameid/x"])), SteamApps.appid_of(PackedStringArray())],
+		[1145360, 413150, 0, 0, 0])
 	check("steam: an install or uninstall opens Steam's own UI at the steam:// URI, not silent",
 		SteamApps.ui_args("steam://install/413150"),
 		PackedStringArray(["-gamepadui", "-steamos3", "-steampal", "-steamdeck", "steam://install/413150"]))

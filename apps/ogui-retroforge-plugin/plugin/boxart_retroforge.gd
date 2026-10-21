@@ -59,12 +59,15 @@ func get_boxart(item: LibraryItem, kind: LAYOUT) -> Texture2D:
 	return ImageTexture.create_from_image(image)
 
 
-## A Steam game's art, or null.
+## A Steam game's art, or null: any card that launches a Steam game, ours or another library's.
 func _steam_art(item: LibraryItem, kind: LAYOUT) -> Texture2D:
-	var launch: LibraryLaunchItem = item.get_launch_item(STEAM_LIBRARY_ID)
-	if not launch:
+	var appid := 0
+	for launch in item.launch_items:
+		appid = SteamApps.appid_of(launch.args)
+		if appid > 0:
+			break
+	if appid <= 0:
 		return null
-	var appid := int(launch.metadata.get("steam_app", 0))
 	var image := await _off_main_thread(_steam_image.bind(SteamApps.steam_root(), SteamApps.art_cache_dir(), appid, kind))
 	return ImageTexture.create_from_image(image) if image else null
 
