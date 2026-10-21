@@ -56,6 +56,7 @@ var _pairing: Control  # toggle
 var _timer: Timer  # background checks
 var _notified := ""  # the last version a background check announced
 var _nodes: Array[Node] = []
+var _hidden: Array[Node] = []  # OGUI's own nodes hidden here, shown again on detach
 
 
 ## Called by plugin.gd once the settings menus exist. (No _init override: tests/test-plugin.sh
@@ -76,6 +77,7 @@ func ready(root: Window) -> void:
 		_add_updater(box)
 		_start_background_checks(menu)
 	_add_remote_access(box)
+	_add_separator_under(box, "Appearance")
 
 
 func detach() -> void:
@@ -85,6 +87,21 @@ func detach() -> void:
 		if is_instance_valid(node):
 			node.queue_free()
 	_nodes.clear()
+	for node in _hidden:
+		if is_instance_valid(node):
+			node.visible = true
+	_hidden.clear()
+
+
+## A line under one of OGUI's own section titles, like the ones under ours.
+func _add_separator_under(box: Node, title: String) -> void:
+	var label := box.get_node_or_null(title)
+	if not label:
+		return
+	var separator := HSeparator.new()
+	box.add_child(separator)
+	box.move_child(separator, label.get_index() + 1)
+	_nodes.append(separator)
 
 
 ## OGUI's updater fetches OGUI's x86 update.zip (the session runs it with --skip-update-pack): its
@@ -123,7 +140,7 @@ func _add_updater(box: Node) -> void:
 	# release export, where calling a method on such a null child segfaults instead of erroring
 	# (see scraper_settings.gd).
 	var at := label.get_index() + 1
-	for node in [_button, _channel]:
+	for node in [HSeparator.new(), _button, _channel]:
 		box.add_child(node)
 		box.move_child(node, at)
 		at += 1
@@ -175,8 +192,14 @@ func _add_remote_access(box: Node) -> void:
 	_pairing = toggle_scene.instantiate()
 	_pairing.name = "RetroForgePairing"
 	_pairing.text = "Allow pairing a computer"
+	_pairing.separator_visible = false  # read in _ready, so before add_child
+	# Nor OGUI's line between the Updates rows and Appearance, which now falls under this one.
+	var separator := box.get_node_or_null("HSeparator2")
+	if separator:
+		separator.visible = false
+		_hidden.append(separator)
 	var at: int = _channel.get_index() + 1 if is_instance_valid(_channel) else 0
-	for node in [label, _pairing]:
+	for node in [label, HSeparator.new(), _pairing]:
 		box.add_child(node)
 		box.move_child(node, at)
 		at += 1

@@ -49,6 +49,7 @@ func attach() -> bool:
 	_toggle.name = "RetroForgePauseInMenus"
 	_toggle.text = "Pause game in menus"
 	_toggle.description = "Freeze the running game or emulator while a menu is open over it."
+	_toggle.separator_visible = false  # read in _ready, so before add_child
 	box.add_child(_toggle)
 	if after:
 		box.move_child(_toggle, after.get_index() + 1)
