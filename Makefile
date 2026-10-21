@@ -120,6 +120,21 @@ RAUC_CERT ?= /pki/release.cert.pem
 RAUC_KEY  ?= /pki/release.key.pem
 endif
 
+# A DEV build (RETROFORGE_DEV=1, dev.env) with no PKIDIR signs with the build box's own dev key,
+# work/dev-pki (ota/gen-dev-signing.sh, run by dev.env), which a dev card trusts beside the project
+# CA (rootfs/lib-assemble-devcard.sh, STAGE dev-ota-key). `make bundle` then makes a bundle a dev
+# card installs over itself with `rauc install`, keeping its /home, instead of a throwaway cert no
+# device accepts. A release device rejects it and ota/publish-bundle.sh refuses it. /src is the repo
+# itself, so the key needs no mount of its own.
+ifndef PKIDIR
+ifeq ($(RETROFORGE_DEV),1)
+ifneq ($(wildcard work/dev-pki/release.key.pem),)
+RAUC_CERT ?= /src/work/dev-pki/release.cert.pem
+RAUC_KEY  ?= /src/work/dev-pki/release.key.pem
+endif
+endif
+endif
+
 # The bundling invocation, shared by `bundle` and `sign-bundle` so the two cannot drift in how the
 # key reaches the container. Recursively expanded (`=`, not `:=`) because PKI_MOUNT and RAUC_CERT/
 # RAUC_KEY only exist inside the ifdef above -- expanding this eagerly would bake in their values
@@ -192,6 +207,9 @@ VERSION_STAMP := work/.rootfs-version-$(if $(RETROFORGE_VERSION),$(RETROFORGE_VE
 DEV_WIFI     := $(if $(filter 0,$(RETROFORGE_WIFI)),,$(if $(RETROFORGE_WIFI_SSID),$(if $(RETROFORGE_WIFI_PSK),1,),))
 ROOTFS_MODE  := $(if $(filter 1,$(RETROFORGE_DEV)),dev$(if $(DEV_WIFI),,-nowifi),release)
 MODE_STAMP   := work/.rootfs-mode-$(ROOTFS_MODE)
+# The dev OTA CA a dev root's keyring carries (STAGE dev-ota-key): a prerequisite once dev.env has
+# minted it, so the first dev card after that is re-assembled with it in the keyring.
+DEV_CA       := $(if $(filter 1,$(RETROFORGE_DEV)),$(wildcard work/dev-pki/ca.cert.pem))
 
 # The BASE tree is mode-dependent for the same reason and needs the same treatment: RETROFORGE_DEV=1
 # adds DEV_PKGS (evtest, usbutils) to the bootstrap (rootfs/customize-base.sh:176), so a dev base
@@ -475,6 +493,7 @@ test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-steam.sh
 	bash $(TESTS_DIR)/test-steam-direct.sh
 	bash $(TESTS_DIR)/test-steam-library.sh
+	bash $(TESTS_DIR)/test-dev-signing.sh
 	bash $(TESTS_DIR)/test-steam-install.sh
 	bash $(TESTS_DIR)/test-steam-x86-guest.sh
 	bash $(TESTS_DIR)/test-steam-compat-tools.sh
@@ -744,7 +763,7 @@ $(VERSION_STAMP):
 # /usr/lib/retroforge/boot mirror the RAUC hook refreshes the ESP and the slot's efi partition FROM.
 # That is what makes "this root and the software that boots it came from one build" true by
 # construction. No cycle: the initramfs is built from work/base, never from the assembled root.
-$(ROOTFS): $(KERNEL) $(INITRAMFS) $(GRUB) boot/esp-dtbs.sh $(BASE_STAMP) $(FW_LINUX) $(FW_QCOM) $(PLUGIN_ZIP) $(SIGDEFER_LIB) $(GPTK_LIB) $(HIDEMENU_LIB) $(MESA_X86_DEP) $(ASSEMBLE_SRC) $(MODE_STAMP) $(VERSION_STAMP) $(SCRAPER_STAMP) | $(BUILD_STAMP)
+$(ROOTFS): $(KERNEL) $(INITRAMFS) $(GRUB) boot/esp-dtbs.sh $(BASE_STAMP) $(FW_LINUX) $(FW_QCOM) $(PLUGIN_ZIP) $(SIGDEFER_LIB) $(GPTK_LIB) $(HIDEMENU_LIB) $(MESA_X86_DEP) $(ASSEMBLE_SRC) $(MODE_STAMP) $(VERSION_STAMP) $(SCRAPER_STAMP) $(DEV_CA) | $(BUILD_STAMP)
 	$(DOCKER) $(DEV_ENV) $(SCRAPER_ENV) $(ID_ENV) -e RETROFORGE_DEBUG -e RETROFORGE_X86_MESA $(BUILD_IMG) \
 	  $(ROOTFS_DIR)/assemble-rootfs.sh /src/work/base
 

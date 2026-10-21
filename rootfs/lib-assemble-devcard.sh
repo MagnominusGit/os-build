@@ -303,3 +303,23 @@ NET
 unmanaged-devices=interface-name:usb0
 NMCONF
 fi
+
+# STAGE dev-ota-key — DEV-ONLY. The build box's own dev OTA CA (ota/gen-dev-signing.sh, minted by
+# dev.env into work/dev-pki/) is appended to the keyring rauc-boot-mirror installed, after the
+# project CA. A dev build's `make bundle` signs with that dev key, so a dev card takes every later
+# build as an update (`rauc install`): the other slot is written and /home -- Steam and its games,
+# the x86 guest, emulators, Wi-Fi -- is kept, where a reflash erased it (HW, KONKR Pocket FIT,
+# 2026-10-21: Hades downloaded again after every card). Never in a release image: this file is not
+# sourced for one, and rootfs/guard-rootfs.sh fails a release keyring that is not the project CA
+# alone. The installer runs from the card and verifies against this same keyring
+# (installer/rauc-session.sh), so a dev card can also install a dev bundle to internal storage.
+if [ "${RETROFORGE_DEV:-}" = "1" ]; then
+  dev_ca="$ROOT/work/dev-pki/ca.cert.pem"
+  if [ -s "$dev_ca" ] && openssl x509 -in "$dev_ca" -noout 2>/dev/null; then
+    { echo; cat "$dev_ca"; } >>"$stage/etc/rauc/keyring.pem"
+    echo "  [TEST] RAUC keyring: + this build box's dev OTA CA ($(openssl x509 -in "$dev_ca" -noout -subject | sed 's/^subject=//'))"
+  else
+    echo "  [TEST] WARNING: no dev OTA CA (work/dev-pki/ca.cert.pem; source dev.env) — this card takes no dev bundle, only a reflash"
+  fi
+  unset dev_ca
+fi

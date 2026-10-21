@@ -436,6 +436,25 @@ if [ ! -s "$STAGE/usr/bin/btrfstune" ]; then
   rauc_ok=0
   bad "/usr/bin/btrfstune is missing — the post-install hook cannot re-randomise the target slot's fsid"
 fi
+# Whose bundles the image installs: /etc/rauc/keyring.pem. A RELEASE image trusts the project CA
+# (ota/rauc/retroforge-ca.pem) and nothing else, or a device in the field would install bundles signed
+# by another key. A DEV card also trusts its build box's own dev OTA CA (STAGE dev-ota-key, minted by
+# ota/gen-dev-signing.sh), after the project CA, so it can take dev builds as updates.
+keyring="$STAGE/etc/rauc/keyring.pem"
+project_ca="$ROOT/ota/rauc/retroforge-ca.pem"
+img_mode="$(sed -n 's/^RETROFORGE_MODE=//p' "$STAGE/etc/retroforge-release" 2>/dev/null || true)"
+if [ -s "$keyring" ] && [ -s "$project_ca" ]; then
+  if [ "$img_mode" = dev ]; then
+    if ! head -c "$(wc -c <"$project_ca")" "$keyring" | cmp -s - "$project_ca"; then
+      rauc_ok=0
+      bad "/etc/rauc/keyring.pem does not start with the project CA — this dev card would refuse every signed release bundle"
+    fi
+  elif ! cmp -s "$keyring" "$project_ca"; then
+    rauc_ok=0
+    bad "/etc/rauc/keyring.pem is not the project CA alone — a ${img_mode:-release} image would install bundles signed by another key (a dev OTA CA belongs on dev cards only)"
+  fi
+fi
+unset keyring project_ca img_mode
 
 # --- what the INTERNAL INSTALLER reads out of this root ------------------------------------------
 # Separate from the list above because nothing on the A/B update path touches these, so an update

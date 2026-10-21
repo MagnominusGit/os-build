@@ -162,6 +162,26 @@ comes back for 3 seconds when a board that has never had a boot confirmed is tri
 how a wrong board shows itself and how to get back from it — and when no slot has tries left. With a
 Device model set, change the board in OpenABL's menu instead.
 
+### Update a dev card instead of reflashing it
+
+A reflash erases `/home`: Steam and its games, the x86 guest, emulators, Wi-Fi. A dev card takes a
+new build as an update instead, into its other slot, keeping `/home`. `dev.env` mints the build
+box's own dev OTA key once (`ota/gen-dev-signing.sh`, into `work/dev-pki/`, kept like the dev SSH
+key), every dev card built after that trusts it beside the project CA (STAGE `dev-ota-key`), and a
+dev build's `make bundle` signs with it. Flash a card once; after that:
+
+```sh
+set -a; . ./dev.env; set +a
+make bundle                                               # out/images/retroforge-<build>.raucb
+scp -i work/dev-ssh/id_ed25519 out/images/retroforge-<build>.raucb root@<device>:/home/
+ssh -i work/dev-ssh/id_ed25519 root@<device> 'rauc install /home/retroforge-<build>.raucb && rm /home/retroforge-<build>.raucb && systemctl reboot'
+```
+
+`/home` has the room (the bundle is ~1 GB); `/tmp` is RAM. A release device rejects these bundles
+(the guard keeps the dev CA out of release keyrings), and `ota/publish-bundle.sh` refuses them. A
+card flashed before its build box had a dev key, or from another build box, trusts no dev bundle:
+reflash it once. Deleting `work/dev-pki` does the same to every card flashed with it.
+
 ## Reach the device
 
 **These devices have no UART.** If you cannot reach a device over the network, your only
