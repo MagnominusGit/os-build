@@ -164,6 +164,8 @@ instead, so signing into Steam Client is enough (`apps/ogui-retroforge-plugin`: 
 - **Launch**: `steam -gamepadui -steamos3 -steampal -steamdeck -silent steam://rungameid/<appid>`,
   as the Steam plugin starts them. OGUI takes the Steam app id from that argument, so gamescope
   focuses the game's window and OGUI's Steam handling (and patches 0017 and 0020) applies.
+  `/usr/bin/steam` may then start a game Steam has started here before without the client
+  ("Starting games without Steam", below).
 - **Install and Uninstall** (OGUI's own buttons on a game): handed to Steam, `steam
   -gamepadui -steamos3 -steampal -steamdeck steam://install/<appid>` (or `uninstall`), which opens
   Steam's own dialog in Big Picture, started as Emulators > Steam Client > Open starts it. The game's
@@ -237,6 +239,121 @@ second, idle, before it). Not covered while it is on:
 
 `systemctl --user status retroforge-steam` and `journalctl --user -u retroforge-steam` (as the
 player) show a kept client; the launches log to OGUI's journal as before.
+
+## Starting games without Steam (Settings > General, on by default on the SM6115 and 4 GB boards)
+
+**Why.** On the MANGMI Air X (SM6115, 3.5 GB, zram 3.5 GB) earlyoom killed Hades (Proton 11.0
+ARM64, Vulkan, 1280x720) every time it loaded, last as it entered its first room. It never crashed
+by itself. With the client running, RAM plus swap in use reached 6.95-6.98 of 7.13 GB and swap ran
+out. Hades held ~2.4 GB (RAM, swap and ~1 GB of GPU buffers that cannot be swapped), and the client
+and its web helper held 1.0-1.2 GB beside it (up to 2.1 GB while Steam started the game). The same
+launch without the client (2026-10-22, `hades-memlog` every 2 s):
+
+| run | RAM+swap in use, peak | swap free, least | Steam client | outcome |
+|---|---|---|---|---|
+| with Steam, 09:18 | 6978 MiB | 0 | 1030 MiB | killed while loading |
+| with Steam, 09:50 | 6954 MiB | 0 | 1200 MiB | killed |
+| with Steam, 10:05 | 6982 MiB | 29 MiB | 1039 MiB | killed entering the first room |
+| without the client, 15:32 | 5494 MiB | 1515 MiB | none | menu, first room, played, quit |
+
+So ~1.5 GB of RAM and swap is freed, and swap no longer runs out. RAM itself stays tight (the GPU
+buffers and ~0.9 GB of compressed zram). Hades's own log shows it carry on without Steam:
+`Initializing steam`, then `SteamAPI failed to initialize!` and `Steam not initialized`, then
+the main menu ~35 s after the press, and `RoomOpening` loaded. Its window came up 24 s after the
+press. With Steam, the install-script step alone took 19 s of the launch on this device.
+
+**How** (`/usr/bin/retroforge-steam-direct`, asked by `/usr/bin/steam` at every game launch). A game
+Steam has started on this device before is started the way Steam started it, without the client.
+Steam logs every launch in `<Steam>/logs/console_log.txt`:
+
+```
+[2026-10-22 10:07:35] Game process added : AppID 1145360 "<Steam>/linuxarm64/steam-launch-wrapper --oom-score-adjust 900 -- <Steam>/steamrtarm64/reaper SteamLaunch AppId=1145360 -- '<SteamLinuxRuntime_4-arm64>'/_v2-entry-point --verb=waitforexitandrun -- '<Proton 11.0 (ARM64)>'/proton waitforexitandrun  '<Hades>/x64Vk/Hades.exe' /c=..\\ /steampowered ...", ProcID 8664, IP 0.0.0.0:0
+```
+
+and ran that command with `/bin/sh -c`. The helper runs it the same way, so these stay Steam's:
+- the launch option Steam chose (Hades has 18 of them, for betas and the Steam Deck);
+- the player's own launch options;
+- the compat tool and the runtime it needs.
+
+Steam's own `steam-launch-wrapper` and `reaper` stay too, so gamescope gives the game's windows its
+app id and OGUI's Steam handling (patch 0017) works as with the client.
+
+- **Where it is kept.** A game's newest such line is its last one in `console_log.previous.txt`,
+  then `console_log.txt`: chosen by place in the log, not by its stamp, which a handheld's unset
+  clock can get wrong. It is kept in `~/.cache/retroforge/steam-direct/<appid>.json` when read, and
+  `/usr/bin/steam` keeps every game's (`retroforge-steam-direct remember`) before each start of the
+  client, so a log the client rotates away does not lose one. Install scripts are logged otherwise
+  (`Running install script evaluator for AppID ...`), so the line is the game's own.
+- **Environment.** The variables Steam gives a game (`steamclient.so` names them), added to the
+  launch's own: `SteamAppId`, `SteamGameId`, `SteamOverlayGameId` and `STEAM_COMPAT_APP_ID`;
+  `STEAM_COMPAT_CLIENT_INSTALL_PATH`; `STEAM_COMPAT_DATA_PATH` (the prefix, in the game's
+  library); `STEAM_COMPAT_INSTALL_PATH`; `STEAM_COMPAT_SHADER_PATH`; `STEAM_COMPAT_LIBRARY_PATHS`
+  (every library); `STEAM_COMPAT_TOOL_PATHS` (the command's compat tools, Proton first);
+  `SteamDeck=1` (the client runs with `-steamdeck`).
+- **Valve's per-game Proton setting.** `STEAM_COMPAT_CONFIG` comes from `app_compat_configs` of
+  app 891390, "SteamPlay 2.0 Manifests", in `appinfo.vdf`. Hades has none.
+- **Working folder.** The working folder of the `appinfo.vdf` launch entry that runs that
+  executable (Hades: `x64Vk\`), else the executable's own folder.
+- **Before it runs.** `/usr/bin/steam` still does the D-Bus check and DXVK-Sarek, then execs the
+  helper. It skips the kept client and the x86 guest. `check` has already checked everything `run`
+  needs, because once `/usr/bin/steam` has exec'd `run` nothing can fall back to Steam. So `run`
+  does not ask again about the setting or a client. SIGPIPE and SIGXFSZ go back to their defaults
+  before the exec: Python ignores them, and an ignored signal stays ignored in everything it execs.
+
+**Left to the client.** For these, `retroforge-steam-direct check` says why in OGUI's journal, and
+`/usr/bin/steam` starts Steam as before:
+- the setting is off (nothing is said);
+- a client already runs (`~/.steam/steam.pid` names a live `steam`; the client leaves a stale one
+  behind when OGUI kills it). That client gets the game, with the overlay, cloud and achievements,
+  at no more memory;
+- Steam has not started the game on this device yet. Its first launch goes through Steam, which
+  also runs the game's install scripts (DirectX, VC++ redistributables) and sets up its prefix;
+- the game is not fully installed, or its StateFlags have any bit other than fully installed (4),
+  update queued (2) and a run Steam did not see end (64): an update, a download, a validation, files
+  missing. An update Steam has only queued does not stop a launch: the game runs its installed
+  version until Steam runs (Main menu > Emulators > Steam Client) and updates it;
+- an x86 game or an x86 Proton: Steam runs those through its FEX tool (app 3127680) and an x86
+  Steam Linux Runtime, with settings only the client makes;
+- the logged command names no compat tool, or no file of the game;
+- a path in it is in a folder that is gone (the compat tool was changed or uninstalled), or Steam's
+  launch wrapper or reaper is gone. A file not written yet, in a folder that exists (a log the game
+  is told to write), is fine. Paths are compared resolved, so a library named through a link works.
+
+A launch option or compat tool the player changes in Steam reaches a game started this way only
+once Steam has started it again. Open Main menu > Emulators > Steam Client and start the game from
+there once.
+
+**What goes without the client** (the setting's description says the first four):
+- **Steam Cloud.** Saves stay on the device, and Steam syncs them the next time it starts the
+  game. A game also played on another device in between gets Steam's cloud-conflict dialog then.
+- **Achievements and playtime.**
+- **The overlay.**
+- **Steam Input.** The game reads the gamepad itself (InputPlumber's virtual pad).
+- **Games that require Steam.** Steam DRM (SteamStub), an online license check, a game that quits
+  when `SteamAPI_Init` fails: such a game closes right after it starts. Turn the setting off for it.
+  The setting applies to every game.
+- **The install scripts** Steam runs before each launch (Hades: 19 s on the Air X), the Steam Linux
+  Runtime's own update, and anything Steam would update before a launch.
+
+**The setting.** `DIRECT_LAUNCH=on|off` in `~/.config/retroforge/steam.conf`, beside `DXVK_SAREK`
+and `KEEP_RUNNING`. The player changes it in Settings > General > "Steam: start games without Steam"
+(`steam_direct.gd`), or with `retroforge-steam-direct on|off|status` over SSH. Never set, it is on
+for SoC class SM6115 (`device-env`) and on boards with less than 4.5 GiB of `MemTotal` (the 4 GB
+boards report ~3.5-3.8 GiB), and off elsewhere. The SM6115 is on whatever its RAM, because its client
+also runs on emulated LSE atomics (`0025`). `RETROFORGE_STEAM_DIRECT=on|off` overrides it, for
+testing. A launch item stays `steam ... steam://rungameid/<appid>`, so the setting applies from the
+next launch without a library rescan. Keeping Steam running between games does not apply to a game
+started without the client. It still applies to first launches and to Steam's own UI.
+
+**umu-launcher** was the other way to do this. Upstream (2026-08) supports aarch64: it maps Proton's
+`require_tool_appid` 4185400 to `steamrt4-arm64`. But it downloads its own copy of that runtime from
+repo.steampowered.com into `~/.local/share/umu`, instead of the one Steam installed. It checks for a
+newer one at each online launch. It needs a Python stack the image does not ship (python-xlib,
+urllib3, vdf, filelock). And it leaves choosing the executable and its launch option to the caller.
+Replaying Steam's own launch needs none of that.
+
+**Not yet seen on hardware:** a game on an SD card library, a game with a `STEAM_COMPAT_CONFIG`,
+Proton-CachyOS with DXVK-Sarek started this way, and a game that requires Steam (expected to close).
 
 ## x86 games: the FEX guest
 

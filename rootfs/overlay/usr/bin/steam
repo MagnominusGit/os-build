@@ -33,7 +33,8 @@
 # without its wrapper.
 # Unless the player keeps Steam running between games (Settings > General): then the client runs as a
 # user unit and outlives the launch, and this script hands launches to it ("Kept running between
-# games" below).
+# games" below). And a game Steam has started here before may start without the client at all
+# (Settings > General, on by default on the SM6115 and 4 GB boards: "Without the client" below).
 #
 # First start: on 2026-10-15 the client updated itself from Valve's manifest (667 MB download) to
 # ~3 GB, because the linuxarm64 manifest also carries the x86 client and runtimes. steam-install runs
@@ -68,6 +69,28 @@ for link in steam root; do
     ln -sfn "$RETROFORGE_STEAM_ROOT" "$HOME/.steam/$link"
   fi
 done
+
+# ---- Without the client (Settings > General; on by default on the SM6115 and 4 GB boards) -----------
+# A game launch (steam://rungameid/<appid>) can start without the Steam client, which holds ~1 GB
+# beside the game: on the MANGMI Air X (3.5 GB) earlyoom killed Hades in its first room with the
+# client running, and Hades played without it (2026-10-22). /usr/bin/retroforge-steam-direct decides
+# (`check`: the player's setting, no client running, a launch of this game that Steam has run on this
+# device before and that needs nothing only the client sets up), replays that launch (`run`), and
+# says what goes without the client: cloud saves, achievements, the overlay, Steam Input. Then the
+# client's own set-up below is skipped (the kept client, the x86 guest), but not the D-Bus check and
+# DXVK-Sarek, and this script becomes the helper. Anything else (Steam's UI, an install, a game's
+# first launch, an x86 game) starts the client as before.
+# TEST SEAM (tests/test-steam-direct.sh): RETROFORGE_STEAM_DIRECT_CLI.
+direct_cli="${RETROFORGE_STEAM_DIRECT_CLI:-/usr/bin/retroforge-steam-direct}"
+direct=""
+if [ -z "${RETROFORGE_STEAM_KEPT:-}" ] && [ -x "$direct_cli" ]; then
+  for arg in "$@"; do
+    case "$arg" in steam://rungameid/*) direct="${arg#steam://rungameid/}" ;; esac
+  done
+  case "$direct" in *[!0-9]*) direct="" ;; esac
+  if [ -n "$direct" ] && ! "$direct_cli" check "$direct"; then direct=""; fi
+fi
+# ----------------------------------------------------------------------------------------------------
 
 # ---- Kept running between games (Settings > General, off by default) ------------------------------
 # Off, the client lives as long as this launch: OGUI SIGTERMs it once the game's windows are gone, and
@@ -186,7 +209,7 @@ kept_launch() {
   [ "$("$keep_cli" status 2>/dev/null)" = on ] || "$keep_cli" stop-idle
   exit 0
 }
-if [ -z "${RETROFORGE_STEAM_KEPT:-}" ] && [ -x "$keep_cli" ]; then
+if [ -z "$direct" ] && [ -z "${RETROFORGE_STEAM_KEPT:-}" ] && [ -x "$keep_cli" ]; then
   kept_launch "$@"
 fi
 # ----------------------------------------------------------------------------------------------------
@@ -226,7 +249,7 @@ for pair in "sdk32 linux32" "sdk64 linux64" "bin32 ubuntu12_32" "bin64 ubuntu12_
     ln -sfn "$RETROFORGE_STEAM_ROOT/$target" "$HOME/.steam/$link"
   fi
 done
-if [ "${RETROFORGE_STEAM_X86_GUEST:-1}" != 0 ]; then
+if [ -z "$direct" ] && [ "${RETROFORGE_STEAM_X86_GUEST:-1}" != 0 ]; then
   export RETROFORGE_STEAM_X86_GUEST_DIR="${RETROFORGE_STEAM_X86_GUEST_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/retroforge/fex-guest}"
   "${RETROFORGE_STEAM_X86_GUEST_HELPER:-/usr/lib/retroforge/steam-x86-guest}" start "$$"
   provider="$RETROFORGE_STEAM_X86_GUEST_DIR/root/graphics_provider.json"
@@ -256,6 +279,11 @@ sarek_cli="${RETROFORGE_STEAM_SAREK_CLI:-/usr/bin/retroforge-steam-sarek}"
 if [ -x "$sarek_cli" ] && [ "$("$sarek_cli" apply)" = on ]; then
   export PROTON_DXVK_SAREK="${PROTON_DXVK_SAREK:-1}"
 fi
+
+# Without the client (above): the game, as Steam last started it. Else the client starts, and it may
+# rotate its log, which holds how it last started each game: the helper keeps those first.
+[ -n "$direct" ] && exec "$direct_cli" run "$direct"
+[ -x "$direct_cli" ] && "$direct_cli" remember
 
 # No STEAM_MULTIPLE_XWAYLANDS, unlike SteamOS and Nova-Deck where Steam is the shell on :0: it makes
 # the client put games on the Xwayland after its own, and OGUI already starts it on :1 (games' own

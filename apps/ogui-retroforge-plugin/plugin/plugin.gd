@@ -50,6 +50,7 @@ var _art_fetch: RefCounted  # art_fetch.gd: new ROMs' art, fetched when their ca
 var _os: Resource  # retroforge_os.gd, installed as OGUI's platform.os
 var _sarek: RefCounted  # steam_sarek.gd
 var _keep: RefCounted  # steam_keep.gd
+var _direct: RefCounted  # steam_direct.gd
 var _watch: RefCounted  # rom_watch.gd
 var _steam_watch: RefCounted  # steam_watch.gd
 var _rescan_timer: Timer
@@ -115,6 +116,9 @@ func _ready() -> void:
 	_keep = load(plugin_base.path_join("steam_keep.gd")).new().setup(get_tree())
 	if not _keep.attach():
 		logger.warn("OGUI general settings layout or retroforge-steam-keep not found; no keep-Steam-running toggle")
+	_direct = load(plugin_base.path_join("steam_direct.gd")).new().setup(get_tree())
+	if not _direct.attach():
+		logger.warn("OGUI general settings layout or retroforge-steam-direct not found; no start-without-Steam toggle")
 	_setup_input_boost()
 
 
@@ -154,6 +158,8 @@ func unload() -> void:
 		_sarek.detach()
 	if _keep:
 		_keep.detach()
+	if _direct:
+		_direct.detach()
 	if is_instance_valid(_hardware_card):
 		var qb_card: Node = _hardware_card.find_parent("QuickBarCard*")
 		(qb_card if qb_card else _hardware_card).queue_free()

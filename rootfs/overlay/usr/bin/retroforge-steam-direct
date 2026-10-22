@@ -1,0 +1,484 @@
+#!/usr/bin/env python3
+# retroforge-steam-direct — Steam games started without the Steam client, on boards where the client's
+# memory is what the game needs: the player's "Start Steam games without Steam" setting, and the launch.
+#
+#   retroforge-steam-direct status       print on or off (and on stderr, where that comes from)
+#   retroforge-steam-direct on|off       save the player's choice; print the result
+#   retroforge-steam-direct check APPID  exit 0 when APPID starts without the client now; else exit 1,
+#                                        saying why on stderr (nothing when the setting is off)
+#   retroforge-steam-direct run APPID    start APPID without the client: this process becomes the
+#                                        launch. /usr/bin/steam execs it after a `check`, so it asks
+#                                        neither the setting nor whether a client runs; exit 1,
+#                                        nothing started, when there is no launch to replay
+#   retroforge-steam-direct remember     keep every game's newest launch in Steam's log (/usr/bin/steam
+#                                        runs it before the client starts)
+#
+# WHY. On the MANGMI Air X (SM6115, 3.5 GB) earlyoom killed Hades every time it entered its first
+# room: the client and its web helper held ~1.0-1.2 GB beside the game's ~2.4 GB (RAM, swap and
+# ~1 GB of GPU buffers that cannot be swapped), and RAM plus swap in use reached ~6.98 of 7.13 GB.
+# Without the client the same launch peaked at 5.49 GB with 1.5 GB of swap left, and Hades played
+# (2026-10-22). Hades logs "SteamAPI failed to initialize!" and carries on; a game that needs Steam
+# (Steam DRM, an online check) closes instead.
+#
+# WHAT IT RUNS: Steam's own last launch of the game on this device. Steam logs each one in
+# <Steam>/logs/console_log.txt,
+#   [2026-10-22 10:07:35] Game process added : AppID 1145360 "<command>", ProcID 8664, IP 0.0.0.0:0
+# and ran <command> as `/bin/sh -c <command>`:
+#   <Steam>/linuxarm64/steam-launch-wrapper --oom-score-adjust 900 -- <Steam>/steamrtarm64/reaper
+#   SteamLaunch AppId=1145360 -- '<SteamLinuxRuntime_4-arm64>'/_v2-entry-point --verb=waitforexitandrun
+#   -- '<Proton 11.0 (ARM64)>'/proton waitforexitandrun '<Hades>/x64Vk/Hades.exe' /c=..\ ...
+# It is run the same way, so the launch option Steam chose (Hades has 18 of them, for betas and the
+# Steam Deck), the player's own launch options, the compat tool and its runtime stay Steam's, and
+# gamescope and OGUI see Steam's reaper as with the client. A game's newest such line (the last one in
+# console_log.previous.txt then console_log.txt: by place, not by stamp, which a handheld's clock may
+# have got wrong) is kept in ~/.cache/retroforge/steam-direct/<appid>.json when it is read, and
+# /usr/bin/steam keeps every game's before each start of the client, so a log the client rotates away
+# does not lose one. Install scripts are logged otherwise ("Running install script evaluator for
+# AppID ..."), so the line is the game's own.
+# With the environment Steam gives a game (steamclient.so names these), over the launch's own:
+#   SteamAppId, SteamGameId, SteamOverlayGameId, STEAM_COMPAT_APP_ID   the app id
+#   STEAM_COMPAT_CLIENT_INSTALL_PATH   <Steam>
+#   STEAM_COMPAT_DATA_PATH             <library>/steamapps/compatdata/<appid> (the game's library)
+#   STEAM_COMPAT_INSTALL_PATH          <library>/steamapps/common/<installdir>
+#   STEAM_COMPAT_SHADER_PATH           <library>/steamapps/shadercache/<appid>
+#   STEAM_COMPAT_LIBRARY_PATHS         every library's steamapps (what pressure-vessel shares)
+#   STEAM_COMPAT_TOOL_PATHS            the command's compat tools (folders with a toolmanifest.vdf)
+#   STEAM_COMPAT_CONFIG                Valve's per-game Proton setting, when there is one (appinfo.vdf,
+#                                      app 891390 "SteamPlay 2.0 Manifests", app_compat_configs)
+#   SteamDeck=1                        as the client sets it: /usr/bin/steam starts it with -steamdeck
+# from the working folder of the appinfo.vdf launch entry that runs that executable, else the
+# executable's own folder.
+#
+# Left to the client (check says why, and /usr/bin/steam starts Steam as before):
+#   - the setting is off;
+#   - a client already runs (~/.steam/steam.pid names a live `steam`): it has the game's overlay,
+#     cloud saves and achievements, at no more memory;
+#   - Steam has not started the game on this device yet. Its first launch goes through Steam, which
+#     also runs the game's install scripts (DirectX, VC++ redistributables) and sets up its prefix;
+#   - the game is not fully installed, or its files are changing (StateFlags beyond fully installed,
+#     an update queued and a run Steam did not see end: an update, a download, a validation...);
+#   - an x86 game, or an x86 Proton: Steam runs those through its FEX tool (app 3127680) and an x86
+#     Steam Linux Runtime, with settings only the client makes;
+#   - the command names no compat tool or no program of the game, or a path in a folder that is gone
+#     (the compat tool was changed or uninstalled), or Steam's launch wrapper or reaper is gone.
+# A launch option or compat tool the player changes in Steam reaches a game started this way once
+# Steam has started it again (Main menu > Emulators > Steam Client, then the game from there).
+# An update Steam has queued (StateFlags 2) does not stop a launch: Steam installs it once it runs
+# (Main menu > Emulators > Steam Client), and the game runs its installed version until then.
+# Not run without the client: the install scripts, cloud sync (saves stay on the device, and Steam
+# uploads them the next time it starts the game), achievements, playtime, the overlay, Steam Input
+# (the game reads the gamepad itself) and the Steam Linux Runtime's update.
+#
+# THE SETTING is DIRECT_LAUNCH=on|off in ~/.config/retroforge/steam.conf, beside DXVK_SAREK and
+# KEEP_RUNNING (the last such line counts; saving rewrites that line and keeps the others). The
+# RetroForge plugin's Settings > General toggle "Steam: start games without Steam" runs this. Never
+# set, it is on for SoC class SM6115 (device-env: the client also runs on emulated LSE atomics there)
+# and on boards with under 4.5 GiB of RAM (MemTotal: the 4 GB boards), off elsewhere.
+# RETROFORGE_STEAM_DIRECT=on|off overrides both, for testing and debugging.
+#
+# Exit 0; 1 when the setting could not be saved, or (check, run) the game starts through Steam; 2 for a
+# bad invocation.
+#
+# TEST SEAMS (tests/test-steam-direct.sh): RETROFORGE_STEAM_ROOT (also set by /usr/bin/steam),
+# RETROFORGE_PROC (/proc), RETROFORGE_MEMINFO (/proc/meminfo), RETROFORGE_DEVICE_ENV,
+# RETROFORGE_STEAM_LIBRARY (the steam-library whose readers this uses), XDG_CONFIG_HOME, XDG_CACHE_HOME.
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import shlex
+import signal
+import subprocess
+import sys
+import tempfile
+
+HOME = os.path.expanduser("~")
+DATA = os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".local", "share")
+STEAM_ROOT = (os.environ.get("RETROFORGE_STEAM_ROOT") or os.path.join(DATA, "Steam")).rstrip("/")
+CONF = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "retroforge", "steam.conf")
+CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.join(HOME, ".cache"), "retroforge", "steam-direct")
+PROC = os.environ.get("RETROFORGE_PROC", "/proc")
+MEMINFO = os.environ.get("RETROFORGE_MEMINFO", "/proc/meminfo")
+DEVICE_ENV = os.environ.get("RETROFORGE_DEVICE_ENV", "/usr/lib/retroforge/device-env")
+STEAM_LIBRARY = os.environ.get("RETROFORGE_STEAM_LIBRARY", "/usr/lib/retroforge/steam-library")
+KEY = "DIRECT_LAUNCH"
+# Under this much RAM (kB of MemTotal) the setting is on by default: the 4 GB boards report ~3.5-3.8 GiB.
+LOW_RAM_KB = 4718592
+# Steam's FEX tool and its x86 Steam Linux Runtimes (scout, soldier, sniper, 4.0).
+X86_TOOLS = (3127680, 1070560, 1391110, 1628350, 4183110)
+STEAMPLAY_MANIFESTS = 891390
+# StateFlags of an app manifest: fully installed, and what may go with it for a game that can start:
+# an update queued (2), a run Steam did not see end (64). Any other bit (files missing or corrupt, an
+# update, a download, a validation, a move...) leaves the game to Steam.
+FULLY_INSTALLED = 4
+READY = FULLY_INSTALLED | 2 | 64
+# Steam's own programs in a launch, which have to be there: its launch wrapper and its reaper.
+LAUNCHERS = ("steam-launch-wrapper", "reaper")
+LAUNCH = re.compile(r'^\[(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\] Game process added : AppID (\d+) "(.*)", ProcID \d+')
+
+
+def log(msg):
+    print(f"retroforge-steam-direct: {msg}", file=sys.stderr, flush=True)
+
+
+class Refused(Exception):
+    """The game starts through Steam; the message says why."""
+
+
+def steam_library():
+    """/usr/lib/retroforge/steam-library as a module: its VDF readers and library folders."""
+    loader = importlib.machinery.SourceFileLoader("steam_library", STEAM_LIBRARY)
+    spec = importlib.util.spec_from_loader("steam_library", loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+# ------------------------------------------------------------------------------------------------
+# The setting
+
+
+def saved():
+    """The player's choice: on, off, or None when there is none."""
+    value = None
+    try:
+        with open(CONF, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith(KEY + "="):
+                    value = line.rstrip("\n")[len(KEY) + 1:]
+    except OSError:
+        return None
+    return value if value in ("on", "off") else None
+
+
+def board():
+    """(SoC class, MemTotal in kB); "" and 0 for what cannot be read."""
+    soc, mem = "", 0
+    try:
+        out = subprocess.run([DEVICE_ENV], capture_output=True, text=True, timeout=10).stdout
+        for line in out.splitlines():
+            for word in shlex.split(line):
+                if word.startswith("RETROFORGE_SOC_CLASS="):
+                    soc = word.split("=", 1)[1]
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    try:
+        with open(MEMINFO) as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    mem = int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return soc, mem
+
+
+def state():
+    """(on|off, where that comes from)."""
+    env = os.environ.get("RETROFORGE_STEAM_DIRECT", "")
+    if env in ("on", "off"):
+        return env, "RETROFORGE_STEAM_DIRECT"
+    choice = saved()
+    if choice:
+        return choice, CONF
+    soc, mem = board()
+    ram = f"{mem / 1048576:.1f} GiB of RAM" if mem else "unknown RAM"
+    on = soc == "SM6115" or 0 < mem < LOW_RAM_KB
+    return ("on" if on else "off"), f"the default on {soc or 'an unknown board'} with {ram}"
+
+
+def save(value):
+    lines = []
+    try:
+        with open(CONF, encoding="utf-8", errors="surrogateescape") as f:
+            lines = [line for line in f if not line.startswith(KEY + "=")]
+    except FileNotFoundError:
+        lines = ["# Steam settings of the RetroForge shell (retroforge-steam-sarek, -keep, -direct). Safe to edit.\n"]
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += "\n"
+    lines.append(f"{KEY}={value}\n")
+    os.makedirs(os.path.dirname(CONF), exist_ok=True)
+    tmp = CONF + ".part"
+    with open(tmp, "w", encoding="utf-8", errors="surrogateescape") as f:
+        f.writelines(lines)
+    os.replace(tmp, CONF)
+
+
+# ------------------------------------------------------------------------------------------------
+# The launch
+
+
+def client_running():
+    """True while Steam's client runs: ~/.steam/steam.pid names a live process called steam (the client
+    leaves the file behind when it is killed)."""
+    try:
+        with open(os.path.join(HOME, ".steam", "steam.pid")) as f:
+            pid = f.read().strip()
+        if not pid.isdigit():
+            return False
+        with open(os.path.join(PROC, pid, "comm")) as f:
+            return f.read().strip() == "steam"
+    except OSError:
+        return False
+
+
+def logged_launches():
+    """{appid: (stamp, command)}: each game's newest launch in Steam's logs. Newest by place, not by
+    stamp: the client only appends, and rotates console_log.txt to console_log.previous.txt, so the
+    last line wins even when the handheld's clock was wrong (or not yet set) when it was written."""
+    found = {}
+    for name in ("console_log.previous.txt", "console_log.txt"):
+        try:
+            with open(os.path.join(STEAM_ROOT, "logs", name), encoding="utf-8", errors="surrogateescape") as f:
+                for line in f:
+                    if "Game process added" not in line:
+                        continue
+                    m = LAUNCH.match(line)
+                    if m:
+                        found[int(m.group(2))] = (m.group(1), m.group(3))
+        except OSError:
+            continue
+    return found
+
+
+def kept(appid):
+    """The (stamp, command) kept for appid, else None."""
+    try:
+        with open(os.path.join(CACHE, f"{appid}.json"), encoding="utf-8") as f:
+            cached = json.load(f)
+        return str(cached["logged"]), str(cached["command"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def keep(appid, launch):
+    """Keep launch for appid, unless it is what is kept already."""
+    if kept(appid) == launch:
+        return
+    try:
+        os.makedirs(CACHE, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=CACHE, prefix=f".{appid}-")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"logged": launch[0], "command": launch[1]}, f)
+        os.replace(tmp, os.path.join(CACHE, f"{appid}.json"))
+    except OSError as err:
+        log(f"could not keep Steam's launch of app {appid}: {err}")
+
+
+def remember():
+    """Keep every game's newest logged launch (/usr/bin/steam runs this before the client starts, which
+    may rotate its log); the number of games."""
+    found = logged_launches()
+    for appid, launch in found.items():
+        keep(appid, launch)
+    return len(found)
+
+
+def logged_launch(appid):
+    """(stamp, command) of Steam's newest logged launch of appid (kept), else the kept one; None when
+    there is neither."""
+    launch = logged_launches().get(appid)
+    if launch is None:
+        return kept(appid)
+    keep(appid, launch)
+    return launch
+
+
+def manifest(sl, appid):
+    """(library, installdir, StateFlags) of appid's app manifest in any library, else None."""
+    for lib in sl.library_dirs(STEAM_ROOT):
+        fields = {}
+        for depth, key, value in sl.vdf_pairs(sl.read_text(os.path.join(lib, "steamapps", f"appmanifest_{appid}.acf"))):
+            if depth == 1 and key in ("installdir", "StateFlags") and key not in fields:
+                fields[key] = value
+        if fields:
+            flags = fields.get("StateFlags", "0")
+            return lib, fields.get("installdir", ""), int(flags) if flags.isdigit() else 0
+    return None
+
+
+def under(path, folder):
+    """True when path is folder or inside it, both resolved (a library may be named through a link)."""
+    if not path or not folder:
+        return False
+    path, folder = os.path.realpath(path), os.path.realpath(folder)
+    return path == folder or path.startswith(folder.rstrip("/") + "/")
+
+
+def plan(appid):
+    """{command, env (to add), workdir, stamp, waiting (an update is queued)} of the launch; Refused
+    when there is none."""
+    stamp_command = logged_launch(appid)
+    if not stamp_command:
+        raise Refused("Steam has not started it on this device yet (its first launch goes through Steam)")
+    stamp, command = stamp_command
+    if f" SteamLaunch AppId={appid} " not in f" {command} ":
+        raise Refused(f"Steam's launch of {stamp} is not one this can replay")
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        raise Refused(f"Steam's launch of {stamp} does not parse")
+    sl = steam_library()
+    found = manifest(sl, appid)
+    if not found:
+        raise Refused("it is not installed")
+    lib, installdir, flags = found
+    if not flags & FULLY_INSTALLED or flags & ~READY:
+        raise Refused(f"its files are not ready (StateFlags {flags}): Steam is installing, updating or checking it")
+    if not installdir.strip("/."):
+        raise Refused("its app manifest names no folder")
+    libraries = sl.library_dirs(STEAM_ROOT)
+    game = os.path.join(lib, "steamapps", "common", installdir)
+
+    # The programs the command names: the compat tools (a folder with a toolmanifest.vdf) and the game's
+    # executable (the first of its files). A path in a folder that is gone is a tool Steam has replaced
+    # or uninstalled; a file not there yet in a folder that is (a log the game is told to write) is not.
+    x86 = []
+    for tool in X86_TOOLS:
+        where = manifest(sl, tool)
+        if where and where[1]:
+            x86.append(os.path.join(where[0], "steamapps", "common", where[1]))
+    roots = [STEAM_ROOT] + libraries
+    tools, exe = [], ""
+    for word in words:
+        if not word.startswith("/") or not any(under(word, r) for r in roots):
+            continue   # an argument (Hades: /c=..\), not a path of Steam's
+        if any(under(word, d) for d in x86):
+            raise Refused("Steam runs it through its FEX tool (an x86 game or Proton), which needs the client")
+        folder = os.path.dirname(word)
+        if not os.path.isdir(folder) or (os.path.basename(word) in LAUNCHERS and not os.path.isfile(word)):
+            raise Refused(f"{word} is gone (Steam starts it again with what is installed now)")
+        if os.path.isfile(os.path.join(folder, "toolmanifest.vdf")):
+            if not os.path.exists(word):
+                raise Refused(f"{word} is gone (Steam starts it again with what is installed now)")
+            if folder not in tools:
+                tools.append(folder)
+        elif not exe and under(word, game) and os.path.isfile(word):
+            exe = word
+    if not tools:
+        raise Refused(f"Steam's launch of {stamp} names no compat tool")
+    if not exe:
+        raise Refused(f"Steam's launch of {stamp} names no program of the game")
+
+    appinfo = {}
+    try:
+        appinfo = sl.read_app_nodes(os.path.join(STEAM_ROOT, "appcache", "appinfo.vdf"), {appid, STEAMPLAY_MANIFESTS})
+    except (OSError, sl.Unreadable) as err:
+        log(f"appinfo.vdf: {err}; the game runs from its executable's folder, without Valve's Proton setting")
+    workdir = workingdir(appinfo.get(appid, {}), game, exe)
+    config = compat_config(appinfo.get(STEAMPLAY_MANIFESTS, {}), appid)
+    env = {
+        "SteamAppId": str(appid), "SteamGameId": str(appid), "SteamOverlayGameId": str(appid),
+        "STEAM_COMPAT_APP_ID": str(appid),
+        "STEAM_COMPAT_CLIENT_INSTALL_PATH": STEAM_ROOT,
+        "STEAM_COMPAT_DATA_PATH": os.path.join(lib, "steamapps", "compatdata", str(appid)),
+        "STEAM_COMPAT_INSTALL_PATH": game,
+        "STEAM_COMPAT_SHADER_PATH": os.path.join(lib, "steamapps", "shadercache", str(appid)),
+        "STEAM_COMPAT_LIBRARY_PATHS": ":".join(os.path.join(d, "steamapps") for d in libraries),
+        # Innermost first, as Steam lists them: Proton, then the runtime it runs in.
+        "STEAM_COMPAT_TOOL_PATHS": ":".join(reversed(tools)),
+        "SteamDeck": "1",
+    }
+    if config:
+        env["STEAM_COMPAT_CONFIG"] = config
+    return {"command": command, "env": env, "workdir": workdir, "stamp": stamp, "waiting": bool(flags & 2)}
+
+
+def workingdir(app, game, exe):
+    """The working folder of the launch entry that runs exe, else exe's folder."""
+    rel = os.path.relpath(os.path.realpath(exe), os.path.realpath(game)) if under(exe, game) else ""
+    launch = app.get("appinfo", app).get("config", {}).get("launch", {})
+    for entry in launch.values() if isinstance(launch, dict) else ():
+        if not isinstance(entry, dict):
+            continue
+        path = str(entry.get("executable", "")).replace("\\", "/")
+        path = path[2:] if path.startswith("./") else path.lstrip("/")
+        wd = str(entry.get("workingdir", "")).replace("\\", "/").strip("/")
+        if rel and path.casefold() == rel.casefold() and wd:
+            folder = os.path.join(game, wd)
+            if os.path.isdir(folder):
+                return folder
+    return os.path.dirname(exe)
+
+
+def compat_config(manifests, appid):
+    """Valve's per-game Proton setting for appid ("" when there is none)."""
+    configs = manifests.get("appinfo", manifests).get("extended", {}).get("app_compat_configs", {})
+    for entry in configs.values() if isinstance(configs, dict) else ():
+        if isinstance(entry, dict) and str(entry.get("appid", "")) == str(appid):
+            value = str(entry.get("config", "")).strip()
+            return "" if value == "none" else value
+    return ""
+
+
+def decide(appid):
+    """The launch (plan) when appid starts without the client; None while the setting is off; Refused,
+    saying why, for anything else."""
+    if state()[0] != "on":
+        return None
+    if client_running():
+        raise Refused("the Steam client is running: the game goes to it")
+    return plan(appid)
+
+
+def run(appid, launch):
+    """Become the launch: Steam's command, through /bin/sh as Steam ran it, from its working folder.
+    SIGPIPE and SIGXFSZ go back to their defaults: Python ignores them, and an ignored signal stays
+    ignored across exec, in the reaper, pressure-vessel, Proton and the game."""
+    log(f"starting app {appid} without the Steam client, as Steam started it at {launch['stamp']}")
+    if launch["waiting"]:
+        log(f"app {appid} has an update waiting: Steam installs it once it runs (Main menu > Emulators > Steam Client)")
+    env = dict(os.environ)
+    env.update(launch["env"], PWD=launch["workdir"])
+    for sig in (signal.SIGPIPE, signal.SIGXFSZ):
+        signal.signal(sig, signal.SIG_DFL)
+    try:
+        os.chdir(launch["workdir"])
+        os.execve("/bin/sh", ["/bin/sh", "-c", launch["command"]], env)
+    except OSError as err:
+        log(f"could not start app {appid}: {err}")
+    return 1
+
+
+def main(argv):
+    cmd = argv[0] if argv else ""
+    if cmd == "status" and len(argv) == 1:
+        on, where = state()
+        log(f"starting Steam games without Steam is {on} ({where})")
+        print(on)
+        return 0
+    if cmd in ("on", "off") and len(argv) == 1:
+        try:
+            save(cmd)
+        except OSError as err:
+            log(f"could not save {KEY}={cmd} in {CONF}: {err}")
+            return 1
+        on, where = state()
+        if on != cmd:
+            log(f"saved {cmd}, but {where} says {on}")
+        print(on)
+        return 0
+    if cmd == "remember" and len(argv) == 1:
+        remember()
+        return 0
+    if cmd in ("check", "run") and len(argv) == 2:
+        if not argv[1].isdigit():
+            log(f"not an app id: {argv[1]}")
+            return 2
+        appid = int(argv[1])
+        try:
+            # check decides; run, which /usr/bin/steam execs after a check, only plans: nothing it
+            # could refuse now would start Steam instead.
+            launch = decide(appid) if cmd == "check" else plan(appid)
+        except Refused as why:
+            log(f"app {appid} starts through Steam: {why}" if cmd == "check" else f"could not start app {appid}: {why}")
+            return 1
+        if launch is None:
+            return 1
+        return 0 if cmd == "check" else run(appid, launch)
+    log("usage: retroforge-steam-direct status|on|off|remember|check APPID|run APPID")
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

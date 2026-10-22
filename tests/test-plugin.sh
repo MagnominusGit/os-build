@@ -108,6 +108,24 @@ grep -q 'library_manager.library_launch_item_added.connect(_drop_steam_shortcut)
   && grep -q 'add_library(steam)' "$SRC/plugin.gd" \
   && ok "the Steam games' library is added, under the id the tab and the art provider look for" \
   || bad "library_steam.gd is not added, or its id differs between library_steam.gd, plugin.gd and boxart_retroforge.gd"
+# Starting Steam games without the client (retroforge-steam-direct) is /usr/bin/steam's choice at each
+# launch, so a game's launch item stays `steam ... steam://rungameid/<appid>` (OGUI's Steam handling
+# keys on that argument) and the setting applies from the next launch without a rescan. Its toggle
+# is attached and detached like the other Steam toggles, after keep-running, with no separator of its
+# own (bfd3f38: the rows there draw none).
+grep -q '^	item.command = "steam"$' "$SRC/library_steam.gd" && grep -q '^	item.args = SteamApps.launch_args(game\["appid"\])$' "$SRC/library_steam.gd" \
+  && ok "a Steam game launches through /usr/bin/steam, which decides whether the client starts" \
+  || bad "library_steam.gd no longer launches games through steam: the start-without-Steam setting would be bypassed"
+grep -q 'load(plugin_base.path_join("steam_direct.gd")).new().setup(get_tree())' "$SRC/plugin.gd" \
+  && grep -q '_direct.detach()' "$SRC/plugin.gd" && grep -q '^const TOOL := "/usr/bin/retroforge-steam-direct"$' "$SRC/steam_direct.gd" \
+  && ok "the start-without-Steam toggle is attached and detached, and runs retroforge-steam-direct" \
+  || bad "plugin.gd does not attach steam_direct.gd, or it runs another command"
+python3 - "$SRC/steam_direct.gd" <<'PY2' && ok "steam_direct.gd turns its separator off before add_child, after the keep-running toggle" || bad "steam_direct.gd draws its own separator, or is not placed after the keep-running toggle"
+import sys
+s = open(sys.argv[1]).read()
+sep, add = s.find("_toggle.separator_visible = false"), s.find("box.add_child(_toggle)")
+sys.exit(0 if 0 <= sep < add and s.find('["RetroForgeSteamKeep", ') > 0 else 1)
+PY2
 
 # =================================================================================================
 CASE="zip"

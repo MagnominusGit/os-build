@@ -142,6 +142,16 @@ def read_packages(path):
 
 def read_apps(path, wanted):
     """{appid: (type, name)} from appinfo.vdf, for the app ids in `wanted` only."""
+    apps = {}
+    for appid, root in read_app_nodes(path, wanted).items():
+        common = root.get("appinfo", root).get("common", {})
+        apps[appid] = (str(common.get("type", "")).lower(), str(common.get("name", "")).strip())
+    return apps
+
+
+def read_app_nodes(path, wanted):
+    """{appid: its whole KeyValues tree} from appinfo.vdf, for the app ids in `wanted` only
+    (retroforge-steam-direct reads their launch entries too)."""
     with open(path, "rb") as f:
         data = f.read()
     try:
@@ -169,9 +179,7 @@ def read_apps(path, wanted):
                 return apps
             size = struct.unpack_from("<I", data, pos + 4)[0]
             if appid in wanted:
-                root = BinaryKV(data, pos + 8 + header, names).node()
-                common = root.get("appinfo", root).get("common", {})
-                apps[appid] = (str(common.get("type", "")).lower(), str(common.get("name", "")).strip())
+                apps[appid] = BinaryKV(data, pos + 8 + header, names).node()
             pos += 8 + size
     except (struct.error, IndexError, ValueError) as err:
         raise Unreadable(f"appinfo.vdf is cut short or damaged: {err}")

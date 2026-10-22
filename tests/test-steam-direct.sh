@@ -1,0 +1,458 @@
+#!/usr/bin/env bash
+# Offline test for /usr/bin/retroforge-steam-direct and /usr/bin/steam's "Without the client" block:
+# Steam games started without the Steam client, on boards where the client's memory is what the game
+# needs (the MANGMI Air X, 3.5 GB: Hades was killed in its first room with the client, and played
+# without it, 2026-10-22).
+#
+#   tests/test-steam-direct.sh
+#
+# WHY THIS EXISTS. Each rule below fails as a game that does not start, starts differently from how
+# Steam starts it, or a Steam that never comes back:
+#   the setting: on by default on SoC class SM6115 and under 4.5 GiB of RAM, off elsewhere; saved
+#     beside the other Steam settings (DXVK_SAREK, KEEP_RUNNING), which stay; an override for testing;
+#   what is replayed: Steam's own newest logged launch of that game ("Game process added"), from
+#     console_log.txt or console_log.previous.txt, kept in a cache so a rotated log does not lose it;
+#     run as Steam ran it (/bin/sh -c), word for word, from the launch entry's working folder, with
+#     Steam's compat variables (the game's library on an SD card too) and the launch's own environment;
+#   when it is not: the setting off (silently), a client running (a stale steam.pid is not one), a game
+#     Steam never started here, not installed or changing, an x86 game (Steam's FEX tool), a compat
+#     tool that is gone; each says why, and nothing runs;
+#   the wrapper: execs the helper for a game it can start, with the D-Bus check and DXVK-Sarek done
+#     and none of the client's own set-up (the kept client); everything else (Steam's UI, a first
+#     launch, the kept client's own run) starts the client as before.
+# Steam's programs are stubs that record how they were called; the client's binary caches are written
+# by a small encoder of Valve's binary KeyValues (as in test-steam-library.sh).
+set -uo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+DIRECT="$ROOT/rootfs/overlay/usr/bin/retroforge-steam-direct"
+WRAP="$ROOT/rootfs/overlay/usr/bin/steam"
+LIBRARY="$ROOT/rootfs/overlay/usr/lib/retroforge/steam-library"
+for f in "$DIRECT" "$WRAP" "$LIBRARY"; do [ -f "$f" ] || { echo "missing: $f" >&2; exit 1; }; done
+
+PASS=0; FAIL=0; CASE=""
+ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
+bad() { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
+
+T="$(mktemp -d)" && [ -d "$T" ] || { echo "mktemp -d failed" >&2; exit 1; }
+trap 'rm -rf "$T"' EXIT
+
+H="$T/home"; S="$H/.local/share/Steam"; SD="$T/sdcard/SteamLibrary"
+CONF="$H/.config/retroforge/steam.conf"; CACHE="$H/.cache/retroforge/steam-direct"
+SLOG="$S/logs/console_log.txt"
+SLR="$S/steamapps/common/SteamLinuxRuntime_4-arm64"; PROTON="$S/steamapps/common/Proton 11.0 (ARM64)"
+GAME="$S/steamapps/common/Hades"
+mkdir -p "$S/logs" "$S/linuxarm64" "$S/steamrtarm64" "$SLR" "$PROTON" "$GAME/x64Vk" "$GAME/x64" "$T/proc"
+
+# Steam's programs: the launch wrapper records its arguments (one per line), working folder and the
+# environment the game gets, and exits with $T/game.rc; the rest only have to be there.
+cat >"$S/linuxarm64/steam-launch-wrapper" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" >"$T/ran.args"; pwd >"$T/ran.cwd"; env >"$T/ran.env"; trap -p >"$T/ran.traps"
+exit "\$(cat "$T/game.rc" 2>/dev/null || echo 0)"
+EOF
+for f in "$S/steamrtarm64/reaper" "$SLR/_v2-entry-point" "$PROTON/proton" "$GAME/x64Vk/Hades.exe" "$GAME/x64/Hades.exe"; do
+  printf '#!/bin/sh\nexit 0\n' >"$f"
+done
+chmod +x "$S/linuxarm64/steam-launch-wrapper" "$S/steamrtarm64/reaper" "$SLR/_v2-entry-point" "$PROTON/proton"
+printf '"manifest"\n{\n  "commandline" "/_v2-entry-point --verb=%%verb%% --"\n}\n' >"$SLR/toolmanifest.vdf"
+printf '"manifest"\n{\n  "commandline" "/proton %%verb%%"\n  "require_tool_appid" "4185400"\n}\n' >"$PROTON/toolmanifest.vdf"
+
+acf() {  # acf <library> <appid> <installdir> <StateFlags>
+  mkdir -p "$1/steamapps"
+  printf '"AppState"\n{\n\t"appid"\t\t"%s"\n\t"name"\t\t"%s"\n\t"StateFlags"\t\t"%s"\n\t"installdir"\t\t"%s"\n\t"UserConfig"\n\t{\n\t\t"installdir"\t\t"not this"\n\t}\n}\n' \
+    "$2" "$3" "$4" "$3" >"$1/steamapps/appmanifest_$2.acf"
+}
+acf "$S" 1145360 Hades 4
+acf "$S" 4185400 SteamLinuxRuntime_4-arm64 4
+acf "$S" 4628740 "Proton 11.0 (ARM64)" 4
+
+# appinfo.vdf (v29): Hades's launch entries (the Vulkan one runs from x64Vk; one entry names a working
+# folder that is not its executable's), and Valve's per-game Proton settings (app 891390).
+mkappinfo() {
+  python3 - "$S/appcache/appinfo.vdf" <<'PY'
+import os, struct, sys
+out = sys.argv[1]
+os.makedirs(os.path.dirname(out), exist_ok=True)
+apps = {
+    1145360: {"appinfo": {"appid": 1145360, "common": {"name": "Hades", "type": "Game"}, "config": {
+        "installdir": "Hades", "launch": {
+            "0": {"executable": "x64\\Hades.exe", "workingdir": "x64\\", "arguments": "/c=..\\ /steampowered"},
+            "1": {"executable": "x64Vk\\Hades.exe", "workingdir": "x64Vk\\", "arguments": "/c=..\\ /steampowered"},
+            "2": {"executable": "Odd\\x64Vk\\Hades.exe", "workingdir": "x64\\"},
+            "3": {"executable": "./NoDir/Game.exe"}}}}},
+    891390: {"appinfo": {"appid": 891390, "common": {"name": "SteamPlay 2.0 Manifests", "type": "Config"}, "extended": {
+        "app_compat_configs": {"2310": {"appid": 2310, "config": "oldglstr", "comment": "QUAKE"},
+                               "1145360": {"appid": 1145360, "config": "gamedrive,heapdelayfree", "comment": "test"}}}}},
+}
+table = []
+def key(k):
+    if k not in table:
+        table.append(k)
+    return struct.pack("<I", table.index(k))
+def kv(tree):
+    b = b""
+    for k, v in tree.items():
+        if isinstance(v, dict):
+            b += b"\x00" + key(k) + kv(v) + b"\x08"
+        elif isinstance(v, int):
+            b += b"\x02" + key(k) + struct.pack("<i", v)
+        else:
+            b += b"\x01" + key(k) + v.encode() + b"\0"
+    return b
+body = b""
+for appid, tree in sorted(apps.items()):
+    data = kv(tree) + b"\x08"
+    head = struct.pack("<IIQ", 2, 1700000000, 0) + b"\x11" * 20 + struct.pack("<I", 7) + b"\x22" * 20
+    body += struct.pack("<II", appid, len(head) + len(data)) + head + data
+body += struct.pack("<I", 0)
+strings = struct.pack("<I", len(table)) + b"".join(s.encode() + b"\0" for s in table)
+open(out, "wb").write(struct.pack("<IIq", 0x07564429, 1, 16 + len(body)) + body + strings)
+PY
+}
+mkappinfo
+
+# Steam's own log line for a launch, as the client writes it (the first two paths unquoted, the
+# others quoted, the game's /c=..\ as /c=..\\, two spaces after waitforexitandrun).
+cmdline() {  # cmdline <appid> <runtime> <proton> <exe>
+  printf "%s --oom-score-adjust 900 -- %s SteamLaunch AppId=%s -- '%s'/_v2-entry-point --verb=waitforexitandrun -- '%s'/proton waitforexitandrun  '%s' /c=..\\\\\\\\ /steampowered /DirectLoadShell=true" \
+    "$S/linuxarm64/steam-launch-wrapper" "$S/steamrtarm64/reaper" "$1" "$2" "$3" "$4"
+}
+logline() {  # logline <file> <stamp> <appid> <command>
+  printf '[%s] Game process added : AppID %s "%s", ProcID 8664, IP 0.0.0.0:0\n' "$2" "$3" "$4" >>"$1"
+}
+HADES_CMD="$(cmdline 1145360 "$SLR" "$PROTON" "$GAME/x64Vk/Hades.exe")"
+fresh_log() {  # the client's log as it was after Hades's launches, nothing kept yet
+  : >"$SLOG"; rm -f "$S/logs/console_log.previous.txt" "$CACHE"/*.json
+  echo "[2026-10-22 10:07:15] Running install script evaluator for AppID 1145360, 2 step(s)  $S/linuxarm64/steam-launch-wrapper -- x" >>"$SLOG"
+  logline "$SLOG" "2026-10-22 09:00:34" 1145360 "$(cmdline 1145360 "$SLR" "$PROTON" "$GAME/x64/Hades.exe")"
+  logline "$SLOG" "2026-10-22 09:30:00" 413150 "$(cmdline 413150 "$SLR" "$PROTON" "$S/steamapps/common/Stardew/x.exe")"
+  logline "$SLOG" "2026-10-22 10:07:35" 1145360 "$HADES_CMD"
+  echo "[2026-10-22 10:08:43] Game process removed: AppID 1145360 \"$HADES_CMD\", ProcID 8833" >>"$SLOG"
+}
+
+printf '#!/usr/bin/env bash\necho "RETROFORGE_SOC_CLASS=$(cat %s)"\n' "'$T/soc'" >"$T/device-env"; chmod +x "$T/device-env"
+board() {  # board <SoC class> <MemTotal kB>
+  echo "$1" >"$T/soc"; printf 'MemTotal:       %s kB\nMemFree:          1000 kB\n' "$2" >"$T/meminfo"
+}
+DENV=(env -u RETROFORGE_STEAM_ROOT -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_CACHE_HOME -u RETROFORGE_STEAM_DIRECT
+      -u SteamAppId -u STEAM_COMPAT_CONFIG -u STEAM_COMPAT_DATA_PATH HOME="$H" RETROFORGE_PROC="$T/proc"
+      RETROFORGE_MEMINFO="$T/meminfo" RETROFORGE_DEVICE_ENV="$T/device-env" RETROFORGE_STEAM_LIBRARY="$LIBRARY")
+direct() {  # direct [VAR=value...] -- args...
+  local -a vars=()
+  while [ "$1" != -- ]; do vars+=("$1"); shift; done; shift
+  OUT="$("${DENV[@]}" "${vars[@]}" python3 "$DIRECT" "$@" 2>"$T/err")"; RC=$?
+  ERR="$(cat "$T/err")"
+}
+ran_env() { grep -m1 "^$1=" "$T/ran.env" | cut -d= -f2-; }
+reset_run() { rm -f "$T/ran.args" "$T/ran.cwd" "$T/ran.env" "$T/game.rc"; }
+
+# ================================================================================================
+CASE="setting"
+board SM6115 3650556
+direct -- status
+[ "$OUT" = on ] && grep -q "SM6115 with 3.5 GiB" <<<"$ERR" && ok "on by default on the SM6115 (the Air X), and says why" || bad "out=$OUT err=$ERR"
+board SM6115 7864320
+direct -- status
+[ "$OUT" = on ] && ok "on for the SM6115 whatever its RAM (the client runs on emulated LSE atomics there)" || bad "out=$OUT err=$ERR"
+board SM8250 3900000
+direct -- status
+[ "$OUT" = on ] && ok "on under 4.5 GiB of RAM on another SoC (a 4 GB board)" || bad "out=$OUT err=$ERR"
+board SM8250 7864320
+direct -- status
+[ "$OUT" = off ] && grep -q "SM8250 with 7.5 GiB" <<<"$ERR" && ok "off on a board with more RAM" || bad "out=$OUT err=$ERR"
+printf '# Steam settings, mine\nDXVK_SAREK=on\nKEEP_RUNNING=off\nDIRECT_LAUNCH=on\n' | { mkdir -p "${CONF%/*}"; cat >"$CONF"; }
+direct -- on
+[ "$OUT" = on ] && [ "$(grep -c '^DIRECT_LAUNCH=' "$CONF")" = 1 ] && grep -qx "DIRECT_LAUNCH=on" "$CONF" \
+  && grep -qx "DXVK_SAREK=on" "$CONF" && grep -qx "KEEP_RUNNING=off" "$CONF" && grep -qx "# Steam settings, mine" "$CONF" \
+  && ok "on is saved once, beside the DXVK-Sarek and keep-running settings, which stay" || bad "out=$OUT conf=$(cat "$CONF")"
+board SM6115 3650556
+direct -- off
+[ "$OUT" = off ] && grep -qx "DIRECT_LAUNCH=off" "$CONF" && ok "off is kept over the board's default" || bad "out=$OUT conf=$(cat "$CONF")"
+direct -- status
+[ "$OUT" = off ] && grep -q "steam.conf" <<<"$ERR" && ok "and read back, from the file" || bad "out=$OUT err=$ERR"
+direct RETROFORGE_STEAM_DIRECT=on -- status
+[ "$OUT" = on ] && ok "RETROFORGE_STEAM_DIRECT overrides the file" || bad "out=$OUT"
+rm -f "$CONF"
+direct -- off
+[ "$OUT" = off ] && head -1 "$CONF" | grep -q '^# ' && grep -qx "DIRECT_LAUNCH=off" "$CONF" && ok "a new steam.conf gets its comment line" || bad "conf=$(cat "$CONF")"
+direct -- sideways; [ "$RC" = 2 ] && ok "a bad invocation is exit 2" || bad "rc=$RC"
+direct -- check Hades; [ "$RC" = 2 ] && grep -q "not an app id" <<<"$ERR" && ok "an app id that is not a number is exit 2" || bad "rc=$RC err=$ERR"
+
+CASE="check: off"
+fresh_log; rm -rf "$CACHE"
+direct -- check 1145360
+[ "$RC" = 1 ] && [ -z "$ERR" ] && ok "the setting off: exit 1, silently (Steam starts the game, as always)" || bad "rc=$RC err=$ERR"
+
+CASE="check"
+rm -f "$CONF"; board SM6115 3650556
+direct -- check 1145360
+[ "$RC" = 0 ] && [ -z "$ERR" ] && ok "a game Steam has started here: it starts without the client" || bad "rc=$RC err=$ERR"
+[ -f "$CACHE/1145360.json" ] && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d["logged"] == "2026-10-22 10:07:35" and d["command"] == sys.argv[2] else 1)' "$CACHE/1145360.json" "$HADES_CMD" \
+  && ok "Steam's newest launch of it is kept (the 10:07 Vulkan one, not the 09:00 one)" || bad "cache: $(cat "$CACHE/1145360.json" 2>&1)"
+direct -- check 268910
+[ "$RC" = 1 ] && grep -q "app 268910 starts through Steam: Steam has not started it on this device yet" <<<"$ERR" \
+  && ok "a game Steam never started here goes through Steam (its install scripts, its prefix), and that is said" || bad "rc=$RC err=$ERR"
+
+CASE="check: the client"
+mkdir -p "$H/.steam" "$T/proc/7780"; echo 7780 >"$H/.steam/steam.pid"; echo steam >"$T/proc/7780/comm"
+direct -- check 1145360
+[ "$RC" = 1 ] && grep -q "the Steam client is running" <<<"$ERR" && ok "a running client gets the game (overlay, cloud, achievements, no more memory)" || bad "rc=$RC err=$ERR"
+echo bash >"$T/proc/7780/comm"
+direct -- check 1145360
+[ "$RC" = 0 ] && ok "a steam.pid left by a killed client, its pid now another program's, is not a client" || bad "rc=$RC err=$ERR"
+rm -rf "$T/proc/7780"
+direct -- check 1145360
+[ "$RC" = 0 ] && ok "nor one whose process is gone" || bad "rc=$RC err=$ERR"
+
+CASE="check: the log"
+: >"$SLOG"; rm -rf "$CACHE"
+logline "$S/logs/console_log.previous.txt" "2026-10-21 22:00:00" 1145360 "$HADES_CMD"
+direct -- check 1145360
+[ "$RC" = 0 ] && [ -f "$CACHE/1145360.json" ] && ok "a launch in console_log.previous.txt counts, and is kept" || bad "rc=$RC err=$ERR"
+rm -f "$S/logs/console_log.previous.txt"
+direct -- check 1145360
+[ "$RC" = 0 ] && ok "rotated out of both logs, the kept launch still starts it" || bad "rc=$RC err=$ERR"
+logline "$SLOG" "2026-10-22 11:00:00" 1145360 "$(cmdline 1145360 "$SLR" "$PROTON" "$GAME/x64/Hades.exe")"
+direct -- check 1145360
+grep -q '"logged": "2026-10-22 11:00:00"' "$CACHE/1145360.json" && grep -q 'x64/Hades.exe' "$CACHE/1145360.json" \
+  && ok "a newer launch in the log replaces the kept one (the player chose DirectX this time)" || bad "cache: $(cat "$CACHE/1145360.json")"
+logline "$SLOG" "2026-01-01 00:00:05" 1145360 "$HADES_CMD"
+direct -- check 1145360
+grep -q '"logged": "2026-01-01 00:00:05"' "$CACHE/1145360.json" && grep -q 'x64Vk/Hades.exe' "$CACHE/1145360.json" \
+  && ok "the log's last launch wins by its place, not its stamp (written before the clock was set)" || bad "cache: $(cat "$CACHE/1145360.json")"
+fresh_log
+direct -- remember
+[ "$RC" = 0 ] && grep -q 'x64Vk/Hades.exe' "$CACHE/1145360.json" && grep -q 'Stardew/x.exe' "$CACHE/413150.json" \
+  && ok "remember keeps every game's newest launch (what /usr/bin/steam runs before the client starts)" || bad "rc=$RC $(ls "$CACHE" 2>&1)"
+fresh_log
+logline "$SLOG" "2026-10-22 10:30:00" 42 "/usr/bin/true SteamLaunch AppId=4242 -- x"
+acf "$S" 42 FortyTwo 4
+direct -- check 42
+[ "$RC" = 1 ] && grep -q "not one this can replay" <<<"$ERR" && ok "a logged command that is not Steam's reaper for that app is refused" || bad "rc=$RC err=$ERR"
+rm -f "$S/steamapps/appmanifest_42.acf"
+
+CASE="check: the game"
+acf "$S" 1145360 Hades 1026
+direct -- check 1145360
+[ "$RC" = 1 ] && grep -q "its files are not ready (StateFlags 1026)" <<<"$ERR" && ok "while Steam updates it: through Steam" || bad "rc=$RC err=$ERR"
+acf "$S" 1145360 Hades 6
+direct -- check 1145360
+[ "$RC" = 0 ] && [ -z "$ERR" ] && ok "an update Steam has only queued (StateFlags 2) does not stop it" || bad "rc=$RC err=$ERR"
+acf "$S" 1145360 Hades 68
+direct -- check 1145360
+[ "$RC" = 0 ] && ok "nor does a run Steam did not see end (StateFlags 64, the client was killed)" || bad "rc=$RC err=$ERR"
+acf "$S" 1145360 Hades $((4 | 0x40000))
+direct -- check 1145360
+[ "$RC" = 1 ] && grep -q "not ready" <<<"$ERR" && ok "any other bit (adding files) leaves it to Steam" || bad "rc=$RC err=$ERR"
+mv "$S/steamapps/appmanifest_1145360.acf" "$T/hades.acf"
+direct -- check 1145360
+[ "$RC" = 1 ] && grep -q "it is not installed" <<<"$ERR" && ok "uninstalled: through Steam" || bad "rc=$RC err=$ERR"
+printf '"AppState"\n{\n\t"appid"\t\t"1145360"\n\t"StateFlags"\t\t"4"\n\t"installdir"\t\t""\n}\n' >"$S/steamapps/appmanifest_1145360.acf"
+direct -- check 1145360
+[ "$RC" = 1 ] && grep -q "names no folder" <<<"$ERR" && ok "an app manifest with no folder (every game would be its)" || bad "rc=$RC err=$ERR"
+mv "$T/hades.acf" "$S/steamapps/appmanifest_1145360.acf"; acf "$S" 1145360 Hades 4
+
+CASE="check: the tools"
+mv "$PROTON" "$T/proton-away"
+direct -- check 1145360
+[ "$RC" = 1 ] && grep -q "Proton 11.0 (ARM64)/proton is gone" <<<"$ERR" && ok "a compat tool that is gone: through Steam, which picks what is installed now" || bad "rc=$RC err=$ERR"
+mv "$T/proton-away" "$PROTON"
+FEX="$S/steamapps/common/FEX"; SNIPER="$S/steamapps/common/SteamLinuxRuntime_sniper"; PX86="$S/steamapps/common/Proton 11.0"
+mkdir -p "$FEX" "$SNIPER" "$PX86" "$S/steamapps/common/Trine/bin"
+touch "$FEX/toolmanifest.vdf" "$FEX/fex-wrapper" "$SNIPER/toolmanifest.vdf" "$SNIPER/_v2-entry-point" "$PX86/toolmanifest.vdf" "$PX86/proton" "$S/steamapps/common/Trine/bin/trine.exe"
+acf "$S" 3127680 FEX 4; acf "$S" 1628350 SteamLinuxRuntime_sniper 4; acf "$S" 35700 Trine 4
+logline "$SLOG" "2026-10-22 10:40:00" 35700 "$S/linuxarm64/steam-launch-wrapper -- $S/steamrtarm64/reaper SteamLaunch AppId=35700 -- '$FEX'/fex-wrapper -- '$SNIPER'/_v2-entry-point --verb=waitforexitandrun -- '$PX86'/proton waitforexitandrun '$S/steamapps/common/Trine/bin/trine.exe'"
+direct -- check 35700
+[ "$RC" = 1 ] && grep -q "FEX tool" <<<"$ERR" && ok "an x86 Proton through Steam's FEX tool: through Steam" || bad "rc=$RC err=$ERR"
+logline "$SLOG" "2026-10-22 10:41:00" 35700 "$S/linuxarm64/steam-launch-wrapper -- $S/steamrtarm64/reaper SteamLaunch AppId=35700 -- '$S/steamapps/common/Trine/bin/trine.exe'"
+direct -- check 35700
+[ "$RC" = 1 ] && grep -q "names no compat tool" <<<"$ERR" && ok "a launch with no compat tool at all is not replayed" || bad "rc=$RC err=$ERR"
+fresh_log; logline "$SLOG" "2026-10-22 10:50:00" 1145360 "$HADES_CMD -log $S/logs/hades-run.log"
+direct -- check 1145360
+[ "$RC" = 0 ] && ok "a file the game is told to write, in a folder that is there, is not a tool that is gone" || bad "rc=$RC err=$ERR"
+logline "$SLOG" "2026-10-22 10:51:00" 1145360 "$S/linuxarm64/steam-launch-wrapper -- $S/steamrtarm64/reaper SteamLaunch AppId=1145360 -- '$SLR'/_v2-entry-point --verb=waitforexitandrun -- '$PROTON'/proton waitforexitandrun"
+direct -- check 1145360
+[ "$RC" = 1 ] && grep -q "names no program of the game" <<<"$ERR" && ok "a launch that runs nothing of the game is not replayed" || bad "rc=$RC err=$ERR"
+fresh_log; mv "$S/linuxarm64/steam-launch-wrapper" "$T/slw"
+direct -- check 1145360
+[ "$RC" = 1 ] && grep -q "steam-launch-wrapper is gone" <<<"$ERR" && ok "Steam's launch wrapper gone: through Steam" || bad "rc=$RC err=$ERR"
+mv "$T/slw" "$S/linuxarm64/steam-launch-wrapper"
+
+# ================================================================================================
+CASE="run"
+fresh_log; reset_run
+direct DISPLAY=:1 OGUI_ID=Hades -- run 1145360
+[ "$RC" = 0 ] && [ -f "$T/ran.args" ] && ok "Steam's launch ran, through Steam's own launch wrapper" || bad "rc=$RC err=$ERR"
+want="$(printf '%s\n' --oom-score-adjust 900 -- "$S/steamrtarm64/reaper" SteamLaunch AppId=1145360 -- "$SLR/_v2-entry-point" \
+  --verb=waitforexitandrun -- "$PROTON/proton" waitforexitandrun "$GAME/x64Vk/Hades.exe" '/c=..\' /steampowered /DirectLoadShell=true)"
+[ "$(cat "$T/ran.args")" = "$want" ] && ok "word for word as Steam ran it (/bin/sh -c): quoted paths with spaces, the game's /c=..\\" \
+  || bad "args: $(cat "$T/ran.args")"
+[ "$(cat "$T/ran.cwd")" = "$GAME/x64Vk" ] && ok "from the Vulkan launch entry's working folder" || bad "cwd: $(cat "$T/ran.cwd")"
+[ "$(ran_env SteamAppId)" = 1145360 ] && [ "$(ran_env SteamGameId)" = 1145360 ] && [ "$(ran_env SteamOverlayGameId)" = 1145360 ] \
+  && [ "$(ran_env STEAM_COMPAT_APP_ID)" = 1145360 ] && ok "the app id, as Steam gives it" || bad "env: $(grep -i appid "$T/ran.env")"
+[ "$(ran_env STEAM_COMPAT_CLIENT_INSTALL_PATH)" = "$S" ] && [ "$(ran_env STEAM_COMPAT_DATA_PATH)" = "$S/steamapps/compatdata/1145360" ] \
+  && [ "$(ran_env STEAM_COMPAT_INSTALL_PATH)" = "$GAME" ] && [ "$(ran_env STEAM_COMPAT_SHADER_PATH)" = "$S/steamapps/shadercache/1145360" ] \
+  && ok "Proton's prefix, the game, the client and the shader cache" || bad "env: $(grep STEAM_COMPAT "$T/ran.env")"
+[ "$(ran_env STEAM_COMPAT_TOOL_PATHS)" = "$PROTON:$SLR" ] && [ "$(ran_env STEAM_COMPAT_LIBRARY_PATHS)" = "$S/steamapps" ] \
+  && ok "the compat tools, Proton then its runtime, and the library (what pressure-vessel shares)" || bad "tools=$(ran_env STEAM_COMPAT_TOOL_PATHS) libs=$(ran_env STEAM_COMPAT_LIBRARY_PATHS)"
+[ "$(ran_env STEAM_COMPAT_CONFIG)" = "gamedrive,heapdelayfree" ] && [ "$(ran_env SteamDeck)" = 1 ] \
+  && ok "Valve's per-game Proton setting (app 891390), and SteamDeck=1 as the -steamdeck client sets it" || bad "config=$(ran_env STEAM_COMPAT_CONFIG) deck=$(ran_env SteamDeck)"
+[ "$(ran_env DISPLAY)" = :1 ] && [ "$(ran_env OGUI_ID)" = Hades ] && ok "over the launch's own environment (OGUI's display and id)" || bad "env: $(grep -E '^(DISPLAY|OGUI_ID)=' "$T/ran.env")"
+grep -q "starting app 1145360 without the Steam client, as Steam started it at 2026-10-22 10:07:35" <<<"$ERR" \
+  && ok "and says so, with which of Steam's launches" || bad "err=$ERR"
+[ -f "$T/ran.traps" ] && ! grep -q SIGPIPE "$T/ran.traps" \
+  && ok "SIGPIPE is not left ignored (Python ignores it, and exec keeps that)" || bad "traps: $(cat "$T/ran.traps" 2>&1)"
+reset_run; echo 3 >"$T/game.rc"
+direct -- run 1145360
+[ "$RC" = 3 ] && ok "the game's exit status is the launch's (the helper becomes the launch)" || bad "rc=$RC"
+reset_run; mkdir -p "$T/proc/7780"; echo steam >"$T/proc/7780/comm"   # ~/.steam/steam.pid says 7780
+direct RETROFORGE_STEAM_DIRECT=off -- run 1145360
+[ "$RC" = 0 ] && [ -f "$T/ran.args" ] && ok "run, which /usr/bin/steam execs after a check, asks neither the setting nor for a client again" || bad "rc=$RC err=$ERR"
+rm -rf "$T/proc/7780"
+
+CASE="run: Steam's quoting"
+reset_run; fresh_log
+printf '[2026-10-22 13:00:00] Game process added : AppID 1145360 "%s -title \"Two Words\" --name=caf\xe9", ProcID 1, IP 0.0.0.0:0\n' "$HADES_CMD" >>"$SLOG"
+direct -- run 1145360
+[ "$(tail -3 "$T/ran.args")" = "$(printf -- '-title\nTwo Words\n--name=caf\xe9')" ] \
+  && ok "double quotes inside the logged command, and a byte that is not UTF-8, reach the game unchanged" || bad "args: $(tail -3 "$T/ran.args" 2>&1 | od -c | head -5)"
+fresh_log
+
+CASE="run: working folder"
+reset_run; logline "$SLOG" "2026-10-22 11:10:00" 1145360 "$(cmdline 1145360 "$SLR" "$PROTON" "$GAME/Odd/x64Vk/Hades.exe")"
+mkdir -p "$GAME/Odd/x64Vk"; touch "$GAME/Odd/x64Vk/Hades.exe"
+direct -- run 1145360
+[ "$(cat "$T/ran.cwd")" = "$GAME/x64" ] && ok "a launch entry's working folder is used even when it is not the executable's" || bad "cwd: $(cat "$T/ran.cwd")"
+reset_run; mkdir -p "$GAME/Other"; touch "$GAME/Other/Game.exe"
+logline "$SLOG" "2026-10-22 11:20:00" 1145360 "$(cmdline 1145360 "$SLR" "$PROTON" "$GAME/Other/Game.exe")"
+direct -- run 1145360
+[ "$(cat "$T/ran.cwd")" = "$GAME/Other" ] && ok "with no launch entry for the executable, its own folder" || bad "cwd: $(cat "$T/ran.cwd")"
+rm -f "$S/appcache/appinfo.vdf"; reset_run; fresh_log
+direct -- run 1145360
+[ "$RC" = 0 ] && [ "$(cat "$T/ran.cwd")" = "$GAME/x64Vk" ] && [ -z "$(ran_env STEAM_COMPAT_CONFIG)" ] \
+  && ok "without appinfo.vdf the game still starts, from its executable's folder" || bad "rc=$RC cwd=$(cat "$T/ran.cwd" 2>&1) err=$ERR"
+mkappinfo
+
+CASE="run: SD card"
+mkdir -p "$SD/steamapps/common"; mv "$GAME" "$SD/steamapps/common/Hades"; mv "$S/steamapps/appmanifest_1145360.acf" "$SD/steamapps/"
+printf '"libraryfolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n\t"1"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n}\n' "$S" "$SD" >"$S/steamapps/libraryfolders.vdf"
+: >"$SLOG"; rm -rf "$CACHE"; reset_run
+logline "$SLOG" "2026-10-22 12:00:00" 1145360 "$(cmdline 1145360 "$SLR" "$PROTON" "$SD/steamapps/common/Hades/x64Vk/Hades.exe")"
+direct -- run 1145360
+[ "$RC" = 0 ] && [ "$(ran_env STEAM_COMPAT_DATA_PATH)" = "$SD/steamapps/compatdata/1145360" ] \
+  && [ "$(ran_env STEAM_COMPAT_INSTALL_PATH)" = "$SD/steamapps/common/Hades" ] \
+  && [ "$(ran_env STEAM_COMPAT_LIBRARY_PATHS)" = "$S/steamapps:$SD/steamapps" ] && [ "$(cat "$T/ran.cwd")" = "$SD/steamapps/common/Hades/x64Vk" ] \
+  && ok "a game on an SD card: its prefix there, both libraries shared" || bad "rc=$RC err=$ERR env=$(grep STEAM_COMPAT "$T/ran.env" 2>&1)"
+ln -s "$SD" "$T/sdlink"; reset_run
+printf '"libraryfolders"\n{\n\t"0"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n\t"1"\n\t{\n\t\t"path"\t\t"%s"\n\t}\n}\n' "$S" "$T/sdlink" >"$S/steamapps/libraryfolders.vdf"
+direct -- run 1145360
+[ "$RC" = 0 ] && [ "$(ran_env STEAM_COMPAT_INSTALL_PATH)" = "$T/sdlink/steamapps/common/Hades" ] \
+  && [ "$(cat "$T/ran.cwd")" = "$T/sdlink/steamapps/common/Hades/x64Vk" ] \
+  && ok "a library Steam names through a link, the command through the real path: the same game" || bad "rc=$RC err=$ERR cwd=$(cat "$T/ran.cwd" 2>&1)"
+mv "$SD/steamapps/common/Hades" "$GAME"; mv "$SD/steamapps/appmanifest_1145360.acf" "$S/steamapps/"; rm -f "$S/steamapps/libraryfolders.vdf"
+
+CASE="run: refused"
+reset_run; fresh_log; acf "$S" 1145360 Hades 6
+direct -- run 1145360
+grep -q "has an update waiting" <<<"$ERR" && ok "a queued update is said when the game starts" || bad "err=$ERR"
+acf "$S" 1145360 Hades 4; reset_run
+direct -- run 268910
+[ "$RC" = 1 ] && [ ! -e "$T/ran.args" ] && ok "a game it cannot start: exit 1, nothing run" || bad "rc=$RC"
+
+# ================================================================================================
+# The wrapper. The bootstrap is stubbed: it puts a fake client where the real one goes, which records
+# that it ran. The helper is the real one, against the fake Steam above.
+W="$T/w"; mkdir -p "$W/bin"
+cat >"$W/client" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" >"$W/client.args"; echo "dbus: \${DBUS_SESSION_BUS_ADDRESS-unset}" >>"$W/client.args"
+EOF
+cat >"$W/bootstrap" <<EOF
+#!/usr/bin/env bash
+mkdir -p "\$RETROFORGE_STEAM_ROOT/steamrtarm64"; cp "$W/client" "\$RETROFORGE_STEAM_ROOT/steamrtarm64/steam"
+echo "\$RETROFORGE_STEAM_ROOT/steamrtarm64/steam"
+EOF
+cat >"$W/sarek" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$W/sarek.calls"; echo on
+EOF
+cat >"$W/keep" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$W/keep.calls"; echo on
+EOF
+cat >"$W/bin/systemd-run" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$W/sdrun.calls"; exit 1
+EOF
+cat >"$W/stub-direct" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$W/direct.calls"; exit 1
+EOF
+cat >"$W/guest" <<EOF
+#!/usr/bin/env bash
+echo "\$1" >>"$W/guest.calls"
+EOF
+chmod +x "$W/client" "$W/bootstrap" "$W/sarek" "$W/keep" "$W/bin/systemd-run" "$W/stub-direct" "$W/guest"
+# The real helper, as the image installs it: executable (/usr/bin/steam runs it only then).
+cp "$DIRECT" "$W/direct"; chmod +x "$W/direct"
+# The x86 guest is on, its helper a stub that records its calls (test-steam-x86-guest.sh has the rest).
+WENV=(env -u RETROFORGE_STEAM_KEPT -u PROTON_DXVK_SAREK -u RETROFORGE_STEAM_X86_GUEST "${DENV[@]:1}" PATH="$W/bin:$PATH"
+      RETROFORGE_STEAM_BOOTSTRAP="$W/bootstrap" RETROFORGE_STEAM_X86_GUEST_HELPER="$W/guest"
+      RETROFORGE_STEAM_X86_GUEST_DIR="$W/fex-guest" RETROFORGE_STEAM_SAREK_CLI="$W/sarek" RETROFORGE_STEAM_KEEP_CLI="$W/keep"
+      RETROFORGE_STEAM_DIRECT_CLI="$W/direct")
+wrap() {  # wrap [VAR=value...] -- args...
+  local -a vars=()
+  while [ "$1" != -- ]; do vars+=("$1"); shift; done; shift
+  rm -f "$W"/*.calls "$W/client.args"; reset_run
+  WOUT="$("${WENV[@]}" "${vars[@]}" bash "$WRAP" "$@" 2>"$W/err")"; WRC=$?
+  WERR="$(cat "$W/err")"
+}
+fresh_log; rm -f "$CONF"; board SM6115 3650556
+
+CASE="wrapper: a game"
+wrap DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/0/bus" -- -gamepadui -steamos3 -steampal -steamdeck -silent steam://rungameid/1145360
+[ "$WRC" = 0 ] && [ -f "$T/ran.args" ] && [ ! -e "$W/client.args" ] && ok "OGUI's launch of a game Steam started before: the game, and no client" \
+  || bad "rc=$WRC client=$(cat "$W/client.args" 2>&1) err=$WERR"
+[ ! -e "$W/keep.calls" ] && [ ! -e "$W/sdrun.calls" ] && ok "the kept client is not asked, even with keep-running on" || bad "keep: $(cat "$W/keep.calls" 2>&1)"
+[ ! -e "$W/guest.calls" ] && ok "nor the x86 guest (no FEX game starts this way)" || bad "guest: $(cat "$W/guest.calls")"
+[ "$(ran_env PROTON_DXVK_SAREK)" = 1 ] && grep -qx apply "$W/sarek.calls" && ok "DXVK-Sarek is applied first (PROTON_DXVK_SAREK=1)" || bad "sarek=$(ran_env PROTON_DXVK_SAREK)"
+[ -f "$T/ran.env" ] && ! grep -q "^DBUS_SESSION_BUS_ADDRESS=" "$T/ran.env" && ok "a D-Bus address that is not ours is dropped first (bwrap fails on it)" || bad "dbus: $(grep DBUS "$T/ran.env" 2>&1)"
+[ "$(cat "$T/ran.cwd")" = "$GAME/x64Vk" ] && ok "as Steam started it" || bad "cwd: $(cat "$T/ran.cwd")"
+reset_run; echo 7 >"$T/game.rc"
+"${WENV[@]}" bash "$WRAP" -silent steam://rungameid/1145360 2>/dev/null; WRC=$?
+[ "$WRC" = 7 ] && ok "the game's exit status is the launch's" || bad "rc=$WRC"
+
+CASE="wrapper: through Steam"
+wrap -- -gamepadui -steamos3 -steampal -steamdeck -silent steam://rungameid/268910
+[ "$WRC" = 0 ] && grep -qx "steam://rungameid/268910" "$W/client.args" && [ ! -e "$T/ran.args" ] \
+  && grep -q "app 268910 starts through Steam" <<<"$WERR" && ok "a game Steam never started here: the client, with the launch's arguments, and why" \
+  || bad "rc=$WRC client=$(cat "$W/client.args" 2>&1) err=$WERR"
+grep -q status "$W/keep.calls" 2>/dev/null && grep -qx start "$W/guest.calls" 2>/dev/null \
+  && ok "and the kept-client path and the x86 guest are taken as before" || bad "keep: $(cat "$W/keep.calls" 2>&1) guest: $(cat "$W/guest.calls" 2>&1)"
+grep -q 'x64Vk/Hades.exe' "$CACHE/1145360.json" 2>/dev/null && grep -q 'Stardew/x.exe' "$CACHE/413150.json" 2>/dev/null \
+  && ok "every game's last launch is kept before the client starts (it may rotate its log)" || bad "kept: $(ls "$CACHE" 2>&1)"
+wrap RETROFORGE_STEAM_DIRECT=off -- -silent steam://rungameid/1145360
+grep -qx "steam://rungameid/1145360" "$W/client.args" && [ ! -e "$T/ran.args" ] && ! grep -q retroforge-steam-direct <<<"$WERR" \
+  && ok "the setting off: the client, and nothing said" || bad "client=$(cat "$W/client.args" 2>&1) err=$WERR"
+
+CASE="wrapper: not a game"
+WENV+=(RETROFORGE_STEAM_DIRECT_CLI="$W/stub-direct")
+asked() { grep -q '^check' "$W/direct.calls" 2>/dev/null; }   # remember runs before every client start
+wrap -- -gamepadui -steamos3 -steampal -steamdeck steam://install/1145360
+! asked && grep -qx "steam://install/1145360" "$W/client.args" && grep -qx remember "$W/direct.calls" \
+  && ok "an install: the client, the helper not asked (only told to keep the launches)" || bad "direct: $(cat "$W/direct.calls" 2>&1)"
+wrap -- -gamepadui -steamos3 -steampal -steamdeck
+! asked && [ -e "$W/client.args" ] && ok "Steam's own UI: the client" || bad "direct: $(cat "$W/direct.calls" 2>&1)"
+wrap -- steam://rungameid/12345x
+! asked && ok "a rungameid that is not a number: not asked" || bad "direct: $(cat "$W/direct.calls")"
+wrap RETROFORGE_STEAM_KEPT=1 -- -silent steam://rungameid/1145360
+! asked && grep -qx "steam://rungameid/1145360" "$W/client.args" \
+  && ok "the kept client's own run (inside its unit) is the client" || bad "direct: $(cat "$W/direct.calls" 2>&1)"
+wrap -- -silent steam://rungameid/1145360
+[ "$(cat "$W/direct.calls")" = "$(printf 'check 1145360\nremember')" ] && grep -qx "steam://rungameid/1145360" "$W/client.args" \
+  && ok "a game the helper refuses: asked once, then the client" || bad "direct: $(cat "$W/direct.calls" 2>&1)"
+
+echo
+echo "$PASS passed, $FAIL failed"
+[ "$FAIL" -eq 0 ]
