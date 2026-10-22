@@ -51,6 +51,8 @@ var _os: Resource  # retroforge_os.gd, installed as OGUI's platform.os
 var _sarek: RefCounted  # steam_sarek.gd
 var _keep: RefCounted  # steam_keep.gd
 var _direct: RefCounted  # steam_direct.gd
+var _steam_page: RefCounted  # steam_settings.gd: Settings > Steam, where the Steam rows go
+var _proton: RefCounted  # steam_proton.gd
 var _watch: RefCounted  # rom_watch.gd
 var _steam_watch: RefCounted  # steam_watch.gd
 var _rescan_timer: Timer
@@ -110,14 +112,20 @@ func _ready() -> void:
 	_art_fetch.other = _scraper.runner
 	_art_fetch.allowed = _scraper.can_fetch
 	_install_os_platform()
+	_steam_page = load(plugin_base.path_join("steam_settings.gd")).new().setup(get_tree())
+	var steam_box: Node = _steam_page.box if _steam_page.attach() else null
+	if not steam_box:
+		logger.warn("OGUI settings menu layout not found; the Steam rows stay in Settings > General")
+	_proton = load(plugin_base.path_join("steam_proton.gd")).new().setup(get_tree())
+	_proton.attach(steam_box)  # only on ARMv8.0 CPUs
 	_sarek = load(plugin_base.path_join("steam_sarek.gd")).new().setup(get_tree())
-	if not _sarek.attach():
+	if not _sarek.attach(steam_box):
 		logger.warn("OGUI general settings layout or retroforge-steam-sarek not found; no DXVK-Sarek toggle")
 	_keep = load(plugin_base.path_join("steam_keep.gd")).new().setup(get_tree())
-	if not _keep.attach():
+	if not _keep.attach(steam_box):
 		logger.warn("OGUI general settings layout or retroforge-steam-keep not found; no keep-Steam-running toggle")
 	_direct = load(plugin_base.path_join("steam_direct.gd")).new().setup(get_tree())
-	if not _direct.attach():
+	if not _direct.attach(steam_box):
 		logger.warn("OGUI general settings layout or retroforge-steam-direct not found; no start-without-Steam toggle")
 	_setup_input_boost()
 
@@ -160,6 +168,10 @@ func unload() -> void:
 		_keep.detach()
 	if _direct:
 		_direct.detach()
+	if _proton:
+		_proton.detach()
+	if _steam_page:
+		_steam_page.detach()
 	if is_instance_valid(_hardware_card):
 		var qb_card: Node = _hardware_card.find_parent("QuickBarCard*")
 		(qb_card if qb_card else _hardware_card).queue_free()

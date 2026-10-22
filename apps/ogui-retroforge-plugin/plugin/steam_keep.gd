@@ -23,9 +23,9 @@ func setup(scene_tree: SceneTree) -> RefCounted:
 
 ## Add the toggle under Settings > General, after the DXVK-Sarek one. False when the layout differs or
 ## the command is missing.
-func attach() -> bool:
+func attach(target: Node = null) -> bool:  # target: the Settings > Steam page (steam_settings.gd)
 	var menu: Node = tree.root.find_child("GeneralSettings", true, false)
-	var box: Node = menu.get_node_or_null("MarginContainer/VBoxContainer/VBoxContainer") if menu else null
+	var box: Node = target if target else (menu.get_node_or_null("MarginContainer/VBoxContainer/VBoxContainer") if menu else null)
 	if not box or not FileAccess.file_exists(TOOL):
 		return false
 	var after: Node = null
