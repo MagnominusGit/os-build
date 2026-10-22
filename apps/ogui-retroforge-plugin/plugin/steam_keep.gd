@@ -37,6 +37,7 @@ func attach() -> bool:
 	_toggle.name = "RetroForgeSteamKeep"
 	_toggle.text = "Steam: keep running between games"
 	_toggle.description = "Steam games start faster after the first one. Steam stays in memory between games."
+	_toggle.separator_visible = false  # as the rows above it; read in _ready, so before add_child
 	box.add_child(_toggle)
 	if after:
 		box.move_child(_toggle, after.get_index() + 1)

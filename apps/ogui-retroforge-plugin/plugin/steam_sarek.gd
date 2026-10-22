@@ -35,6 +35,7 @@ func attach() -> bool:
 	_toggle.name = "RetroForgeSteamSarek"
 	_toggle.text = "Steam: DXVK-Sarek (low-end GPUs)"
 	_toggle.description = "Installs Proton-CachyOS (356 MB) with DXVK-Sarek for Windows games. Select it for a game in Steam."
+	_toggle.separator_visible = false  # as the rows above it; read in _ready, so before add_child
 	box.add_child(_toggle)
 	if after:
 		box.move_child(_toggle, after.get_index() + 1)
