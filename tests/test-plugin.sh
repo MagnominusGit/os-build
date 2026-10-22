@@ -940,8 +940,8 @@ func run() -> void:
 	check("results text: empty inbox", PsnRunner.results_text([]), "Nothing to install: the PSN folder is empty.")
 	check("a stub means the library reloads", [PsnRunner.any_stub([{"status": "ok", "stub": "A.psn"}]),
 		PsnRunner.any_stub([{"status": "ok", "stub": "-"}, {"status": "failed", "stub": "x.psn"}])], [true, false])
-	check("failure: concurrent", PsnRunner.failure_text(3, "retroforge-launch: another PSN install is already running"),
-		"A PSN install is already running.")
+	check("failure: concurrent", PsnRunner.failure_text(3, "retroforge-launch: a PSN install or a PlayStation 3 game is already running"),
+		"A PSN install or a PlayStation 3 game is already running.")
 	check("failure: rpcs3 missing", "Emulators" in PsnRunner.failure_text(3, "retroforge-launch: rpcs3 is not installed (x)"), true)
 
 	var a := await job("ok")
