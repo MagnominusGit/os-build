@@ -168,9 +168,10 @@ instead, so signing into Steam Client is enough (`apps/ogui-retroforge-plugin`: 
   -gamepadui -steamos3 -steampal -steamdeck steam://install/<appid>` (or `uninstall`), which opens
   Steam's own dialog in Big Picture, started as Emulators > Steam Client > Open starts it. The game's
   app manifest then gives the download's progress (`BytesDownloaded` of `BytesToDownload`) and its
-  end (fully installed, nothing still going). Steam downloads while it runs: closing Steam first ends
-  the install in OGUI as failed, and Steam carries on with it at its next start. Steam updates
-  installed games itself.
+  end (fully installed, nothing still going). Steam downloads while it runs: leaving Steam first (no
+  OGUI launch goes through `steam` any more) ends the install in OGUI as failed, and Steam carries on
+  with it while it still runs (kept running, below) or at its next start. Steam updates installed
+  games itself.
 - **Art**: what the client cached for its own library, `appcache/librarycache/<appid>/`
   (`library_600x900.jpg` for cards, `header.jpg`, `library_hero.jpg`, `logo.png`), else the same file
   from Valve's CDN (`steamcdn-a.akamaihd.net/steam/apps/<appid>/`, what the Steam plugin fetches),
@@ -178,11 +179,64 @@ instead, so signing into Steam Client is enough (`apps/ogui-retroforge-plugin`: 
   day.
 - **Refresh**: the plugin polls the manifests and the two caches every 5 s, as it polls `~/roms`,
   and reloads the list once a change has settled, never while a game runs. Steam's own UI counts as
-  one, so a game installed, uninstalled or bought shows once Steam is closed.
+  one, so a game installed, uninstalled or bought shows once Steam's UI is left.
 - The games get a Steam tab beside the systems' tabs, and show in OGUI's Installed and All Games.
 
 With the OGUI Steam plugin installed too, OGUI shows a game both list as one card with two launch
 items; the plugin is not needed, and its steamcmd (x86, downloaded by the plugin) cannot run here.
+
+## Keeping Steam running between games (Settings > General, off by default)
+
+A game started from OGUI starts Steam first, and OGUI stops Steam when the game ends. Measured on the
+KONKR Pocket FIT (Hades, Proton 11 ARM64, 2026-10-21): the launch at 44.5 s of uptime, Steam ready at
+~62.5 s (its cold start, ~18 s), Proton at 70.6 s (Steam's own preparation), the game's processes at
+85.6 s, its first frame at 95 s. So ~30 s from the press to the game, more than half of it Steam's.
+
+Settings > General > "Steam: keep running between games" (`retroforge-steam-keep`, `KEEP_RUNNING=` in
+`~/.config/retroforge/steam.conf`) leaves Steam running instead. `/usr/bin/steam` then:
+
+- starts the client, the first time, as the user unit `retroforge-steam.service` (`systemd-run
+  --user`, with the launch's environment and arguments), outside OGUI's process tree: OGUI's "stop
+  Steam" when a game's windows are gone (`RunningApp.find_steam`) only looks inside that tree, and
+  its reaper only kills what is under it;
+- hands every later launch to that client: a second client process passes its arguments over
+  Steam's pipe and exits, as `steam steam://...` always did with a client running;
+- for a game, stays as OGUI's launch for exactly as long as Steam's own launch of it runs. Steam
+  runs a game under `<Steam>/.../reaper SteamLaunch AppId=<appid>`, which exits with the game's last
+  process, but a launch can take two: the game's install scripts run under one first (on every
+  launch, ~5 s for Hades), and the game under another once they are done. Ending OGUI's launch with
+  the first sent OGUI back to its menu a second before the game came up (Pocket FIT, 2026-10-22). So
+  the launch's steps come from Steam's own log, `<Steam>/logs/console_log.txt` (`GameAction [AppID
+  <appid>, ActionID <n>] : LaunchApp changed task to <step>`): once it reaches `Completed` (the
+  game's process is created), the launch lasts while the game's reaper runs. `Failed` ends it, unless
+  the game already runs (`AppError_16`, the game started again from OGUI): then it follows that one.
+  OGUI then returns to its menu as it does for any app. OGUI finds the game's windows by their app
+  id, which gamescope reads from that same reaper, and Steam's own windows for the launch
+  ("Launching...", an error) by the same id, which Steam gives them. `OGUI_ID` (how OGUI ties
+  processes to its launches) is `Steam` for the kept client and everything it starts;
+- on OGUI's Exit (a TERM), ends the game (that reaper and everything under it: TERM, then KILL 5 s
+  later), not Steam;
+- for Steam's own UI (Emulators > Steam Client, an install from the library: launches named "Steam",
+  whose `OGUI_ID` matches the kept client's, so OGUI finds and focuses its windows), stays until OGUI
+  stops it or Steam exits.
+
+Turning it off stops a kept Steam that runs no game; one that does stops when that game ends. Without
+the user's systemd (`systemd-run` fails), Steam runs with the launch as when it is off. A launch Steam
+has not picked up within 300 s ends with "Steam did not start app <id>", and Main menu > Emulators >
+Steam Client shows why. Measured warm, on the Pocket FIT (Hades, 2026-10-22): ~12 s from the press to
+the game's window (Steam's install scripts 5 s, its process at 7 s), against ~30 s cold.
+
+Steam's windows belong to no OGUI launch between games, and OGUI checks for such orphan windows every
+second: its patch 0022 warns about them once per change, not on every check (two journal lines a
+second, idle, before it). Not covered while it is on:
+
+- What `/usr/bin/steam` sets when the client starts (DXVK-Sarek, the x86 guest after its first
+  download, an OGUI per-game environment) reaches games from Steam's next start: turn the setting off
+  and on, or restart.
+- Steam keeps its memory (the client and its web helpers) between games.
+
+`systemctl --user status retroforge-steam` and `journalctl --user -u retroforge-steam` (as the
+player) show a kept client; the launches log to OGUI's journal as before.
 
 ## x86 games: the FEX guest
 

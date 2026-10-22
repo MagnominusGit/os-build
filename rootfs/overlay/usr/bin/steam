@@ -31,6 +31,9 @@
 # (RunningApp.find_steam). That is the client: this script runs as `bash`, because env re-execs it.
 # A TERM/INT/HUP sent to this script is passed on to the client, so it is never left running
 # without its wrapper.
+# Unless the player keeps Steam running between games (Settings > General): then the client runs as a
+# user unit and outlives the launch, and this script hands launches to it ("Kept running between
+# games" below).
 #
 # First start: on 2026-10-15 the client updated itself from Valve's manifest (667 MB download) to
 # ~3 GB, because the linuxarm64 manifest also carries the x86 client and runtimes. steam-install runs
@@ -65,6 +68,128 @@ for link in steam root; do
     ln -sfn "$RETROFORGE_STEAM_ROOT" "$HOME/.steam/$link"
   fi
 done
+
+# ---- Kept running between games (Settings > General, off by default) ------------------------------
+# Off, the client lives as long as this launch: OGUI SIGTERMs it once the game's windows are gone, and
+# every game starts Steam cold (~18 s of a ~30 s launch: KONKR Pocket FIT, Hades, 2026-10-21). On
+# (/usr/bin/retroforge-steam-keep), the client runs as the user unit retroforge-steam.service
+# instead, outside OGUI's process tree, where neither OGUI's "stop Steam" nor its reaper reach it,
+# and this launch:
+#   - starts the unit when it is not running: this script again, with this launch's arguments and
+#     environment, which runs the rest of it inside the unit (RETROFORGE_STEAM_KEPT=1). Else it hands
+#     its arguments to the running client: a second client process passes them over Steam's own
+#     pipe (~/.steam/steam.pipe) and exits;
+#   - for a game (steam://rungameid/<appid>), stays until Steam's launch of it has created the
+#     game's process (retroforge-steam-keep launch: Steam's log) and then for as long as the game's
+#     reaper runs (retroforge-steam-keep games), so OGUI keeps the game as running and shows its
+#     menu again when it ends. Not the first reaper: the game's install scripts run under one of
+#     their own before it, and OGUI went back to its menu between the two (Hades, KONKR Pocket FIT,
+#     2026-10-22). OGUI finds the game's windows by the app id gamescope reads from that reaper,
+#     and Steam's own windows for the launch ("Launching...", an error) by the same app id, which
+#     Steam gives them. It gives up when Steam has not picked the launch up within
+#     RETROFORGE_STEAM_LAUNCH_WAIT s (300), when Steam refuses it, or when the unit stops first;
+#   - for Steam's own UI (no game), stays until OGUI stops it or the unit stops;
+#   - on TERM (Exit in OGUI's menu) ends the game's launch, not Steam.
+# The unit's processes carry OGUI_ID=Steam. OGUI tells which app a process belongs to by that
+# variable, and "Steam" is the name of every launch of Steam's own UI (Main menu > Emulators > Steam
+# Client, an install from the library, the desktop Steam entry), so those find a kept client's
+# windows.
+# A kept client also takes this path while the setting is off (it was turned off during a game), and
+# is stopped once that launch ends. Without a user manager (systemd-run fails), Steam runs with this
+# launch, as with the setting off.
+# TEST SEAMS (tests/test-steam.sh): RETROFORGE_STEAM_KEEP_CLI, RETROFORGE_STEAM_LAUNCH_WAIT,
+# RETROFORGE_PROC, and systemd-run and systemctl from PATH.
+keep_cli="${RETROFORGE_STEAM_KEEP_CLI:-/usr/bin/retroforge-steam-keep}"
+KEPT_UNIT=retroforge-steam
+kept_active() { systemctl --user is-active --quiet "$KEPT_UNIT.service" 2>/dev/null; }
+kept_start() {
+  local name self
+  local -a env=()
+  self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  for name in $(compgen -e); do
+    case "$name" in
+      OGUI_ID|INVOCATION_ID|JOURNAL_STREAM|SYSTEMD_EXEC_PID|MANAGERPID|NOTIFY_SOCKET|LISTEN_*|WATCHDOG_*|PWD|OLDPWD|SHLVL|_) continue ;;
+    esac
+    [[ "${!name}" == *$'\n'* ]] || env+=(--setenv="$name=${!name}")
+  done
+  systemd-run --user --quiet --collect --unit="$KEPT_UNIT" -p TasksMax=infinity --working-directory="$HOME" \
+    "${env[@]}" --setenv=OGUI_ID=Steam --setenv=RETROFORGE_STEAM_KEPT=1 "$self" "$@" >/dev/null
+}
+kept_stop() {  # TERM, INT or HUP: end the game this launch started, not Steam
+  [ -n "$appid" ] && "$keep_cli" end "$appid"
+  [ "$("$keep_cli" status 2>/dev/null)" = on ] || "$keep_cli" stop-idle
+  exit 143
+}
+kept_launch() {
+  local arg pid pids="" alive deadline stage=wait step="" ran=0 since proc="${RETROFORGE_PROC:-/proc}"
+  appid=""
+  since="$(date '+%F %T')"
+  for arg in "$@"; do
+    case "$arg" in steam://rungameid/*) appid="${arg#steam://rungameid/}" ;; esac
+  done
+  case "$appid" in *[!0-9]*) appid="" ;; esac
+  if kept_active; then
+    log "handing this launch to the kept Steam ($KEPT_UNIT.service)"
+    ( cd "$RETROFORGE_STEAM_ROOT/steamrtarm64" &&
+      LD_LIBRARY_PATH="$RETROFORGE_STEAM_ROOT/steamrtarm64:$RETROFORGE_STEAM_ROOT/steamrtarm64/video${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        exec "$client" "$@" )
+  elif [ "$("$keep_cli" status 2>/dev/null)" != on ]; then
+    return 0
+  elif ! kept_start "$@"; then
+    log "could not start Steam as the user unit $KEPT_UNIT.service: it runs with this launch only"
+    return 0
+  fi
+  trap kept_stop TERM INT HUP
+  deadline=$((SECONDS + ${RETROFORGE_STEAM_LAUNCH_WAIT:-300}))
+  while :; do
+    if [ -z "$appid" ]; then
+      kept_active || break
+      sleep 1 & wait $!
+      continue
+    fi
+    # wait: until Steam's launch has created the game's process (its install scripts run first,
+    # under a reaper of their own). run: until the game's reaper has exited.
+    if [ "$stage" = wait ]; then
+      step="$("$keep_cli" launch "$appid" "$since")"
+      case "$step" in
+        Completed) stage=run ;;
+        Failed)
+          # AppError_16, the game already runs (launched again from OGUI): follow that one.
+          [ -n "$("$keep_cli" games "$appid")" ] || {
+            log "Steam could not start app $appid (see $RETROFORGE_STEAM_ROOT/logs/console_log.txt)"
+            exit 1
+          }
+          stage=run ;;
+        unknown)   # no Steam log to read: the first reaper seen is taken for the game's
+          [ -z "$("$keep_cli" games "$appid")" ] || stage=run ;;
+      esac
+      ran=$SECONDS
+    fi
+    if [ "$stage" = run ]; then
+      alive=""
+      for pid in $pids; do [ -e "$proc/$pid" ] && alive="$alive $pid"; done
+      [ -n "$alive" ] || alive="$("$keep_cli" games "$appid" | tr '\n' ' ')"
+      if [ -n "${alive// /}" ]; then
+        pids=$alive
+      elif [ -n "$pids" ] || [ $((SECONDS - ran)) -ge 5 ]; then
+        break   # the game has ended (or died before it was seen)
+      fi
+    elif [ -z "${step#unknown}" ] && [ "$SECONDS" -ge "$deadline" ]; then
+      log "Steam did not start app $appid within ${RETROFORGE_STEAM_LAUNCH_WAIT:-300} s (open Steam from Main menu > Emulators > Steam Client to see why)"
+      exit 1
+    elif ! kept_active; then
+      log "the kept Steam stopped before it started app $appid"
+      exit 1
+    fi
+    sleep 1 & wait $!
+  done
+  [ "$("$keep_cli" status 2>/dev/null)" = on ] || "$keep_cli" stop-idle
+  exit 0
+}
+if [ -z "${RETROFORGE_STEAM_KEPT:-}" ] && [ -x "$keep_cli" ]; then
+  kept_launch "$@"
+fi
+# ----------------------------------------------------------------------------------------------------
 
 # ---- x86 games: the FEX guest ----------------------------------------------------------------------
 # Valve's FEX tool runs x86 games and x86 Protons, but needs an x86_64 + i386 graphics provider (ld.so,

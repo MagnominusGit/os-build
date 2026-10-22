@@ -1,0 +1,195 @@
+#!/usr/bin/env bash
+# retroforge-steam-keep — the player's "Keep Steam running between games" setting, and what
+# /usr/bin/steam needs to run games through a Steam client that outlives them.
+#
+#   retroforge-steam-keep status         print on or off (and on stderr, where that comes from)
+#   retroforge-steam-keep on|off         save the player's choice; print the result. `off` also stops a
+#                                        kept client that runs no game (stop-idle)
+#   retroforge-steam-keep games [APPID]  print the PIDs of Steam's running game launches, of APPID only
+#                                        when given (one per line; nothing when there are none)
+#   retroforge-steam-keep end APPID      end Steam's launch of APPID: TERM its reaper and everything
+#                                        under it, KILL what is left 5 s later. Steam keeps running
+#   retroforge-steam-keep launch APPID SINCE
+#                                        print the step Steam's launch of APPID last reached since SINCE
+#                                        ("YYYY-MM-DD HH:MM:SS", local time): Completed once the game's
+#                                        process is created, Failed, a step in between, nothing before
+#                                        Steam has picked the launch up, `unknown` without Steam's log
+#   retroforge-steam-keep stop-idle      stop the kept client unless it runs a game
+#
+# Off (the default): /usr/bin/steam runs the client for one launch, and OGUI stops it once the game
+# has closed, so every game starts Steam cold first (~18 s of a ~30 s launch: KONKR Pocket FIT,
+# Hades, 2026-10-21). On: the first launch starts the client as the user unit retroforge-steam.service,
+# outside OGUI's process tree, and later launches hand their steam:// URI to it (/usr/bin/steam says
+# how). Steam then stays in memory between games.
+#
+# A game runs under Steam's own reaper, `<Steam>/.../reaper SteamLaunch AppId=<appid> -- ...`, which
+# exits when the game's last process has. OGUI starts every app under a reaper of its own with the
+# same arguments (/usr/share/opengamepadui/reaper), told apart by its path, as OGUI's patch 0017 does.
+# A launch can take more than one reaper: Steam runs a game's install scripts under one first, and
+# the game under another once they are done, a second or so later (Hades, KONKR Pocket FIT,
+# 2026-10-22: 06:42:56-06:43:12, then the game from 06:43:12). So the steps of a launch come from
+# Steam's own log (<Steam>/logs/console_log.txt), one line per step:
+#   [2026-10-22 06:42:56] GameAction [AppID 1145360, ActionID 1] : LaunchApp changed task to ProcessingInstallScript with ""
+#   [2026-10-22 06:43:12] GameAction [AppID 1145360, ActionID 1] : LaunchApp changed task to Completed with ""
+# Completed comes right after the game's process is created; Failed, when Steam refuses the launch
+# (AppError_16: the game already runs).
+#
+# The setting is KEEP_RUNNING=on|off in ~/.config/retroforge/steam.conf, beside
+# retroforge-steam-sarek's DXVK_SAREK (the last such line counts; saving rewrites that line and keeps
+# the others). The RetroForge plugin's Settings > General toggle "Keep Steam running between games"
+# runs this. RETROFORGE_STEAM_KEEP=on|off overrides the file, for testing and debugging.
+#
+# Exit 0, 1 when the setting could not be saved, 2 for a bad invocation.
+#
+# TEST SEAMS (tests/test-steam.sh): RETROFORGE_PROC (/proc), RETROFORGE_STEAM_KEEP_KILL (kill),
+# RETROFORGE_STEAM_ROOT (also set by /usr/bin/steam), and systemctl from PATH.
+set -u
+
+export LC_ALL=C
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}/retroforge/steam.conf"
+STEAM_ROOT="${RETROFORGE_STEAM_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/Steam}"
+PROC="${RETROFORGE_PROC:-/proc}"
+KILL="${RETROFORGE_STEAM_KEEP_KILL:-kill}"
+UNIT=retroforge-steam
+
+log() { echo "retroforge-steam-keep: $*" >&2; }
+
+saved() {  # the player's choice: on, off, or nothing when there is none
+  local line value=""
+  [ -r "$CONF" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in KEEP_RUNNING=*) value="${line#KEEP_RUNNING=}" ;; esac
+  done <"$CONF"
+  case "$value" in on|off) echo "$value" ;; esac
+}
+
+state() {  # sets STATE (on|off) and FROM (where it comes from)
+  case "${RETROFORGE_STEAM_KEEP:-}" in
+    on|off) STATE=$RETROFORGE_STEAM_KEEP; FROM="RETROFORGE_STEAM_KEEP"; return ;;
+  esac
+  STATE="$(saved)"
+  if [ -n "$STATE" ]; then FROM="$CONF"; else STATE=off; FROM="the default"; fi
+}
+
+save() {  # save on|off: through a temporary file and a rename
+  local line tmp="$CONF.part"
+  mkdir -p "${CONF%/*}" || return 1
+  {
+    if [ -r "$CONF" ]; then
+      while IFS= read -r line || [ -n "$line" ]; do
+        case "$line" in KEEP_RUNNING=*) ;; *) printf '%s\n' "$line" ;; esac
+      done <"$CONF"
+    else
+      echo "# Steam settings of the RetroForge shell (retroforge-steam-sarek, retroforge-steam-keep). Safe to edit."
+    fi
+    echo "KEEP_RUNNING=$1"
+  } >"$tmp" && mv -f "$tmp" "$CONF"
+}
+
+games() {  # games [appid]
+  local d comm a
+  local -a argv
+  for d in "$PROC"/[0-9]*; do
+    { read -r comm <"$d/comm"; } 2>/dev/null || continue
+    [ "$comm" = reaper ] || continue
+    argv=()
+    while IFS= read -r -d '' a; do argv+=("$a"); done 2>/dev/null <"$d/cmdline"
+    [ "${#argv[@]}" -ge 3 ] && [ "${argv[1]}" = SteamLaunch ] || continue
+    case "${argv[0]}" in *opengamepadui*) continue ;; esac
+    for a in "${argv[@]:2}"; do
+      [ "$a" = -- ] && break
+      case "$a" in
+        AppId=*) { [ -z "${1-}" ] || [ "$a" = "AppId=$1" ]; } && echo "${d##*/}"; break ;;
+      esac
+    done
+  done
+}
+
+under() {  # under PID...: the PIDs under the given ones, all generations
+  local d line ppid pid
+  local -A kids=()
+  local -a queue=("$@")
+  for d in "$PROC"/[0-9]*; do
+    { read -r line <"$d/stat"; } 2>/dev/null || continue
+    read -r _ ppid _ <<<"${line##*) }"   # after the command name, which may hold spaces and parens
+    kids[$ppid]+=" ${d##*/}"
+  done
+  while [ "${#queue[@]}" -gt 0 ]; do
+    pid=${queue[0]}; queue=("${queue[@]:1}")
+    for d in ${kids[$pid]-}; do echo "$d"; queue+=("$d"); done
+  done
+}
+
+end() {
+  local -a pids
+  local pid left _
+  read -ra pids <<<"$(games "$1" | tr '\n' ' ')"
+  [ "${#pids[@]}" -gt 0 ] || return 0
+  read -ra pids <<<"${pids[*]} $(under "${pids[@]}" | tr '\n' ' ')"
+  log "ending Steam's launch of app $1 (${#pids[@]} processes)"
+  "$KILL" -TERM "${pids[@]}" 2>/dev/null
+  for _ in $(seq 20); do
+    left=""
+    for pid in "${pids[@]}"; do [ -e "$PROC/$pid" ] && left="$left $pid"; done
+    [ -z "$left" ] && return 0
+    sleep 0.25
+  done
+  log "still running after 5 s, killed:$left"
+  # shellcheck disable=SC2086
+  "$KILL" -KILL $left 2>/dev/null
+  return 0
+}
+
+launch() {  # launch appid since
+  local log="$STEAM_ROOT/logs/console_log.txt" line step=""
+  [ -r "$log" ] || { echo unknown; return 0; }
+  while IFS= read -r line; do
+    # "[YYYY-MM-DD HH:MM:SS] ...": the stamp compares as text, in the C locale.
+    [[ "${line:1:19}" < "$2" ]] && continue
+    step="${line##*changed task to }"
+    step="${step%% *}"
+  done < <(grep -aF "GameAction [AppID $1, " "$log" | grep -aF "LaunchApp changed task to ")
+  [ -z "$step" ] || echo "$step"
+}
+
+stop_idle() {
+  systemctl --user is-active --quiet "$UNIT.service" 2>/dev/null || return 0
+  if [ -n "$(games)" ]; then
+    log "a Steam game is running: the kept Steam stops when it ends"
+    return 0
+  fi
+  systemctl --user stop "$UNIT.service"
+}
+
+case "${1-}:$#" in
+  status:1)
+    state
+    log "Keep Steam running is $STATE ($FROM)"
+    echo "$STATE"
+    ;;
+  on:1|off:1)
+    save "$1" || { log "could not save KEEP_RUNNING=$1 in $CONF"; exit 1; }
+    state
+    [ "$STATE" = "$1" ] || log "saved $1, but $FROM says $STATE"
+    [ "$STATE" = off ] && stop_idle
+    echo "$STATE"
+    ;;
+  games:1|games:2)
+    games "${2-}"
+    ;;
+  end:2)
+    case "$2" in ''|*[!0-9]*) log "not an app id: $2"; exit 2 ;; esac
+    end "$2"
+    ;;
+  launch:3)
+    case "$2" in ''|*[!0-9]*) log "not an app id: $2"; exit 2 ;; esac
+    launch "$2" "$3"
+    ;;
+  stop-idle:1)
+    stop_idle
+    ;;
+  *)
+    log "usage: retroforge-steam-keep status|on|off|games [APPID]|end APPID|launch APPID SINCE|stop-idle"
+    exit 2
+    ;;
+esac

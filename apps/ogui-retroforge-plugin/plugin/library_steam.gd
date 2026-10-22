@@ -11,16 +11,14 @@ extends Library
 ## to Steam (steam://install/<appid>, steam://uninstall/<appid>), whose own dialog opens in Big
 ## Picture, started as Main menu > Emulators > Steam Client starts it. The game's app manifest then
 ## says how the download goes (install_progressed) and when it is done. Steam downloads while it
-## runs: closing Steam before the end ends the install here as failed, and Steam carries on with it
-## at its next start.
+## runs: leaving Steam before the end ends the install here as failed, and Steam carries on with it
+## while it still runs, or at its next start.
 
 const SteamApps := preload("steam_apps.gd")
 const RomNames := preload("rom_names.gd")
 const HELPER := "/usr/lib/retroforge/steam-library"
 ## s between two looks at an install's app manifest.
 const POLL := 2.0
-## s Steam has to come up after an install or uninstall is handed to it.
-const STEAM_START := 90.0
 
 var launch_manager := load("res://core/global/launch_manager.tres") as LaunchManager
 
@@ -105,7 +103,8 @@ func uninstall(item: LibraryLaunchItem) -> void:
 
 
 ## Hand an install or uninstall to Steam and follow the game's app manifest until it is done: true,
-## or false once Steam has closed (or never came up) first.
+## or false once no OGUI launch goes through Steam any more (the player left Steam's UI, or it never
+## came up) first.
 func _through_steam(item: LibraryLaunchItem, verb: String) -> bool:
 	var appid := item.provider_app_id.to_int()
 	logger.info("%s: %s through Steam" % [item.name, verb])
@@ -117,11 +116,8 @@ func _through_steam(item: LibraryLaunchItem, verb: String) -> bool:
 	steam._provider_id = ""
 	launch_manager.launch(steam)
 	var root := SteamApps.steam_root()
-	var waited := 0.0
-	var steam_seen := false
 	while true:
 		await get_tree().create_timer(POLL).timeout
-		waited += POLL
 		var state := SteamApps.app_state(root, appid)
 		if verb == "install" and not state.is_empty():
 			if state["total"] > 0:
@@ -130,14 +126,17 @@ func _through_steam(item: LibraryLaunchItem, verb: String) -> bool:
 				return true
 		elif verb == "uninstall" and state.is_empty():
 			return true
-		var running := _steam_running()
-		steam_seen = steam_seen or running
-		if (steam_seen and not running) or (not steam_seen and waited > STEAM_START):
+		if not _steam_in_use():
 			logger.info("%s: Steam closed before the %s was done" % [item.name, verb])
 			return false
 	return false
 
 
-## True while Valve's client runs (a process named steam: /usr/bin/steam runs as bash).
-func _steam_running() -> bool:
-	return OS.execute("pgrep", ["-x", "steam"]) == 0
+## True while OGUI runs a launch through /usr/bin/steam: this one, Steam opened from Main menu >
+## Emulators > Steam Client (whose client this one's hands the install to), or a Steam game. Not the
+## client process: kept running between games (steam_keep.gd), it outlives every launch.
+func _steam_in_use() -> bool:
+	for app in launch_manager.get_running():
+		if app.launch_item and app.launch_item.command == "steam":
+			return true
+	return false

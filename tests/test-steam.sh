@@ -26,6 +26,13 @@
 #   - points ~/.steam/steam and ~/.steam/root at the client, and the links Valve's steam.sh makes;
 #   - drops a D-Bus address that is not ours, and the STEAM_RUNTIME variables;
 #   - a failed bootstrap is exit 1 without running anything.
+#   kept running between games (retroforge-steam-keep, the wrapper's "Kept running" block): off by
+#   default, as before; on, the first launch starts the client as a user unit with the launch's
+#   environment (OGUI_ID=Steam, not the game's), later ones hand their arguments to it, and a game's
+#   launch lasts exactly as long as Steam's own reaper for that app id (never OGUI's reaper, which
+#   takes the same arguments), so OGUI neither returns to its menu early nor waits forever. Exit
+#   from OGUI's menu ends the game's processes, not Steam; a kept client turned off mid-game stops
+#   when the game ends; without a user manager Steam runs with the launch, as when off.
 # Valve's servers are replaced by file:// URLs: $CDN for the client.
 set -uo pipefail
 
@@ -269,8 +276,42 @@ chmod +x "$W/client" "$W/bootstrap"
 # test-steam-compat-tools.sh). Here they would reach the real helpers, and on a device start real
 # downloads into the test's home (1.4 GB; on an SM6115, Proton-CachyOS too): RETROFORGE_STEAM_X86_GUEST=0
 # turns the guest off, and RETROFORGE_STEAM_SAREK_CLI names no such file.
+# Keeping Steam running: the real retroforge-steam-keep, over a fake /proc ($P: a process is its
+# folder there) and stub systemctl, systemd-run and kill in $W/bin. Off unless a case turns it on.
+KEEP="$ROOT/rootfs/overlay/usr/bin/retroforge-steam-keep"
+P="$W/proc"; mkdir -p "$P" "$W/bin"
+unset RETROFORGE_STEAM_KEEP RETROFORGE_STEAM_KEPT XDG_CONFIG_HOME OGUI_ID
+cat >"$W/bin/systemctl" <<EOF
+#!/usr/bin/env bash
+echo "systemctl \$*" >>"$W/sysd.log"
+case "\$*" in
+  *is-active*) [ -e "$W/unit-active" ] ;;
+  *" stop "*) rm -f "$W/unit-active" ;;
+esac
+EOF
+cat >"$W/bin/systemd-run" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" >"$W/sdrun.args"
+[ -e "$W/sdrun-fails" ] && { echo "Failed to connect to bus: No medium found" >&2; exit 1; }
+touch "$W/unit-active"
+EOF
+cat >"$W/bin/fakekill" <<EOF
+#!/usr/bin/env bash
+sig=\$1; shift; echo "\$sig \$*" >>"$W/kills"
+if [ "\$sig" = -TERM ]; then for p in "\$@"; do rm -rf "$P/\${p:?}"; done; fi
+EOF
+chmod +x "$W/bin/systemctl" "$W/bin/systemd-run" "$W/bin/fakekill"
+fakeproc() {  # fakeproc <pid> <ppid> <comm> <argv...>
+  local pid=$1 ppid=$2 comm=$3; shift 3
+  mkdir -p "$P/$pid"; echo "$comm" >"$P/$pid/comm"; printf '%s\0' "$@" >"$P/$pid/cmdline"
+  echo "$pid ($comm) S $ppid $pid $pid 0 -1" >"$P/$pid/stat"
+}
+gone() { rm -rf "${P:?}/${1:?}"; }
+until_true() { local _; for _ in $(seq 60); do eval "$1" && return 0; sleep 0.1; done; return 1; }
 WENV=(env -u RETROFORGE_STEAM_ROOT -u XDG_DATA_HOME -u LD_LIBRARY_PATH HOME="$W/home" RETROFORGE_STEAM_BOOTSTRAP="$W/bootstrap"
-      RETROFORGE_CPUINFO="$W/cpuinfo" RETROFORGE_STEAM_X86_GUEST=0 RETROFORGE_STEAM_SAREK_CLI="$W/no-sarek-cli")
+      RETROFORGE_CPUINFO="$W/cpuinfo" RETROFORGE_STEAM_X86_GUEST=0 RETROFORGE_STEAM_SAREK_CLI="$W/no-sarek-cli"
+      PATH="$W/bin:$PATH" RETROFORGE_STEAM_KEEP_CLI="$KEEP" RETROFORGE_PROC="$P" RETROFORGE_STEAM_KEEP_KILL="$W/bin/fakekill")
+KENV=(env HOME="$W/home" PATH="$W/bin:$PATH" RETROFORGE_PROC="$P" RETROFORGE_STEAM_KEEP_KILL="$W/bin/fakekill")
 wrap() {  # wrap <exit codes of successive runs> [args...]
   echo "$1" >"$W/codes"; shift; rm -f "$W/count" "$W"/call*
   WOUT="$("${WENV[@]}" bash "$WRAP" "$@" 2>"$W/err")"; WRC=$?
@@ -358,6 +399,199 @@ wrap 1
 [ "$WRC" = 1 ] && grep -q "the client exited with status 1" <<<"$WERR" && ok "a failed start is said" || bad "rc=$WRC err=$WERR"
 wrap 0
 ! grep -q "exited with status" <<<"$WERR" && ok "a clean exit says nothing" || bad "err=$WERR"
+
+# ================================================================================================
+# Keeping Steam running between games.
+CONF="$W/home/.config/retroforge/steam.conf"
+STEAM_REAPER="$WROOT/linuxarm64/reaper"
+SLOG="$WROOT/logs/console_log.txt"   # Steam's own log: one line per step of a launch
+reset_keep() {
+  rm -f "$W/unit-active" "$W/sdrun.args" "$W/sdrun-fails" "$W/kills" "$W/sysd.log" "$W/count" "$W"/call* "$CONF" "$SLOG"
+  local d; for d in "$P"/*; do [ -d "$d" ] && gone "${d##*/}"; done
+  echo 0 >"$W/codes"
+}
+step() {  # step <appid> <step> [stamp]: a line of Steam's log, now unless stamped
+  mkdir -p "${SLOG%/*}"
+  printf '[%s] GameAction [AppID %s, ActionID 1] : LaunchApp changed task to %s with ""\n' "${3:-$(date '+%F %T')}" "$1" "$2" >>"$SLOG"
+}
+bg_wrap() {  # bg_wrap [VAR=value...] -- args...: the wrapper in the background, as OGUI's launch
+  local -a vars=()
+  while [ "$1" != -- ]; do vars+=("$1"); shift; done; shift
+  "${WENV[@]}" "${vars[@]}" bash "$WRAP" "$@" 2>"$W/err" &
+  wpid=$!
+}
+finish() { until_true '! kill -0 "$wpid" 2>/dev/null'; wait "$wpid"; WRC=$?; }
+
+CASE="keep: the setting"
+reset_keep
+out="$("${KENV[@]}" bash "$KEEP" status 2>"$W/kerr")"
+[ "$out" = off ] && grep -q "the default" "$W/kerr" && ok "off by default" || bad "out=$out $(cat "$W/kerr")"
+mkdir -p "${CONF%/*}"; printf '# mine\nDXVK_SAREK=on\n' >"$CONF"
+out="$("${KENV[@]}" bash "$KEEP" on 2>"$W/kerr")"
+[ "$out" = on ] && grep -qx "KEEP_RUNNING=on" "$CONF" && grep -qx "DXVK_SAREK=on" "$CONF" && grep -qx "# mine" "$CONF" \
+  && ok "on is saved beside the DXVK-Sarek setting, which stays" || bad "out=$out conf=$(cat "$CONF")"
+[ "$("${KENV[@]}" bash "$KEEP" status 2>/dev/null)" = on ] && ok "and read back" || bad "status after on"
+[ "$("${KENV[@]}" RETROFORGE_STEAM_KEEP=off bash "$KEEP" status 2>/dev/null)" = off ] \
+  && ok "RETROFORGE_STEAM_KEEP overrides the file" || bad "override ignored"
+"${KENV[@]}" bash "$KEEP" sideways >/dev/null 2>&1; [ $? = 2 ] && ok "a bad invocation is exit 2" || bad "bad invocation"
+
+CASE="keep: Steam's launches"
+reset_keep
+fakeproc 4242 1 reaper "$STEAM_REAPER" SteamLaunch AppId=42 -- "$WROOT/linuxarm64/steam-launch-wrapper" -- game
+fakeproc 4343 1 reaper "$STEAM_REAPER" SteamLaunch AppId=43 -- game
+fakeproc 5000 1 reaper /usr/share/opengamepadui/reaper SteamLaunch AppId=42 -- env steam steam://rungameid/42
+fakeproc 5100 1 reaper "$STEAM_REAPER" SteamLaunch -- game AppId=42
+fakeproc 5200 1 bash bash -c "reaper SteamLaunch AppId=42"
+[ "$("${KENV[@]}" bash "$KEEP" games 42)" = 4242 ] \
+  && ok "app 42's launch is Steam's reaper with AppId=42, not OGUI's reaper with the same arguments" \
+  || bad "games 42: $("${KENV[@]}" bash "$KEEP" games 42 | tr '\n' ' ')"
+[ "$("${KENV[@]}" bash "$KEEP" games | sort | tr '\n' ' ')" = "4242 4343 " ] \
+  && ok "without an app id, every Steam launch; an AppId= after -- (the game's own argument) is none" \
+  || bad "games: $("${KENV[@]}" bash "$KEEP" games | tr '\n' ' ')"
+
+CASE="keep: ending a launch"
+fakeproc 4244 4242 steam-launch-wr x; fakeproc 4245 4244 "game (main)" x; fakeproc 4300 1 other x
+"${KENV[@]}" bash "$KEEP" end 42 2>"$W/kerr"
+[ "$(cat "$W/kills" 2>/dev/null)" = "-TERM 4242 4244 4245" ] \
+  && ok "TERM to Steam's reaper and everything under it, a command name with spaces and parens too" \
+  || bad "kills: $(cat "$W/kills" 2>&1) $(cat "$W/kerr")"
+[ -d "$P/4300" ] && [ -d "$P/4343" ] && [ -d "$P/5000" ] && ok "nothing else: another game, OGUI's reaper" || bad "$(ls "$P")"
+
+CASE="keep: a launch's steps"
+reset_keep
+since="$(date '+%F %T')"
+[ "$("${KENV[@]}" RETROFORGE_STEAM_ROOT="$WROOT" bash "$KEEP" launch 42 "$since")" = unknown ] \
+  && ok "unknown without Steam's log" || bad "no log: $("${KENV[@]}" RETROFORGE_STEAM_ROOT="$WROOT" bash "$KEEP" launch 42 "$since")"
+step 42 Completed "2020-01-01 00:00:00"; step 42 ProcessingInstallScript; step 43 Completed
+echo "[$(date '+%F %T')] GameAction [AppID 42, ActionID 1] : LaunchApp waiting for user response to ShowLaunchOption \"\"" >>"$SLOG"
+[ "$("${KENV[@]}" RETROFORGE_STEAM_ROOT="$WROOT" bash "$KEEP" launch 42 "$since")" = ProcessingInstallScript ] \
+  && ok "the last step of that app since the launch: an earlier launch's Completed and another app's do not count" \
+  || bad "launch 42: $("${KENV[@]}" RETROFORGE_STEAM_ROOT="$WROOT" bash "$KEEP" launch 42 "$since") $(cat "$SLOG")"
+[ -z "$("${KENV[@]}" RETROFORGE_STEAM_ROOT="$WROOT" bash "$KEEP" launch 44 "$since")" ] \
+  && ok "nothing before Steam has picked a launch up" || bad "launch 44"
+
+CASE="keep: off stops an idle kept Steam"
+reset_keep; touch "$W/unit-active"
+fakeproc 4343 1 reaper "$STEAM_REAPER" SteamLaunch AppId=43 -- game
+"${KENV[@]}" bash "$KEEP" off >/dev/null 2>"$W/kerr"
+[ -e "$W/unit-active" ] && grep -q "stops when it ends" "$W/kerr" && ok "not while it runs a game" || bad "$(cat "$W/sysd.log") $(cat "$W/kerr")"
+gone 4343
+"${KENV[@]}" bash "$KEEP" off >/dev/null 2>&1
+[ ! -e "$W/unit-active" ] && grep -q "stop retroforge-steam.service" "$W/sysd.log" && ok "stopped once it runs none" || bad "$(cat "$W/sysd.log")"
+
+CASE="keep: off"
+reset_keep
+wrap 0 -gamepadui -silent steam://rungameid/42
+[ "$(cat "$W/count")" = 1 ] && [ ! -e "$W/sdrun.args" ] && [ "$WRC" = 0 ] \
+  && ok "the client runs with the launch, as before; no unit" || bad "rc=$WRC runs=$(cat "$W/count" 2>&1) $WERR"
+
+CASE="keep: a game, Steam not running"
+reset_keep
+bg_wrap RETROFORGE_STEAM_KEEP=on OGUI_ID=Hades DISPLAY=:1 -- -gamepadui -silent steam://rungameid/42
+until_true '[ -s "$W/sdrun.args" ]'
+A="$(cat "$W/sdrun.args" 2>/dev/null)"
+grep -qx -- "--user" <<<"$A" && grep -qx -- "--unit=retroforge-steam" <<<"$A" && grep -qx -- "--collect" <<<"$A" \
+  && ok "starts the user unit retroforge-steam.service" || bad "systemd-run: $A"
+grep -qx -- "--setenv=OGUI_ID=Steam" <<<"$A" && ! grep -q -- "--setenv=OGUI_ID=Hades" <<<"$A" \
+  && ok "its OGUI_ID is Steam (Steam's UI launches find its windows), not the game's" || bad "systemd-run: $A"
+grep -qx -- "--setenv=DISPLAY=:1" <<<"$A" && grep -qx -- "--setenv=RETROFORGE_STEAM_KEPT=1" <<<"$A" \
+  && ok "with the launch's environment, and marked as the kept client" || bad "systemd-run: $A"
+[ "$(tail -4 <<<"$A" | tr '\n' ' ')" = "$WRAP -gamepadui -silent steam://rungameid/42 " ] \
+  && ok "running this wrapper with the launch's arguments" || bad "command: $(tail -4 <<<"$A" | tr '\n' ' ')"
+[ ! -e "$W/count" ] && ok "the client is not run under OGUI's launch" || bad "runs=$(cat "$W/count")"
+# As Hades on the Pocket FIT (2026-10-22): the install scripts under one reaper, then the game
+# under another.
+step 42 Completed "2020-01-01 00:00:00"; step 42 ProcessingInstallScript
+fakeproc 4241 1 reaper "$STEAM_REAPER" SteamLaunch AppId=42 -- install-script
+sleep 1.5; gone 4241; sleep 2.2
+kill -0 "$wpid" 2>/dev/null && ok "the install scripts' reaper ending is not the game ending" || bad "exited after the install scripts: $(cat "$W/err")"
+step 42 Completed; fakeproc 4242 1 reaper "$STEAM_REAPER" SteamLaunch AppId=42 -- game
+sleep 2.2
+kill -0 "$wpid" 2>/dev/null && ok "once Steam has created the game's process, the launch lasts while its reaper runs" || bad "exited early: $(cat "$W/err")"
+gone 4242
+finish
+[ "$WRC" = 0 ] && [ -e "$W/unit-active" ] && ok "and ends with it, exit 0; Steam keeps running" || bad "rc=$WRC $(cat "$W/err")"
+
+CASE="keep: a game, Steam kept"   # and no Steam log: the first reaper seen is the game's
+reset_keep; touch "$W/unit-active"
+fakeproc 4242 1 reaper "$STEAM_REAPER" SteamLaunch AppId=42 -- game
+bg_wrap RETROFORGE_STEAM_KEEP=on -- -gamepadui -silent steam://rungameid/42
+until_true '[ -e "$W/call1" ]'
+grep -qx "args: -gamepadui -silent steam://rungameid/42" "$W/call1" && grep -qx "cwd: $WROOT/steamrtarm64" "$W/call1" \
+  && grep -qx "ld: $WROOT/steamrtarm64:$WROOT/steamrtarm64/video" "$W/call1" && [ ! -e "$W/sdrun.args" ] \
+  && ok "the launch's arguments are handed to the kept client (a second client process), no new unit" || bad "$(cat "$W/call1" 2>&1)"
+sleep 0.5
+kill -TERM "$wpid"; wait "$wpid"; WRC=$?
+[ "$WRC" = 143 ] && [ "$(cat "$W/kills" 2>/dev/null)" = "-TERM 4242" ] && [ -e "$W/unit-active" ] \
+  && ok "Exit from OGUI's menu (TERM) ends the game's launch, not Steam" || bad "rc=$WRC kills=$(cat "$W/kills" 2>&1) $(cat "$W/sysd.log")"
+
+CASE="keep: Steam does not start the game"
+reset_keep; touch "$W/unit-active"
+fakeproc 5000 1 reaper /usr/share/opengamepadui/reaper SteamLaunch AppId=42 -- env steam
+bg_wrap RETROFORGE_STEAM_KEEP=on RETROFORGE_STEAM_LAUNCH_WAIT=1 -- steam://rungameid/42
+finish
+[ "$WRC" = 1 ] && grep -q "did not start app 42 within 1 s" "$W/err" \
+  && ok "gives up after RETROFORGE_STEAM_LAUNCH_WAIT s, and says where to look (OGUI's own reaper is not the game)" || bad "rc=$WRC $(cat "$W/err")"
+reset_keep; touch "$W/unit-active"
+bg_wrap RETROFORGE_STEAM_KEEP=on -- steam://rungameid/42
+until_true '[ -e "$W/call1" ]'; rm -f "$W/unit-active"
+finish
+[ "$WRC" = 1 ] && grep -q "stopped before it started app 42" "$W/err" && ok "or as soon as the kept Steam stops" || bad "rc=$WRC $(cat "$W/err")"
+reset_keep; touch "$W/unit-active"
+bg_wrap RETROFORGE_STEAM_KEEP=on -- steam://rungameid/42
+until_true '[ -e "$W/call1" ]'; step 42 Failed
+finish
+[ "$WRC" = 1 ] && grep -q "could not start app 42" "$W/err" && ok "or when Steam refuses the launch" || bad "rc=$WRC $(cat "$W/err")"
+
+CASE="keep: launched again while it runs"
+reset_keep; touch "$W/unit-active"
+fakeproc 4242 1 reaper "$STEAM_REAPER" SteamLaunch AppId=42 -- game
+bg_wrap RETROFORGE_STEAM_KEEP=on -- steam://rungameid/42
+until_true '[ -e "$W/call1" ]'; step 42 Failed   # AppError_16
+sleep 2.2
+kill -0 "$wpid" 2>/dev/null && ok "Steam refuses it (the game already runs): the launch follows the running game" || bad "exited: $(cat "$W/err")"
+gone 4242
+finish
+[ "$WRC" = 0 ] && ok "and ends with it" || bad "rc=$WRC $(cat "$W/err")"
+
+CASE="keep: turned off during a game"
+reset_keep; touch "$W/unit-active"
+fakeproc 4242 1 reaper "$STEAM_REAPER" SteamLaunch AppId=42 -- game
+bg_wrap RETROFORGE_STEAM_KEEP=off -- steam://rungameid/42
+until_true '[ -e "$W/call1" ]'
+[ ! -e "$W/sdrun.args" ] && ok "a kept client still gets the launch" || bad "a unit was started"
+gone 4242
+finish
+[ "$WRC" = 0 ] && [ ! -e "$W/unit-active" ] && ok "and is stopped when the game ends" || bad "rc=$WRC $(cat "$W/sysd.log" 2>&1)"
+
+CASE="keep: Steam's UI"
+reset_keep; touch "$W/unit-active"
+bg_wrap RETROFORGE_STEAM_KEEP=on -- -gamepadui -steamos3 -steampal -steamdeck
+until_true '[ -e "$W/call1" ]'
+grep -qx "args: -gamepadui -steamos3 -steampal -steamdeck" "$W/call1" && ok "handed to the kept client" || bad "$(cat "$W/call1" 2>&1)"
+sleep 1.2
+kill -0 "$wpid" 2>/dev/null && ok "and stays while it runs" || bad "exited: $(cat "$W/err")"
+rm -f "$W/unit-active"
+finish
+[ "$WRC" = 0 ] && ok "until it stops" || bad "rc=$WRC"
+reset_keep; touch "$W/unit-active"
+bg_wrap RETROFORGE_STEAM_KEEP=on -- -gamepadui
+until_true '[ -e "$W/call1" ]'; sleep 0.3
+kill -TERM "$wpid"; wait "$wpid"; WRC=$?
+[ "$WRC" = 143 ] && [ -e "$W/unit-active" ] && [ ! -e "$W/kills" ] && ok "or OGUI stops it: Steam keeps running" || bad "rc=$WRC $(cat "$W/kills" 2>&1)"
+
+CASE="keep: no user manager"
+reset_keep; touch "$W/sdrun-fails"
+RETROFORGE_STEAM_KEEP=on wrap 0 -silent steam://rungameid/42
+[ "$WRC" = 0 ] && [ "$(cat "$W/count")" = 1 ] && grep -qx "args: -silent steam://rungameid/42" "$W/call1" \
+  && grep -q "could not start Steam as the user unit" <<<"$WERR" && ok "the client runs with the launch, and it is said" || bad "rc=$WRC $WERR"
+
+CASE="keep: inside the unit"
+reset_keep; touch "$W/unit-active"
+RETROFORGE_STEAM_KEEP=on RETROFORGE_STEAM_KEPT=1 wrap 0 -silent steam://rungameid/42
+[ "$WRC" = 0 ] && [ "$(cat "$W/count")" = 1 ] && ! grep -q "handing" <<<"$WERR" \
+  && ok "the unit's own run is the client itself, not a hand-over to itself" || bad "rc=$WRC $WERR"
+reset_keep
 
 echo
 echo "$PASS passed, $FAIL failed"
