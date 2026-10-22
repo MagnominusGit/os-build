@@ -70,14 +70,18 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
   FEX's CMake args into `FEX_COMMON_CMAKE_ARGS`.
 - [x] `.github/workflows/sync.yml`: daily, plus manual dispatch. Newest stable (no beta/rc) and experimental tag;
   build on `ubuntu-24.04-arm`; release `armv8-<tag>` (experimental = pre-release); an issue on failure. Agent: D11.
-- [ ] First CI run of each channel (run 39823534073).
+- [x] First CI runs: stable 74 min, experimental needed the Xalia exception (scan-allow.txt).
 - [ ] FEX job: build `FEX`, `FEXServer`, `FEXOfflineCompiler`, `FEXGetConfig` at Valve's tool commit (37265b1) for ARMv8.0.
 - [ ] LICENSE for the repo (the user's choice).
 
 ### Phase 2: hardware check (Air X)
-- [ ] Install the stable build into `compatibilitytools.d`. Does the arm64 client list it? Its `compatibilitytool.vdf`
-  says `to_oslist linux`, and the client has "Ignoring tool %s as it's for a different target platform".
-- [ ] Hades: LSE emulations before and after (`/root/lse-count.py`, `/root/lse-where.py`).
+- [x] Installed `armv8-proton-11.0-2e` with the branch's `steam-compat-tools` on the Air X (2026-10-22): 412 MB
+  download, 215 s, 2.0 GB; named and Sarek on as designed.
+- [ ] Does the arm64 client list it? Its `compatibilitytool.vdf` says `to_oslist linux`, and the client has "Ignoring
+  tool %s as it's for a different target platform".
+- [x] Hades without the client through it (`~/.cache/rf-test/rf-tool-launch.py`): menu reached. Emulations peaked at
+  ~1,000/s (was 3.36M/s), ~2k in total for Hades.exe, none from `ntdll.dll`; the rest is Valve's `steamclient.so`.
+- [x] Experimental: rebuilt with Xalia allowed (`scan-allow.txt`), released as `armv8-experimental-11.0-20261014`.
 - [ ] `PROTON_DXVK_SAREK=1` selects Sarek.
 - [ ] Works with the clientless launch (`retroforge-steam-direct`).
 - [ ] FEX delivery test: does Steam pick up our ARMv8.0 FEX? Try (a) our four binaries swapped into Steam's
@@ -85,10 +89,13 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
   `toolmanifest.vdf` (`compatmanager_layer_name "fex"`). Check with a native x86 Linux game and `lse-where`. Also
   check whether Steam restores Valve's files on its next tool update or verify.
 
-### Phase 3: device import (os-build branch from `main` 99495d6)
-- [ ] Generalize `steam-compat-tools` (today: Proton-CachyOS) to the new channels. Gate by D6. Remove the CachyOS download where ours applies.
-- [ ] zram (D10): `zram-size = ram/2` to `min(ram, 8192)` in `rootfs/overlay/usr/lib/systemd/zram-generator.conf` (measured necessary for Hades).
-- [ ] Tests (`tests/test-steam-compat-tools.sh` style, fake releases and API), plus `docs/steam-arm64.md`.
+### Phase 3: device import (branch `steam-armv8-proton` from `main` 99495d6; not pushed)
+- [x] `steam-compat-tools`: with no `atomics` in /proc/cpuinfo it takes `proton-armv8.pin`; `.tar.zst`, `sidecar:` and
+  `prereleases:` pin fields; Sarek off in every RetroForge folder. Committed as 4138332.
+- [x] zram (D10): `min(ram, 8192)`. Committed as 3129ec3.
+- [x] Tests: 10 new cases. In a Linux container: compat-tools 121/0, steam 99/0, steam-direct 72/0, x86-guest 110/0.
+  On macOS, 12 cases fail with or without these changes (no /proc, no setsid).
+- [ ] The Proton-CachyOS folder already on ARMv8.0 devices (2.2 GB) stays. Remove it? (user's call)
 
 ### Phase 4: OGUI Steam settings page (same branch, or the next one)
 - [ ] A Steam page. Move "keep running", DXVK-Sarek and the clientless toggle there from Settings > General.
