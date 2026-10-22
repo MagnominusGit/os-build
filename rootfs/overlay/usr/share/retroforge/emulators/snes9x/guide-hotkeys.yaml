@@ -11,19 +11,19 @@
 # QuickSave000, EmuTurbo and GTK_quit (names from gtk_control.cpp b_links). F-keys because no
 # game binds them and the handhelds have no physical keyboard to collide with.
 #
-# WHY GUIDE MAPS TO ITSELF TOO: translation runs BEFORE the intercept check
-# (composite_device/mod.rs handle_event: translate_event, then is_intercept_event per translated
-# event). A Guide mapping that only targets the layer would consume Guide before InputPlumber's
-# intercept (Pass mode in-game) ever sees it — and that intercept is how OpenGamepadUI gets its
-# DBus Guide event, i.e. the in-game menu. Re-emitting Guide keeps that path: a plain tap still
-# opens the menu on release.
+# GUIDE GOES STRAIGHT TO DBUS (ui_guide), the way OpenGamepadUI's own mouse_keyboard_wasd profile
+# maps it, and NOT back to gamepad:Guide. Translation runs BEFORE the intercept check
+# (composite_device/mod.rs handle_event), and a translated DBus event skips that check and goes to
+# the DBus target directly (write_event). So OGUI's single-cap intercept ([Guide]) never fires and
+# never switches InterceptMode to Always — which is what killed the chords on the first HW run
+# (2026-10-21, MANGMI Air X: on the Guide press every later event, the layer's F-keys too, went to
+# DBus only; with the intercept forced off, Guide+R1 quick-saved). OGUI still gets the same
+# ui_guide press/release it gets from the intercept and opens the menu on release.
 #
-# KNOWN BROKEN (HW 2026-10-21, MANGMI Air X): the chords do nothing and the menu opens on release.
-# OpenGamepadUI's intercept activation is the SINGLE cap [Guide], and is_intercept_event_single
-# switches to InterceptMode::Always on the Guide PRESS — every later event goes to the DBus
-# target, which maps F1-F4 to Action::None and drops them. With InterceptMode forced to 0 by
-# busctl, Guide+R1 quick-saved: the layer is right, the intercept is the blocker. Fix pending
-# (tap-vs-chord in InputPlumber, asked upstream); .claude/plans/guide-hotkeys.plan.md.
+# HW 2026-10-22, MANGMI Air X: Guide+R1 quick-saves, and the profile survives OGUI's
+# set_gamepad_profile("") on the Guide press (ProfilePath unchanged). STILL OPEN: OGUI never sees
+# the chord buttons, so it cannot tell Guide+R1 from a plain Guide tap and opens the menu when
+# Guide is released after a chord. Asked upstream; .claude/plans/guide-hotkeys.plan.md.
 #
 # TARGET_DEVICES IS EXPLICIT, not omitted: omitting keeps the composite's current targets, which
 # on every board but one is already exactly this triple — but the MANGMI Pocket Max ships without
@@ -46,15 +46,14 @@ target_devices:
   - mouse
 
 mapping:
-  - name: Guide holds the hotkey layer (and stays Guide for the shell's menu)
+  - name: Guide holds the hotkey layer (and goes to the shell's menu over DBus)
     source_event:
       gamepad:
         button: Guide
     target_events:
       - layer:
           name: guide
-      - gamepad:
-          button: Guide
+      - dbus: ui_guide
 
 layers:
   - name: guide

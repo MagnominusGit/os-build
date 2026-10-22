@@ -90,6 +90,26 @@ Options (user checking with ShadowApex before choosing):
 - (fallback) profile only: no Guide re-emit; menu via another chord (e.g. Guide+Select -> Guide
   inside the layer). Changes the menu UX.
 
+## Next try (ShadowApex's idea, 2026-10-22): Guide -> dbus: ui_guide
+
+The profile maps Guide to [layer guide, dbus: ui_guide] instead of re-emitting gamepad:Guide,
+as OGUI's own mouse_keyboard_wasd profile does. A translated DBus event skips is_intercept_event
+and goes straight to the DBus target (write_event), so the single-cap intercept never flips to
+Always and the layer's F-keys reach the keyboard target. No IP patch 0002 needed if it holds.
+HW 2026-10-22 on the Air X (bind-mounted over the read-only /usr): Guide+R1 quick-saves, and
+ProfilePath stays guide-hotkeys.yaml through OGUI's set_gamepad_profile("") on the Guide press
+(global_default*.json exist there, yet nothing replaced the profile). Remaining gap, below
+(first point): the menu DOES open when Guide is released after a chord. Asked ShadowApex.
+Gaps:
+- CONFIRMED: OGUI never sees the chord buttons, so on Guide release after a chord it opens the
+  menu (_guide_input opens unless ogui_guide_action is pressed). A profile alone cannot fix it:
+  every DBus event sends press AND release, and the release clears the flag before Guide goes up.
+  Proposed (pending ShadowApex): each layer chord also emits `dbus: ogui_guide_action` (custom
+  actions pass through IP and OGUI's _on_dbus_input_event), plus OGUI patch 0016 ignoring the
+  DBus RELEASE of ogui_guide_action so it stays set until _guide_input clears it on Guide release.
+- NOT A PROBLEM on the Air X: OGUI's set_gamepad_profile("") on every Guide press left our
+  profile loaded.
+
 ## HW checklist (Pocket ACE or FIT; also once on a Pocket Max for the keyboard-target case)
 
 1. `busctl --system get-property org.shadowblip.InputPlumber \
