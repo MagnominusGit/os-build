@@ -96,8 +96,26 @@ def lacks_atomics():
     return any("atomics" not in x for x in feats)
 
 
+STEAM_CONF = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+                          "retroforge", "steam.conf")
+
+
+def channel():
+    """The player's ARMv8.0 Proton channel (retroforge-steam-proton): stable unless PROTON_CHANNEL=experimental."""
+    value = ""
+    try:
+        with open(STEAM_CONF, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith("PROTON_CHANNEL="):
+                    value = line.strip().split("=", 1)[1]
+    except OSError:
+        pass
+    return "experimental" if value == "experimental" else "stable"
+
+
+ARMV8_PINS = {"stable": "proton-armv8.pin", "experimental": "proton-armv8-experimental.pin"}
 PIN = os.environ.get("RETROFORGE_STEAM_COMPAT_PIN") or os.path.join(
-    PINS, "proton-armv8.pin" if lacks_atomics() else "proton-cachyos-arm64.pin")
+    PINS, ARMV8_PINS[channel()] if lacks_atomics() else "proton-cachyos-arm64.pin")
 TOOLS = os.path.join(STEAM_ROOT, "compatibilitytools.d")
 LOCK = os.path.join(STEAM_ROOT, ".retroforge-compat-tools.lock")
 TMP_PREFIX = ".retroforge-compat-tools-"
