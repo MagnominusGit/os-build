@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Thu, 22 Oct 2026 07:00:00 -0700
+Subject: [PATCH] fix(LaunchManager): warn about orphan windows once per change,
+ not every second
+
+check_running() runs every second and warned about every window no
+running app claims, each time. A window that belongs to no OGUI launch
+stays an orphan for as long as it lives: Steam kept running between games
+(RetroForge's Settings > General) has a dozen, so OGUI's journal took two
+lines a second while idle in the menu and ~4.5 a second during a game
+(HW, KONKR Pocket FIT, 2026-10-22: 1164 lines in 5 minutes).
+
+The warning now comes when the set of orphan windows changes, and only
+then.
+
+---
+ core/global/launch_manager.gd | 10 ++++++++--
+ 1 file changed
+
+--- a/core/global/launch_manager.gd
++++ b/core/global/launch_manager.gd
+@@ -66,6 +66,10 @@
+ var should_manage_overlay := true
+ var logger := Log.get_logger("LaunchManager", Log.LEVEL.INFO)
+ var _focused_app_id := 0
++## The orphan windows last warned about: a window no running app claims stays one for as long as it
++## lives (an app kept running outside OGUI, such as Steam between games), and check_running() runs
++## every second.
++var _orphan_windows := PackedInt64Array()
+ var _input_manager: InputManager
+ 
+ # Connect to Gamescope signals
+@@ -695,8 +699,10 @@
+ 		if window in windows_with_app:
+ 			continue
+ 		orphan_windows.push_back(window)
+-	if not orphan_windows.is_empty():
+-		logger.warn("Found orphan windows:", orphan_windows)
++	if orphan_windows != _orphan_windows:
++		_orphan_windows = orphan_windows
++		if not orphan_windows.is_empty():
++			logger.warn("Found orphan windows:", orphan_windows)
+ 
+ 
+ # Updates our mapping of PIDs to Windows. This gives us a good view of what

@@ -208,6 +208,19 @@ if [ -f "$P21" ]; then
 else
   bad "0021: $P21 is missing"
 fi
+# 0022: every orphan window warned about once a second (Steam kept running: HW, Pocket FIT, 2026-10-22).
+P22="$PKG/patches/0022-launch-manager-orphan-windows-warned-once.patch"
+if [ -f "$P22" ]; then
+  [ "$(grep -E '^\+\+\+ b/' "$P22" | sed 's#^+++ b/##' | sort -u)" = "core/global/launch_manager.gd" ] \
+    && ok "0022: changes launch_manager.gd only" || bad "0022 touches more than launch_manager.gd"
+  grep -qE '^-\s+if not orphan_windows.is_empty\(\):' "$P22" && grep -qE '^\+\s+if orphan_windows != _orphan_windows:' "$P22" \
+    && grep -qE '^\+var _orphan_windows := PackedInt64Array\(\)' "$P22" \
+    && ok "0022: orphan windows are warned about when their set changes, not on every check" || bad "0022: still warns on every check"
+  grep -q "0021-library-desktop-steam-shortcuts-start-steams-gamepad-ui.patch 0022-launch-manager-orphan-windows-warned-once.patch" "$PKG/source.pin" \
+    && ok "0022: listed in source.pin, after 0021" || bad "0022: not in source.pin's patches"
+else
+  bad "0022: $P22 is missing"
+fi
 # One file of the tree as 0018 leaves it, hunk by hunk (context and added lines; a new file whole).
 newside() { python3 - "$P18" "$1" <<'PY'
 import sys
