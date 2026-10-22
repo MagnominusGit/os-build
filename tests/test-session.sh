@@ -221,6 +221,22 @@ if [ -f "$P22" ]; then
 else
   bad "0022: $P22 is missing"
 fi
+# 0023: a recent app's home card stayed on a replaced library item: no art, Play did nothing
+# (HW, Pocket FIT, 2026-10-22).
+P23="$PKG/patches/0023-home-card-rebuilt-when-its-library-item-is-replaced.patch"
+if [ -f "$P23" ]; then
+  [ "$(grep -E '^\+\+\+ b/' "$P23" | sed 's#^+++ b/##' | sort -u)" = "core/ui/card_ui/home/cardui_home.gd" ] \
+    && ok "0023: changes cardui_home.gd only" || bad "0023 touches more than cardui_home.gd"
+  grep -qE '^-\s+if item.name in card_nodes and is_instance_valid\(card_nodes\[item.name\]\):' "$P23" \
+    && grep -qE '^\+\s+if is_instance_valid\(old\) and \(old as GameCard\).library_item == item:' "$P23" \
+    && grep -qE '^\+\s+var old = card_nodes.get\(item.name\)' "$P23" \
+    && ok "0023: a card is reused only while it shows the very library item (untyped: a freed card may be listed)" \
+    || bad "0023: home cards are still reused by name"
+  grep -q "0022-launch-manager-orphan-windows-warned-once.patch 0023-home-card-rebuilt-when-its-library-item-is-replaced.patch" "$PKG/source.pin" \
+    && ok "0023: listed in source.pin, after 0022" || bad "0023: not in source.pin's patches"
+else
+  bad "0023: $P23 is missing"
+fi
 # One file of the tree as 0018 leaves it, hunk by hunk (context and added lines; a new file whole).
 newside() { python3 - "$P18" "$1" <<'PY'
 import sys

@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Thu, 22 Oct 2026 08:10:00 -0700
+Subject: [PATCH] fix(HomeMenu): a recent app's card is rebuilt when its library
+ item is replaced
+
+The home screen kept a recent app's card by name. A library that drops a
+game and adds it again leaves LibraryManager with a new LibraryItem of
+the same name, and the card stayed on the old one, which has no launch
+item: its page showed no art, and Play did nothing (HW, KONKR Pocket FIT,
+2026-10-22: Hades, whose only launch item at first was Steam's own
+desktop shortcut, removed by the RetroForge plugin in favour of its
+Steam library's). A card frees itself on removed_from_library, but it
+listens only after its art has loaded, and the removal came first.
+
+A card is now reused only while it shows the very item; otherwise the old
+one is freed and a new one built.
+
+---
+ core/ui/card_ui/home/cardui_home.gd | 12 +++++++++---
+ 1 file changed
+
+--- a/core/ui/card_ui/home/cardui_home.gd
++++ b/core/ui/card_ui/home/cardui_home.gd
+@@ -284,10 +284,16 @@
+ 	for item in library_items:
+ 		var card: Control
+ 		
+-		# Build a card for each library item if one does not exist
+-		if item.name in card_nodes and is_instance_valid(card_nodes[item.name]):
+-			card = card_nodes[item.name]
++		# Build a card for each library item if one does not exist. Reuse one only while it shows
++		# this very item: a library that drops a game and adds it again makes a new LibraryItem of
++		# the same name, and a card left on the old one has no launch item (no art; Play does
++		# nothing). Its removed_from_library can come before the card listens for it.
++		var old = card_nodes.get(item.name)  # untyped: a freed card may still be listed
++		if is_instance_valid(old) and (old as GameCard).library_item == item:
++			card = old
+ 		else:
++			if is_instance_valid(old):
++				old.queue_free()
+ 			card = await _build_card(item) as Control
+ 			card_nodes[item.name] = card
+ 			
