@@ -98,8 +98,10 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
 - [ ] The Proton-CachyOS folder already on ARMv8.0 devices (2.2 GB) stays. Remove it? (user's call)
 
 ### Phase 4: OGUI Steam settings page (same branch, or the next one)
-- [ ] A Steam page. Move "keep running", DXVK-Sarek and the clientless toggle there from Settings > General.
-- [ ] Default Proton (Valve, ARMv8.0 stable or ARMv8.0 experimental; the last two only under D6).
+- [x] Settings > Steam (`steam_settings.gd`), after General; the three Steam toggles moved there (6ecae33). Not yet run on hardware.
+- [x] Proton row (`steam_proton.gd`), only on ARMv8.0 CPUs: stable or experimental. `retroforge-steam-proton` makes it
+  Steam's default (`CompatToolMapping` "0" in config.vdf, written while the client is closed; 15dc8a3). The user decided
+  2026-10-22: default on ARMv8.0-only devices, nothing elsewhere, other options hidden there.
 - [ ] Per-game overrides in the game's settings (like `game_settings_page.gd`): Proton build and Sarek (D7). Turnip and FEX settings once Phase 4b answers how.
 - [ ] 4b: Turnip variants in `/home` via `VK_DRIVER_FILES`. Does Steam Linux Runtime 4 load them? What about the matching x86 Turnip for FEX guests? Which `proton-fex-config.json` keys are worth exposing?
 - [ ] Tests (`tests/test-plugin.sh`), docs.
