@@ -114,7 +114,7 @@ case "${1-}:$#" in
     if [ "$STATE" != "$1" ]; then
       log "saved $1, but $FROM says $STATE"
     elif [ "$STATE" = on ]; then
-      log "on: Proton-CachyOS is installed or updated in the background (log: $LOG). Select it in Steam."
+      log "on: its Proton is installed or updated in the background (log: $LOG). Select it in Steam."
     fi
     echo "$STATE"
     ;;

@@ -749,6 +749,117 @@ reset SM6115 0
 "${STUBS[@]}" RETROFORGE_STEAM_BOOTSTRAP="$W/bootstrap" RETROFORGE_STEAM_SAREK_CLI="$W/missing" bash "$WRAP" 2>"$W/err"; WRC=$?
 [ "$WRC" = 0 ] && grep -qx "sarek: unset" "$W/client" && [ ! -s "$W/err" ] && ok "the client runs, nothing exported, no error" || bad "rc=$WRC err=$(cat "$W/err")"
 
+# ================================================================================================
+# ARMv8.0: proton-armv8.pin (sunshineinabox/proton-armv8), taken when /proc/cpuinfo has no `atomics`:
+# .tar.zst assets with a <asset>.sha512 sidecar; experimental releases are prereleases.
+PIN8_REAL="$ROOT/rootfs/overlay/usr/share/retroforge/steam/proton-armv8.pin"
+CASE="armv8: the real pin"
+python3 - "$PIN8_REAL" <<'PY' && ok "stable channel: proton-armv8's API, its .tar.zst with .sha512, one folder" || bad "proton-armv8.pin is not that"
+import re, sys
+f = dict(re.findall(r"^(\w+):[ \t]*(.*?)[ \t]*$", open(sys.argv[1]).read(), re.M))
+assert f["releases"] == "https://api.github.com/repos/sunshineinabox/proton-armv8/releases", f
+assert f["asset"] == "proton-armv8-proton-*.tar.zst" and f["sidecar"] == ".sha512", f
+assert f["dir"] == "proton-armv8-retroforge" and "tag" not in f and "prereleases" not in f, f
+PY
+
+S8="$T/home8/.local/share/Steam"; TOOLS8="$S8/compatibilitytools.d"; DIR8=proton-armv8-retroforge
+PINS8="$T/pins8"; mkdir -p "$PINS8"
+{ printf 'name: proton-armv8\nreleases: %s\nasset: proton-armv8-proton-*.tar.zst\nsidecar: .sha512\n' "$RELEASES"
+  printf 'dir: %s\ndisplay_name: Proton ARMv8.0 (RetroForge)\n' "$DIR8"; } >"$PINS8/proton-armv8.pin"
+{ printf 'name: proton-armv8-experimental\nreleases: %s\nasset: proton-armv8-experimental-*.tar.zst\n' "$RELEASES"
+  printf 'sidecar: .sha512\nprereleases: yes\ndir: proton-armv8-experimental-retroforge\ndisplay_name: Exp\n'; } >"$PINS8/exp.pin"
+grep -v '^prereleases:' "$PINS8/exp.pin" >"$PINS8/exp-noprerelease.pin"
+mkpin; cp "$PIN" "$PINS8/proton-cachyos-arm64.pin"
+printf 'processor\t: 0\nFeatures\t: fp asimd evtstrm aes pmull sha1 sha2 crc32 cpuid\n' >"$T/cpuinfo-v80"
+printf 'processor\t: 0\nFeatures\t: fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid\n' >"$T/cpuinfo-v82"
+
+mktool8() {  # mktool8 <top> <marker>: $DL/<top>.tar.zst
+  mktool "$1" "$2" &&
+    python3 -c 'import lzma, sys; open(sys.argv[2], "wb").write(lzma.open(sys.argv[1]).read())' "$DL/$1.tar.xz" "$DL/$1.tar" &&
+    rm -f "$DL/$1.tar.xz" && zstd -q -f --rm "$DL/$1.tar" -o "$DL/$1.tar.zst"
+}
+cat >"$T/releases8.py" <<'PY'
+import hashlib, json, os, sys
+dl, out = sys.argv[1:3]
+rels = []
+for line in sys.stdin:
+    if not line.strip():
+        continue
+    tag, published, top, *flags = line.split()
+    path = os.path.join(dl, top + ".tar.zst")
+    data = open(path, "rb").read()
+    with open(path + ".sha512", "w") as f:
+        f.write(("0" * 128 if "badsidecar" in flags else hashlib.sha512(data).hexdigest()) + f"  {top}.tar.zst\n")
+    rels.append({"tag_name": tag, "published_at": published, "draft": False, "prerelease": "prerelease" in flags,
+                 "assets": [{"name": top + ".tar.zst", "state": "uploaded", "browser_download_url": "file://" + path,
+                             "digest": "sha256:" + hashlib.sha256(data).hexdigest()},
+                            {"name": top + ".tar.zst.sha512", "state": "uploaded",
+                             "browser_download_url": "file://" + path + ".sha512"}]})
+json.dump(rels, open(out, "w"), indent=1)
+PY
+releases8() { python3 "$T/releases8.py" "$DL" "$API/releases.json"; }
+tools8() {  # tools8 <cpuinfo> <pin|-> <args>: the helper against $S8, its pin chosen by the CPU unless given
+  local pin=()
+  [ "$2" != - ] && pin=(RETROFORGE_STEAM_COMPAT_PIN="$2")
+  : >"$API/requests.log"
+  OUT="$("${NOPROXY[@]}" HOME="$T/home8" RETROFORGE_STEAM_ROOT="$S8" RETROFORGE_STEAM_PINS="$PINS8" \
+         RETROFORGE_CPUINFO="$1" "${pin[@]}" python3 "$HELPER" "${@:3}" 2>"$T/err")"; RC=$?
+  ERR="$(cat "$T/err")"
+}
+for t in proton-11.0-2c proton-11.0-2e experimental-11.0-20261014; do mktool8 "proton-armv8-$t" "armv8 $t"; done
+releases8 <<EOF
+armv8-experimental-11.0-20261014 2026-10-22T13:00:00Z proton-armv8-experimental-11.0-20261014 prerelease
+armv8-proton-11.0-2e 2026-10-22T12:00:00Z proton-armv8-proton-11.0-2e
+armv8-proton-11.0-2c 2026-10-01T12:00:00Z proton-armv8-proton-11.0-2c
+EOF
+
+CASE="armv8: an ARMv8.0 CPU"
+tools8 "$T/cpuinfo-v80" - on
+[ "$RC" = 0 ] && [ "$OUT" = "$TOOLS8/$DIR8" ] && [ "$(tag_of "$TOOLS8/$DIR8")" = armv8-proton-11.0-2e ] \
+  && ok "proton-armv8.pin: the newest stable .tar.zst, checked by its .sha512" || bad "rc=$RC out=$OUT err=$ERR"
+grep -q "armv8 proton-11.0-2e" "$TOOLS8/$DIR8/proton" && [ -L "$TOOLS8/$DIR8/files/lib/libfoo.so" ] \
+  && ok "unpacked whole, symlinks kept" || bad "$(ls -la "$TOOLS8/$DIR8" 2>&1 | head -5)"
+[ "$(vdf_strings "$TOOLS8/$DIR8")" = "compatibilitytools|compat_tools|$DIR8|install_path|.|display_name|Proton ARMv8.0 (RetroForge)|from_oslist|windows|to_oslist|linux" ] \
+  && ok "named $DIR8 for Steam" || bad "$(vdf_strings "$TOOLS8/$DIR8")"
+[ "$(settings "$TOOLS8/$DIR8")" = '{"PROTON_DXVK_SAREK": "1"}' ] && ok "DXVK-Sarek on in it" || bad "$(settings "$TOOLS8/$DIR8" 2>&1)"
+
+CASE="armv8: a CPU with atomics"
+rm -rf "$T/home8"
+tools8 "$T/cpuinfo-v82" - on
+[ "$RC" = 1 ] && grep -q "proton-cachyos-\*-slr-arm64.tar.xz" <<<"$ERR" && [ ! -e "$TOOLS8/$DIR8" ] \
+  && ok "keeps proton-cachyos-arm64.pin" || bad "rc=$RC err=$ERR"
+
+CASE="armv8: experimental"
+rm -rf "$T/home8"
+tools8 "$T/cpuinfo-v80" "$PINS8/exp.pin" on
+[ "$RC" = 0 ] && [ "$(tag_of "$TOOLS8/proton-armv8-experimental-retroforge")" = armv8-experimental-11.0-20261014 ] \
+  && ok "prereleases: yes takes the prerelease" || bad "rc=$RC err=$ERR"
+rm -rf "$T/home8"
+tools8 "$T/cpuinfo-v80" "$PINS8/exp-noprerelease.pin" on
+[ "$RC" = 1 ] && grep -q "with its checksum" <<<"$ERR" && ok "without it, a prerelease is skipped" || bad "rc=$RC err=$ERR"
+
+CASE="armv8: a bad .sha512"
+rm -rf "$T/home8"
+releases8 <<EOF
+armv8-proton-11.0-2e 2026-10-22T12:00:00Z proton-armv8-proton-11.0-2e badsidecar
+EOF
+tools8 "$T/cpuinfo-v80" - on
+[ "$RC" = 1 ] && grep -q "sha512 mismatch" <<<"$ERR" && [ ! -e "$TOOLS8/$DIR8" ] && [ -z "$(find "$S8" -maxdepth 1 -name '.retroforge-compat-tools-*')" ] \
+  && ok "refused, nothing installed, nothing left" || bad "rc=$RC err=$ERR"
+
+CASE="armv8: off"
+rm -rf "$T/home8"
+releases8 <<EOF
+armv8-proton-11.0-2e 2026-10-22T12:00:00Z proton-armv8-proton-11.0-2e
+EOF
+tools8 "$T/cpuinfo-v80" - on
+mkdir -p "$TOOLS8/$STABLE"
+printf 'name: proton-cachyos-arm64\ntag: %s\n' "$R1" >"$TOOLS8/$STABLE/.retroforge-pin"
+cp "$TOOLS8/$DIR8/user_settings.py" "$TOOLS8/$STABLE/user_settings.py"
+tools8 "$T/cpuinfo-v80" - off
+[ "$RC" = 0 ] && [ ! -e "$TOOLS8/$DIR8/user_settings.py" ] && [ ! -e "$TOOLS8/$STABLE/user_settings.py" ] && [ -e "$TOOLS8/$DIR8/proton" ] \
+  && ok "Sarek off in it and in a Proton-CachyOS left on the device; the tools stay" || bad "rc=$RC err=$ERR"
+
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

@@ -58,8 +58,13 @@
 # installed and GitHub unreachable, a checksum mismatch, a tarball without its folder); 2 for a bad
 # invocation.
 #
+# ARMv8.0 CPUs (no `atomics` in /proc/cpuinfo, e.g. the SM6115) take proton-armv8.pin instead: Valve's
+# Proton built for them, with DXVK-Sarek (sunshineinabox/proton-armv8). Proton-CachyOS's build needs the
+# kernel's LSE emulation there, which costs ~0.3-0.5 us per atomic.
+#
 # TEST SEAMS (tests/test-steam-compat-tools.sh): RETROFORGE_STEAM_ROOT (also set by /usr/bin/steam),
-# RETROFORGE_STEAM_COMPAT_PIN (whose releases: can point at a fake API).
+# RETROFORGE_STEAM_COMPAT_PIN (whose releases: can point at a fake API), RETROFORGE_STEAM_PINS (the pins'
+# folder), RETROFORGE_CPUINFO.
 import fcntl
 import fnmatch
 import hashlib
@@ -77,7 +82,22 @@ import urllib.request
 
 DATA = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
 STEAM_ROOT = os.environ.get("RETROFORGE_STEAM_ROOT") or os.path.join(DATA, "Steam")
-PIN = os.environ.get("RETROFORGE_STEAM_COMPAT_PIN", "/usr/share/retroforge/steam/proton-cachyos-arm64.pin")
+PINS = os.environ.get("RETROFORGE_STEAM_PINS", "/usr/share/retroforge/steam")
+CPUINFO = os.environ.get("RETROFORGE_CPUINFO", "/proc/cpuinfo")
+
+
+def lacks_atomics():
+    """Whether a CPU here has no LSE atomics (ARMv8.0)."""
+    try:
+        with open(CPUINFO, encoding="utf-8", errors="replace") as f:
+            feats = [line.split(":", 1)[1].split() for line in f if line.startswith("Features")]
+    except OSError:
+        return False
+    return any("atomics" not in x for x in feats)
+
+
+PIN = os.environ.get("RETROFORGE_STEAM_COMPAT_PIN") or os.path.join(
+    PINS, "proton-armv8.pin" if lacks_atomics() else "proton-cachyos-arm64.pin")
 TOOLS = os.path.join(STEAM_ROOT, "compatibilitytools.d")
 LOCK = os.path.join(STEAM_ROOT, ".retroforge-compat-tools.lock")
 TMP_PREFIX = ".retroforge-compat-tools-"
@@ -91,6 +111,17 @@ TOOL_FILES = (VDF, "toolmanifest.vdf", "proton")
 PER_PAGE = 20
 AGENT = "retroforge-steam-compat-tools"
 NAME_OK = re.compile(r"[\w+-][\w.+-]*")  # a tag, or an asset's name: no "/", no leading "."
+ARCHIVES = (".tar.xz", ".tar.zst")
+
+
+def stem(asset):
+    """The asset's name without its archive extension: the tarball's top folder."""
+    return next(asset[:-len(e)] for e in ARCHIVES if asset.endswith(e))
+
+
+def sidecar_name(asset, pin):
+    """The checksum file's name: the pin's suffix after the asset's name, else <stem>.sha512sum."""
+    return asset + pin["sidecar"] if pin["sidecar"] else stem(asset) + ".sha512sum"
 
 SAREK_SETTINGS = """\
 # Written by /usr/lib/retroforge/steam-compat-tools: the player's DXVK-Sarek setting is on
@@ -126,14 +157,19 @@ def fields(text, keys):
 def read_pin():
     try:
         with open(PIN, encoding="utf-8") as f:
-            pin = fields(f.read(), ("name", "releases", "asset", "dir", "display_name", "tag", "sha512"))
+            pin = fields(f.read(), ("name", "releases", "asset", "dir", "display_name", "tag", "sha512",
+                                    "sidecar", "prereleases"))
     except (OSError, UnicodeDecodeError) as err:
         raise Failed(f"no pin: {err}")
     need = ("name", "releases", "asset", "dir", "display_name")
     if not all(pin[k] for k in need):
         raise Failed(f"{PIN}: needs {', '.join(need)}")
-    if not pin["asset"].endswith(".tar.xz") or "/" in pin["asset"]:
-        raise Failed(f"{PIN}: asset must be a .tar.xz name (a glob)")
+    if not pin["asset"].endswith(ARCHIVES) or "/" in pin["asset"]:
+        raise Failed(f"{PIN}: asset must be a .tar.xz or .tar.zst name (a glob)")
+    if pin["sidecar"] and not re.fullmatch(r"\.[\w.+-]+", pin["sidecar"]):
+        raise Failed(f"{PIN}: sidecar must be a suffix such as .sha512")
+    if pin["prereleases"] not in (None, "yes", "no"):
+        raise Failed(f"{PIN}: prereleases is yes or no")
     if not NAME_OK.fullmatch(pin["dir"]):
         raise Failed(f"{PIN}: dir must be a plain folder name")
     if pin["tag"] and not NAME_OK.fullmatch(pin["tag"]):
@@ -211,8 +247,10 @@ def candidate(rel, pin):
                 and isinstance(a.get("browser_download_url"), str) and a.get("state", "uploaded") == "uploaded"):
             assets[a["name"]] = a
     for name in sorted(assets):
-        sidecar = assets.get(name[:-len(".tar.xz")] + ".sha512sum")
-        if not fnmatch.fnmatchcase(name, pin["asset"]) or not NAME_OK.fullmatch(name) or sidecar is None:
+        if not fnmatch.fnmatchcase(name, pin["asset"]) or not NAME_OK.fullmatch(name):
+            continue
+        sidecar = assets.get(sidecar_name(name, pin))
+        if sidecar is None:
             continue
         digest = assets[name].get("digest")
         digest = digest[7:].lower() if isinstance(digest, str) and digest.startswith("sha256:") else None
@@ -233,15 +271,16 @@ def resolve(pin):
     if pin["tag"]:
         found = candidate(api(f"{pin['releases']}/tags/{urllib.parse.quote(pin['tag'], safe='')}"), pin)
         if found is None:
-            raise Unresolved(f"release {pin['tag']} has no {pin['asset']} with its .sha512sum")
+            raise Unresolved(f"release {pin['tag']} has no {pin['asset']} with its checksum")
         return found
     releases = api(f"{pin['releases']}?per_page={PER_PAGE}")
     if not isinstance(releases, list):
         raise Unresolved("GitHub's API did not answer with a list of releases")
     found = [c for c in (candidate(r, pin) for r in releases
-                         if isinstance(r, dict) and not r.get("draft") and not r.get("prerelease")) if c]
+                         if isinstance(r, dict) and not r.get("draft")
+                         and (not r.get("prerelease") or pin["prereleases"] == "yes")) if c]
     if not found:
-        raise Unresolved(f"none of the newest {len(releases)} releases has {pin['asset']} with its .sha512sum")
+        raise Unresolved(f"none of the newest {len(releases)} releases has {pin['asset']} with its checksum")
     return max(found, key=lambda c: (proton_version(c["tag"]), c["published"]))
 
 
@@ -369,7 +408,8 @@ def sarek_on(tool):
 
 
 def sarek_off(pin):
-    """Deletes the Sarek user_settings.py from every folder this installed. The tools stay."""
+    """Deletes the Sarek user_settings.py from every folder this installed, under any pin (a
+    Proton-CachyOS left on an ARMv8.0 device too). The tools stay."""
     try:
         names = sorted(os.listdir(TOOLS))
     except FileNotFoundError:
@@ -377,7 +417,7 @@ def sarek_off(pin):
     for name in names:
         tool = os.path.join(TOOLS, name)
         path = os.path.join(tool, SETTINGS)
-        if not ours(tool, pin) or not os.path.lexists(path):
+        if marker(tool) is None or not os.path.lexists(path):
             continue
         if our_settings(path):
             os.unlink(path)
@@ -471,16 +511,18 @@ def prepare(rel, pin, tmp):
     compatibilitytool.vdf, and its .retroforge-pin. Returns its folder."""
     sha512 = pin["sha512"] or sidecar_sha512(rel)
     log(f"downloading {rel['asset']} ({rel['tag']}) from {rel['url']}")
-    archive = os.path.join(tmp, "tool.tar.xz")
+    top = stem(rel["asset"])
+    archive = os.path.join(tmp, "tool" + rel["asset"][len(top):])
     sha256 = download(rel, archive, sha512)
     tree = os.path.join(tmp, "tree")
     os.mkdir(tree)
-    res = subprocess.run(["tar", "--no-same-owner", "-xJf", archive, "-C", tree],
+    # tar finds zstd by itself when reading (GNU tar and bsdtar both).
+    unpack = "-xJf" if archive.endswith(".tar.xz") else "-xf"
+    res = subprocess.run(["tar", "--no-same-owner", unpack, archive, "-C", tree],
                          stderr=subprocess.PIPE, text=True)
     os.unlink(archive)
     if res.returncode != 0:
         raise Failed(f"could not unpack {rel['url']}: {res.stderr.strip()}")
-    top = rel["asset"][:-len(".tar.xz")]
     new = os.path.join(tree, top)
     if os.path.islink(new) or not os.path.isdir(new) or not complete(new):
         raise Failed(f"{rel['url']} has no {top}/ with {', '.join(TOOL_FILES)}")

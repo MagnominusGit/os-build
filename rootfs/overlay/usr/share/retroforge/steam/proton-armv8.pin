@@ -1,0 +1,10 @@
+# Proton for ARMv8.0 CPUs (no LSE atomics), with DXVK-Sarek: Valve's Proton rebuilt with -march=armv8-a by
+# sunshineinabox/proton-armv8, stable channel (Valve's proton-11.0-* tags). steam-compat-tools takes this
+# pin instead of proton-cachyos-arm64.pin when /proc/cpuinfo has no `atomics` (the SM6115). Fields as in
+# proton-cachyos-arm64.pin; sidecar: is the checksum file's suffix after the asset's name.
+name: proton-armv8
+releases: https://api.github.com/repos/sunshineinabox/proton-armv8/releases
+asset: proton-armv8-proton-*.tar.zst
+sidecar: .sha512
+dir: proton-armv8-retroforge
+display_name: Proton ARMv8.0 (RetroForge)

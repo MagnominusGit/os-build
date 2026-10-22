@@ -629,6 +629,37 @@ Not yet seen:
   device, anything on hardware. A release after `cachyos-11.0-20261005-slr` is not ISA-scanned before
   players get it.
 
+## ARMv8.0 CPUs: our own Proton build (downloaded, not shipped)
+
+Valve's Proton ARM64 and Proton-CachyOS are built with `-march=armv8.2-a`. On the SM6115 they run only
+through kernel patch 0025, and that costs a lot. Measured on the Air X (2026-10-22): an emulated atomic
+costs 276 ns on the A73 and 487 ns on the A53, against ~11 ns for LL/SC. While Hades loaded, emulations
+peaked at 3.36M/s, about 1-1.5 cores. ~94% came from Proton's `aarch64-windows/ntdll.dll`
+(RtlEnter/LeaveCriticalSection, RtlAllocateHeap). LSE instructions in `ntdll.dll`: Valve 245, Proton-CachyOS
+252; in CachyOS's Sarek `d3d11.dll`: 6,048.
+
+[sunshineinabox/proton-armv8](https://github.com/sunshineinabox/proton-armv8) builds each new Valve tag with
+`-march=armv8-a` and DXVK-Sarek built in (`PROTON_DXVK_SAREK=1`, as in Proton-CachyOS), on GitHub's arm64
+runners. A release goes out only when its LSE scan finds no inline LSE. Stable follows `proton-11.0-*`;
+experimental follows `experimental-11.0-*` and is marked as a pre-release.
+
+When `/proc/cpuinfo` has no `atomics`, `steam-compat-tools` takes `proton-armv8.pin` instead of
+`proton-cachyos-arm64.pin`: assets `proton-armv8-proton-*.tar.zst`, each checked by its `.sha512`
+(`sidecar: .sha512`), installed as `compatibilitytools.d/proton-armv8-retroforge`, "Proton ARMv8.0
+(RetroForge)". Everything else works as for Proton-CachyOS above: the channel, one request per
+start, the one-name folder, the wait while a game runs from it, and Sarek through `user_settings.py`,
+which Valve's `proton` applies before it reads `PROTON_DXVK_SAREK`. A pin can also take pre-releases
+(`prereleases: yes`), for the experimental channel. Turning Sarek off clears it in every folder
+RetroForge installed, so a Proton-CachyOS left on such a device follows the setting too.
+
+Valve's FEX tool (app 3127680, for native x86 Linux games) is built for ARMv8.1+ as well: inline LSE in
+`usr/bin/FEX` (244), `FEXOfflineCompiler` (139), `FEXGetConfig` (4) and `FEXServer` (1). Steam adds it as a
+compat layer (`compatmanager_layer_name "fex"`), not as a tool a game can be set to. Whether Steam takes
+a replacement is not yet tested.
+
+Not yet seen on hardware: Steam listing the tool (`to_oslist linux` on the arm64 client), a game run with
+it, the emulation rate with it.
+
 ## Remote Play (the handheld as a client)
 
 Valve's arm64 client has the whole Remote Play client (`steamrtarm64/streaming_client`): a PC's
