@@ -111,7 +111,7 @@ EOF
   chmod +x "$T/stub/xxhsum"
   export RETROFORGE_XXHSUM="$T/stub/xxhsum"
 fi
-xxh3() { "$RETROFORGE_XXHSUM" -H3 <"$1" | sed -E 's/^XXH3_//; s/[[:space:]].*//'; }
+xxh3() { "$RETROFORGE_XXHSUM" -H3 <"$1" | sed -E 's/^XXH3 \(.*\) = //; s/^XXH3_//; s/[[:space:]].*//'; }
 
 # ---- FEX's server: Range, and $SRV/.delay (seconds, mid-body) / $SRV/.mode (range|full|cut) ---------
 SRV="$T/srv"; mkdir -p "$SRV"

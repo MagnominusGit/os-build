@@ -494,7 +494,9 @@ def digest_of(path, algo):
             res = subprocess.run([XXHSUM, "-H3"], stdin=f, capture_output=True, text=True)
     except OSError as err:
         raise Failed(f"could not check {os.path.basename(path)}: {err}")
-    m = re.match(r"(?:XXH3_)?([0-9a-fA-F]{1,16})\s", res.stdout)  # "XXH3_23350f949fc1413d  stdin"
+    # "XXH3_23350f949fc1413d  stdin" (0.8.2+), or the tag form "XXH3 (stdin) = 23350f949fc1413d" (older)
+    m = re.match(r"(?:XXH3_)?([0-9a-fA-F]{1,16})\s", res.stdout) \
+        or re.match(r"XXH3 \(.*\) = ([0-9a-fA-F]{1,16})\s*$", res.stdout)
     if res.returncode != 0 or not m:
         raise Failed(f"could not check {os.path.basename(path)} with {XXHSUM}: {(res.stderr or res.stdout).strip()}")
     return f"{int(m.group(1), 16):016x}"
