@@ -261,6 +261,32 @@ if [ -f "$P23" ]; then
 else
   bad "0023: $P23 is missing"
 fi
+# 0024: a game started from the Steam client's own UI got the client's app id, so Steam Input never
+# reached it (SuperTux, HW, MANGMI Air X, 2026-10-23).
+P24="$PKG/patches/0024-running-app-a-game-steam-starts-keeps-its-own-app-id.patch"
+if [ -f "$P24" ]; then
+  files24="$(grep -E '^\+\+\+ b/' "$P24" | sed 's#^+++ b/##' | sort -u | tr '\n' ' ')"
+  [ "$files24" = "core/global/launch_manager.gd core/systems/launcher/running_app.gd " ] \
+    && ok "0024: changes launch_manager.gd and running_app.gd only" || bad "0024 touches: $files24"
+  grep -qE '^-\s+xwayland.set_app_id\(window, self.app_id\)' "$P24" && grep -qE '^\+\s+xwayland.set_app_id\(window, wanted\)' "$P24" \
+    && grep -qE '^\+\s+var wanted := get_window_app_id\(window\)' "$P24" \
+    && ok "0024: each window is stamped with the id it should carry, not the app's alone" || bad "0024: every window still gets the app's id"
+  grep -qE '^\+\s+var steam_game_id := steam_game_id_from_env\(Reaper.get_pid_environment\(window_pid\)\)' "$P24" \
+    && grep -qE '^\+\s+var id := env.get\("SteamGameId", ""\) as String' "$P24" \
+    && ok "0024: a window whose process has SteamGameId keeps the game's id" || bad "0024: SteamGameId is not read"
+  # Godot's to_int() logs an error for a 64-bit unsigned id (a non-Steam shortcut's), on every check.
+  grep -qE '^\+\s+if id.length\(\) > 10 or not id.is_valid_int\(\):' "$P24" \
+    && ok "0024: a shortcut's 64-bit SteamGameId never reaches to_int()" || bad "0024: a 64-bit SteamGameId reaches to_int()"
+  grep -qE '^\+\s+app_ids.insert\(0, window_app_id\)' "$P24" && grep -qE '^\+\s+new_focused_apps.append_array\(app_ids\)' "$P24" \
+    && ok "0024: a focused game's id goes ahead of the app's in the baselayer app ids" || bad "0024: the game's id is not in the baselayer app ids"
+  # From ids cached in update(): focused_app_updated is emitted while GamescopeInstance is bound.
+  grep -qE '^\+\s+if app.owns_app_id\(to\):' "$P24" && grep -qE '^\+\s+return id == self.app_id or id in window_app_ids.values\(\)' "$P24" \
+    && ok "0024: LaunchManager maps a focused game id to its app, without asking gamescope" || bad "0024: a focused game id maps to no running app"
+  grep -q "0023-home-card-rebuilt-when-its-library-item-is-replaced.patch 0024-running-app-a-game-steam-starts-keeps-its-own-app-id.patch" "$PKG/source.pin" \
+    && ok "0024: listed in source.pin, after 0023" || bad "0024: not in source.pin's patches"
+else
+  bad "0024: $P24 is missing"
+fi
 # One file of the tree as 0018 leaves it, hunk by hunk (context and added lines; a new file whole).
 newside() { python3 - "$P18" "$1" <<'PY'
 import sys

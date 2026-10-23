@@ -1,0 +1,161 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Thu, 22 Oct 2026 22:50:00 -0700
+Subject: [PATCH] fix(RunningApp): a game Steam starts keeps its own app id
+
+A game started from the Steam client's own UI, with the client launched
+by OGUI as an app of its own (RetroForge's Steam Client entry), runs
+under the client, so its windows were among the client's and
+_ensure_app_id stamped the client's app id on them, again every check.
+gamescope then reported the client focused, and Steam, not seeing its
+game focused, gave it no Steam Input: no controller in SuperTux (HW,
+MANGMI Air X, 2026-10-23). A Proton game lost the STEAM_GAME Wine sets
+from SteamGameId the same way. gamescope's own guess would not help: its
+walk up the process tree keeps the outermost reaper's AppId, OGUI's.
+
+A window whose process has SteamGameId, which Steam sets for every game
+it starts, now carries that id. When such a window gets the focus its id
+goes ahead of the app's in the baselayer app ids, and LaunchManager
+takes a focused id to be the app whose windows carry it. A
+steam://rungameid launch or a game started without the client (app id =
+the Steam app id), and every other app, stamp the same ids as before. A
+non-Steam shortcut's SteamGameId is a 64-bit game id: its windows keep
+the app's.
+
+---
+ core/global/launch_manager.gd        |  2 +-
+ core/systems/launcher/running_app.gd | 67 ++++++++++++++++++++++++----
+ 2 files changed, 59 insertions(+), 10 deletions(-)
+
+diff --git a/core/global/launch_manager.gd b/core/global/launch_manager.gd
+index 2e8b5ee..abd3b08 100644
+--- a/core/global/launch_manager.gd
++++ b/core/global/launch_manager.gd
+@@ -108,7 +108,7 @@ func _init() -> void:
+ 			var last_app := self._current_app
+ 			var detected_app: RunningApp
+ 			for app in _running:
+-				if app.app_id == to:
++				if app.owns_app_id(to):
+ 					detected_app = app
+ 
+ 			# If the running app was not launched by OpenGamepadUI, then detect it.
+diff --git a/core/systems/launcher/running_app.gd b/core/systems/launcher/running_app.gd
+index b52a99b..1621bd5 100644
+--- a/core/systems/launcher/running_app.gd
++++ b/core/systems/launcher/running_app.gd
+@@ -118,6 +118,8 @@ var not_running_count := 0
+ ## Flag for if OGUI should manage this app. Set to false if app is launched
+ ## outside OGUI and we just want to track it.
+ var is_ogui_managed: bool = true
++## The app id each of the app's windows carries, as _ensure_app_id last set it (window id -> app id)
++var window_app_ids: Dictionary[int, int] = {}
+ var logger := Log.get_logger("RunningApp", Log.LEVEL.INFO)
+ 
+ 
+@@ -430,7 +432,39 @@ func is_focused() -> bool:
+ 	if not xwayland_primary:
+ 		return false
+ 	var focused_app := xwayland_primary.focused_app
+-	return self.app_id == focused_app
++	return owns_app_id(focused_app)
++
++
++## Returns true if the given app id is the app's, or one its windows carry (a game Steam started
++## from it). Reads no window: LaunchManager asks from inside a gamescope signal.
++func owns_app_id(id: int) -> bool:
++	return id == self.app_id or id in window_app_ids.values()
++
++
++## Returns the app id the given window should carry: a game Steam started (SteamGameId in its
++## environment) keeps its own, so gamescope reports it focused and Steam Input feeds it. Any other
++## window carries the app's.
++func get_window_app_id(window_id: int) -> int:
++	var xwayland := gamescope.get_xwayland_by_name(display)
++	if not xwayland:
++		return self.app_id
++	for window_pid in xwayland.get_pids_for_window(window_id):
++		var steam_game_id := steam_game_id_from_env(Reaper.get_pid_environment(window_pid))
++		if steam_game_id > 0:
++			return steam_game_id
++	return self.app_id
++
++
++## Returns the Steam app id in a process environment's SteamGameId, or 0. A non-Steam shortcut's
++## is a 64-bit game id, which no STEAM_GAME property can hold.
++static func steam_game_id_from_env(env: Dictionary[String, String]) -> int:
++	var id := env.get("SteamGameId", "") as String
++	if id.length() > 10 or not id.is_valid_int():
++		return 0
++	var value := id.to_int()
++	if value <= 0 or value > 0xFFFFFFFF:
++		return 0
++	return value
+ 
+ 
+ ## Focuses to the app's window
+@@ -442,9 +476,21 @@ func grab_focus() -> void:
+ 		logger.warn("No windows to grab focus on")
+ 		return
+ 
+-	# Set the baselayer app id
++	var focus_window := self.last_focused_window_id
++	if not focus_window in self.window_ids:
++		focus_window = self.window_ids[0]
++
++	# Set the baselayer app id. A game Steam started from this app carries its own, listed first.
++	var app_ids := PackedInt64Array([self.app_id])
++	var window_app_id := get_window_app_id(focus_window)
++	if window_app_id != self.app_id:
++		app_ids.insert(0, window_app_id)
+ 	var focused_apps := xwayland_primary.baselayer_apps
+-	if self.app_id in focused_apps:
++	var listed := true
++	for id in app_ids:
++		if not id in focused_apps:
++			listed = false
++	if listed:
+ 		# Gamescope sometimes focuses correctly if the baselayer apps is set, so this is necessary
+ 		xwayland_primary.baselayer_apps = focused_apps
+ 	else:
+@@ -452,18 +498,17 @@ func grab_focus() -> void:
+ 		# the overlay app id.
+ 		var new_focused_apps := PackedInt64Array()
+ 		new_focused_apps.push_back(GamescopeInstance.EXTRA_UNKNOWN_GAME_ID)
+-		new_focused_apps.push_back(self.app_id)
++		new_focused_apps.append_array(app_ids)
+ 		for other_app_id in focused_apps:
+ 			if other_app_id in [GamescopeInstance.EXTRA_UNKNOWN_GAME_ID, GamescopeInstance.OVERLAY_GAME_ID]:
+ 				continue
++			if other_app_id in app_ids:
++				continue
+ 			new_focused_apps.push_back(other_app_id)
+ 		new_focused_apps.push_back(GamescopeInstance.OVERLAY_GAME_ID)
+ 		xwayland_primary.baselayer_apps = new_focused_apps
+ 
+ 	# Set the baselayer window id
+-	var focus_window := self.last_focused_window_id
+-	if not focus_window in self.window_ids:
+-		focus_window = self.window_ids[0]
+ 	xwayland_primary.baselayer_window = focus_window
+ 	self.focused = true
+ 
+@@ -517,12 +562,16 @@ func _ensure_app_id() -> void:
+ 
+ 	# Try setting the app ID on each possible Window. If they are valid windows,
+ 	# gamescope will make these windows available as focusable windows.
++	var app_ids: Dictionary[int, int] = {}
+ 	for window in possible_windows:
++		var wanted := get_window_app_id(window)
++		app_ids[window] = wanted
+ 		var window_app_id := xwayland.get_app_id(window)
+-		if window_app_id == self.app_id:
++		if window_app_id == wanted:
+ 			continue
+ 
+-		xwayland.set_app_id(window, self.app_id)
++		xwayland.set_app_id(window, wanted)
++	window_app_ids = app_ids
+ 
+ 
+ ## Returns true if the running app was launched through Steam
