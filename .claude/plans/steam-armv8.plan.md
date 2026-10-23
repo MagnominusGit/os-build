@@ -178,7 +178,13 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
   memory). A scratch device, lz4 then everything idle recompressed to zstd 1: 3.1 s for 256 MB (87 MB/s),
   ratio 1.90 -> 2.26. Live zram0, the timer's second run (07:33, Steam and SuperTux in memory): compressed
   629 -> 531 MB, memory used 640 -> 587 MB, ratio 2.21 -> 2.61, 19 s of CPU at idle priority.
-- [ ] Hades on build 31 with no new OOM (not run yet).
+- [x] Hades on build 31: the kernel OOM-killed it 74 s in (07:42, anon 146 MB, 1.28 GB swapped). Loading swaps
+  out in one burst with nothing idle yet, so lz4's ~19% more RAM ran out before recompression could help;
+  earlyoom never fired (its swap-free condition: zram looked half empty). With an /etc override to
+  `zstd(level=1)` alone, the same load got through (07:46-07:50, quit from OGUI): available memory touched 0 MB
+  at +92 s, zram 1.72 GB in 955 MB afterwards. Fixed in d9439a0: zstd level 1 alone, the timer and script
+  removed, lz4 and MULTI_COMP left in the kernel unused. The Air X keeps the override
+  (`/etc/systemd/zram-generator.conf`) until an image with d9439a0 is installed; remove it then.
 
 ### Later (TODO)
 - [ ] Steam page: an "Open Steam (Remote Play)" button, as Emulators > Steam Client > Open, and a read-only video decode
