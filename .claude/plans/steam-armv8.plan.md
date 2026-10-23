@@ -83,10 +83,22 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
 - [x] Experimental: rebuilt with Xalia allowed (`scan-allow.txt`), released as `armv8-experimental-11.0-20261014`.
 - [x] `PROTON_DXVK_SAREK=1` selects Sarek: Hades on DirectX 11 reached its first room through Sarek, without an OOM.
 - [x] Works with the clientless launch (`retroforge-steam-direct`), which swaps in the tool Steam is set to now (437e6d5).
-- [ ] FEX delivery test: does Steam pick up our ARMv8.0 FEX? Try (a) our four binaries swapped into Steam's
-  `steamapps/common/FEX-Emu` while its `VERSIONS.txt` matches our build, and (b) a local layer with its own
-  `toolmanifest.vdf` (`compatmanager_layer_name "fex"`). Check with a native x86 Linux game and `lse-where`. Also
-  check whether Steam restores Valve's files on its next tool update or verify.
+- [x] FEX delivery test (a), 2026-10-23: SuperTux (app 1572920, free, x86_64 Linux AppImage) on the Air X. Our
+  build of Valve's commit (debian:trixie arm64, clang 19 as Valve's, `BUILD_STEAM_SUPPORT=TRUE`, LTO,
+  `TUNE_CPU=none`, `TUNE_ARCH=armv8-a`; same `FEX-2607-76-g37265b1`) swapped into `FEX-Emu/usr/bin`: Steam ran it.
+  Inline LSE: Valve's seven binaries 388, ours 0 (4 in `FEXGetConfig`'s `--test-fault-granularity` asm probe).
+  Kernel LSE emulations at SuperTux's menu: Valve's FEX ~3,000/s from the game (7,528/s in all, the rest the
+  client), ours 0/s (4,415/s in all).
+  How SuperTux got there: the arm64 client maps an x86 Linux game that also has a Windows build to Proton
+  (non-user mapping, priority 85), so its compat tool has to be forced to `fex` (Valve's tool, shown as "fex").
+  The AppImage needs FUSE, which the image lacks: `APPIMAGE_EXTRACT_AND_RUN=1 %command%`. Its controller needs
+  Steam Input off: OGUI tags windows of games started inside the client with the client's app id
+  (`running_app.gd` `_ensure_app_id`), so Steam Input never routes to them (separate session).
+- [ ] FEX delivery, to decide: (a) swap into Valve's tool (named "fex"; Steam may put Valve's files back on its next
+  tool update or verify, so re-apply only while `VERSIONS.txt` matches our build), or (b) our own layer in
+  `compatibilitytools.d`, "FEX ARMv8.0 (RetroForge)" (untested: does Steam take a local layer with
+  `compatmanager_layer_name "fex"` in place of app 3127680?). Then a FEX job in proton-armv8 that follows Valve's
+  tool commit.
 
 ### Phase 3: device import (branch `steam-armv8-proton` from `main` 99495d6; not pushed)
 - [x] `steam-compat-tools`: with no `atomics` in /proc/cpuinfo it takes `proton-armv8.pin`; `.tar.zst`, `sidecar:` and
