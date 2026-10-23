@@ -144,7 +144,8 @@ board() {  # board <SoC class> <MemTotal kB>
   echo "$1" >"$T/soc"; printf 'MemTotal:       %s kB\nMemFree:          1000 kB\n' "$2" >"$T/meminfo"
 }
 DENV=(env -u RETROFORGE_STEAM_ROOT -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_CACHE_HOME -u RETROFORGE_STEAM_DIRECT
-      -u SteamAppId -u STEAM_COMPAT_CONFIG -u STEAM_COMPAT_DATA_PATH HOME="$H" RETROFORGE_PROC="$T/proc"
+      -u SteamAppId -u STEAM_COMPAT_CONFIG -u STEAM_COMPAT_DATA_PATH -u DISPLAY -u RETROFORGE_GAMESCOPE_NESTED_W
+      -u RETROFORGE_GAMESCOPE_NESTED_H HOME="$H" RETROFORGE_PROC="$T/proc"
       RETROFORGE_MEMINFO="$T/meminfo" RETROFORGE_DEVICE_ENV="$T/device-env" RETROFORGE_STEAM_LIBRARY="$LIBRARY")
 direct() {  # direct [VAR=value...] -- args...
   local -a vars=()
@@ -349,7 +350,7 @@ printf '"manifest"\n{\n  "commandline" "/proton %%verb%%"\n  "require_tool_appid
 printf '"compatibilitytools"\n{\n  "compat_tools"\n  {\n    "proton-armv8-experimental-retroforge"\n    {\n      "install_path" "."\n    }\n  }\n}\n' >"$EXP/compatibilitytool.vdf"
 GAMES="$H/.config/retroforge/steam-games.json"
 direct -- game 1145360
-[ "$RC" = 0 ] && python3 -c 'import json, sys; d = json.loads(sys.argv[1]); assert d["settings"] == {"proton": "default", "sarek": "default", "launch": "default"}, d; assert [e["key"] for e in d["launch"]] == ["0", "1", "2", "3", "4", "15"], d; assert d["launch"][-1]["description"] == "Hades (Steam Deck)", d; assert d["direct"] in ("on", "off"), d' "$OUT" \
+[ "$RC" = 0 ] && python3 -c 'import json, sys; d = json.loads(sys.argv[1]); assert d["settings"] == {"proton": "default", "sarek": "default", "launch": "default", "resolution": "default"}, d; assert [e["key"] for e in d["launch"]] == ["0", "1", "2", "3", "4", "15"], d; assert d["launch"][-1]["description"] == "Hades (Steam Deck)", d; assert d["direct"] in ("on", "off"), d' "$OUT" \
   && ok "game: every choice at its default, and the launch entries Steam's dialog offers here, in its order" || bad "rc=$RC out=$OUT err=$ERR"
 direct -- game 1145360 set launch 0 && direct -- game 1145360 set proton experimental && direct -- game 1145360 set sarek off
 [ "$RC" = 0 ] && python3 -c 'import json, sys; assert json.load(open(sys.argv[1])) == {"1145360": {"launch": "0", "proton": "experimental", "sarek": "off"}}' "$GAMES" \
@@ -371,6 +372,52 @@ rmdir "$GAME/Odd"
 for k in launch proton sarek; do direct -- game 1145360 set $k default; done
 python3 -c 'import json, sys; assert json.load(open(sys.argv[1])) == {}' "$GAMES" && ok "all back to default: nothing kept" || bad "$(cat "$GAMES")"
 rm -rf "$S/compatibilitytools.d" "$GAMES"
+
+CASE="run: Steam's game resolution"
+mkdir -p "$S/config" "$S/userdata/12345/config"
+printf '"users"\n{\n\t"76561197960278073"\n\t{\n\t\t"AccountName"\t\t"x"\n\t\t"MostRecent"\t\t"1"\n\t}\n}\n' >"$S/config/loginusers.vdf"
+printf '"UserLocalConfigStore"\n{\n\t"Software"\n\t{\n\t\t"Valve"\n\t\t{\n\t\t\t"Steam"\n\t\t\t{\n\t\t\t\t"apps"\n\t\t\t\t{\n\t\t\t\t\t"1145360"\n\t\t\t\t\t{\n\t\t\t\t\t\t"LastPlayed"\t\t"1792663724"\n\t\t\t\t\t\t"ResolutionOverride2"\t\t"800x450"\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n' \
+  >"$S/userdata/12345/config/localconfig.vdf"
+X="$T/xwayland.json"; echo '{"display": ":1", "id": 1, "width": 1280, "height": 720}' >"$X"
+printf '#!/bin/sh\nprintf "%%s\\n" "$@" >"%s"\n' "$T/detached" >"$T/detach"; chmod +x "$T/detach"
+size() { python3 -c 'import json, sys; d = json.load(open(sys.argv[1])); print("%dx%d" % (d["width"], d["height"]))' "$X"; }
+XENV=(DISPLAY=:1 RETROFORGE_STEAM_XWAYLAND="$X" RETROFORGE_STEAM_DETACH="$T/detach")
+fresh_log; reset_run; rm -f "$T/detached"
+direct "${XENV[@]}" -- run 1145360
+[ "$RC" = 0 ] && [ -f "$T/ran.args" ] && [ "$(size)" = 800x450 ] && grep -q "runs at 800x450, its resolution in Steam (the X server had 1280x720)" <<<"$ERR" \
+  && ok "the game's X server gets the resolution Steam runs it at" || bad "rc=$RC size=$(size) err=$ERR"
+tail -5 "$T/detached" 2>/dev/null | python3 -c 'import sys; w = sys.stdin.read().split("\n")[:5]; sys.exit(0 if w[0] == "restore-resolution" and w[1].isdigit() and w[2:] == [":1", "1280x720", "800x450"] else 1)' \
+  && ok "and a watcher to give its old size back when the launch ends" || bad "detached: $(cat "$T/detached" 2>&1)"
+direct "${XENV[@]}" -- restore-resolution 999999 :1 1280x720 800x450
+[ "$RC" = 0 ] && [ "$(size)" = 1280x720 ] && ok "restore-resolution: the old size, once the launch has ended" || bad "rc=$RC size=$(size) err=$ERR"
+echo '{"display": ":1", "id": 1, "width": 1920, "height": 1080}' >"$X"
+direct "${XENV[@]}" -- restore-resolution 999999 :1 1280x720 800x450
+[ "$(size)" = 1920x1080 ] && ok "restore-resolution: not over a size something else has set since" || bad "size=$(size)"
+echo '{"display": ":1", "id": 1, "width": 1280, "height": 720}' >"$X"
+direct "${XENV[@]}" -- game 1145360
+python3 -c 'import json, sys; d = json.loads(sys.argv[1]); assert d["steam_resolution"] == "800x450", d' "$OUT" \
+  && ok "game: Steam's resolution for it, for the Default row's label" || bad "out=$OUT err=$ERR"
+direct "${XENV[@]}" -- game 1145360 set resolution 1000x1
+[ "$RC" = 2 ] && ok "set: a size that is not one is refused" || bad "rc=$RC"
+direct "${XENV[@]}" -- game 1145360 set resolution 960x540; fresh_log; reset_run; rm -f "$T/detached"
+direct "${XENV[@]}" -- run 1145360
+[ "$RC" = 0 ] && [ "$(size)" = 960x540 ] && grep -q "runs at 960x540" <<<"$ERR" && ok "the size chosen in Game settings, over Steam's" || bad "rc=$RC size=$(size) err=$ERR"
+echo '{"display": ":1", "id": 1, "width": 1280, "height": 720}' >"$X"
+direct "${XENV[@]}" -- game 1145360 set resolution 1280x720; fresh_log; reset_run; rm -f "$T/detached"
+direct "${XENV[@]}" -- run 1145360
+[ "$RC" = 0 ] && [ "$(size)" = 1280x720 ] && [ ! -e "$T/detached" ] && ok "the board's own size chosen: Steam's 800x450 is not used" || bad "rc=$RC size=$(size)"
+direct "${XENV[@]}" -- game 1145360 set resolution default
+echo '{"display": ":1", "id": 1, "width": 800, "height": 450}' >"$X"; fresh_log; reset_run; rm -f "$T/detached"
+direct "${XENV[@]}" -- run 1145360
+[ "$RC" = 0 ] && [ ! -e "$T/detached" ] && ok "a server at that size already: nothing to do" || bad "rc=$RC $(cat "$T/detached" 2>&1)"
+echo '{"display": ":0", "id": 0, "width": 1280, "height": 720}' >"$X"; fresh_log; reset_run
+direct "${XENV[@]}" -- run 1145360
+[ "$RC" = 0 ] && [ -f "$T/ran.args" ] && grep -q "runs at the X server's size, not 800x450: :1 is not gamescope's" <<<"$ERR" \
+  && ok "not a gamescope X server: the game still starts, and that is said" || bad "rc=$RC err=$ERR"
+rm -rf "$S/userdata" "$S/config/loginusers.vdf"; echo '{"display": ":1", "id": 1, "width": 1280, "height": 720}' >"$X"
+fresh_log; reset_run; rm -f "$T/detached"
+direct "${XENV[@]}" -- run 1145360
+[ "$RC" = 0 ] && [ "$(size)" = 1280x720 ] && [ ! -e "$T/detached" ] && ok "Steam's Default: the X server's size stays" || bad "rc=$RC size=$(size)"
 
 CASE="run: Steam's quoting"
 reset_run; fresh_log

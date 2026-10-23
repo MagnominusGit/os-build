@@ -1,8 +1,8 @@
 extends ScrollContainer
 
 ## Game settings > RetroForge: per-ROM options, in the screen the gear on OGUI's launch menu opens.
-## For Steam games: their Proton, DXVK-Sarek and launch option, which retroforge-steam-direct keeps
-## and uses when it starts the game without the client.
+## For Steam games: their Proton, DXVK-Sarek, launch option and resolution, which retroforge-steam-direct
+## keeps and uses when it starts the game without the client.
 ## "Run on fast cores": the emulator's default (Main menu > Emulators), On or Off for this game
 ## (CPUS=big / all in the game's conf, which retroforge-launch reads; launch_args.gd). Then one
 ## dropdown per option of the game's emulator (options.json, emu_options.gd): "Emulator default
@@ -55,11 +55,15 @@ const STEAM_DIRECT := "/usr/bin/retroforge-steam-direct"
 const STEAM_PROTON := "/usr/bin/retroforge-steam-proton"
 const PROTON_CHOICES := ["default", "stable", "experimental"]
 const SAREK_CHOICES := ["default", "on", "off"]
+const DisplaySettings := preload("display_settings.gd")
 var _steam_app := 0  # the Steam app id of the game being configured, 0 for none
 var _proton: Control  # OGUI Dropdowns: the Steam game's own choices
 var _sarek: Control
 var _launch: Control
 var _launch_keys: Array = []
+var _resolution: Control
+var _resolution_keys: Array = []  # "default", then WxH: the sizes of Settings > Display > Game resolution
+var _display := DisplaySettings.new()
 var _armv8 := -1  # retroforge-steam-proton manages Proton here (an ARMv8.0 CPU): 1, 0, or -1 not asked yet
 const DIRECT_OFF := " Used only while Settings > Steam > \"Steam: start games without Steam\" is on."
 
@@ -143,6 +147,7 @@ func _build_page() -> void:
 	_proton = _steam_dropdown("Proton", "Built for this CPU. Default: the one Steam runs it with (Settings > Steam).", "proton")
 	_sarek = _steam_dropdown("DXVK-Sarek", "Direct3D 8 to 11 for low-end GPUs. Default: Proton's choice.", "sarek")
 	_launch = _steam_dropdown("Launch option", "Which of the game's programs starts, as in Steam's launch dialog. Default: the one Steam last started.", "launch")
+	_resolution = _steam_dropdown("Resolution", "The size the game draws at; the display scales it to the panel. Default: its Game resolution in Steam, else Settings > Display.", "resolution")
 
 
 func _steam_dropdown(title: String, description: String, key: String) -> Control:
@@ -214,7 +219,7 @@ func _on_game_settings_entered(_from: State) -> void:
 ## only when Steam offers more than one.
 func _fill_steam_rows() -> void:
 	var app := _steam_app
-	for row in [_proton, _sarek, _launch]:
+	for row in [_proton, _sarek, _launch, _resolution]:
 		row.visible = false
 	if _item != null:
 		_focus_group.current_focus = _fast_cores
@@ -247,11 +252,29 @@ func _fill_steam_rows() -> void:
 		_launch_keys.append(str(entry.get("key", "")))
 		_launch.add_item(str(entry.get("description", "")))
 	_launch.select(maxi(_launch_keys.find(settings.get("launch", "default")), 0))
-	for row in [_proton, _sarek, _launch]:
+	_resolution.clear()
+	_resolution_keys = ["default"]
+	var steam_size := str(data.get("steam_resolution", ""))
+	var shown := _display.size_for(_display.stored_resolution())
+	_resolution.add_item("Default (Steam's, %s)" % steam_size.replace("x", " x ") if steam_size != ""
+		else "Default (Settings > Display, %d x %d)" % [shown.x, shown.y])
+	for r in DisplaySettings.RESOLUTIONS.slice(1):
+		var dims: Vector2i = _display.size_for(r[0])
+		var key := "%dx%d" % [dims.x, dims.y]
+		if not key in _resolution_keys:
+			_resolution_keys.append(key)
+			_resolution.add_item("%s, %d x %d" % [r[1], dims.x, dims.y])
+	var mine := str(settings.get("resolution", "default"))
+	if not mine in _resolution_keys:  # a size from before the display changed
+		_resolution_keys.append(mine)
+		_resolution.add_item(mine.replace("x", " x "))
+	_resolution.select(_resolution_keys.find(mine))
+	for row in [_proton, _sarek, _launch, _resolution]:
 		row.description = str(row.get_meta("about")) + ("" if data.get("direct", "on") == "on" else DIRECT_OFF)
 	_proton.visible = _armv8 == 1
 	_sarek.visible = true
 	_launch.visible = entries.size() > 1
+	_resolution.visible = _resolution_keys.size() > 1
 	_focus_group.current_focus = _proton if _proton.visible else _sarek
 	_focus_group.recalculate_focus()
 
@@ -268,7 +291,7 @@ func _output_of(cmd_path: String, args: Array[String]) -> String:
 
 
 func _on_steam_choice(key: String, index: int) -> void:
-	var values: Array = PROTON_CHOICES if key == "proton" else (SAREK_CHOICES if key == "sarek" else _launch_keys)
+	var values: Array = {"proton": PROTON_CHOICES, "sarek": SAREK_CHOICES, "launch": _launch_keys}.get(key, _resolution_keys)
 	if _steam_app <= 0 or index < 0 or index >= values.size():
 		return
 	var app := _steam_app

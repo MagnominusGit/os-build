@@ -12,6 +12,12 @@
 #                                        nothing started, when there is no launch to replay
 #   retroforge-steam-direct remember     keep every game's newest launch in Steam's log (/usr/bin/steam
 #                                        runs it before the client starts)
+#   retroforge-steam-direct game APPID [set KEY VALUE]
+#                                        print (JSON) APPID's own Proton, DXVK-Sarek, launch option and
+#                                        resolution (Game settings > RetroForge), after saving one
+#   retroforge-steam-direct restore-resolution PID DISPLAY WxH WxH
+#                                        once PID ends, give DISPLAY's X server the first size back if it
+#                                        still has the second (run, through systemd-run, starts it)
 #
 # WHY. On the MANGMI Air X (SM6115, 3.5 GB) earlyoom killed Hades every time it entered its first
 # room: the client and its web helper held ~1.0-1.2 GB beside the game's ~2.4 GB (RAM, swap and
@@ -47,7 +53,11 @@
 #                                      app 891390 "SteamPlay 2.0 Manifests", app_compat_configs)
 #   SteamDeck=1                        as the client sets it: /usr/bin/steam starts it with -steamdeck
 # from the working folder of the appinfo.vdf launch entry that runs that executable, else the
-# executable's own folder.
+# executable's own folder. And at the resolution Steam is set to run it at (its Properties > General >
+# Game resolution: ResolutionOverride2 in the signed-in account's localconfig.vdf) or the one the player
+# chose for it in Game settings, which the client gives the game's X server through gamescope
+# (GAMESCOPE_XWAYLAND_MODE_CONTROL) before it starts it; the old size, the one Settings > Display >
+# Game resolution gives that server (display_settings.gd), comes back when the game ends.
 #
 # Left to the client (check says why, and /usr/bin/steam starts Steam as before):
 #   - the setting is off;
@@ -81,7 +91,11 @@
 #
 # TEST SEAMS (tests/test-steam-direct.sh): RETROFORGE_STEAM_ROOT (also set by /usr/bin/steam),
 # RETROFORGE_PROC (/proc), RETROFORGE_MEMINFO (/proc/meminfo), RETROFORGE_DEVICE_ENV,
-# RETROFORGE_STEAM_LIBRARY (the steam-library whose readers this uses), XDG_CONFIG_HOME, XDG_CACHE_HOME.
+# RETROFORGE_STEAM_LIBRARY (the steam-library whose readers this uses), XDG_CONFIG_HOME, XDG_CACHE_HOME,
+# RETROFORGE_STEAM_XWAYLAND (a JSON file standing in for the game's X server), RETROFORGE_STEAM_DETACH
+# (what starts the restore-resolution watcher: systemd-run).
+import ctypes
+import glob
 import importlib.machinery
 import importlib.util
 import json
@@ -92,6 +106,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 
 HOME = os.path.expanduser("~")
 DATA = os.environ.get("XDG_DATA_HOME") or os.path.join(HOME, ".local", "share")
@@ -115,6 +130,9 @@ FULLY_INSTALLED = 4
 READY = FULLY_INSTALLED | 2 | 64
 # Steam's own programs in a launch, which have to be there: its launch wrapper and its reaper.
 LAUNCHERS = ("steam-launch-wrapper", "reaper")
+XWAYLAND = os.environ.get("RETROFORGE_STEAM_XWAYLAND", "")
+DETACH = os.environ.get("RETROFORGE_STEAM_DETACH", "systemd-run --user --quiet --collect --")
+XA_CARDINAL, PROP_MODE_REPLACE = 6, 0
 LAUNCH = re.compile(r'^\[(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\] Game process added : AppID (\d+) "(.*)", ProcID \d+')
 
 
@@ -394,7 +412,7 @@ def game_settings(appid):
     """proton, sarek and launch for appid: "default" for each one not chosen."""
     mine = read_games().get(str(appid))
     mine = mine if isinstance(mine, dict) else {}
-    return {k: str(mine.get(k, "default")) for k in ("proton", "sarek", "launch")}
+    return {k: str(mine.get(k, "default")) for k in ("proton", "sarek", "launch", "resolution")}
 
 
 def save_game_setting(appid, key, value):
@@ -613,6 +631,123 @@ def decide(appid):
     return plan(appid)
 
 
+def game_resolution(appid):
+    """(width, height) Steam runs appid at, from the localconfig.vdf of the account the client last
+    signed in to (else the newest one); None for its Default, gamescope's own size."""
+    users = vdf_tree(os.path.join(STEAM_ROOT, "config", "loginusers.vdf")).get("users", {})
+    ids = [i for i, u in users.items() if i.isdigit() and isinstance(u, dict) and u.get("mostrecent") == "1"]
+    paths = [os.path.join(STEAM_ROOT, "userdata", str(int(i) & 0xFFFFFFFF), "config", "localconfig.vdf") for i in ids]
+    paths = [p for p in paths if os.path.isfile(p)] \
+        or sorted(glob.glob(os.path.join(STEAM_ROOT, "userdata", "*", "config", "localconfig.vdf")), key=os.path.getmtime)[-1:]
+    stack = [vdf_tree(paths[0])] if paths else []
+    while stack:
+        node = stack.pop()
+        app = node.get(str(appid))
+        if isinstance(app, dict) and "resolutionoverride2" in app:
+            m = re.fullmatch(r"(\d+)x(\d+)", app["resolutionoverride2"].strip())
+            return (int(m.group(1)), int(m.group(2))) if m and int(m.group(1)) and int(m.group(2)) else None
+        stack.extend(v for v in node.values() if isinstance(v, dict))
+    return None
+
+
+def sane_size(value):
+    """True for "WxH" with both from 64 to 16384 (Game settings offers Settings > Display's sizes)."""
+    m = re.fullmatch(r"(\d+)x(\d+)", value)
+    return bool(m) and all(64 <= int(n) <= 16384 for n in m.groups())
+
+
+def xwayland(display, size=None):
+    """(gamescope server id, width, height) of display's X server, else None (not one of gamescope's).
+    With size, it is then asked to give that server size, as the client does: GAMESCOPE_XWAYLAND_MODE_CONTROL
+    on its root, server id, width, height, and 0 for no larger than the screen."""
+    if XWAYLAND:
+        try:
+            with open(XWAYLAND, encoding="utf-8") as f:
+                state = json.load(f)
+        except (OSError, ValueError):
+            return None
+        if state.get("display") != display:
+            return None
+        before = (state["id"], state["width"], state["height"])
+        if size:
+            state.update(width=size[0], height=size[1])
+            with open(XWAYLAND, "w", encoding="utf-8") as f:
+                json.dump(state, f)
+        return before
+    c = ctypes
+    x = c.CDLL("libX11.so.6")
+    x.XOpenDisplay.restype, x.XOpenDisplay.argtypes = c.c_void_p, [c.c_char_p]
+    x.XDefaultRootWindow.restype, x.XDefaultRootWindow.argtypes = c.c_ulong, [c.c_void_p]
+    x.XInternAtom.restype, x.XInternAtom.argtypes = c.c_ulong, [c.c_void_p, c.c_char_p, c.c_int]
+    x.XDisplayWidth.argtypes = x.XDisplayHeight.argtypes = [c.c_void_p, c.c_int]
+    x.XGetWindowProperty.argtypes = [c.c_void_p, c.c_ulong, c.c_ulong, c.c_long, c.c_long, c.c_int, c.c_ulong,
+                                     c.POINTER(c.c_ulong), c.POINTER(c.c_int), c.POINTER(c.c_ulong),
+                                     c.POINTER(c.c_ulong), c.POINTER(c.c_void_p)]
+    x.XChangeProperty.argtypes = [c.c_void_p, c.c_ulong, c.c_ulong, c.c_ulong, c.c_int, c.c_int, c.c_void_p, c.c_int]
+    x.XFree.argtypes = x.XFlush.argtypes = x.XCloseDisplay.argtypes = [c.c_void_p]
+    on_error = c.CFUNCTYPE(c.c_int, c.c_void_p, c.c_void_p)(lambda dpy, event: 0)  # Xlib's own exits
+    x.XSetErrorHandler.argtypes = [c.c_void_p]
+    x.XSetErrorHandler(c.cast(on_error, c.c_void_p))
+    dpy = x.XOpenDisplay(display.encode())
+    if not dpy:
+        return None
+    try:
+        root, sid = x.XDefaultRootWindow(dpy), None
+        atom = x.XInternAtom(dpy, b"GAMESCOPE_XWAYLAND_SERVER_ID", True)
+        kind, fmt, n, left, data = c.c_ulong(), c.c_int(), c.c_ulong(), c.c_ulong(), c.c_void_p()
+        if atom and x.XGetWindowProperty(dpy, root, atom, 0, 1, False, XA_CARDINAL, c.byref(kind), c.byref(fmt),
+                                         c.byref(n), c.byref(left), c.byref(data)) == 0 and data.value:
+            if fmt.value == 32 and n.value == 1:
+                sid = c.cast(data, c.POINTER(c.c_ulong))[0]  # format 32 comes as longs
+            x.XFree(data)
+        if sid is None:
+            return None
+        before = (sid, x.XDisplayWidth(dpy, 0), x.XDisplayHeight(dpy, 0))
+        if size:
+            values = (c.c_ulong * 4)(sid, size[0], size[1], 0)
+            mode = x.XInternAtom(dpy, b"GAMESCOPE_XWAYLAND_MODE_CONTROL", False)
+            x.XChangeProperty(dpy, root, mode, XA_CARDINAL, 32, PROP_MODE_REPLACE, values, 4)
+            x.XFlush(dpy)
+        return before
+    finally:
+        x.XCloseDisplay(dpy)
+
+
+def give_resolution(appid, size):
+    """Give the game's X server (DISPLAY) size, and leave a watcher outside the game's process tree
+    (DETACH) to give it its old size back when this process, the launch, ends."""
+    display = os.environ.get("DISPLAY", "")
+    try:
+        state = xwayland(display) if display else None
+    except OSError as err:  # no libX11
+        log(f"app {appid} runs at the X server's size, not {size[0]}x{size[1]}: {err}")
+        return
+    if not state:
+        log(f"app {appid} runs at the X server's size, not {size[0]}x{size[1]}: {display or 'no DISPLAY'} is not gamescope's")
+        return
+    was = (state[1], state[2])
+    if was == size:
+        return
+    xwayland(display, size)
+    log(f"app {appid} runs at {size[0]}x{size[1]}, its resolution in Steam (the X server had {was[0]}x{was[1]})")
+    watcher = shlex.split(DETACH) + [sys.executable, os.path.abspath(__file__), "restore-resolution",
+                                     str(os.getpid()), display, "%dx%d" % was, "%dx%d" % size]
+    try:
+        subprocess.run(watcher, check=True, timeout=15, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as err:
+        log(f"{display} keeps {size[0]}x{size[1]} after the game, nothing to give {was[0]}x{was[1]} back: {err}")
+
+
+def restore_resolution(pid, display, was, now):
+    """Once pid ends, give display's X server was again, unless something has changed it from now since."""
+    while os.path.exists(os.path.join(PROC, str(pid))):
+        time.sleep(1)
+    state = xwayland(display)
+    if state and (state[1], state[2]) == now:
+        xwayland(display, was)
+        log(f"{display} has {was[0]}x{was[1]} again")
+
+
 def run(appid, launch):
     """Become the launch: Steam's command, through /bin/sh as Steam ran it, from its working folder.
     SIGPIPE and SIGXFSZ go back to their defaults: Python ignores them, and an ignored signal stays
@@ -620,6 +755,10 @@ def run(appid, launch):
     log(f"starting app {appid} without the Steam client, as Steam started it at {launch['stamp']}")
     if launch["waiting"]:
         log(f"app {appid} has an update waiting: Steam installs it once it runs (Main menu > Emulators > Steam Client)")
+    mine = re.fullmatch(r"(\d+)x(\d+)", game_settings(appid)["resolution"])
+    size = (int(mine.group(1)), int(mine.group(2))) if mine else game_resolution(appid)
+    if size:
+        give_resolution(appid, size)
     env = dict(os.environ)
     env.update(launch["env"], PWD=launch["workdir"])
     for sig in (signal.SIGPIPE, signal.SIGXFSZ):
@@ -668,6 +807,12 @@ def main(argv):
         if launch is None:
             return 1
         return 0 if cmd == "check" else run(appid, launch)
+    if cmd == "restore-resolution" and len(argv) == 5 and argv[1].isdigit():
+        sizes = [re.fullmatch(r"(\d+)x(\d+)", a) for a in argv[3:]]
+        if all(sizes):
+            was, now = [(int(m.group(1)), int(m.group(2))) for m in sizes]
+            restore_resolution(int(argv[1]), argv[2], was, now)
+            return 0
     if cmd == "game" and len(argv) in (2, 5) and argv[1].isdigit() and (len(argv) == 2 or argv[2] == "set"):
         appid = int(argv[1])
         sl = steam_library()
@@ -679,7 +824,8 @@ def main(argv):
         entries = launch_entries(app, beta_key(sl, appid))
         if len(argv) == 5:
             key, value = argv[3], argv[4]
-            ok = value in CHOICES.get(key, ()) or (key == "launch" and (value == "default" or value in [e["key"] for e in entries]))
+            ok = value in CHOICES.get(key, ()) or (key == "launch" and (value == "default" or value in [e["key"] for e in entries])) \
+                or (key == "resolution" and (value == "default" or sane_size(value)))
             if not ok:
                 log(f"not a choice: {key} {value}")
                 return 2
@@ -688,8 +834,10 @@ def main(argv):
             except OSError as err:
                 log(f"could not save {GAMES}: {err}")
                 return 1
+        steam = game_resolution(appid)
         print(json.dumps({"settings": game_settings(appid), "direct": state()[0],
-                          "launch": [{"key": e["key"], "description": e["description"]} for e in entries]}))
+                          "launch": [{"key": e["key"], "description": e["description"]} for e in entries],
+                          "steam_resolution": "%dx%d" % steam if steam else ""}))
         return 0
     log("usage: retroforge-steam-direct status|on|off|remember|check APPID|run APPID|game APPID [set KEY VALUE]")
     return 2

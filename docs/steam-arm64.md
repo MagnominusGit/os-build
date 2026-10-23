@@ -346,13 +346,26 @@ next launch without a library rescan. Keeping Steam running between games does n
 started without the client. It still applies to first launches and to Steam's own UI.
 
 **Per game** (Game settings > RetroForge, `game_settings_page.gd`): a Steam game's own Proton (ARMv8.0
-stable or experimental, shown on ARMv8.0 CPUs only), DXVK-Sarek (on or off) and launch option.
-`retroforge-steam-direct game APPID [set KEY VALUE]` keeps them in `~/.config/retroforge/steam-games.json`.
-A launch without the client applies them to Steam's logged command: the tool when it runs on the same
-runtime, the executable and its working folder, `PROTON_DXVK_SAREK`. The launch options are the ones
+stable or experimental, shown on ARMv8.0 CPUs only), DXVK-Sarek (on or off), launch option and
+resolution. `retroforge-steam-direct game APPID [set KEY VALUE]` keeps them in
+`~/.config/retroforge/steam-games.json`. A launch without the client applies them to Steam's logged
+command: the tool when it runs on the same runtime; the launch option's executable, its arguments and
+its working folder, the arguments in place of those of the entry Steam ran (the player's own launch
+options after them stay); `PROTON_DXVK_SAREK`; the resolution (below). The launch options are the ones
 Steam's dialog offers on a Steam Deck, as the client runs with `-steamdeck`: Windows, 64-bit, not
 `type none`, not another branch's (`BetaKey`), not `steamdeck 0`. Hades offers two, DirectX and
 "Vulkan - Steam Deck". A launch through the client does not use them.
+
+**Resolution.** The client gives a game's X server the game's Game resolution (Properties > General;
+`ResolutionOverride2 "800x450"` in `userdata/<account>/config/localconfig.vdf`) through gamescope before
+it starts it: `GAMESCOPE_XWAYLAND_MODE_CONTROL` on the server's root, `[server id, width, height, 0]`,
+the id from its `GAMESCOPE_XWAYLAND_SERVER_ID`. A launch without the client does the same, with the size
+chosen in Game settings over Steam's. It leaves a watcher outside the game's process tree
+(`systemd-run --user`, `restore-resolution`) that gives the server its old size back when the launch
+ends: the one Settings > Display > Game resolution gives every game (`display_settings.gd`; its
+Default is the board's `RETROFORGE_GAMESCOPE_NESTED_W/H`, 1280x720 on the Air X), so the next game or
+emulator gets that again. Game settings offers the same sizes (Native, 900p, 720p, 540p, 480p at the
+panel's aspect) and keeps the one chosen as `WxH`.
 
 **umu-launcher** was the other way to do this. Upstream (2026-08) supports aarch64: it maps Proton's
 `require_tool_appid` 4185400 to `steamrt4-arm64`. But it downloads its own copy of that runtime from
