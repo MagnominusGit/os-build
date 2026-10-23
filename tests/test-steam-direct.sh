@@ -75,7 +75,8 @@ import os, struct, sys
 out = sys.argv[1]
 os.makedirs(os.path.dirname(out), exist_ok=True)
 apps = {
-    1145360: {"appinfo": {"appid": 1145360, "common": {"name": "Hades", "type": "Game"}, "config": {
+    1145360: {"appinfo": {"appid": 1145360, "common": {"name": "Hades", "type": "Game",
+                                                       "steam_frame_compatibility": {"configuration": {"tso_enable": 0}}}, "config": {
         "installdir": "Hades", "launch": {
             "0": {"executable": "x64\\Hades.exe", "workingdir": "x64\\", "arguments": "/c=..\\ /steampowered"},
             "1": {"executable": "x64Vk\\Hades.exe", "workingdir": "x64Vk\\", "arguments": "/c=..\\ /steampowered"},
@@ -350,7 +351,7 @@ printf '"manifest"\n{\n  "commandline" "/proton %%verb%%"\n  "require_tool_appid
 printf '"compatibilitytools"\n{\n  "compat_tools"\n  {\n    "proton-armv8-experimental-retroforge"\n    {\n      "install_path" "."\n    }\n  }\n}\n' >"$EXP/compatibilitytool.vdf"
 GAMES="$H/.config/retroforge/steam-games.json"
 direct -- game 1145360
-[ "$RC" = 0 ] && python3 -c 'import json, sys; d = json.loads(sys.argv[1]); assert d["settings"] == {"proton": "default", "sarek": "default", "launch": "default", "resolution": "default"}, d; assert [e["key"] for e in d["launch"]] == ["0", "1", "2", "3", "4", "15"], d; assert d["launch"][-1]["description"] == "Hades (Steam Deck)", d; assert d["direct"] in ("on", "off"), d' "$OUT" \
+[ "$RC" = 0 ] && python3 -c 'import json, sys; d = json.loads(sys.argv[1]); assert d["settings"] == {"proton": "default", "sarek": "default", "tso": "default", "launch": "default", "resolution": "default"}, d; assert d["tso_hint"] == "0", d; assert [e["key"] for e in d["launch"]] == ["0", "1", "2", "3", "4", "15"], d; assert d["launch"][-1]["description"] == "Hades (Steam Deck)", d; assert d["direct"] in ("on", "off"), d' "$OUT" \
   && ok "game: every choice at its default, and the launch entries Steam's dialog offers here, in its order" || bad "rc=$RC out=$OUT err=$ERR"
 direct -- game 1145360 set launch 0 && direct -- game 1145360 set proton experimental && direct -- game 1145360 set sarek off
 [ "$RC" = 0 ] && python3 -c 'import json, sys; assert json.load(open(sys.argv[1])) == {"1145360": {"launch": "0", "proton": "experimental", "sarek": "off"}}' "$GAMES" \
@@ -362,6 +363,11 @@ direct -- run 1145360
 grep -qxF "$GAME/x64/Hades.exe" "$T/ran.args" && grep -qxF "$EXP/proton" "$T/ran.args" && [ "$(cat "$T/ran.cwd")" = "$GAME/x64" ] \
   && ok "run: the chosen launch option, from its own working folder, with the chosen Proton" || bad "args=$(grep -E 'proton|Hades' "$T/ran.args") cwd=$(cat "$T/ran.cwd")"
 [ "$(ran_env PROTON_DXVK_SAREK)" = 0 ] && ok "run: DXVK-Sarek off for this game" || bad "sarek=$(ran_env PROTON_DXVK_SAREK)"
+[ -z "$(ran_env STEAM_FEX_TSOENABLED)" ] && ok "run: FEX TSO left to Proton by default" || bad "tso=$(ran_env STEAM_FEX_TSOENABLED)"
+direct -- game 1145360 set tso off; fresh_log; reset_run
+direct -- run 1145360
+[ "$(ran_env STEAM_FEX_TSOENABLED)" = 0 ] && ok "run: FEX TSO off for this game (STEAM_FEX_TSOENABLED, Proton's FEX config)" || bad "tso=$(ran_env STEAM_FEX_TSOENABLED)"
+direct -- game 1145360 set tso default
 direct -- game 1145360 set launch 4; fresh_log; reset_run; mkdir "$GAME/Odd"
 direct -- run 1145360
 want="$(printf '%s\n' "$GAME/x64/Hades.exe" '/c=..\' -dx11 '/name=two words' /DirectLoadShell=true)"
@@ -369,7 +375,7 @@ want="$(printf '%s\n' "$GAME/x64/Hades.exe" '/c=..\' -dx11 '/name=two words' /Di
   && ok "run: the launch option's own arguments and working folder, the player's extra words kept" \
   || bad "args=$(tail -6 "$T/ran.args" | tr "\n" "|") cwd=$(cat "$T/ran.cwd")"
 rmdir "$GAME/Odd"
-for k in launch proton sarek; do direct -- game 1145360 set $k default; done
+for k in launch proton sarek tso; do direct -- game 1145360 set $k default; done
 python3 -c 'import json, sys; assert json.load(open(sys.argv[1])) == {}' "$GAMES" && ok "all back to default: nothing kept" || bad "$(cat "$GAMES")"
 rm -rf "$S/compatibilitytools.d" "$GAMES"
 

@@ -346,12 +346,15 @@ next launch without a library rescan. Keeping Steam running between games does n
 started without the client. It still applies to first launches and to Steam's own UI.
 
 **Per game** (Game settings > RetroForge, `game_settings_page.gd`): a Steam game's own Proton (ARMv8.0
-stable or experimental, shown on ARMv8.0 CPUs only), DXVK-Sarek (on or off), launch option and
-resolution. `retroforge-steam-direct game APPID [set KEY VALUE]` keeps them in
+stable or experimental, shown on ARMv8.0 CPUs only), DXVK-Sarek (on or off), FEX TSO (on or off),
+launch option and resolution. `retroforge-steam-direct game APPID [set KEY VALUE]` keeps them in
 `~/.config/retroforge/steam-games.json`. A launch without the client applies them to Steam's logged
 command: the tool when it runs on the same runtime; the launch option's executable, its arguments and
 its working folder, the arguments in place of those of the entry Steam ran (the player's own launch
-options after them stay); `PROTON_DXVK_SAREK`; the resolution (below). The launch options are the ones
+options after them stay); `PROTON_DXVK_SAREK`; `STEAM_FEX_TSOENABLED`, which Proton writes into the
+game's `proton-fex-config.json` (its default, `files/share/fex-emu/Config.json`, is on; the arm64 client sets no
+FEX settings itself, and Valve's appinfo hint `common/steam_frame_compatibility/configuration/tso_enable` is shown
+beside the row); the resolution (below). The launch options are the ones
 Steam's dialog offers on a Steam Deck, as the client runs with `-steamdeck`: Windows, 64-bit, not
 `type none`, not another branch's (`BetaKey`), not `steamdeck 0`. Hades offers two, DirectX and
 "Vulkan - Steam Deck". A launch through the client does not use them.

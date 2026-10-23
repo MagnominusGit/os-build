@@ -13,8 +13,8 @@
 #   retroforge-steam-direct remember     keep every game's newest launch in Steam's log (/usr/bin/steam
 #                                        runs it before the client starts)
 #   retroforge-steam-direct game APPID [set KEY VALUE]
-#                                        print (JSON) APPID's own Proton, DXVK-Sarek, launch option and
-#                                        resolution (Game settings > RetroForge), after saving one
+#                                        print (JSON) APPID's own Proton, DXVK-Sarek, FEX TSO, launch
+#                                        option and resolution (Game settings > RetroForge), after saving one
 #   retroforge-steam-direct restore-resolution PID DISPLAY WxH WxH
 #                                        once PID ends, give DISPLAY's X server the first size back if it
 #                                        still has the second (run, through systemd-run, starts it)
@@ -395,7 +395,8 @@ def swap_tool(appid, tools, command, want=None):
 
 # The player's per-game choices (Game settings, steam_game_settings.gd), keyed by app id.
 GAMES = os.path.join(os.path.dirname(CONF), "steam-games.json")
-CHOICES = {"proton": ("default", "stable", "experimental"), "sarek": ("default", "on", "off")}
+CHOICES = {"proton": ("default", "stable", "experimental"), "sarek": ("default", "on", "off"),
+           "tso": ("default", "on", "off")}
 ARMV8_TOOLS = {"stable": "proton-armv8-retroforge", "experimental": "proton-armv8-experimental-retroforge"}
 
 
@@ -412,7 +413,14 @@ def game_settings(appid):
     """proton, sarek and launch for appid: "default" for each one not chosen."""
     mine = read_games().get(str(appid))
     mine = mine if isinstance(mine, dict) else {}
-    return {k: str(mine.get(k, "default")) for k in ("proton", "sarek", "launch", "resolution")}
+    return {k: str(mine.get(k, "default")) for k in ("proton", "sarek", "tso", "launch", "resolution")}
+
+
+def tso_hint(app):
+    """Valve's TSO setting for app on the Steam Frame (appinfo common/steam_frame_compatibility), "0", "1" or ""."""
+    frame = app.get("appinfo", app).get("common", {}).get("steam_frame_compatibility", {})
+    value = frame.get("configuration", {}).get("tso_enable", "") if isinstance(frame, dict) else ""
+    return str(value) if str(value) in ("0", "1") else ""
 
 
 def save_game_setting(appid, key, value):
@@ -591,6 +599,8 @@ def plan(appid):
         env["STEAM_COMPAT_CONFIG"] = config
     if choice["sarek"] in ("on", "off"):
         env["PROTON_DXVK_SAREK"] = "1" if choice["sarek"] == "on" else "0"
+    if choice["tso"] in ("on", "off"):  # Proton's FEX config for the game (proton-fex-config.json)
+        env["STEAM_FEX_TSOENABLED"] = "1" if choice["tso"] == "on" else "0"
     return {"command": command, "env": env, "workdir": workdir, "stamp": stamp, "waiting": bool(flags & 2)}
 
 
@@ -837,7 +847,7 @@ def main(argv):
         steam = game_resolution(appid)
         print(json.dumps({"settings": game_settings(appid), "direct": state()[0],
                           "launch": [{"key": e["key"], "description": e["description"]} for e in entries],
-                          "steam_resolution": "%dx%d" % steam if steam else ""}))
+                          "steam_resolution": "%dx%d" % steam if steam else "", "tso_hint": tso_hint(app)}))
         return 0
     log("usage: retroforge-steam-direct status|on|off|remember|check APPID|run APPID|game APPID [set KEY VALUE]")
     return 2
