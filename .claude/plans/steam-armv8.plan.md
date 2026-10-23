@@ -102,10 +102,17 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
   Licences: FEX (binaries, `Source/Steam/{toolmanifest.vdf,emulator.json,ConfigTemplate.json,CompatTool.cpp}`) is
   MIT; `fex-compat-tool` and `unshare.py` are Valve's and not in FEX's repo, so the device copies those two from
   the installed `FEX-Emu` rather than our releases carrying them.
-- [ ] Ship it: a FEX job in proton-armv8 building Valve's tool commit (`VERSIONS.txt` "FEX bash") for ARMv8.0,
-  released with FEX's Steam files and checksummed; on ARMv8.0 devices, assemble the tool from that release plus
-  Valve's two scripts once Steam has installed `FEX-Emu`. Open: whether to also swap our binaries into Valve's tool
-  so x86 games that never get a per-game choice use them too.
+- [x] Ship it, both ways on ARMv8.0 devices only (the user's choice, 2026-10-23):
+  - proton-armv8 `e47fa65` (local, not pushed): `fex.pin` (Valve's commit and version, bumped by hand: the
+    tool's depots are owners-only, anonymous steamcmd gets "Missing configuration"), `scripts/build-fex.sh`
+    (everything in a Debian 13 arm64 container; FEX's own install lays the tool out as Valve ships it),
+    `scan-allow-fex.txt`, `.github/workflows/fex.yml` (release `fex-armv8-<describe>`, not "latest"). Built
+    here: 1.4 MB, scan 0.
+  - os-build `3b9783e`: steam-compat-tools pins get `entry:` (the file a tool is checked by; own lock and
+    waiting folder, no Sarek); `fex-armv8.pin`; `retroforge-steam-fex` apply/install/status, run by
+    `/usr/bin/steam`; tests (fex 19, compat-tools 128).
+- [ ] On the Air X from the real release: push proton-armv8 (CI publishes it), then run apply with the branch's
+  scripts; Steam lists the tool, SuperTux runs with it, and Valve's tool gets the swap.
 
 ### Phase 3: device import (branch `steam-armv8-proton` from `main` 99495d6; not pushed)
 - [x] `steam-compat-tools`: with no `atomics` in /proc/cpuinfo it takes `proton-armv8.pin`; `.tar.zst`, `sidecar:` and
