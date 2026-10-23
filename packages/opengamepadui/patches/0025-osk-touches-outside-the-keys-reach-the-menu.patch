@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Fri, 23 Oct 2026 08:05:00 -0700
+Subject: [PATCH] fix(OnScreenKeyboard): touches outside the keys reach the menu
+ behind it
+
+card_ui.tscn puts the keyboard in AlwaysVisibleContent, a MarginContainer,
+which sizes it to the whole screen. Its root control passed mouse events
+(MOUSE_FILTER_PASS), so while the keyboard was up it took every touch on the
+screen, above the menu (z_index 21): a dialog's Submit button over the
+keyboard could not be tapped, only reached with the controller (HW, MANGMI
+Air X, 2026-10-23: Settings > Network's Wi-Fi password).
+
+The root ignores mouse events now. The keys are buttons and the panel
+behind them stops events itself, so the keyboard keeps every touch on it.
+
+---
+ core/ui/common/osk/on_screen_keyboard.tscn | 2 +-
+ 1 file changed
+
+--- a/core/ui/common/osk/on_screen_keyboard.tscn
++++ b/core/ui/common/osk/on_screen_keyboard.tscn
+@@ -13,7 +13,7 @@
+ anchor_bottom = 1.0
+ grow_horizontal = 2
+ grow_vertical = 0
+-mouse_filter = 1
++mouse_filter = 2
+ script = ExtResource("1_3r64j")
+ layout = ExtResource("2_0han2")
+
