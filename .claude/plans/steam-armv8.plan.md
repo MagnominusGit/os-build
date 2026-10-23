@@ -106,6 +106,13 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
 - [ ] 4b: Turnip variants in `/home` via `VK_DRIVER_FILES`. Does Steam Linux Runtime 4 load them? What about the matching x86 Turnip for FEX guests? Which `proton-fex-config.json` keys are worth exposing?
 - [ ] Tests (`tests/test-plugin.sh`), docs.
 
+### Later (TODO)
+- [ ] Steam page: an "Open Steam (Remote Play)" button, as Emulators > Steam Client > Open, and a read-only video decode
+  line (hardware: venus on SM6115, Iris on SM8250/8550/8650; else software). Steam's own Remote Play settings keep the
+  hardware-decoding switch.
+- [ ] Remote Play on hardware: a stream from a PC, "V4L2 ... hardware decoding" in the client's log, no stall after
+  the first frame, the stream window focused under OGUI.
+
 ### Phase 5 (TODO, last): seamless Steam login
 - [ ] Discuss first. Ideas: a "Sign in to Steam" button that opens Steam's own sign-in; check QR sign-in in Big Picture on the arm64 client; keep the session on /home; a cloud sync around clientless sessions.
 
