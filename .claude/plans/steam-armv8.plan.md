@@ -171,9 +171,14 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
   kernel/build.sh; `retroforge-zram-recompress.timer` every 10 min at idle priority). Measured with real swapped
   pages: zstd level 1 = level 3's ratio (1.78 vs 1.79) at +26% compression speed; lz4 compresses 3.3x and
   decompresses 4.5-5x faster than zstd at a 1.59 ratio.
-- [ ] Both need the next dev build (kernel rebuild). Check on the Air X: `comp_algorithm` [lz4],
-  `recomp_algorithm` [zstd], the timer's runs in the journal, `mm_stat` falling after a game sits in a menu,
-  and Hades with no new OOM.
+- [x] On the Air X with dev build 31 (20261023T070207Z): `comp_algorithm` [lz4], `recomp_algorithm` #1 [zstd],
+  the timer every 10 min; `libz.so.1` -> `libz.so.1.3.1.zlib-ng`.
+  In kernel, 256 MB of real swapped pages (Steam + SuperTux), warm cores: lz4 271/174 MB/s compress and
+  928/533 decompress (A73/A53) at 1.87; zstd 1 84/49 and 313/179 at 2.22 (lz4 3-3.5x faster, 19% more
+  memory). A scratch device, lz4 then everything idle recompressed to zstd 1: 3.1 s for 256 MB (87 MB/s),
+  ratio 1.90 -> 2.26. Live zram0, the timer's second run (07:33, Steam and SuperTux in memory): compressed
+  629 -> 531 MB, memory used 640 -> 587 MB, ratio 2.21 -> 2.61, 19 s of CPU at idle priority.
+- [ ] Hades on build 31 with no new OOM (not run yet).
 
 ### Later (TODO)
 - [ ] Steam page: an "Open Steam (Remote Play)" button, as Emulators > Steam Client > Open, and a read-only video decode
