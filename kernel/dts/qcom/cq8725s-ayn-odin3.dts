@@ -320,6 +320,70 @@
 };
 
 /*
+ * Stick rings: four RGB pixels per side, each a multicolor group over three
+ * HTR3212 channels (rgb:l1..l4 / rgb:r1..r4), grouped as on the Thor. The
+ * raw channels' l:<c><n> / r:<c><n> labels carry no colour powerd can read,
+ * so lit directly every channel got the same level and the rings showed white.
+ */
+/ {
+	multi-ledr1 {
+		compatible = "leds-group-multicolor";
+		color = <LED_COLOR_ID_RGB>;
+		function = "r1";
+		leds = <&ledr_r4>, <&ledr_g4>, <&ledr_b4>;
+	};
+
+	multi-ledl1 {
+		compatible = "leds-group-multicolor";
+		color = <LED_COLOR_ID_RGB>;
+		function = "l1";
+		leds = <&ledl_r4>, <&ledl_g4>, <&ledl_b4>;
+	};
+
+	multi-ledr2 {
+		compatible = "leds-group-multicolor";
+		color = <LED_COLOR_ID_RGB>;
+		function = "r2";
+		leds = <&ledr_r1>, <&ledr_g1>, <&ledr_b1>;
+	};
+
+	multi-ledl2 {
+		compatible = "leds-group-multicolor";
+		color = <LED_COLOR_ID_RGB>;
+		function = "l2";
+		leds = <&ledl_r1>, <&ledl_g1>, <&ledl_b1>;
+	};
+
+	multi-ledr3 {
+		compatible = "leds-group-multicolor";
+		color = <LED_COLOR_ID_RGB>;
+		function = "r3";
+		leds = <&ledr_r2>, <&ledr_g2>, <&ledr_b2>;
+	};
+
+	multi-ledl3 {
+		compatible = "leds-group-multicolor";
+		color = <LED_COLOR_ID_RGB>;
+		function = "l3";
+		leds = <&ledl_r2>, <&ledl_g2>, <&ledl_b2>;
+	};
+
+	multi-ledr4 {
+		compatible = "leds-group-multicolor";
+		color = <LED_COLOR_ID_RGB>;
+		function = "r4";
+		leds = <&ledr_r3>, <&ledr_g3>, <&ledr_b3>;
+	};
+
+	multi-ledl4 {
+		compatible = "leds-group-multicolor";
+		color = <LED_COLOR_ID_RGB>;
+		function = "l4";
+		leds = <&ledl_r3>, <&ledl_g3>, <&ledl_b3>;
+	};
+};
+
+/*
  * AYN Odin 3 has two extra back paddles (M1, M2) below the shoulder
  * triggers. They are plain active-low SoC TLMM GPIOs (M1 = GPIO_3,
  * M2 = GPIO_7), not on the gamepad MCU UART and not ADC (despite AYN's
