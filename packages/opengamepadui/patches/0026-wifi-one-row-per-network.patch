@@ -1,0 +1,132 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Fri, 23 Oct 2026 09:10:00 -0700
+Subject: [PATCH] fix(WifiNetworkTree): one row per network
+
+Rows were keyed by SSID but made per access point, so a network with two
+radios (2.4 and 5 GHz) or mesh nodes showed twice, both "Connected" (HW,
+MANGMI Air X, 2026-10-23). Showing Settings > Network also started two
+refreshes at once, the menu's and this tree's own visibility_changed, and
+each made rows for networks it had not seen.
+
+Each network gets one row, for its strongest access point, and a join takes
+that one: the join is pinned to the access point it is given. One refresh
+runs at a time, and none while the list is hidden. Hidden networks, which
+have no name to join by here, get no row.
+
+---
+ core/ui/components/wifi_network_tree.gd | 62 +++++++++++++++++++++++-------
+ 1 file changed
+
+--- a/core/ui/components/wifi_network_tree.gd
++++ b/core/ui/components/wifi_network_tree.gd
+@@ -21,6 +21,10 @@
+ var challenge_ssid := ""
+ ## The network a join in progress is for: its row's status is network_connect()'s.
+ var _connecting_ssid := ""
++## A refresh is running. One asked for meanwhile is served by it until it reads the access points,
++## and runs once it is done after that (_refresh_again).
++var _refreshing := false
++var _refresh_again := false
+ var logger := Log.get_logger("WifiNetworkTree")
+ 
+ 
+@@ -97,7 +101,11 @@
+ 		_set_status(item, "Not found")
+ 		_end_connect()
+ 		return
++	# The network's strongest radio: the join is pinned to the access point it is given.
+ 	var access_point := valid_access_points[0] as NetworkAccessPoint
++	for ap: NetworkAccessPoint in valid_access_points:
++		if ap.strength > access_point.strength:
++			access_point = ap
+ 
+ 	# connect() saves a new profile on every join, next to any saved before: a corrected password
+ 	# sat beside the wrong one. One profile is kept, the one that works (stale_after_join).
+@@ -174,8 +182,24 @@
+ 	return not uuids.is_empty()
+ 
+ 
+-## Refreshes the available wifi networks
++## Refreshes the available wifi networks. Showing Settings > Network started two refreshes at once
++## (visibility_changed reaches the menu and this tree), and each made rows of its own: one runs at a
++## time now, and none while hidden.
+ func refresh_networks() -> void:
++	if not is_visible_in_tree():
++		return
++	if _refreshing:
++		_refresh_again = true
++		return
++	_refreshing = true
++	await _refresh_networks()
++	_refreshing = false
++	if _refresh_again:
++		_refresh_again = false
++		refresh_networks()
++
++
++func _refresh_networks() -> void:
+ 	logger.info("Refreshing wifi networks")
+ 	refresh_started.emit()
+ 
+@@ -195,36 +219,46 @@
+ 	await get_tree().create_timer(0.5).timeout
+ 
+ 	# Fetch all the available access points
++	_refresh_again = false
+ 	var tree := self as Tree
+ 	var root := tree.get_root()
+ 	var access_points := device.wireless.access_points
+ 
+-	# Create an array of BSSIDs from our access points
+-	var bssids := []
+-	for ap in access_points:
+-		bssids.append(ap.ssid)
++	# One row per network. Each access point of an SSID (a router's 2.4 and 5 GHz radios, mesh nodes)
++	# had a row of its own; the strongest stands for the network now. A hidden network has no name
++	# to join it by here, and gets no row.
++	var best := {}
++	var best_strength := {}
++	for ap: NetworkAccessPoint in access_points:
++		var ssid := ap.ssid
++		var strength := ap.strength
++		if ssid.is_empty() or strength <= best_strength.get(ssid, -1):
++			continue
++		best[ssid] = ap
++		best_strength[ssid] = strength
+ 
+-	# Look at the current tree items to see if any need to be removed
+-	var tree_bssids := {}
++	# Remove the rows of networks gone, and any second row of one network
++	var tree_items := {}
+ 	for item in root.get_children():
+-		var bssid := item.get_metadata(0) as String
+-		if bssid in bssids:
+-			tree_bssids[bssid] = item
++		var ssid := item.get_metadata(0) as String
++		if ssid in best and not ssid in tree_items:
++			tree_items[ssid] = item
+ 			continue
+ 		root.remove_child(item)
+ 
+ 	var active_ap := device.wireless.active_access_point
+ 	var active_status := status_text(device.state)
+ 
+-	# Look at the current APs to see if any tree items need to be created
+-	# or updated
+-	for ap in access_points:
++	# Create or update each network's row
++	for ssid in best:
++		var ap := best[ssid] as NetworkAccessPoint
+ 		await get_tree().create_timer(0.1).timeout # help spread out sync data fetching
+ 		var item: TreeItem
+-		if ap.ssid in tree_bssids:
+-			item = tree_bssids[ap.ssid]
++		if ssid in tree_items:
++			item = tree_items[ssid]
+ 		else:
+ 			item = tree.create_item(root)
++			tree_items[ssid] = item
+ 
+ 		# Determine the security used for the access point
+ 		var has_security := ap.flags > ap.NM_802_11_AP_SEC_NONE
