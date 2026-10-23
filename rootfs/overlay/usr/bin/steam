@@ -31,10 +31,10 @@
 # (RunningApp.find_steam). That is the client: this script runs as `bash`, because env re-execs it.
 # A TERM/INT/HUP sent to this script is passed on to the client, so it is never left running
 # without its wrapper.
-# Unless the player keeps Steam running between games (Settings > General): then the client runs as a
+# Unless the player keeps Steam running between games (Settings > Steam): then the client runs as a
 # user unit and outlives the launch, and this script hands launches to it ("Kept running between
 # games" below). And a game Steam has started here before may start without the client at all
-# (Settings > General, on by default on the SM6115 and 4 GB boards: "Without the client" below).
+# (Settings > Steam, on by default on the SM6115 and 4 GB boards: "Without the client" below).
 #
 # First start: on 2026-10-15 the client updated itself from Valve's manifest (667 MB download) to
 # ~3 GB, because the linuxarm64 manifest also carries the x86 client and runtimes. steam-install runs
@@ -70,7 +70,7 @@ for link in steam root; do
   fi
 done
 
-# ---- Without the client (Settings > General; on by default on the SM6115 and 4 GB boards) -----------
+# ---- Without the client (Settings > Steam; on by default on the SM6115 and 4 GB boards) -------------
 # A game launch (steam://rungameid/<appid>) can start without the Steam client, which holds ~1 GB
 # beside the game: on the MANGMI Air X (3.5 GB) earlyoom killed Hades in its first room with the
 # client running, and Hades played without it (2026-10-22). /usr/bin/retroforge-steam-direct decides
@@ -92,7 +92,7 @@ if [ -z "${RETROFORGE_STEAM_KEPT:-}" ] && [ -x "$direct_cli" ]; then
 fi
 # ----------------------------------------------------------------------------------------------------
 
-# ---- Kept running between games (Settings > General, off by default) ------------------------------
+# ---- Kept running between games (Settings > Steam, off by default) --------------------------------
 # Off, the client lives as long as this launch: OGUI SIGTERMs it once the game's windows are gone, and
 # every game starts Steam cold (~18 s of a ~30 s launch: KONKR Pocket FIT, Hades, 2026-10-21). On
 # (/usr/bin/retroforge-steam-keep), the client runs as the user unit retroforge-steam.service
@@ -275,7 +275,7 @@ unset STEAM_RUNTIME STEAM_RUNTIME_LIBRARY_PATH
 proton_cli="${RETROFORGE_STEAM_PROTON_CLI:-/usr/bin/retroforge-steam-proton}"
 [ -x "$proton_cli" ] && "$proton_cli" apply >/dev/null
 
-# DXVK-Sarek, the player's setting (Settings > General, on by default on the SM6115's Adreno 610,
+# DXVK-Sarek, the player's setting (Settings > Steam, on by default on the SM6115's Adreno 610,
 # where upstream DXVK stops working with Mesa 26.3). retroforge-steam-sarek applies it: when it is on,
 # Proton-CachyOS's arm64 build is installed or updated in the background, and PROTON_DXVK_SAREK=1 is
 # its switch for Sarek (Valve's Proton ignores it); when off, Sarek is turned off in an installed one.

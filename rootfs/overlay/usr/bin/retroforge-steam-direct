@@ -71,7 +71,7 @@
 #
 # THE SETTING is DIRECT_LAUNCH=on|off in ~/.config/retroforge/steam.conf, beside DXVK_SAREK and
 # KEEP_RUNNING (the last such line counts; saving rewrites that line and keeps the others). The
-# RetroForge plugin's Settings > General toggle "Steam: start games without Steam" runs this. Never
+# RetroForge plugin's Settings > Steam toggle "Steam: start games without Steam" runs this. Never
 # set, it is on for SoC class SM6115 (device-env: the client also runs on emulated LSE atomics there)
 # and on boards with under 4.5 GiB of RAM (MemTotal: the 4 GB boards), off elsewhere.
 # RETROFORGE_STEAM_DIRECT=on|off overrides both, for testing and debugging.

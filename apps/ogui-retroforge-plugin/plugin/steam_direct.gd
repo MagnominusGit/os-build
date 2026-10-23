@@ -1,5 +1,5 @@
 extends RefCounted
-## Settings > General > "Steam: start games without Steam": the player's setting, kept by
+## Settings > Steam > "Steam: start games without Steam": the player's setting, kept by
 ## /usr/bin/retroforge-steam-direct (DIRECT_LAUNCH=on|off in ~/.config/retroforge/steam.conf), which
 ## /usr/bin/steam asks at every game launch. On: a game Steam has started on this device before starts
 ## the way Steam started it, without the Steam client and its ~1 GB (the Air X's Hades was killed in
@@ -23,8 +23,8 @@ func setup(scene_tree: SceneTree) -> RefCounted:
 	return self
 
 
-## Add the toggle under Settings > General, after the keep-Steam-running one. False when the layout
-## differs or the command is missing.
+## Add the toggle to target (Settings > Steam), else under Settings > General after the
+## keep-Steam-running one. False when the layout differs or the command is missing.
 func attach(target: Node = null) -> bool:  # target: the Settings > Steam page (steam_settings.gd)
 	var menu: Node = tree.root.find_child("GeneralSettings", true, false)
 	var box: Node = target if target else (menu.get_node_or_null("MarginContainer/VBoxContainer/VBoxContainer") if menu else null)

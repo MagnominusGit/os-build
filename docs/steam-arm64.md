@@ -187,14 +187,14 @@ instead, so signing into Steam Client is enough (`apps/ogui-retroforge-plugin`: 
 With the OGUI Steam plugin installed too, OGUI shows a game both list as one card with two launch
 items; the plugin is not needed, and its steamcmd (x86, downloaded by the plugin) cannot run here.
 
-## Keeping Steam running between games (Settings > General, off by default)
+## Keeping Steam running between games (Settings > Steam, off by default)
 
 A game started from OGUI starts Steam first, and OGUI stops Steam when the game ends. Measured on the
 KONKR Pocket FIT (Hades, Proton 11 ARM64, 2026-10-21): the launch at 44.5 s of uptime, Steam ready at
 ~62.5 s (its cold start, ~18 s), Proton at 70.6 s (Steam's own preparation), the game's processes at
 85.6 s, its first frame at 95 s. So ~30 s from the press to the game, more than half of it Steam's.
 
-Settings > General > "Steam: keep running between games" (`retroforge-steam-keep`, `KEEP_RUNNING=` in
+Settings > Steam > "Steam: keep running between games" (`retroforge-steam-keep`, `KEEP_RUNNING=` in
 `~/.config/retroforge/steam.conf`) leaves Steam running instead. `/usr/bin/steam` then:
 
 - starts the client, the first time, as the user unit `retroforge-steam.service` (`systemd-run
@@ -240,7 +240,7 @@ second, idle, before it). Not covered while it is on:
 `systemctl --user status retroforge-steam` and `journalctl --user -u retroforge-steam` (as the
 player) show a kept client; the launches log to OGUI's journal as before.
 
-## Starting games without Steam (Settings > General, on by default on the SM6115 and 4 GB boards)
+## Starting games without Steam (Settings > Steam, on by default on the SM6115 and 4 GB boards)
 
 **Why.** On the MANGMI Air X (SM6115, 3.5 GB, zram 3.5 GB) earlyoom killed Hades (Proton 11.0
 ARM64, Vulkan, 1280x720) every time it loaded, last as it entered its first room. It never crashed
@@ -336,7 +336,7 @@ there once.
   Runtime's own update, and anything Steam would update before a launch.
 
 **The setting.** `DIRECT_LAUNCH=on|off` in `~/.config/retroforge/steam.conf`, beside `DXVK_SAREK`
-and `KEEP_RUNNING`. The player changes it in Settings > General > "Steam: start games without Steam"
+and `KEEP_RUNNING`. The player changes it in Settings > Steam > "Steam: start games without Steam"
 (`steam_direct.gd`), or with `retroforge-steam-direct on|off|status` over SSH. Never set, it is on
 for SoC class SM6115 (`device-env`) and on boards with less than 4.5 GiB of `MemTotal` (the 4 GB
 boards report ~3.5-3.8 GiB), and off elsewhere. The SM6115 is on whatever its RAM, because its client
@@ -534,7 +534,7 @@ LSE atomics (covered by `0025`), apart from libraries that pick their code path 
 under noconform the A610 reports 1.3, so that check does not pick Sarek today.
 
 **One setting.** `DXVK_SAREK=on|off` in `~/.config/retroforge/steam.conf`, kept by
-`/usr/bin/retroforge-steam-sarek`. The player changes it in Settings > General > "Steam: DXVK-Sarek
+`/usr/bin/retroforge-steam-sarek`. The player changes it in Settings > Steam > "Steam: DXVK-Sarek
 (low-end GPUs)" (the RetroForge plugin), or with `retroforge-steam-sarek on|off|status` over SSH.
 Never set, it is on for SoC class SM6115 (device-env) and off elsewhere. A card moved to another board
 follows that board until the player chooses. `RETROFORGE_STEAM_SAREK=on|off` overrides it, for testing.

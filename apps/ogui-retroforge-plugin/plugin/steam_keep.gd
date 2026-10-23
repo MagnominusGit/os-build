@@ -1,5 +1,5 @@
 extends RefCounted
-## Settings > General > "Steam: keep running between games": the player's setting, kept by
+## Settings > Steam > "Steam: keep running between games": the player's setting, kept by
 ## /usr/bin/retroforge-steam-keep (KEEP_RUNNING=on|off in ~/.config/retroforge/steam.conf), which
 ## /usr/bin/steam reads at every launch. Off (the default), Steam starts with each game and OGUI stops
 ## it when the game ends. On, the first launch leaves Steam running as a user unit and later games are
@@ -21,8 +21,8 @@ func setup(scene_tree: SceneTree) -> RefCounted:
 	return self
 
 
-## Add the toggle under Settings > General, after the DXVK-Sarek one. False when the layout differs or
-## the command is missing.
+## Add the toggle to target (Settings > Steam), else under Settings > General after the DXVK-Sarek
+## one. False when the layout differs or the command is missing.
 func attach(target: Node = null) -> bool:  # target: the Settings > Steam page (steam_settings.gd)
 	var menu: Node = tree.root.find_child("GeneralSettings", true, false)
 	var box: Node = target if target else (menu.get_node_or_null("MarginContainer/VBoxContainer/VBoxContainer") if menu else null)
