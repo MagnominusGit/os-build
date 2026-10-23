@@ -311,6 +311,29 @@ direct RETROFORGE_STEAM_DIRECT=off -- run 1145360
 [ "$RC" = 0 ] && [ -f "$T/ran.args" ] && ok "run, which /usr/bin/steam execs after a check, asks neither the setting nor for a client again" || bad "rc=$RC err=$ERR"
 rm -rf "$T/proc/7780"
 
+CASE="run: the tool Steam is set to now"
+OURS="$S/compatibilitytools.d/proton-armv8-retroforge"; mkdir -p "$OURS" "$S/config"
+printf '#!/bin/sh\nexit 0\n' >"$OURS/proton"; chmod +x "$OURS/proton"
+printf '"manifest"\n{\n  "commandline" "/proton %%verb%%"\n  "require_tool_appid" "4185400"\n}\n' >"$OURS/toolmanifest.vdf"
+printf '"compatibilitytools"\n{\n  "compat_tools"\n  {\n    "proton-armv8-retroforge" // Internal name\n    {\n      "install_path" "."\n    }\n  }\n}\n' >"$OURS/compatibilitytool.vdf"
+mapping() {  # mapping <the game's own tool|-> <Steam's default tool>: config.vdf's CompatToolMapping
+  { printf '"InstallConfigStore"\n{\n\t"Software"\n\t{\n\t\t"Valve"\n\t\t{\n\t\t\t"Steam"\n\t\t\t{\n\t\t\t\t"CompatToolMapping"\n\t\t\t\t{\n'
+    [ "$1" != - ] && printf '\t\t\t\t\t"1145360"\n\t\t\t\t\t{\n\t\t\t\t\t\t"name"\t\t"%s"\n\t\t\t\t\t}\n' "$1"
+    printf '\t\t\t\t\t"0"\n\t\t\t\t\t{\n\t\t\t\t\t\t"name"\t\t"%s"\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n' "$2"; } >"$S/config/config.vdf"
+}
+fresh_log; reset_run; mapping - proton-armv8-retroforge
+direct -- run 1145360
+grep -qxF "$OURS/proton" "$T/ran.args" && [ "$(ran_env STEAM_COMPAT_TOOL_PATHS)" = "$OURS:$SLR" ] && grep -q "runs with proton-armv8-retroforge" <<<"$ERR" \
+  && ok "Steam's default is our tool: it runs instead of the Proton Steam logged" || bad "args=$(grep proton "$T/ran.args") err=$ERR"
+fresh_log; reset_run; mapping proton_11_arm64 proton-armv8-retroforge
+direct -- run 1145360
+grep -qxF "$PROTON/proton" "$T/ran.args" && ok "a game set to one of Steam's own tools keeps its logged launch" || bad "args=$(grep proton "$T/ran.args")"
+fresh_log; reset_run; mapping - proton-armv8-retroforge
+sed -i.b 's/4185400/1628350/' "$OURS/toolmanifest.vdf"
+direct -- run 1145360
+grep -qxF "$PROTON/proton" "$T/ran.args" && ok "a tool on another runtime is not swapped in" || bad "args=$(grep proton "$T/ran.args")"
+rm -rf "$S/compatibilitytools.d" "$S/config/config.vdf"
+
 CASE="run: Steam's quoting"
 reset_run; fresh_log
 printf '[2026-10-22 13:00:00] Game process added : AppID 1145360 "%s -title \"Two Words\" --name=caf\xe9", ProcID 1, IP 0.0.0.0:0\n' "$HADES_CMD" >>"$SLOG"

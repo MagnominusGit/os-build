@@ -305,6 +305,76 @@ def under(path, folder):
     return path == folder or path.startswith(folder.rstrip("/") + "/")
 
 
+# Steam's choice of tool for a game: config.vdf's CompatToolMapping, its own entry, else "0".
+VDF_TOKEN = re.compile(r'"((?:[^"\\]|\\.)*)"|([{}])|//[^\n]*')
+
+
+def vdf_tree(path):
+    """A text VDF as nested dicts, keys lowercased; {} when it cannot be read."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return {}
+    stack, cur, key = [], {}, None
+    for m in VDF_TOKEN.finditer(text):
+        s, brace = m.group(1), m.group(2)
+        if brace == "{":
+            new = {}
+            if key is not None:
+                cur[key.lower()] = new
+            stack.append(cur)
+            cur, key = new, None
+        elif brace == "}":
+            cur, key = (stack.pop() if stack else cur), None
+        elif s is not None:
+            if key is None:
+                key = s
+            else:
+                cur[key.lower()] = s
+                key = None
+    return stack[0] if stack else cur
+
+
+def mapped_tool(appid):
+    """The compatibilitytools.d folder of the tool Steam is set to use for appid; "" for one of Steam's
+    own tools (its logged launch has that already) or none."""
+    m = vdf_tree(os.path.join(STEAM_ROOT, "config", "config.vdf"))
+    for k in ("installconfigstore", "software", "valve", "steam", "compattoolmapping"):
+        m = m.get(k, {}) if isinstance(m, dict) else {}
+    entry = m.get(str(appid))
+    if not (isinstance(entry, dict) and entry.get("name")):
+        entry = m.get("0")
+    name = entry.get("name", "") if isinstance(entry, dict) else ""
+    tools = os.path.join(STEAM_ROOT, "compatibilitytools.d")
+    if not name or not os.path.isdir(tools):
+        return ""
+    for d in sorted(os.listdir(tools)):
+        folder = os.path.join(tools, d)
+        names = vdf_tree(os.path.join(folder, "compatibilitytool.vdf")).get("compatibilitytools", {}).get("compat_tools", {})
+        if isinstance(names, dict) and name.lower() in names:
+            return folder
+    return ""
+
+
+def runtime_of(tool):
+    """The tool appid a compat tool's toolmanifest.vdf requires ("" for none)."""
+    manifest = vdf_tree(os.path.join(tool, "toolmanifest.vdf")).get("manifest", {})
+    return str(manifest.get("require_tool_appid", "")) if isinstance(manifest, dict) else ""
+
+
+def swap_tool(appid, tools, command):
+    """tools and command with the Proton Steam logged replaced by the one it is set to now, when that is
+    a compatibilitytools.d tool on the same runtime (Steam's default changed since: ARMv8.0 Proton)."""
+    proton = [t for t in tools if os.path.isfile(os.path.join(t, "proton"))]
+    want = mapped_tool(appid)
+    if (len(proton) != 1 or not want or want == proton[0] or proton[0] not in command
+            or not os.path.isfile(os.path.join(want, "proton")) or runtime_of(want) != runtime_of(proton[0])):
+        return tools, command
+    log(f"app {appid} runs with {os.path.basename(want)}, the tool Steam is set to, not {os.path.basename(proton[0])} as last logged")
+    return [want if t == proton[0] else t for t in tools], command.replace(proton[0], want)
+
+
 def plan(appid):
     """{command, env (to add), workdir, stamp, waiting (an update is queued)} of the launch; Refused
     when there is none."""
@@ -359,6 +429,7 @@ def plan(appid):
         raise Refused(f"Steam's launch of {stamp} names no compat tool")
     if not exe:
         raise Refused(f"Steam's launch of {stamp} names no program of the game")
+    tools, command = swap_tool(appid, tools, command)
 
     appinfo = {}
     try:
