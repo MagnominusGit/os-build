@@ -1,0 +1,19 @@
+#!/bin/sh
+# zram-recompress — the zram pages nothing has touched since the last run go to zram's second
+# algorithm (zstd, after lz4: zram-generator.conf), then every page is marked idle for the next run.
+# A page read or written in between loses its mark and stays lz4, so what a game keeps coming back to
+# stays fast to fault in and the rest ends at zstd's ratio. Run by retroforge-zram-recompress.timer,
+# at idle CPU and IO priority.
+#
+# Devices without a second algorithm (recomp_algorithm has no [selected] entry: a kernel without
+# CONFIG_ZRAM_MULTI_COMP shows none at all) and devices not set up are left alone.
+#
+# TEST SEAM (tests/test-zram.sh): RETROFORGE_SYS (/sys).
+SYS="${RETROFORGE_SYS:-/sys}"
+for dev in "$SYS"/block/zram*; do
+  [ -d "$dev" ] || continue
+  [ "$(cat "$dev/initstate" 2>/dev/null)" = 1 ] || continue
+  grep -q '\[' "$dev/recomp_algorithm" 2>/dev/null || continue
+  echo type=idle > "$dev/recompress" 2>/dev/null || echo "zram-recompress: ${dev##*/}: recompression failed" >&2
+  echo all > "$dev/idle"
+done

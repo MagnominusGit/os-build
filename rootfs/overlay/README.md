@@ -85,9 +85,12 @@ this image `/etc/passwd` and `/var` are *build products* rather than device stat
   (RAM spans 8–16 GB across supported SKUs, so percentages mean different headroom per unit),
   reports off (the default is one journal line per second, onto an SD card), and the session spine
   protected. Enabled by `60-retroforge-earlyoom.preset` + a `multi-user.target.wants` symlink.
-- `usr/lib/systemd/zram-generator.conf` — the image's only swap device, `min(ram, 8192)` compressed in RAM.
-  **Coupled to the kernel:** it needs `CONFIG_ZRAM` + the zstd backend, which `kernel/build.sh`
-  asserts, because without them there is no `zram0`, no swap, and no error.
+- `usr/lib/systemd/zram-generator.conf` — the image's only swap device, `min(ram, 8192)` compressed in RAM:
+  lz4 as pages are swapped out, then zstd (level 1) for the ones that sit idle, recompressed by
+  `retroforge-zram-recompress.timer` (every 10 minutes, at idle priority; `usr/lib/retroforge/zram-recompress`,
+  enabled by `60-retroforge-zram-recompress.preset` + a `timers.target.wants` symlink).
+  **Coupled to the kernel:** it needs `CONFIG_ZRAM`, the lz4 and zstd backends and `CONFIG_ZRAM_MULTI_COMP`,
+  which `kernel/build.sh` asserts, because without them there is no `zram0`, no swap, and no error.
 
 **PortMaster's `/roms` — `roms -> /home/player/roms`**
 The only top-level symlink in the tree. PortMaster (downloaded into the player's home from

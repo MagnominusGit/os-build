@@ -1,0 +1,12 @@
+# Every 10 minutes from 10 minutes after boot. A page untouched for a whole interval is recompressed
+# at the run after it was marked idle; one the game touches in between keeps lz4's speed.
+[Unit]
+Description=Recompress idle zram pages every 10 minutes
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=10min
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
