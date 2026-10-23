@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Fri, 23 Oct 2026 10:45:00 -0700
+Subject: [PATCH] feat(NetworkSettings): the open network in use can be forgotten
+
+Forget network lives in the password dialog, which only secured networks
+opened: A on the open network in use joined it again, so it could not be
+forgotten (HW, MANGMI Air X, 2026-10-23).
+
+That network opens the dialog too, without the password field and Submit:
+it names the network and offers Forget network. Any other open network
+still connects at once.
+
+---
+ core/ui/common/settings/network_settings_menu.gd | 11 ++++++++++-
+ core/ui/components/wifi_network_tree.gd          | 16 ++++++++++++++++
+ 2 files changed
+
+--- a/core/ui/components/wifi_network_tree.gd
++++ b/core/ui/components/wifi_network_tree.gd
+@@ -19,6 +19,8 @@
+ var connecting := false
+ ## The network the last challenge_required asked a password for.
+ var challenge_ssid := ""
++## That network is the open one in use: its dialog has no password, only Forget network.
++var challenge_open := false
+ ## The network a join in progress is for: its row's status is network_connect()'s.
+ var _connecting_ssid := ""
+ ## A refresh is running. One asked for meanwhile is served by it until it reads the access points,
+@@ -53,11 +55,27 @@
+ 	var has_security := item.get_metadata(2) as bool
+ 	if has_security:
+ 		challenge_ssid = ssid
++		challenge_open = false
+ 		challenge_required.emit(network_connect.bind(ssid))
+ 		return
++	# The open network in use gets the dialog, for Forget network: A on it only joined it again.
++	if _is_connected_to(ssid):
++		challenge_ssid = ssid
++		challenge_open = true
++		challenge_required.emit(network_connect.bind(ssid))
++		return
+ 	network_connect("", ssid)
+ 
+ 
++## The Wi-Fi device is connected through an access point of the given network.
++func _is_connected_to(ssid: String) -> bool:
++	var device := _wifi_device()
++	if not device or device.state != NetworkDevice.NM_DEVICE_STATE_ACTIVATED:
++		return false
++	var ap := device.wireless.active_access_point
++	return ap != null and ap.ssid == ssid
++
++
+ ## Status column text for the network a device in the given state is using. NetworkManager makes
+ ## an access point the active one as soon as it starts associating with it, so only an activated
+ ## device is "Connected".
+@@ -130,6 +148,7 @@
+ 	_end_connect()
+ 	if failure == WRONG_PASSWORD:
+ 		challenge_ssid = ssid
++		challenge_open = false
+ 		challenge_required.emit(network_connect.bind(ssid))
+ 
+ 
+--- a/core/ui/common/settings/network_settings_menu.gd
++++ b/core/ui/common/settings/network_settings_menu.gd
+@@ -138,12 +138,20 @@
+ func _on_wifi_challenge(callback: Callable) -> void:
+ 	_close_dialog()
+ 	_dialog_ssid = wifi_tree.challenge_ssid
++	# The open network in use has no password: the dialog names it and offers Forget network.
++	var open := wifi_tree.challenge_open
++	password_input.title = _dialog_ssid if open else "Password"
++	password_input.description = "Open network, connected" if open else "Enter the password for this network"
++	password_input.line_edit.visible = not open
++	_show_password.visible = not open
++	password_button.visible = not open
++	_forget_button.visible = open
+ 	# _close_dialog() left an empty, hidden field: what was typed for the last dialog stayed in it,
+ 	# so a mistyped password was submitted again on every later try.
+ 	password_popup.visible = true
+ 	if back_watcher:
+ 		back_watcher.set_process_input(false)
+-	password_input.grab_focus.call_deferred()
++	(_forget_button if open else password_input).grab_focus.call_deferred()
+ 
+ 	_pending_submit = func():
+ 		connecting = true
