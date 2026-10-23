@@ -334,6 +334,29 @@ direct -- run 1145360
 grep -qxF "$PROTON/proton" "$T/ran.args" && ok "a tool on another runtime is not swapped in" || bad "args=$(grep proton "$T/ran.args")"
 rm -rf "$S/compatibilitytools.d" "$S/config/config.vdf"
 
+CASE="run: per-game choices"
+EXP="$S/compatibilitytools.d/proton-armv8-experimental-retroforge"; mkdir -p "$EXP"
+printf '#!/bin/sh\nexit 0\n' >"$EXP/proton"; chmod +x "$EXP/proton"
+printf '"manifest"\n{\n  "commandline" "/proton %%verb%%"\n  "require_tool_appid" "4185400"\n}\n' >"$EXP/toolmanifest.vdf"
+printf '"compatibilitytools"\n{\n  "compat_tools"\n  {\n    "proton-armv8-experimental-retroforge"\n    {\n      "install_path" "."\n    }\n  }\n}\n' >"$EXP/compatibilitytool.vdf"
+GAMES="$H/.config/retroforge/steam-games.json"
+direct -- game 1145360
+[ "$RC" = 0 ] && python3 -c 'import json, sys; d = json.loads(sys.argv[1]); assert d["settings"] == {"proton": "default", "sarek": "default", "launch": "default"}, d; assert [e["key"] for e in d["launch"]] == ["0", "1", "2", "3"], d' "$OUT" \
+  && ok "game: every choice at its default, and the game's launch entries" || bad "rc=$RC out=$OUT err=$ERR"
+direct -- game 1145360 set launch 0 && direct -- game 1145360 set proton experimental && direct -- game 1145360 set sarek off
+[ "$RC" = 0 ] && python3 -c 'import json, sys; assert json.load(open(sys.argv[1])) == {"1145360": {"launch": "0", "proton": "experimental", "sarek": "off"}}' "$GAMES" \
+  && ok "set: saved in steam-games.json" || bad "rc=$RC $(cat "$GAMES" 2>&1)"
+direct -- game 1145360 set sarek maybe
+[ "$RC" = 2 ] && ok "set: a value that is not a choice is refused" || bad "rc=$RC"
+fresh_log; reset_run
+direct -- run 1145360
+grep -qxF "$GAME/x64/Hades.exe" "$T/ran.args" && grep -qxF "$EXP/proton" "$T/ran.args" && [ "$(cat "$T/ran.cwd")" = "$GAME/x64" ] \
+  && ok "run: the chosen launch option, from its own working folder, with the chosen Proton" || bad "args=$(grep -E 'proton|Hades' "$T/ran.args") cwd=$(cat "$T/ran.cwd")"
+[ "$(ran_env PROTON_DXVK_SAREK)" = 0 ] && ok "run: DXVK-Sarek off for this game" || bad "sarek=$(ran_env PROTON_DXVK_SAREK)"
+for k in launch proton sarek; do direct -- game 1145360 set $k default; done
+python3 -c 'import json, sys; assert json.load(open(sys.argv[1])) == {}' "$GAMES" && ok "all back to default: nothing kept" || bad "$(cat "$GAMES")"
+rm -rf "$S/compatibilitytools.d" "$GAMES"
+
 CASE="run: Steam's quoting"
 reset_run; fresh_log
 printf '[2026-10-22 13:00:00] Game process added : AppID 1145360 "%s -title \"Two Words\" --name=caf\xe9", ProcID 1, IP 0.0.0.0:0\n' "$HADES_CMD" >>"$SLOG"
