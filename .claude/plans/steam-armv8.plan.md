@@ -111,8 +111,14 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
   - os-build `3b9783e`: steam-compat-tools pins get `entry:` (the file a tool is checked by; own lock and
     waiting folder, no Sarek); `fex-armv8.pin`; `retroforge-steam-fex` apply/install/status, run by
     `/usr/bin/steam`; tests (fex 19, compat-tools 128).
-- [ ] On the Air X from the real release: push proton-armv8 (CI publishes it), then run apply with the branch's
-  scripts; Steam lists the tool, SuperTux runs with it, and Valve's tool gets the swap.
+- [x] On the Air X from the real release (2026-10-23): proton-armv8 pushed, the FEX workflow released
+  `fex-armv8-FEX-2607-76-g37265b1` in ~5 min (1.4 MB, not "latest"). The branch's `install`: downloaded and
+  checked it, installed it in 3 s, took Valve's two scripts in, and swapped 6 binaries into Valve's tool
+  (`FEXBash` and `FEXpidof` were already byte-identical: Valve builds with the same Debian clang 19.1.7);
+  `status` went valve -> ours. SuperTux ran from it, 0 emulations from the game (4,451/s in all, the client).
+  Steam's game properties show "Warning: FEX ARMv8.0 (RetroForge) is incompatible with this application"
+  (`is_incompatible`, the client's own rule; the tool declares linux to linux like Valve's SLR 3.0), and the game
+  runs regardless.
 
 ### Phase 3: device import (branch `steam-armv8-proton` from `main` 99495d6; not pushed)
 - [x] `steam-compat-tools`: with no `atomics` in /proc/cpuinfo it takes `proton-armv8.pin`; `.tar.zst`, `sidecar:` and
