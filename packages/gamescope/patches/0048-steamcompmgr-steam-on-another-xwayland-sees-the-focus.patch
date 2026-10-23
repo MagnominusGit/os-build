@@ -1,0 +1,126 @@
+From: retroforge
+Subject: [PATCH] steamcompmgr: Steam on another XWayland sees the focus
+
+Steam reads GAMESCOPE_FOCUSED_APP, _FOCUSED_APP_GFX, _FOCUSED_WINDOW,
+_FOCUSABLE_APPS and _FOCUSABLE_WINDOWS from the root of the XWayland it
+runs on, and gamescope sets them on the first XWayland only. Under
+OpenGamepadUI the shell is on the first and Steam on the second, so
+Steam never saw what was focused. A game that connects to the client (a
+Proton game, through its steam.exe) was recognised anyway, but a native
+x86 game under FEX was not: Steam logged "OnFocusWindowChanged to window
+type: k_nGameIDControllerConfigs_Desktop", applied its Desktop controller
+config and wrote nothing to its virtual pad, so the game had no
+controller (SuperTux, HW, MANGMI Air X, 2026-10-23). With the five atoms
+copied to the second XWayland by hand, Steam switched to the game's
+config within a second and its virtual pad carried the player's input.
+
+Every XWayland after the first now gets these atoms for its own windows.
+While the focus is on another XWayland (the shell's own UI) they are
+removed, which is what Steam saw before. Steam's own windows are
+reported as app id 769: OpenGamepadUI tags them with its id for the
+Steam client, and Steam took its own Big Picture window under that id
+for a game's (a "Last Resort" gamepad config for app 1984639); as 769 it
+is Steam's UI again. The first XWayland is unchanged.
+
+---
+ src/steamcompmgr.cpp | 80 ++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 80 insertions(+)
+
+diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
+index 5798212..33fb4d5 100644
+--- a/src/steamcompmgr.cpp
++++ b/src/steamcompmgr.cpp
+@@ -5242,6 +5242,83 @@ DumpFocusInfo()
+ 	}
+ }
+ 
++// retroforge: Steam reads the focus atoms below from the root of the XWayland it runs on, and they
++// are set on the first one only. A shell that runs Steam on another XWayland (OpenGamepadUI on :0,
++// Steam on :1) left Steam blind to the focus: a game that does not connect to the client itself
++// (a native x86 game under FEX) got Steam's Desktop controller config, so no Steam Input reached it.
++// Every other XWayland gets the atoms for its own windows, none while the focus is on another one,
++// and Steam's windows as Steam's own app id 769: the shell tags them with an id of its own, which
++// Steam took for a game's.
++static unsigned long
++focus_atom_appid( steamcompmgr_win_t *w )
++{
++	if ( window_is_steam( w ) || w->bIsSteamPid || w->bIsSteamWebHelperPid )
++		return 769;
++	return w->appID;
++}
++
++static void
++set_focus_atom( xwayland_ctx_t *ctx, Atom atom, const std::vector< unsigned long > &values )
++{
++	if ( values.empty() )
++		XDeleteProperty( ctx->dpy, ctx->root, atom );
++	else
++		XChangeProperty( ctx->dpy, ctx->root, atom, XA_CARDINAL, 32, PropModeReplace,
++						 (unsigned char *)values.data(), values.size() );
++}
++
++static void
++publish_focus_on_other_xwaylands( global_focus_t *pFocus, const std::vector< steamcompmgr_win_t* > &vecPossibleFocusWindows )
++{
++	gamescope_xwayland_server_t *server = NULL;
++	for ( size_t i = 1; ( server = wlserver_get_xwayland_server( i ) ); i++ )
++	{
++		xwayland_ctx_t *ctx = server->ctx.get();
++		auto isHere = [ctx]( steamcompmgr_win_t *w )
++		{
++			return w && w->type == steamcompmgr_win_type_t::XWAYLAND && w->xwayland().ctx == ctx;
++		};
++
++		// As for the first XWayland: [window, appid, pid] triplets, the same windows left out.
++		std::vector< unsigned long > focusableApps;
++		std::vector< unsigned long > focusableWindows;
++		for ( steamcompmgr_win_t *w : vecPossibleFocusWindows )
++		{
++			if ( !isHere( w ) || win_is_useless( w ) || win_skip_and_not_fullscreen( w ) || w->xwayland().a.override_redirect )
++				continue;
++			unsigned long appID = focus_atom_appid( w );
++			if ( appID != 0 && std::find( focusableApps.begin(), focusableApps.end(), appID ) == focusableApps.end() )
++				focusableApps.push_back( appID );
++			focusableWindows.push_back( w->xwayland().id );
++			focusableWindows.push_back( appID );
++			focusableWindows.push_back( w->pid );
++		}
++
++		std::vector< unsigned long > focusedWindow;
++		std::vector< unsigned long > focusedApp;
++		std::vector< unsigned long > focusedAppGfx;
++		if ( isHere( pFocus->focusWindow ) )
++		{
++			focusedWindow.push_back( pFocus->focusWindow->id() );
++			if ( unsigned long appID = focus_atom_appid( pFocus->focusWindow ) )
++				focusedAppGfx.push_back( appID );
++			// The input focus may be elsewhere, such as the shell's own menu over the game.
++			if ( isHere( pFocus->inputFocusWindow ) )
++			{
++				if ( unsigned long appID = focus_atom_appid( pFocus->inputFocusWindow ) )
++					focusedApp.push_back( appID );
++			}
++		}
++
++		set_focus_atom( ctx, ctx->atoms.gamescopeFocusableAppsAtom, focusableApps );
++		set_focus_atom( ctx, ctx->atoms.gamescopeFocusableWindowsAtom, focusableWindows );
++		set_focus_atom( ctx, ctx->atoms.gamescopeFocusedAppAtom, focusedApp );
++		set_focus_atom( ctx, ctx->atoms.gamescopeFocusedAppGfxAtom, focusedAppGfx );
++		set_focus_atom( ctx, ctx->atoms.gamescopeFocusedWindowAtom, focusedWindow );
++		XFlush( ctx->dpy );
++	}
++}
++
+ static void
+ determine_and_apply_focus( global_focus_t *pFocus )
+ {
+@@ -5636,6 +5713,9 @@ determine_and_apply_focus( global_focus_t *pFocus )
+ 						(unsigned char *)focused_keyboard_display, strlen(focused_keyboard_display) + 1 );
+ 
+ 		XFlush( root_ctx->dpy );
++
++		if ( steamMode )
++			publish_focus_on_other_xwaylands( pFocus, vecPossibleFocusWindows );
+ 	}
+ 
+ 	// Sort out fading.

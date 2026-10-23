@@ -101,6 +101,25 @@ grep -Fq 'secondary-output' "$ROOT/packages/gamescope/patches/0040-drm-drive-a-s
   grep -q '0040-drm-drive-a-secondary-output.patch' "$ROOT/packages/gamescope/source.pin" \
   && ok "the gamescope build carries the flag (patch 0040 in source.pin)" \
   || bad "--secondary-output is passed but patch 0040 is not in packages/gamescope/source.pin"
+CASE="gamescope focus for Steam on its own XWayland"
+# 0048: Steam runs on :1 under OGUI and reads gamescope's focus atoms from its own root; with them
+# on :0 only, a native game got Steam's Desktop controller config (HW, MANGMI Air X, 2026-10-23).
+P48="$ROOT/packages/gamescope/patches/0048-steamcompmgr-steam-on-another-xwayland-sees-the-focus.patch"
+if [ -f "$P48" ] && grep -q '0048-steamcompmgr-steam-on-another-xwayland-sees-the-focus.patch' "$ROOT/packages/gamescope/source.pin"; then
+  grep -qE '^\+\s+for \( size_t i = 1; \( server = wlserver_get_xwayland_server\( i \) \); i\+\+ \)' "$P48" \
+    && grep -qE '^\+\s+publish_focus_on_other_xwaylands\( pFocus, vecPossibleFocusWindows \);' "$P48" \
+    && ok "0048: the focus atoms are published on every XWayland after the first" \
+    || bad "0048: the focus atoms reach the first XWayland only"
+  grep -qE '^\+\s+if \( window_is_steam\( w \) \|\| w->bIsSteamPid \|\| w->bIsSteamWebHelperPid \)' "$P48" \
+    && ok "0048: Steam's own windows are reported to it as 769 (OGUI tags them with its own id)" \
+    || bad "0048: Steam's windows keep OGUI's id, and Steam takes its own UI for a game"
+  # OGUI's core takes the XWayland with GAMESCOPE_KEYBOARD_FOCUS_DISPLAY for the primary one.
+  ! grep -qE '^\+.*gamescope(Keyboard|Mouse)?FocusDisplay' "$P48" \
+    && ok "0048: the focus-display atoms stay on the first XWayland (OGUI finds its primary by them)" \
+    || bad "0048: a focus-display atom is published elsewhere: OGUI would see two primaries"
+else
+  bad "gamescope patch 0048 is missing or not in packages/gamescope/source.pin"
+fi
 
 CASE="no-r-by-default"
 # gamescope keeps -r as g_nNestedRefresh, which overrides the scanning mode's rate in its limiter
