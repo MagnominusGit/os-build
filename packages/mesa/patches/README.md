@@ -57,3 +57,24 @@ blit, `VK_QCOM_rotated_copy_commands` on Adreno), and a compositor that honours 
 rotates layers itself, and its own rotated-blit patches (`packages/gamescope`) use the same
 `VK_QCOM_rotated_copy_commands` from `0002` here. Off unless the variable is set, so every
 other board is unaffected. Applied cleanly on 26.2.4 (checked 2026-10-09).
+
+## A610 registers from the stock blob (0014), added 2026-10-23
+
+Mesa shares one register table (`a6xx_gen1_low`) between the A605 and the A610. 0014 gives the
+A610 its own entry, using what the stock Android 14 driver (`Adreno610v1`) writes when it sets up
+a context on the Air X. The values come from libwrap captures of a draw, a copy and a compute
+dispatch, diffed against Turnip on drm-shim. In the table, TPL1_DBG_ECO_CNTL becomes 0x8000,
+SP_CHICKEN_BITS 0x400 and UCHE_UNKNOWN_0E12 0x10000001. It adds the blob's writes of
+UCHE_UNKNOWN_0E11, VFD_DBG_ECO_CNTL, RB_UNKNOWN_8E09 (0x4, the same value the A710 uses with one
+CCU), SP_UNKNOWN_0CE2-0CE7 and RB_UNKNOWN_8A00-8A30. Two props change: `prim_alloc_threshold`
+(3, the blob's value) and `highest_bank_bit` (14). The bank bit is only a fallback, since Turnip
+asks the kernel, and every A610 SoC (SM6115, SM4250, SM6125) reports 14 there and in KGSL.
+
+Left out on purpose: UCHE_CLIENT_PF, because the msm kernel sets it to 0x81 for its fault
+handler and the blob's 0x4 would clear that. Also left out: values Turnip hardcodes for every A6XX
+(TPL1_UNKNOWN_B605, GRAS_MODE_CNTL, TPL1_MODE_CNTL rounding), which would need code changes.
+None of the new registers fall in the A610's CP protect list (`a630_protect`, kernel 7.2.11).
+With 0014, Turnip's A610 init stream matches the blob for every register above.
+
+**HW test still owed:** this was checked on drm-shim only. On the Air X, run a Vulkan title and a
+GL one and watch for hangs or corruption.
