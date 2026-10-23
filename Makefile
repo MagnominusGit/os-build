@@ -491,6 +491,7 @@ test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-hw-map.sh
 	bash $(TESTS_DIR)/test-hw-dtb.sh
 	bash $(TESTS_DIR)/test-cpu-scheduler.sh
+	bash $(TESTS_DIR)/test-panel-calibration.sh
 	bash $(TESTS_DIR)/test-splash.sh
 	bash $(TESTS_DIR)/test-splash-status.sh
 	bash $(TESTS_DIR)/test-update.sh
