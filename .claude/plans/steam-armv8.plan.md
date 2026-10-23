@@ -94,11 +94,18 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
   The AppImage needs FUSE, which the image lacks: `APPIMAGE_EXTRACT_AND_RUN=1 %command%`. Its controller needs
   Steam Input off: OGUI tags windows of games started inside the client with the client's app id
   (`running_app.gd` `_ensure_app_id`), so Steam Input never routes to them (separate session).
-- [ ] FEX delivery, to decide: (a) swap into Valve's tool (named "fex"; Steam may put Valve's files back on its next
-  tool update or verify, so re-apply only while `VERSIONS.txt` matches our build), or (b) our own layer in
-  `compatibilitytools.d`, "FEX ARMv8.0 (RetroForge)" (untested: does Steam take a local layer with
-  `compatmanager_layer_name "fex"` in place of app 3127680?). Then a FEX job in proton-armv8 that follows Valve's
-  tool commit.
+- [x] FEX delivery (b), the user's choice, works (2026-10-23): `compatibilitytools.d/fex-armv8-retroforge` with
+  `compatibilitytool.vdf` ("FEX ARMv8.0 (RetroForge)", linux to linux), Valve's tool files and our eight binaries
+  (FEXCompatTool too, 0 inline LSE). After a restart Steam listed it, SuperTux's compat tool was set to it, and Steam
+  ran `fex-armv8-retroforge/fex-compat-tool`; FEX, FEXServer and the game ran from it, 0 emulations from the game.
+  It is a per-game choice: the x86 Steam Linux Runtimes' automatic FEX dependency stays Valve's app 3127680.
+  Licences: FEX (binaries, `Source/Steam/{toolmanifest.vdf,emulator.json,ConfigTemplate.json,CompatTool.cpp}`) is
+  MIT; `fex-compat-tool` and `unshare.py` are Valve's and not in FEX's repo, so the device copies those two from
+  the installed `FEX-Emu` rather than our releases carrying them.
+- [ ] Ship it: a FEX job in proton-armv8 building Valve's tool commit (`VERSIONS.txt` "FEX bash") for ARMv8.0,
+  released with FEX's Steam files and checksummed; on ARMv8.0 devices, assemble the tool from that release plus
+  Valve's two scripts once Steam has installed `FEX-Emu`. Open: whether to also swap our binaries into Valve's tool
+  so x86 games that never get a per-game choice use them too.
 
 ### Phase 3: device import (branch `steam-armv8-proton` from `main` 99495d6; not pushed)
 - [x] `steam-compat-tools`: with no `atomics` in /proc/cpuinfo it takes `proton-armv8.pin`; `.tar.zst`, `sidecar:` and
