@@ -160,6 +160,21 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
 - [ ] Per-game Turnip (`VK_DRIVER_FILES`): later, by the user's call (2026-10-23); only the image's Turnip for now.
 - [x] Tests (`tests/test-plugin.sh`, `test-steam-direct.sh`, `test-steam-proton.sh`), docs (`docs/steam-arm64.md`).
 
+### Detour: compression speed (2026-10-23)
+- [x] zlib-ng as the system zlib (0f63372): `zlib-ng-compat 2.3.3-1` from the pinned holo snapshot replaces
+  `core/zlib 1.3.2` (relock diff: that line, plus OGUI's new hash for patch 0024, a539c17). Valve's build on the
+  Air X, 32 MB of libraries: inflate 1.4-1.5x, deflate 2x, crc32 6-10x, adler32 2-6x; no LSE; level-1 output
+  ~25% bigger. Helps what uses the system libz (our Python tools, OGUI, PortMaster ports), not emulators or
+  Steam's runtime (their own zlib). Native-mode zlib-ng (`libz-ng.so.2`): nothing in the image uses it.
+- [x] zram (a142e98): lz4 for what is swapped out, zstd level 1 for what then sits idle
+  (`compression-algorithm = lz4 zstd(level=1)`, CONFIG_ZRAM_BACKEND_LZ4 + CONFIG_ZRAM_MULTI_COMP, asserted by
+  kernel/build.sh; `retroforge-zram-recompress.timer` every 10 min at idle priority). Measured with real swapped
+  pages: zstd level 1 = level 3's ratio (1.78 vs 1.79) at +26% compression speed; lz4 compresses 3.3x and
+  decompresses 4.5-5x faster than zstd at a 1.59 ratio.
+- [ ] Both need the next dev build (kernel rebuild). Check on the Air X: `comp_algorithm` [lz4],
+  `recomp_algorithm` [zstd], the timer's runs in the journal, `mm_stat` falling after a game sits in a menu,
+  and Hades with no new OOM.
+
 ### Later (TODO)
 - [ ] Steam page: an "Open Steam (Remote Play)" button, as Emulators > Steam Client > Open, and a read-only video decode
   line (hardware: venus on SM6115, Iris on SM8250/8550/8650; else software). Steam's own Remote Play settings keep the
