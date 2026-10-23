@@ -31,6 +31,7 @@ var roms  # our Library subclass; untyped so roms.SYSTEMS resolves at runtime
 var steam  # library_steam.gd
 ## system (or STEAM_TAB) -> {"tab": ScrollContainer, "grid": HFlowContainer}
 var _tabs := {}
+var _scroll_tween: Tween  # a library tab's scroll to its focused card (_scroll_to_card)
 var _emulators_button: Control
 var _emulators_screen: Control
 var _game_settings_page: Control
@@ -318,7 +319,7 @@ func _refresh_system(system: String) -> void:
 	for child in grid.get_children():
 		child.queue_free()
 	for item in items:
-		grid.add_child(_build_card(item))
+		grid.add_child(_build_card(item, _tabs[system]["tab"]))
 	logger.info("%s tab: %d game(s), cards built in %d ms" % [_tab_text(system), items.size(), Time.get_ticks_msec() - started])
 
 
@@ -353,14 +354,29 @@ func _make_tab() -> Dictionary:
 ## not awaited: the card goes in the grid at once and its texture lands when ready, so cards whose
 ## card image must be composed (boxart_retroforge.gd, on worker threads) build in parallel instead
 ## of one after another (300 new cards: 15.9 s one by one on the ACE, 2026-10-17).
-func _build_card(item: LibraryItem) -> Control:
+## A focused card scrolls its tab to it, as library_menu.gd does for its own tabs: without that the
+## Steam tab left the focused card below the screen's edge.
+func _build_card(item: LibraryItem, tab: ScrollContainer) -> Control:
 	var card = card_scene.instantiate()
 	card.set_library_item(item)
 	var on_button_up := func():
 		launcher_state.data = {"item": item}
 		menu_state_machine.push_state(launcher_state)
 	card.button_up.connect(on_button_up)
+	card.focus_entered.connect(_scroll_to_card.bind(card, tab))
 	return card
+
+
+## library_menu.gd's _on_focus_updated: a smooth scroll that puts the card a third of its height
+## from the top, except while touch or the mouse is in use.
+func _scroll_to_card(card: Control, tab: ScrollContainer) -> void:
+	var input_manager := get_tree().get_first_node_in_group("input_manager")
+	if input_manager and ((input_manager as InputManager).current_touches > 0 or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)):
+		return
+	if _scroll_tween:
+		_scroll_tween.kill()
+	_scroll_tween = get_tree().create_tween()
+	_scroll_tween.tween_property(tab, "scroll_vertical", card.position.y - card.size.y / 3, 0.25)
 
 
 ## Quick bar > Hardware: the board's battery, temperatures, fan, clocks, backlight and LED
