@@ -134,6 +134,19 @@ static func ui_args(uri: String) -> PackedStringArray:
 	return args
 
 
+## Steam Client is installed, as steam-install's status says: the client's arm64 binary, and the x86
+## guest beside the client's folder unless RETROFORGE_STEAM_X86_GUEST=0. Two file checks.
+static func client_installed(root: String) -> bool:
+	if not FileAccess.file_exists(root.path_join("steamrtarm64/steam")):
+		return false
+	if OS.get_environment("RETROFORGE_STEAM_X86_GUEST") == "0":
+		return true
+	var guest := OS.get_environment("RETROFORGE_STEAM_X86_GUEST_DIR")
+	if guest == "":
+		guest = root.get_base_dir().path_join("retroforge/fex-guest")
+	return FileAccess.file_exists(guest.path_join("current"))
+
+
 ## The client's cached art of an app for an OGUI layout, or "". Where the client keeps it:
 ## librarycache/<appid>/<file>, or one folder further down (newer clients put some art under a
 ## hashed folder), or librarycache/<appid>_<file> (older clients).

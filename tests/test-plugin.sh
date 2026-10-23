@@ -641,6 +641,14 @@ func test_steam_apps() -> void:
 	check("steam: an install or uninstall opens Steam's own UI at the steam:// URI, not silent",
 		SteamApps.ui_args("steam://install/413150"),
 		PackedStringArray(["-gamepadui", "-steamos3", "-steampal", "-steamdeck", "steam://install/413150"]))
+	check("steam client: not installed without the client's arm64 binary", SteamApps.client_installed(root), false)
+	write(root + "/steamrtarm64/steam", "elf")
+	check("steam client: not installed while the x86 guest is missing", SteamApps.client_installed(root), false)
+	OS.set_environment("RETROFORGE_STEAM_X86_GUEST", "0")
+	check("steam client: installed without the x86 guest when it is off", SteamApps.client_installed(root), true)
+	OS.set_environment("RETROFORGE_STEAM_X86_GUEST", "")
+	write("$T/retroforge/fex-guest/current", "1")
+	check("steam client: installed with the x86 guest beside the client's folder", SteamApps.client_installed(root), true)
 	var cache := root + "/appcache/librarycache"
 	write(cache + "/1145360/library_600x900.jpg", "p")
 	write(cache + "/1145360/0a1b2c/logo.png", "l")

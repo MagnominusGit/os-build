@@ -24,6 +24,7 @@ var input_plumber := load("res://core/systems/input/input_plumber.tres") as Inpu
 var tabs_state := load("res://core/ui/card_ui/library/library_tabs_state.tres") as TabContainerState
 var menu_state_machine := load("res://assets/state/state_machines/menu_state_machine.tres") as StateMachine
 var launcher_state := load("res://assets/state/states/game_launcher.tres") as State
+var main_menu_state := load("res://assets/state/states/main_menu.tres") as State
 var card_scene := load("res://core/ui/components/card.tscn") as PackedScene
 var scroller_scene := load("res://core/systems/input/scroller_joystick.tscn") as PackedScene
 
@@ -34,6 +35,7 @@ var _tabs := {}
 var _scroll_tween: Tween  # a library tab's scroll to its focused card (_scroll_to_card)
 var _emulators_button: Control
 var _emulators_screen: Control
+var _steam_button: Control  # Main menu > Steam (_add_steam_button)
 var _game_settings_page: Control
 var _hardware_card: Control
 ## Input boost (see _input): how long the UI renders every frame after the last input.
@@ -139,7 +141,9 @@ func unload() -> void:
 	for system in _tabs.keys():
 		tabs_state.remove_tab(_tab_text(system))
 	_tabs.clear()
-	for node in [_emulators_button, _emulators_screen]:
+	if main_menu_state.state_entered.is_connected(_show_steam_button):
+		main_menu_state.state_entered.disconnect(_show_steam_button)
+	for node in [_emulators_button, _emulators_screen, _steam_button]:
 		if is_instance_valid(node):
 			node.queue_free()
 	if is_instance_valid(_game_settings_page):
@@ -243,10 +247,44 @@ func _add_emulators_screen() -> void:
 	buttons.add_child(_emulators_button)
 	if library_button:
 		buttons.move_child(_emulators_button, library_button.get_index() + 1)
+	_add_steam_button(buttons)
 	var focus_group := buttons.find_child("FocusGroup", false, false)
 	if focus_group:
 		focus_group.recalculate_focus()
 	logger.info("Main menu > Emulators added")
+
+
+## Main menu > Steam, under Emulators while Steam Client is installed (looked at each time the main
+## menu opens): Steam's own UI, as Emulators > Steam Client's Open starts it. The launch's in-game
+## state closes the main menu; the popup machine is cleared as OGUI's own buttons do.
+func _add_steam_button(buttons: Node) -> void:
+	_steam_button = load("res://core/ui/components/card_button.tscn").instantiate()
+	_steam_button.name = "RetroForgeSteamButton"
+	_steam_button.text = "Steam"
+	_steam_button.click_focuses = false
+	var updater = load("res://core/systems/state/state_updater.tscn").instantiate()
+	updater.state_machine = load("res://assets/state/state_machines/popup_state_machine.tres")
+	updater.action = 6  # CLEAR
+	updater.on_signal = "button_up"
+	_steam_button.add_child(updater)
+	_steam_button.button_up.connect(_open_steam)
+	buttons.add_child(_steam_button)
+	buttons.move_child(_steam_button, _emulators_button.get_index() + 1)
+	main_menu_state.state_entered.connect(_show_steam_button)
+	_show_steam_button(null)
+
+
+func _show_steam_button(_from: State) -> void:
+	_steam_button.visible = SteamApps.client_installed(SteamApps.steam_root())
+
+
+func _open_steam() -> void:
+	var item := LibraryLaunchItem.new()
+	item.name = "Steam"
+	item.command = "steam"
+	item.args = SteamApps.ui_args("steam://open/bigpicture")
+	item.installed = true
+	launch_manager.launch(item)
 
 
 ## Automatic rescan: reload our library once ~/roms changed and settled (rom_watch.gd), and the
