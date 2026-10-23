@@ -414,19 +414,34 @@ def save_game_setting(appid, key, value):
     os.replace(GAMES + ".part", GAMES)
 
 
-def launch_entries(app):
-    """Steam's launch entries for Windows (or every OS): key, description, executable (relative)."""
+def beta_key(sl, appid):
+    """The branch appid is installed from, from its app manifest: "" for the public one."""
+    for lib in sl.library_dirs(STEAM_ROOT):
+        for depth, key, value in sl.vdf_pairs(sl.read_text(os.path.join(lib, "steamapps", f"appmanifest_{appid}.acf"))):
+            if depth == 2 and key.lower() == "betakey":
+                return value
+    return ""
+
+
+def launch_entries(app, beta=""):
+    """The launch entries Steam's dialog offers here (64-bit Windows, as a Steam Deck, on branch beta),
+    in Steam's order: key, description, executable (relative)."""
     launch = app.get("appinfo", app).get("config", {}).get("launch", {})
     entries = []
-    for key, entry in sorted(launch.items(), key=lambda kv: kv[0]) if isinstance(launch, dict) else ():
-        if not isinstance(entry, dict) or not entry.get("executable"):
+    order = lambda kv: (0, int(kv[0]), "") if str(kv[0]).isdigit() else (1, 0, str(kv[0]))
+    for key, entry in sorted(launch.items(), key=order) if isinstance(launch, dict) else ():
+        if not isinstance(entry, dict) or not entry.get("executable") or entry.get("type") == "none":
             continue
         config = entry.get("config") if isinstance(entry.get("config"), dict) else {}
-        if config.get("oslist") and "windows" not in str(config.get("oslist")):
+        config = {str(k).lower(): str(v) for k, v in config.items()}
+        if (config.get("oslist") and "windows" not in config["oslist"]) or config.get("osarch", "64") != "64" \
+                or config.get("betakey", beta) != beta or config.get("steamdeck") == "0":
             continue
         path = str(entry["executable"]).replace("\\", "/")
         path = path[2:] if path.startswith("./") else path.lstrip("/")
-        entries.append({"key": str(key), "description": str(entry.get("description") or path), "executable": path})
+        loc = entry.get("description_loc") if isinstance(entry.get("description_loc"), dict) else {}
+        text = loc.get("english") or entry.get("description") or path
+        entries.append({"key": str(key), "description": str(text), "executable": path})
     return entries
 
 
@@ -494,7 +509,8 @@ def plan(appid):
     except (OSError, sl.Unreadable) as err:
         log(f"appinfo.vdf: {err}; the game runs from its executable's folder, without Valve's Proton setting")
     if choice["launch"] != "default":
-        entry = next((e for e in launch_entries(appinfo.get(appid, {})) if e["key"] == choice["launch"]), None)
+        entries = launch_entries(appinfo.get(appid, {}), beta_key(sl, appid))
+        entry = next((e for e in entries if e["key"] == choice["launch"]), None)
         other = os.path.join(game, entry["executable"]) if entry else ""
         if entry and os.path.isfile(other) and exe in command:
             command, exe = command.replace(exe, other), other
@@ -616,12 +632,13 @@ def main(argv):
         return 0 if cmd == "check" else run(appid, launch)
     if cmd == "game" and len(argv) in (2, 5) and argv[1].isdigit() and (len(argv) == 2 or argv[2] == "set"):
         appid = int(argv[1])
+        sl = steam_library()
         try:
-            app = steam_library().read_app_nodes(os.path.join(STEAM_ROOT, "appcache", "appinfo.vdf"), {appid}).get(appid, {})
+            app = sl.read_app_nodes(os.path.join(STEAM_ROOT, "appcache", "appinfo.vdf"), {appid}).get(appid, {})
         except Exception as err:  # appinfo.vdf missing or unreadable: no launch options to offer
             log(f"appinfo.vdf: {err}")
             app = {}
-        entries = launch_entries(app)
+        entries = launch_entries(app, beta_key(sl, appid))
         if len(argv) == 5:
             key, value = argv[3], argv[4]
             ok = value in CHOICES.get(key, ()) or (key == "launch" and (value == "default" or value in [e["key"] for e in entries]))
@@ -633,7 +650,8 @@ def main(argv):
             except OSError as err:
                 log(f"could not save {GAMES}: {err}")
                 return 1
-        print(json.dumps({"settings": game_settings(appid), "launch": [{"key": e["key"], "description": e["description"]} for e in entries]}))
+        print(json.dumps({"settings": game_settings(appid), "direct": state()[0],
+                          "launch": [{"key": e["key"], "description": e["description"]} for e in entries]}))
         return 0
     log("usage: retroforge-steam-direct status|on|off|remember|check APPID|run APPID|game APPID [set KEY VALUE]")
     return 2

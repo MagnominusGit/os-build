@@ -1,6 +1,8 @@
 extends ScrollContainer
 
 ## Game settings > RetroForge: per-ROM options, in the screen the gear on OGUI's launch menu opens.
+## For Steam games: their Proton, DXVK-Sarek and launch option, which retroforge-steam-direct keeps
+## and uses when it starts the game without the client.
 ## "Run on fast cores": the emulator's default (Main menu > Emulators), On or Off for this game
 ## (CPUS=big / all in the game's conf, which retroforge-launch reads; launch_args.gd). Then one
 ## dropdown per option of the game's emulator (options.json, emu_options.gd): "Emulator default
@@ -48,6 +50,18 @@ var _rows: VBoxContainer
 var _option_rows: Array = []  # this game's option dropdowns, rebuilt at each visit
 var _section_label: Label
 var _item: LibraryLaunchItem  # the RetroForge launch item of the game being configured
+const STEAM_LIBRARY_ID := "retroforge-steam"
+const STEAM_DIRECT := "/usr/bin/retroforge-steam-direct"
+const STEAM_PROTON := "/usr/bin/retroforge-steam-proton"
+const PROTON_CHOICES := ["default", "stable", "experimental"]
+const SAREK_CHOICES := ["default", "on", "off"]
+var _steam_app := 0  # the Steam app id of the game being configured, 0 for none
+var _proton: Control  # OGUI Dropdowns: the Steam game's own choices
+var _sarek: Control
+var _launch: Control
+var _launch_keys: Array = []
+var _armv8 := -1  # retroforge-steam-proton manages Proton here (an ARMv8.0 CPU): 1, 0, or -1 not asked yet
+const DIRECT_OFF := " Used only while Settings > Steam > \"Steam: start games without Steam\" is on."
 
 
 ## Add the page and its button to OGUI's game settings screen. False when its layout is not
@@ -126,6 +140,21 @@ func _build_page() -> void:
 	_scrape.progressed.connect(func(pct: int) -> void: _art.description = "Scraping... %d%%" % pct)
 	_scrape.finished.connect(_on_art_scraped)
 
+	_proton = _steam_dropdown("Proton", "Built for this CPU. Default: the one Steam runs it with (Settings > Steam).", "proton")
+	_sarek = _steam_dropdown("DXVK-Sarek", "Direct3D 8 to 11 for low-end GPUs. Default: Proton's choice.", "sarek")
+	_launch = _steam_dropdown("Launch option", "Which of the game's programs starts, as in Steam's launch dialog. Default: the one Steam last started.", "launch")
+
+
+func _steam_dropdown(title: String, description: String, key: String) -> Control:
+	var dropdown = dropdown_scene.instantiate()
+	dropdown.title = title
+	dropdown.description = description
+	dropdown.set_meta("about", description)
+	dropdown.visible = false
+	dropdown.item_selected.connect(func(index: int) -> void: _on_steam_choice(key, index))
+	_rows.add_child(dropdown)
+	return dropdown
+
 
 func _build_button(buttons: Node) -> void:
 	button = button_scene.instantiate()
@@ -155,13 +184,18 @@ func _on_game_settings_entered(_from: State) -> void:
 	var item = game_settings_state.get_meta("item") if game_settings_state.has_meta("item") \
 		else game_settings_state.data.get("item")
 	_item = item.get_launch_item(LIBRARY_ID) if item is LibraryItem else null
-	var show := _item != null
+	var steam_item = item.get_launch_item(STEAM_LIBRARY_ID) if item is LibraryItem else null
+	_steam_app = int(steam_item.metadata.get("steam_app", 0)) if steam_item and steam_item.metadata else 0
+	var show := _item != null or _steam_app > 0
+	for row in [_fast_cores, _art]:
+		row.visible = _item != null
+	_fill_steam_rows()
 	if button.visible != show:
 		button.visible = show
 		_recalculate(button.get_parent())
-	if not show:
+	if _item == null:
 		_build_options("")  # no RetroForge game: no rows of the last one left behind
-	if show:
+	else:
 		# Filled on each visit: the default's label follows the emulator's current setting.
 		# select() does not emit item_selected, so loading never saves.
 		_fast_cores.clear()
@@ -173,6 +207,81 @@ func _on_game_settings_entered(_from: State) -> void:
 		if not _scrape.running:
 			_art.description = ART_DESCRIPTION if FileAccess.file_exists(SCRAPER_DEVID) else ScrapeRunner.failure_text(9, "")
 		_build_options(roms.emulator_of(_item))
+
+
+## The Steam game's own choices, from retroforge-steam-direct (about half a second, so off the UI
+## thread); the rows stay hidden for anything else. Proton only on ARMv8.0 CPUs, the launch option
+## only when Steam offers more than one.
+func _fill_steam_rows() -> void:
+	var app := _steam_app
+	for row in [_proton, _sarek, _launch]:
+		row.visible = false
+	if _item != null:
+		_focus_group.current_focus = _fast_cores
+	if app <= 0 or not FileAccess.file_exists(STEAM_DIRECT):
+		return
+	var output: String = await _output_of(STEAM_DIRECT, ["game", str(app)])
+	var data = JSON.parse_string(output) if output != "" else null
+	if _armv8 < 0 and data is Dictionary:
+		var status := ""
+		if FileAccess.file_exists(STEAM_PROTON):
+			status = await _output_of(STEAM_PROTON, ["status"])
+		_armv8 = 1 if status.strip_edges() in ["stable", "experimental"] else 0
+	if app != _steam_app or not data is Dictionary:
+		return  # another game's page by now, or nothing to offer
+	var settings: Dictionary = data.get("settings", {})
+	var entries: Array = data.get("launch", [])
+	# select() does not emit item_selected, so loading never saves.
+	_proton.clear()
+	for text in ["Default (Settings > Steam)", "ARMv8.0 stable", "ARMv8.0 experimental"]:
+		_proton.add_item(text)
+	_proton.select(maxi(PROTON_CHOICES.find(settings.get("proton", "default")), 0))
+	_sarek.clear()
+	for text in ["Default (Settings > Steam)", "On", "Off"]:
+		_sarek.add_item(text)
+	_sarek.select(maxi(SAREK_CHOICES.find(settings.get("sarek", "default")), 0))
+	_launch.clear()
+	_launch_keys = ["default"]
+	_launch.add_item("Default (as Steam last started it)")
+	for entry in entries:
+		_launch_keys.append(str(entry.get("key", "")))
+		_launch.add_item(str(entry.get("description", "")))
+	_launch.select(maxi(_launch_keys.find(settings.get("launch", "default")), 0))
+	for row in [_proton, _sarek, _launch]:
+		row.description = str(row.get_meta("about")) + ("" if data.get("direct", "on") == "on" else DIRECT_OFF)
+	_proton.visible = _armv8 == 1
+	_sarek.visible = true
+	_launch.visible = entries.size() > 1
+	_focus_group.current_focus = _proton if _proton.visible else _sarek
+	_focus_group.recalculate_focus()
+
+
+## cmd's output when it exits 0, else "".
+func _output_of(cmd_path: String, args: Array[String]) -> String:
+	var cmd := Command.create(cmd_path, args)
+	var code := -1
+	if cmd.execute() == OK:
+		code = await cmd.finished as int
+	if code != 0:
+		logger.warn("%s %s exited %d: %s" % [cmd_path, " ".join(PackedStringArray(args)), code, cmd.stderr])
+	return cmd.stdout if code == 0 else ""
+
+
+func _on_steam_choice(key: String, index: int) -> void:
+	var values: Array = PROTON_CHOICES if key == "proton" else (SAREK_CHOICES if key == "sarek" else _launch_keys)
+	if _steam_app <= 0 or index < 0 or index >= values.size():
+		return
+	var app := _steam_app
+	var cmd := Command.create(STEAM_DIRECT, ["game", str(app), "set", key, str(values[index])])
+	var code := -1
+	if cmd.execute() == OK:
+		code = await cmd.finished as int
+	if code == 0:
+		logger.info("Steam app %d: %s = %s" % [app, key, values[index]])
+		return
+	logger.warn("retroforge-steam-direct game %d set %s %s exited %d: %s" % [app, key, values[index], code, cmd.stderr])
+	notification_manager.show(Notification.new("Could not save this game's " + key))
+	_fill_steam_rows()
 
 
 ## The game's emulator options, after the fast-cores row. Removed from the tree before they are

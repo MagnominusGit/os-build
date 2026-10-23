@@ -345,6 +345,15 @@ testing. A launch item stays `steam ... steam://rungameid/<appid>`, so the setti
 next launch without a library rescan. Keeping Steam running between games does not apply to a game
 started without the client. It still applies to first launches and to Steam's own UI.
 
+**Per game** (Game settings > RetroForge, `game_settings_page.gd`): a Steam game's own Proton (ARMv8.0
+stable or experimental, shown on ARMv8.0 CPUs only), DXVK-Sarek (on or off) and launch option.
+`retroforge-steam-direct game APPID [set KEY VALUE]` keeps them in `~/.config/retroforge/steam-games.json`.
+A launch without the client applies them to Steam's logged command: the tool when it runs on the same
+runtime, the executable and its working folder, `PROTON_DXVK_SAREK`. The launch options are the ones
+Steam's dialog offers on a Steam Deck, as the client runs with `-steamdeck`: Windows, 64-bit, not
+`type none`, not another branch's (`BetaKey`), not `steamdeck 0`. Hades offers two, DirectX and
+"Vulkan - Steam Deck". A launch through the client does not use them.
+
 **umu-launcher** was the other way to do this. Upstream (2026-08) supports aarch64: it maps Proton's
 `require_tool_appid` 4185400 to `steamrt4-arm64`. But it downloads its own copy of that runtime from
 repo.steampowered.com into `~/.local/share/umu`, instead of the one Steam installed. It checks for a

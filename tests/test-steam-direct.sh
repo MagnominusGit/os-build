@@ -80,7 +80,14 @@ apps = {
             "0": {"executable": "x64\\Hades.exe", "workingdir": "x64\\", "arguments": "/c=..\\ /steampowered"},
             "1": {"executable": "x64Vk\\Hades.exe", "workingdir": "x64Vk\\", "arguments": "/c=..\\ /steampowered"},
             "2": {"executable": "Odd\\x64Vk\\Hades.exe", "workingdir": "x64\\"},
-            "3": {"executable": "./NoDir/Game.exe"}}}}},
+            "3": {"executable": "./NoDir/Game.exe"},
+            "9": {"executable": "Game.app", "config": {"oslist": "macos"}},
+            "10": {"executable": "Beta\\Hades.exe", "config": {"BetaKey": "nightly-qa"}},
+            "11": {"executable": "None\\Hades.exe", "type": "none"},
+            "12": {"executable": "x86\\Hades.exe", "config": {"oslist": "windows", "osarch": "32"}},
+            "13": {"executable": "Desk\\Hades.exe", "config": {"steamdeck": "0"}},
+            "15": {"executable": "Deck\\Hades.exe", "description": "Deck", "description_loc": {"english": "Hades (Steam Deck)"},
+                   "config": {"oslist": "windows", "osarch": "64", "steamdeck": "1"}}}}}},
     891390: {"appinfo": {"appid": 891390, "common": {"name": "SteamPlay 2.0 Manifests", "type": "Config"}, "extended": {
         "app_compat_configs": {"2310": {"appid": 2310, "config": "oldglstr", "comment": "QUAKE"},
                                "1145360": {"appid": 1145360, "config": "gamedrive,heapdelayfree", "comment": "test"}}}}},
@@ -341,8 +348,8 @@ printf '"manifest"\n{\n  "commandline" "/proton %%verb%%"\n  "require_tool_appid
 printf '"compatibilitytools"\n{\n  "compat_tools"\n  {\n    "proton-armv8-experimental-retroforge"\n    {\n      "install_path" "."\n    }\n  }\n}\n' >"$EXP/compatibilitytool.vdf"
 GAMES="$H/.config/retroforge/steam-games.json"
 direct -- game 1145360
-[ "$RC" = 0 ] && python3 -c 'import json, sys; d = json.loads(sys.argv[1]); assert d["settings"] == {"proton": "default", "sarek": "default", "launch": "default"}, d; assert [e["key"] for e in d["launch"]] == ["0", "1", "2", "3"], d' "$OUT" \
-  && ok "game: every choice at its default, and the game's launch entries" || bad "rc=$RC out=$OUT err=$ERR"
+[ "$RC" = 0 ] && python3 -c 'import json, sys; d = json.loads(sys.argv[1]); assert d["settings"] == {"proton": "default", "sarek": "default", "launch": "default"}, d; assert [e["key"] for e in d["launch"]] == ["0", "1", "2", "3", "15"], d; assert d["launch"][-1]["description"] == "Hades (Steam Deck)", d; assert d["direct"] in ("on", "off"), d' "$OUT" \
+  && ok "game: every choice at its default, and the launch entries Steam's dialog offers here, in its order" || bad "rc=$RC out=$OUT err=$ERR"
 direct -- game 1145360 set launch 0 && direct -- game 1145360 set proton experimental && direct -- game 1145360 set sarek off
 [ "$RC" = 0 ] && python3 -c 'import json, sys; assert json.load(open(sys.argv[1])) == {"1145360": {"launch": "0", "proton": "experimental", "sarek": "off"}}' "$GAMES" \
   && ok "set: saved in steam-games.json" || bad "rc=$RC $(cat "$GAMES" 2>&1)"
