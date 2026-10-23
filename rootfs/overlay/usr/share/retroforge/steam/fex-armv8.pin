@@ -1,0 +1,12 @@
+# Valve's FEX tool built for ARMv8.0 CPUs (no LSE atomics) by sunshineinabox/proton-armv8, from the commit
+# its fex.pin names (Valve's). retroforge-steam-fex installs it on such CPUs as a Steam tool of its own and
+# swaps its binaries into Valve's FEX tool while the versions match. Fields as in proton-armv8.pin; entry:
+# is what steam-compat-tools checks the tool by (its manifest runs Valve's fex-compat-tool, which
+# retroforge-steam-fex copies in from Valve's tool).
+name: fex-armv8
+releases: https://api.github.com/repos/sunshineinabox/proton-armv8/releases
+asset: fex-armv8-*.tar.zst
+sidecar: .sha512
+dir: fex-armv8-retroforge
+display_name: FEX ARMv8.0 (RetroForge)
+entry: FEXCompatTool

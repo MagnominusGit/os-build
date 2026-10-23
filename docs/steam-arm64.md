@@ -677,13 +677,30 @@ which Valve's `proton` applies before it reads `PROTON_DXVK_SAREK`. A pin can al
 (`prereleases: yes`), for the experimental channel. Turning Sarek off clears it in every folder
 RetroForge installed, so a Proton-CachyOS left on such a device follows the setting too.
 
-Valve's FEX tool (app 3127680, for native x86 Linux games) is built for ARMv8.1+ as well: inline LSE in
-`usr/bin/FEX` (244), `FEXOfflineCompiler` (139), `FEXGetConfig` (4) and `FEXServer` (1). Steam adds it as a
-compat layer (`compatmanager_layer_name "fex"`), not as a tool a game can be set to. Whether Steam takes
-a replacement is not yet tested.
+Seen on the Air X (2026-10-22/23): the arm64 client takes the tool (its compat log names "Proton ARMv8.0
+(RetroForge)" as tool 0), Hades runs with it with and without the client, and the emulations fall from
+~3.36M/s to ~1,000/s at their peak, none from `ntdll.dll`.
 
-Not yet seen on hardware: Steam listing the tool (`to_oslist linux` on the arm64 client), a game run with
-it, the emulation rate with it.
+**FEX.** Valve's FEX tool (app 3127680, `steamapps/common/FEX-Emu`, for native x86 Linux games) is built for
+ARMv8.1+ as well: 388 inline LSE sites in its seven binaries (`usr/bin/FEX` 244, `FEXOfflineCompiler` 139...).
+Steam adds it as a compat layer (`compatmanager_layer_name "fex"`) to every x86 Steam Linux Runtime, and lists
+it as "fex" for a game to be set to. proton-armv8 builds the commit Valve's tool is built from (its `fex.pin`,
+bumped by hand: the tool is owners-only, so CI cannot read its version) for ARMv8.0 with Steam support, as
+release `fex-armv8-<version>`. On ARMv8.0 CPUs `retroforge-steam-fex apply` (run by `/usr/bin/steam`) does
+nothing until Steam has installed Valve's tool, then:
+- installs and updates ours as `compatibilitytools.d/fex-armv8-retroforge`, "FEX ARMv8.0 (RetroForge)"
+  (steam-compat-tools, `fex-armv8.pin`, `entry: FEXCompatTool`), copying in Valve's `fex-compat-tool` and
+  `unshare.py`, which its manifest runs but which are not FEX's;
+- while Valve's `VERSIONS.txt` names the same version as ours, renames our `usr/bin/*` and `FEXCompatTool`
+  over Valve's, so every x86 game gets them. Steam puts Valve's back when it updates or checks the tool; the
+  next start swaps them again. Another version keeps Valve's.
+
+On the Air X, SuperTux (app 1572920, free, an x86_64 AppImage) at its menu: ~3,000 emulations a second from
+the game with Valve's FEX, none with ours, both as a swap and as our own tool (2026-10-23). Getting it there
+took three things: the arm64 client maps an x86 Linux game that also has a Windows build to Proton, so its
+tool was set to FEX; its AppImage needs FUSE, which the image lacks (`APPIMAGE_EXTRACT_AND_RUN=1 %command%`);
+and Steam Input never reaches a game started inside the client, because OGUI tags its windows with the
+client's app id (`running_app.gd` `_ensure_app_id`), so its controller needed Steam Input off.
 
 ## Remote Play (the handheld as a client)
 

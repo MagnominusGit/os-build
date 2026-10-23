@@ -53,6 +53,11 @@
 # Steam is never told to use the tool (config.vdf is not edited). The player picks it per game
 # (Properties > Compatibility) or as the Steam Play default (docs/steam-arm64.md).
 #
+# OTHER TOOLS. A pin's `entry:` names the file a tool's toolmanifest.vdf runs, when it is not Proton's
+# `proton` (fex-armv8.pin: FEXCompatTool, for retroforge-steam-fex). Such a tool keeps its own lock and
+# waiting folder (<Steam root>/.retroforge-<name>.lock and .next), so it updates beside Proton, and gets
+# nothing of Sarek.
+#
 # Exit 0 (`on`: the tool's folder on stdout, or nothing when another run holds the lock), also when
 # GitHub cannot be asked and a tool is installed; 1 when the release could not be installed (nothing
 # installed and GitHub unreachable, a checksum mismatch, a tarball without its folder); 2 for a bad
@@ -123,8 +128,6 @@ NEXT = os.path.join(STEAM_ROOT, ".retroforge-compat-tools.next")
 MARKER = ".retroforge-pin"
 SETTINGS = "user_settings.py"
 VDF = "compatibilitytool.vdf"
-# What Steam reads from a tool's folder, and the tool's entry point.
-TOOL_FILES = (VDF, "toolmanifest.vdf", "proton")
 # Releases looked at for the channel: the newest ones. Every release since 2026-02 has the arm64 build.
 PER_PAGE = 20
 AGENT = "retroforge-steam-compat-tools"
@@ -176,7 +179,7 @@ def read_pin():
     try:
         with open(PIN, encoding="utf-8") as f:
             pin = fields(f.read(), ("name", "releases", "asset", "dir", "display_name", "tag", "sha512",
-                                    "sidecar", "prereleases"))
+                                    "sidecar", "prereleases", "entry"))
     except (OSError, UnicodeDecodeError) as err:
         raise Failed(f"no pin: {err}")
     need = ("name", "releases", "asset", "dir", "display_name")
@@ -194,8 +197,19 @@ def read_pin():
         raise Failed(f"{PIN}: tag is not a release tag")
     if pin["sha512"] and not (pin["tag"] and re.fullmatch(r"[0-9a-fA-F]{128}", pin["sha512"])):
         raise Failed(f"{PIN}: sha512 goes with a tag, as 128 hex digits")
+    if pin["entry"] and not NAME_OK.fullmatch(pin["entry"]):
+        raise Failed(f"{PIN}: entry must be a plain file name")
     pin["sha512"] = pin["sha512"] and pin["sha512"].lower()
+    pin["entry"] = pin["entry"] or "proton"
     return pin
+
+
+def use_names(pin):
+    """A tool other than Proton (entry:) waits and locks under its own names, beside Proton's."""
+    global LOCK, NEXT, TMP_PREFIX
+    if pin["entry"] != "proton":
+        base = os.path.join(STEAM_ROOT, f".retroforge-{pin['name']}")
+        LOCK, NEXT, TMP_PREFIX = base + ".lock", base + ".next", f".retroforge-{pin['name']}-"
 
 
 def marker(path):
@@ -215,8 +229,13 @@ def ours(path, pin):
     return m is not None and m["name"] == pin["name"]
 
 
-def complete(path):
-    return all(os.path.isfile(os.path.join(path, f)) for f in TOOL_FILES)
+def tool_files(pin):
+    """What Steam reads from a tool's folder, and the tool's entry point."""
+    return (VDF, "toolmanifest.vdf", pin["entry"])
+
+
+def complete(path, pin):
+    return all(os.path.isfile(os.path.join(path, f)) for f in tool_files(pin))
 
 
 def earlier(pin):
@@ -517,7 +536,7 @@ def staged(rel, pin):
     if not os.path.lexists(NEXT):
         return None
     m = marker(NEXT)
-    if m is not None and m["name"] == pin["name"] and holds(m, rel, pin) and complete(NEXT):
+    if m is not None and m["name"] == pin["name"] and holds(m, rel, pin) and complete(NEXT, pin):
         log(f"{rel['tag']} was downloaded and checked before; putting it in")
         return NEXT
     discard(NEXT)
@@ -542,8 +561,8 @@ def prepare(rel, pin, tmp):
     if res.returncode != 0:
         raise Failed(f"could not unpack {rel['url']}: {res.stderr.strip()}")
     new = os.path.join(tree, top)
-    if os.path.islink(new) or not os.path.isdir(new) or not complete(new):
-        raise Failed(f"{rel['url']} has no {top}/ with {', '.join(TOOL_FILES)}")
+    if os.path.islink(new) or not os.path.isdir(new) or not complete(new, pin):
+        raise Failed(f"{rel['url']} has no {top}/ with {', '.join(tool_files(pin))}")
     vdf = os.path.join(new, VDF)
     try:
         with open(vdf, encoding="utf-8") as f:
@@ -569,7 +588,8 @@ def update(rel, pin, final, was):
             log(f"a game runs from {final}: {rel['tag']} is ready and goes in at the next `steam` "
                 f"start with nothing running from it")
             return
-        settings_into(new, final, pin)
+        if pin["entry"] == "proton":
+            settings_into(new, final, pin)
         if os.path.lexists(final):
             os.rename(final, os.path.join(tmp, "old"))
             try:
@@ -602,8 +622,8 @@ def on(pin):
         if os.path.lexists(final) and not ours(final, pin):
             log(f"{final} is already there and was not installed by RetroForge; leaving it alone")
             return final
-        have = marker(final) if complete(final) else None
-        if have:
+        have = marker(final) if complete(final, pin) else None
+        if have and pin["entry"] == "proton":
             sarek_on(final)
         if have and pin["tag"] and have["tag"] == pin["tag"] and (not pin["sha512"] or have["sha512"] == pin["sha512"]):
             current = True  # the pin's own release is in: nothing to ask
@@ -621,7 +641,7 @@ def on(pin):
                     update(rel, pin, final, have and have["tag"])
         if current and os.path.lexists(NEXT):
             discard(NEXT)  # a release that waited there and is no longer the one to install
-        if marker(final) is not None and complete(final):
+        if marker(final) is not None and complete(final, pin):
             retire(pin)
     return final
 
@@ -632,8 +652,10 @@ def main(argv):
         return 2
     try:
         pin = read_pin()
+        use_names(pin)
         if argv[1] == "off":
-            sarek_off(pin)
+            if pin["entry"] == "proton":
+                sarek_off(pin)
             return 0
         path = on(pin)
     except (Failed, OSError) as err:
