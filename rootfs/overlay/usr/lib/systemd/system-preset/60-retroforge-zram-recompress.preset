@@ -1,4 +1,0 @@
-# retroforge: recompress idle zram pages with zstd (zram-generator.conf's second algorithm). Enabled on
-# release like earlyoom (60 < the stock 99-default.preset's "disable *"), with a build-time
-# timers.target.wants symlink alongside as a fallback.
-enable retroforge-zram-recompress.timer

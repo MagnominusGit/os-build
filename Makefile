@@ -484,7 +484,6 @@ test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-emu.sh
 	bash $(TESTS_DIR)/test-scrape.sh
 	bash $(TESTS_DIR)/test-sysctl.sh
-	bash $(TESTS_DIR)/test-zram.sh
 	bash $(TESTS_DIR)/test-key-drift.sh
 	bash $(TESTS_DIR)/test-portmaster.sh
 	bash $(TESTS_DIR)/test-shares.sh

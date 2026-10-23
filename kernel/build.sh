@@ -177,11 +177,11 @@ fi
   #       update path can be missing exactly when an update is applied.
   #   =y  vfat + loop: image/initramfs/init mounts the ESP to read the A/B slot state. Losing
   #       vfat makes every boot silently fall back to the cmdline root= instead.
-  #   =y  zram + its lz4 and zstd backends + recompression: the ONLY swap device on this image comes
-  #       from zram-generator, and a kernel without it produces no zram0, no swap and no error —
-  #       while 60-retroforge-gaming.conf's vm.swappiness=180 quietly does nothing. The backends and
-  #       MULTI_COMP are checked separately from ZRAM because losing one leaves zram working but
-  #       rejecting the `compression-algorithm = lz4 zstd(level=1)` the shipped generator config asks for.
+  #   =y  zram + the zstd backend: the ONLY swap device on this image comes from zram-generator,
+  #       and a kernel without it produces no zram0, no swap and no error — while
+  #       60-retroforge-gaming.conf's vm.swappiness=180 quietly does nothing. The backend is checked
+  #       separately from ZRAM because losing just that one leaves zram working but rejecting the
+  #       `compression-algorithm = zstd(level=1)` the shipped generator config asks for.
   #
   # The block below guards the Qualcomm platform path against kernel/trim-platforms.config.
   # That fragment disables ~47 non-Qualcomm ARCH_* platform gates and lets kconfig's dependency
@@ -216,7 +216,7 @@ fi
   #       falls back to software decode on four A73s, again with no other symptom.
   for pair in CFG80211=m MAC80211=m TOUCHSCREEN_CHIPONE_TDDI=m VIDEO_QCOM_IRIS=m VIDEO_QCOM_VENUS=m \
               BLK_DEV_DM=y DM_VERITY=y VFAT_FS=y BLK_DEV_LOOP=y \
-              ZRAM=y ZRAM_BACKEND_ZSTD=y ZRAM_BACKEND_LZ4=y ZRAM_MULTI_COMP=y \
+              ZRAM=y ZRAM_BACKEND_ZSTD=y \
               DRM_MSM=y PCIE_QCOM=y PCI_PWRCTRL_GENERIC=y MMC_SDHCI_MSM=y SCSI_UFSHCD=y \
               ARM_SMMU=y ARM64_4K_PAGES=y SCHED_CLASS_EXT=y DEBUG_INFO_BTF=y \
               SQUASHFS=y OVERLAY_FS=y; do
