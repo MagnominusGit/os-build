@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Offline test for /usr/bin/retroforge-suspend's PANEL BLANK path.
+# Offline test for /usr/bin/retroforge-suspend's PANEL BLANK path, and for its radio block never
+# being restored at a later boot.
 #
 #   tests/test-suspend.sh
 #
@@ -99,6 +100,34 @@ if grep -qE '^\s*bl_power 0\s*$' "$SUSPEND"; then
   ok "the resume path unblanks the backlight unconditionally"
 else
   bad "bl_power 0 is missing or conditional in do_resume -- a wake could stay dark"
+fi
+
+CASE="the-radio-block-never-outlives-the-boot"
+# HW 2026-10-23, MANGMI Air X: an update was installed while the device slept, it was woken and
+# rebooted, and the new slot came up with Wi-Fi soft-blocked. systemd-rfkill had saved power_enter's
+# temporary block to /var/lib/systemd/rfkill, and post-install copies the running /var into the new
+# slot; losing power or rebooting while asleep ends the same way. So nothing may save or restore
+# rfkill state across boots. Structural, like the-wiring: systemd does not run here.
+UNITS="$ROOT/rootfs/overlay/etc/systemd/system"
+for u in systemd-rfkill.service systemd-rfkill.socket; do
+  if [ -L "$UNITS/$u" ] && [ "$(readlink "$UNITS/$u")" = /dev/null ]; then
+    ok "$u is masked"
+  else
+    bad "$u is not masked -- a block saved during sleep comes back at the next boot"
+  fi
+done
+RULE="$ROOT/rootfs/overlay/usr/lib/udev/rules.d/99-zz-retroforge-rfkill.rules"
+if grep -qxF 'SUBSYSTEM=="misc", KERNEL=="rfkill", ENV{SYSTEMD_WANTS}=""' "$RULE" 2>/dev/null; then
+  ok "udev no longer wants the masked socket"
+else
+  bad "no rule clearing /dev/rfkill's SYSTEMD_WANTS -- every rfkill uevent logs a masked-unit warning"
+fi
+# udev applies rules files in strcmp order; ahead of 99-systemd.rules the clear is undone.
+first="$(printf '%s\n' "${RULE##*/}" 99-systemd.rules | LC_ALL=C sort | head -n1)"
+if [ "$first" = 99-systemd.rules ]; then
+  ok "${RULE##*/} runs after 99-systemd.rules"
+else
+  bad "${RULE##*/} sorts before 99-systemd.rules, so its clear is undone"
 fi
 
 echo

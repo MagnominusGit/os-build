@@ -37,7 +37,10 @@ drop-in redirects logind `Suspend()` into `retroforge-suspend`; `retroforge-powe
 configurable short/long-press action, suspend and power-off by default), the power-policy daemon
 `retroforge-powerd`, the key-pairing agent `retroforge-pairingd`, Bluetooth, and `systemd-timesyncd`.
 All enabled via shipped presets + `*.target.wants` symlinks. No Wi-Fi resume hook ships (NM
-re-associates unaided).
+re-associates unaided). `etc/systemd/system/systemd-rfkill.{service,socket} -> /dev/null`: the
+suspend engine soft-blocks the radios, and systemd-rfkill would save that block and restore it at the
+next boot (see `_pow_rf_enter` in `usr/lib/retroforge/power-ops.sh`); `99-zz-retroforge-rfkill.rules`
+drops udev's want for the masked socket.
 
 **Update and storage entry points**
 `usr/bin/retroforge-update` is the OS update client (RAUC), including its channel picker

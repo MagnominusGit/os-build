@@ -1,0 +1,8 @@
+# systemd-rfkill is masked (etc/systemd/system/systemd-rfkill.{service,socket} -> /dev/null; see
+# _pow_rf_enter in usr/lib/retroforge/power-ops.sh for why). systemd's own 99-systemd.rules still
+# makes /dev/rfkill want the socket, and a want on a masked unit logs "Unit systemd-rfkill.socket is
+# masked" on every /dev/rfkill uevent (boot, each login and logout). This drops that want.
+#
+# It only works AFTER 99-systemd.rules: udev applies rules files in strcmp order of their names, so
+# a 99-retroforge-* name would run first and be undone. Hence 99-zz-.
+SUBSYSTEM=="misc", KERNEL=="rfkill", ENV{SYSTEMD_WANTS}=""

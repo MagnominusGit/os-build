@@ -51,6 +51,12 @@ _pow_cpu_leave() {
 
 # --- radios: soft-block via sysfs (no rfkill binary dependency). Record only those we actually
 # blocked (skip already-blocked ones) so leave restores the prior radio state.
+#
+# The block must never outlive the boot, which is why the image masks systemd-rfkill. It saved this
+# block to /var/lib/systemd/rfkill within seconds and restored it at the next boot, so a device that
+# lost power, rebooted, or took an update while asleep (post-install copies /var into the new slot)
+# came back with Wi-Fi and Bluetooth soft-blocked (Air X, 2026-10-23). The player's own choices do not
+# live in rfkill: OGUI sets NetworkManager's WirelessEnabled (kept in its state file) and BlueZ's Powered.
 _pow_rf_enter() {
   # Save the connected AP's freq (while still associated) so _pow_rf_leave can prime the
   # scan cache on that one channel at resume instead of eating ath12k/WCN7850's slow
