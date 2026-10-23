@@ -121,8 +121,11 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
     `STEAM_FEX_*`, so a clientless launch loses nothing. Appinfo has Valve's `common/steam_frame_compatibility/
     configuration/tso_enable` (Hades: 0), apparently for the Steam Frame only. Worth exposing: TSO (the big cost
     on ARMv8.0 cores, with Valve's hint as a label), maybe Multiblock.
-- [ ] Per-game Turnip and FEX TSO rows (clientless launches: `VK_DRIVER_FILES`, `STEAM_FEX_TSOENABLED`). Needs a
-  source of Turnip variants first (user's call), and a Hades run with TSO off to see what it is worth.
+- [x] Per-game FEX TSO row (`STEAM_FEX_TSOENABLED`, 424d7e4). Hades on the Air X, standing in the House of Hades
+  hub, 30 s each (2026-10-23): TSO off 237% of one core (threads 98/48/29%, system 39% of 8 cores); TSO on 262%
+  (97/51/41%, system 44%). The main thread is maxed either way, so off saves about a tenth of the CPU, mostly on
+  the worker threads.
+- [ ] Per-game Turnip (`VK_DRIVER_FILES`): later, by the user's call (2026-10-23); only the image's Turnip for now.
 - [x] Tests (`tests/test-plugin.sh`, `test-steam-direct.sh`, `test-steam-proton.sh`), docs (`docs/steam-arm64.md`).
 
 ### Later (TODO)
