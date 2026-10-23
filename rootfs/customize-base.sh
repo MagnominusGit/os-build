@@ -198,7 +198,13 @@ BOOTSTRAP_PKGS=(base)
 #                       Every library the client's arm64 ELFs link resolves against PKGS + gtk2 and
 #                       libibus (checked in the builder 2026-10-17); no ffmpeg, the client ships its
 #                       own libav*.
-PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-mesa-layers vulkan-tools retroforge-gpu-priority mesa gamescope seatd mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit e2fsprogs xorg-xwayland noto-fonts noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl opengamepadui powerstation inputplumber which fuse3 ksmbd-tools avahi sdl2_ttf sdl2_image sdl2_mixer squashfuse mesa-utils unzip openal libtheora rmtfs xxhash fuse-overlayfs gtk2 libibus lsof)
+#   zlib-ng-compat      zlib-ng as the system libz.so.1, in place of core/zlib (it provides zlib and
+#                       libz.so=1-64; nothing in the snapshot needs a versioned zlib). On the Air X,
+#                       32 MB of libraries, against zlib 1.3.2 (2026-10-23): inflate 1.4-1.5x, deflate
+#                       2x, crc32 6-10x, adler32 2-6x, on A73 and A53 alike; no LSE atomics; level-1
+#                       output ~25% bigger. It speeds what uses the system libz (our Python tools, OGUI,
+#                       PortMaster ports); emulators and Steam's runtime carry their own zlib.
+PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-mesa-layers vulkan-tools retroforge-gpu-priority mesa gamescope seatd mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit e2fsprogs xorg-xwayland noto-fonts noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl opengamepadui powerstation inputplumber which fuse3 ksmbd-tools avahi sdl2_ttf sdl2_image sdl2_mixer squashfuse mesa-utils unzip openal libtheora rmtfs xxhash fuse-overlayfs gtk2 libibus lsof zlib-ng-compat)
 
 # Dev-only packages — installed ONLY under RETROFORGE_DEV=1, NEVER in a release base.
 # On-device bring-up tools: evtest reads raw /dev/input events; usbutils provides lsusb.
