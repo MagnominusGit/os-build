@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Fri, 23 Oct 2026 10:30:00 -0700
+Subject: [PATCH] fix(OnScreenKeyboard): opening it while open only retargets
+
+Each open() emitted "opened", and the SpacerGrowerEffect in card_ui.tscn
+grows the menu's KeyboardSpacer to its current height plus the keyboard's.
+Once taps outside the keys reached the menu (0025), a tap on the field the
+keyboard types into opened it again, and every tap pushed the menu up by
+another keyboard height (HW, MANGMI Air X, 2026-10-23).
+
+"opened" is emitted only when the keyboard was closed; a second open()
+still takes the new target and focuses the first key.
+
+---
+ core/ui/common/osk/on_screen_keyboard.gd | 7 +++++++
+ 1 file changed
+
+--- a/core/ui/common/osk/on_screen_keyboard.gd
++++ b/core/ui/common/osk/on_screen_keyboard.gd
+@@ -32,6 +32,9 @@
+ @export var instance: KeyboardInstance = preload("res://core/global/keyboard_instance.tres")
+ var _mode_shift: MODE_SHIFT = MODE_SHIFT.OFF
+ var _last_input_focus: int
++## Between open() and close(). Another open() meanwhile (a tap on the field it types into) only
++## retargets: "opened" again grew the menu's keyboard spacer by the keyboard's height each time.
++var _is_open := false
+ var logger := Log.get_logger("OSK", Log.LEVEL.INFO)
+ 
+ @onready var rows_container := $%KeyboardRowsContainer as VBoxContainer
+@@ -206,11 +209,15 @@
+ 			var overlay_window_id := ogui_windows[0]
+ 			xwayland.set_input_focus(overlay_window_id, 2)
+ 
++	if _is_open:
++		return
++	_is_open = true
+ 	opened.emit()
+ 
+ 
+ # Closes the OSK
+ func close() -> void:
++	_is_open = false
+ 	# Remove the OSK state
+ 	popup_state_machine.remove_state(osk_state)
+ 
