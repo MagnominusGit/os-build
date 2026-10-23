@@ -77,8 +77,7 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
 ### Phase 2: hardware check (Air X)
 - [x] Installed `armv8-proton-11.0-2e` with the branch's `steam-compat-tools` on the Air X (2026-10-22): 412 MB
   download, 215 s, 2.0 GB; named and Sarek on as designed.
-- [ ] Does the arm64 client list it? Its `compatibilitytool.vdf` says `to_oslist linux`, and the client has "Ignoring
-  tool %s as it's for a different target platform".
+- [x] The arm64 client takes it: compat_log.txt has `Command prefix for tool 0 "Proton ARMv8.0 (RetroForge)"`.
 - [x] Hades without the client through it (`~/.cache/rf-test/rf-tool-launch.py`): menu reached. Emulations peaked at
   ~1,000/s (was 3.36M/s), ~2k in total for Hades.exe, none from `ntdll.dll`; the rest is Valve's `steamclient.so`.
 - [x] Experimental: rebuilt with Xalia allowed (`scan-allow.txt`), released as `armv8-experimental-11.0-20261014`.
@@ -106,7 +105,24 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
   (D7), launch option with its own arguments (as Steam's dialog offers them on a Deck), and resolution (Steam's Game
   resolution, else Settings > Display; put back when the game ends). a77b560, 1f7e09b, daecd3d, 4c0d867; all seen on
   the Air X with Hades (2026-10-23). Turnip and FEX settings once Phase 4b answers how.
-- [ ] 4b: Turnip variants in `/home` via `VK_DRIVER_FILES`. Does Steam Linux Runtime 4 load them? What about the matching x86 Turnip for FEX guests? Which `proton-fex-config.json` keys are worth exposing?
+- [x] 4b answered on the Air X (2026-10-23):
+  - Turnip: yes. SLR4's pressure-vessel (0.20261007) takes `VK_DRIVER_FILES` (also `VK_ICD_FILENAMES`,
+    `VK_ADD_DRIVER_FILES`), rewrites the ICD into its overrides and leaves `library_path` in `/home`, which the
+    container shares. `vulkaninfo` in the runtime used "Turnip Adreno (TM) 610" from the `/home` copy. The driver's
+    own libraries come from the runtime, so a variant has to be built against what steamrt4 ships.
+  - x86 Turnip: not needed for Proton games. Proton ARM64 runs x86 Windows code through FEX inside Wine
+    (`libarm64ecfex`, `libwow64fex`, `xtajit64`), and winevulkan calls the arm64 Turnip. Only native x86 Linux
+    games under Steam's FEX layer use the x86 Mesa guest, as now.
+  - FEX: Proton writes `proton-fex-config.json` per game from `STEAM_FEX_TSOENABLED`, `STEAM_FEX_MULTIBLOCK`, or
+    `STEAM_COMPAT_FEX_CONFIG` ("TSOEnabled:1,Multiblock:1", which sets both), plus its own profiles table
+    (X87ReducedPrecision for The Witcher 3). Its defaults (`files/share/fex-emu/Config.json`): TSOEnabled 1,
+    HalfBarrierTSOEnabled 1, VectorTSOEnabled 0, MemcpySetTSOEnabled 0, Multiblock 1, X87ReducedPrecision 1,
+    MaxInst 500. The arm64 client sets `STEAM_COMPAT_FEX_CONFIG` empty at every launch (compat_log.txt) and no
+    `STEAM_FEX_*`, so a clientless launch loses nothing. Appinfo has Valve's `common/steam_frame_compatibility/
+    configuration/tso_enable` (Hades: 0), apparently for the Steam Frame only. Worth exposing: TSO (the big cost
+    on ARMv8.0 cores, with Valve's hint as a label), maybe Multiblock.
+- [ ] Per-game Turnip and FEX TSO rows (clientless launches: `VK_DRIVER_FILES`, `STEAM_FEX_TSOENABLED`). Needs a
+  source of Turnip variants first (user's call), and a Hades run with TSO off to see what it is worth.
 - [x] Tests (`tests/test-plugin.sh`, `test-steam-direct.sh`, `test-steam-proton.sh`), docs (`docs/steam-arm64.md`).
 
 ### Later (TODO)
