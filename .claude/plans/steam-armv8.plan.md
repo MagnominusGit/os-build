@@ -82,8 +82,8 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
 - [x] Hades without the client through it (`~/.cache/rf-test/rf-tool-launch.py`): menu reached. Emulations peaked at
   ~1,000/s (was 3.36M/s), ~2k in total for Hades.exe, none from `ntdll.dll`; the rest is Valve's `steamclient.so`.
 - [x] Experimental: rebuilt with Xalia allowed (`scan-allow.txt`), released as `armv8-experimental-11.0-20261014`.
-- [ ] `PROTON_DXVK_SAREK=1` selects Sarek.
-- [ ] Works with the clientless launch (`retroforge-steam-direct`).
+- [x] `PROTON_DXVK_SAREK=1` selects Sarek: Hades on DirectX 11 reached its first room through Sarek, without an OOM.
+- [x] Works with the clientless launch (`retroforge-steam-direct`), which swaps in the tool Steam is set to now (437e6d5).
 - [ ] FEX delivery test: does Steam pick up our ARMv8.0 FEX? Try (a) our four binaries swapped into Steam's
   `steamapps/common/FEX-Emu` while its `VERSIONS.txt` matches our build, and (b) a local layer with its own
   `toolmanifest.vdf` (`compatmanager_layer_name "fex"`). Check with a native x86 Linux game and `lse-where`. Also
@@ -98,13 +98,16 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
 - [ ] The Proton-CachyOS folder already on ARMv8.0 devices (2.2 GB) stays. Remove it? (user's call)
 
 ### Phase 4: OGUI Steam settings page (same branch, or the next one)
-- [x] Settings > Steam (`steam_settings.gd`), after General; the three Steam toggles moved there (6ecae33). Not yet run on hardware.
+- [x] Settings > Steam (`steam_settings.gd`), after General; the three Steam toggles moved there (6ecae33). Seen on the Air X.
 - [x] Proton row (`steam_proton.gd`), only on ARMv8.0 CPUs: stable or experimental. `retroforge-steam-proton` makes it
   Steam's default (`CompatToolMapping` "0" in config.vdf, written while the client is closed; 15dc8a3). The user decided
   2026-10-22: default on ARMv8.0-only devices, nothing elsewhere, other options hidden there.
-- [ ] Per-game overrides in the game's settings (like `game_settings_page.gd`): Proton build and Sarek (D7). Turnip and FEX settings once Phase 4b answers how.
+- [x] Per-game overrides in Game settings > RetroForge, for games started without the client: Proton build, Sarek
+  (D7), launch option with its own arguments (as Steam's dialog offers them on a Deck), and resolution (Steam's Game
+  resolution, else Settings > Display; put back when the game ends). a77b560, 1f7e09b, daecd3d, 4c0d867; all seen on
+  the Air X with Hades (2026-10-23). Turnip and FEX settings once Phase 4b answers how.
 - [ ] 4b: Turnip variants in `/home` via `VK_DRIVER_FILES`. Does Steam Linux Runtime 4 load them? What about the matching x86 Turnip for FEX guests? Which `proton-fex-config.json` keys are worth exposing?
-- [ ] Tests (`tests/test-plugin.sh`), docs.
+- [x] Tests (`tests/test-plugin.sh`, `test-steam-direct.sh`, `test-steam-proton.sh`), docs (`docs/steam-arm64.md`).
 
 ### Later (TODO)
 - [ ] Steam page: an "Open Steam (Remote Play)" button, as Emulators > Steam Client > Open, and a read-only video decode
@@ -128,7 +131,7 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
 - **Our builds use LL/SC everywhere on the PE side.** That is why they are offered only under D6.
 
 ## Acceptance
-- [ ] Stable and experimental ARMv8.0 releases are published by CI from Valve tags.
-- [ ] ARMv8.0 devices download our build instead of Proton-CachyOS; other devices are unchanged.
-- [ ] The Steam settings page ships with the per-game Proton and Sarek choices.
+- [x] Stable and experimental ARMv8.0 releases are published by CI from Valve tags.
+- [x] ARMv8.0 devices download our build instead of Proton-CachyOS; other devices are unchanged.
+- [x] The Steam settings page ships with the per-game Proton and Sarek choices (on this branch, not yet merged).
 - [ ] Phase 5 is discussed and scheduled.
