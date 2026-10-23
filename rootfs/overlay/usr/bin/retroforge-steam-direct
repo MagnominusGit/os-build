@@ -423,26 +423,59 @@ def beta_key(sl, appid):
     return ""
 
 
-def launch_entries(app, beta=""):
-    """The launch entries Steam's dialog offers here (64-bit Windows, as a Steam Deck, on branch beta),
-    in Steam's order: key, description, executable (relative)."""
+def launch_entries(app, beta="", every=False):
+    """The launch entries Steam's dialog offers here (64-bit Windows, as a Steam Deck, on branch beta;
+    all of them with every), in Steam's order: key, description, executable and workingdir (relative),
+    arguments."""
     launch = app.get("appinfo", app).get("config", {}).get("launch", {})
     entries = []
     order = lambda kv: (0, int(kv[0]), "") if str(kv[0]).isdigit() else (1, 0, str(kv[0]))
     for key, entry in sorted(launch.items(), key=order) if isinstance(launch, dict) else ():
-        if not isinstance(entry, dict) or not entry.get("executable") or entry.get("type") == "none":
+        if not isinstance(entry, dict) or not entry.get("executable"):
             continue
         config = entry.get("config") if isinstance(entry.get("config"), dict) else {}
         config = {str(k).lower(): str(v) for k, v in config.items()}
-        if (config.get("oslist") and "windows" not in config["oslist"]) or config.get("osarch", "64") != "64" \
-                or config.get("betakey", beta) != beta or config.get("steamdeck") == "0":
+        if not every and (entry.get("type") == "none" or (config.get("oslist") and "windows" not in config["oslist"])
+                          or config.get("osarch", "64") != "64" or config.get("betakey", beta) != beta
+                          or config.get("steamdeck") == "0"):
             continue
         path = str(entry["executable"]).replace("\\", "/")
         path = path[2:] if path.startswith("./") else path.lstrip("/")
         loc = entry.get("description_loc") if isinstance(entry.get("description_loc"), dict) else {}
         text = loc.get("english") or entry.get("description") or path
-        entries.append({"key": str(key), "description": str(text), "executable": path})
+        entries.append({"key": str(key), "description": str(text), "executable": path,
+                        "workingdir": str(entry.get("workingdir") or "").replace("\\", "/").strip("/"),
+                        "arguments": str(entry.get("arguments") or "")})
     return entries
+
+
+def steam_words(arguments):
+    """A launch entry's arguments as the words Steam passes: split at spaces, "quoted" parts kept whole."""
+    return [w.replace('"', "") for w in re.findall(r'(?:[^\s"]+|"[^"]*")+', arguments)]
+
+
+def with_entry(command, words, exe, game, entries, entry):
+    """command with exe and its arguments replaced by entry's program and arguments, and whether its
+    arguments were: those of exe's entry (the longest) whose words follow it in command. Words after
+    them, the player's own launch options, stay; with no such entry, all of them do."""
+    after = words[words.index(exe) + 1:]
+    rel = os.path.relpath(os.path.realpath(exe), os.path.realpath(game)).casefold()
+    olds = [steam_words(e["arguments"]) for e in entries if e["executable"].casefold() == rel]
+    old = max((w for w in olds if after[:len(w)] == w), key=len, default=None)
+    start = command.index(exe)
+    end = start + len(exe)
+    if command[start - 1:start] in ("'", '"') and command[end:end + 1] == command[start - 1]:
+        end += 1  # its closing quote
+    head = command[:start] + os.path.join(game, entry["executable"]) + command[start + len(exe):end]
+    if old is None:
+        return head + command[end:], False
+    lexer = shlex.shlex(command[end:], posix=True)
+    lexer.whitespace_split, lexer.commenters = True, ""
+    for _ in old:
+        lexer.get_token()
+    rest = command[end:][lexer.instream.tell():] if old else command[end:]
+    new = "".join(" " + shlex.quote(w) for w in steam_words(entry["arguments"]))
+    return head + new + (" " + rest.lstrip() if rest.strip() else ""), True
 
 
 def plan(appid):
@@ -508,16 +541,21 @@ def plan(appid):
         appinfo = sl.read_app_nodes(os.path.join(STEAM_ROOT, "appcache", "appinfo.vdf"), {appid, STEAMPLAY_MANIFESTS})
     except (OSError, sl.Unreadable) as err:
         log(f"appinfo.vdf: {err}; the game runs from its executable's folder, without Valve's Proton setting")
+    entry_dir = ""
     if choice["launch"] != "default":
-        entries = launch_entries(appinfo.get(appid, {}), beta_key(sl, appid))
-        entry = next((e for e in entries if e["key"] == choice["launch"]), None)
+        app = appinfo.get(appid, {})
+        entry = next((e for e in launch_entries(app, beta_key(sl, appid)) if e["key"] == choice["launch"]), None)
         other = os.path.join(game, entry["executable"]) if entry else ""
         if entry and os.path.isfile(other) and exe in command:
-            command, exe = command.replace(exe, other), other
-            log(f"app {appid} runs its launch option {entry['description']!r}")
+            command, args = with_entry(command, words, exe, game, launch_entries(app, every=True), entry)
+            exe, entry_dir = other, entry["workingdir"]
+            log(f"app {appid} runs its launch option {entry['description']!r}"
+                + ("" if args else ", with the arguments Steam last gave it (no entry of its program has them)"))
         else:
             log(f"app {appid}: its launch option {choice['launch']} is not there; Steam's last launch stays")
     workdir = workingdir(appinfo.get(appid, {}), game, exe)
+    if entry_dir and os.path.isdir(os.path.join(game, entry_dir)):
+        workdir = os.path.join(game, entry_dir)
     config = compat_config(appinfo.get(STEAMPLAY_MANIFESTS, {}), appid)
     env = {
         "SteamAppId": str(appid), "SteamGameId": str(appid), "SteamOverlayGameId": str(appid),
