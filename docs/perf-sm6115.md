@@ -30,6 +30,8 @@ two threads, 15 s per run).
 | Battery state in OGUI | 50% / charging on a full battery: UPower averaged in the charger's empty companion supply; also drove the docked/undocked performance profile | kernel patch 0967 (built, not yet booted) |
 | GPU load in OGUI / PowerStation | `gpu_busy_percent` "not supported" | kernel patch 0265 (built, not yet booted) |
 | Steam cards at Steam's own art size (600x900, 1200x1800 for `_2x`), one texture per card | idle shell with 67 Steam games: 373 MiB of GPU memory (DRM fdinfo), RAM it shares with the game | plugin 0.1.80: 300x450 card images, one texture per art file: 309 MiB (2026-10-24) |
+| Every card's art loaded when it was built, for every card of every library tab | idle shell with 1,000 games: 872 MiB of GPU memory, 843 MiB of RAM available | OGUI patch 0031: art only within a screen of what is shown, dropped 10 s after its tab hides: 310 MiB, 1,408 MiB available; switching tabs peaks at 359 MiB instead of 937 (2026-10-24) |
+| Switching library tabs with 1,000 games | ~140 ms frame on every switch, the same with and without 0031 (the tab's 1,000 cards laid out again) | none yet: plan Phase 4c, library scaling |
 
 ## OpenGamepadUI's frame cost (why navigation lagged)
 

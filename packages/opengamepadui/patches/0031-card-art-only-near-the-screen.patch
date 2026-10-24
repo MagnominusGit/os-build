@@ -1,0 +1,318 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Sat, 24 Oct 2026 13:00:00 -0700
+Subject: [PATCH] perf(GameCard): card art only near the screen
+
+A card loaded its art when it was built, and the library builds a card
+for every item in each of its tabs, so a whole library's art stayed in
+memory whether or not a card was ever shown: about 0.5 MiB of texture per
+item at 300x450. On an SoC that is GPU memory taken from the RAM a game
+runs in (HW, MANGMI Air X, 3.5 GB, 1,000 games: the idle shell held
+872 MiB of GPU memory).
+
+A card in a ScrollContainer now loads its art once it comes within a
+screen of the container's visible part, and drops it past three screens
+or ten seconds after the container is hidden (CardArtWindow, one per
+container; a scroll costs a binary search over the cards in layout
+order). A dropped texture is freed once no other card holds it. The same
+library: 310 MiB, and 565 MiB more RAM available; switching between its
+tabs peaks at 359 MiB instead of 937.
+
+A grid counts only once it has been laid out while visible: a tab built
+hidden never places its cards, so on its first show every card sat at 0
+and looked on screen, and all 1,000 loaded at once.
+
+A card outside a ScrollContainer loads its art at once, as before, and
+set_library_item() still awaits it there. A card not yet in the tree
+still costs its caller a frame, as the art load did: the library menu's
+refreshes merge only while one runs, and without that frame every added
+item ran a whole refresh at once (1,000 items: a 33 s freeze). The
+removal signals connect at once instead of after the art.
+
+---
+ core/ui/components/card.gd                |  66 ++++++++++--
+ core/ui/components/card_art_window.gd     | 177 ++++++++++++++++++++++++++++++
+ core/ui/components/card_art_window.gd.uid |   1 +
+ 3 files changed
+
+diff --git a/core/ui/components/card.gd b/core/ui/components/card.gd
+index 3b84298..d88887a 100644
+--- a/core/ui/components/card.gd
++++ b/core/ui/components/card.gd
+@@ -37,6 +37,8 @@ signal unhighlighted
+ var library_item: LibraryItem
+ var tapped_count := 0
+ var logger := Log.get_logger("GameCard")
++var _art_window: CardArtWindow  # of the ScrollContainer the card is in; null: the art loads at once
++var _art_gen := 0  # bumped when the art is dropped or the item changes, so a late load is ignored
+ 
+ @onready var texture := $%TextureRect
+ @onready var name_container := $%NameMargin
+@@ -79,15 +81,16 @@ func set_library_item(item: LibraryItem, free_on_remove: bool = true) -> void:
+ 	# Set the name based on the library item
+ 	name = item.name
+ 	library_item = item
+-	
+-	# Get the boxart for the item
+-	var layout = BoxArtProvider.LAYOUT.GRID_PORTRAIT
+-	var card_texture: Texture2D = await boxart_manager.get_boxart(item, layout)
+-	if not card_texture:
+-		card_texture = boxart_manager.get_placeholder(layout)
+-		show_label = true
+-		text = item.name
+-	set_texture(card_texture)
++
++	# In a ScrollContainer the art comes when the card nears the screen (CardArtWindow); out of
++	# one, now. A card not in the tree yet gets it once it enters.
++	release_art()
++	if is_inside_tree() and not _follow_art_window():
++		await load_art()
++	elif not is_inside_tree():
++		# Still a frame, as the art load was: the library menu's refreshes merge while one runs,
++		# and without it every added item ran a whole refresh at once (1,000 items: a 33 s freeze).
++		await (Engine.get_main_loop() as SceneTree).process_frame
+ 
+ 	# Listen for library removal signals and free the card if removed
+ 	if free_on_remove:
+@@ -98,6 +101,51 @@ func set_library_item(item: LibraryItem, free_on_remove: bool = true) -> void:
+ 		item.hidden.connect(on_removed, CONNECT_ONE_SHOT)
+ 
+ 
++## Loads the art of the card's item, or its placeholder and name when it has none.
++func load_art() -> void:
++	if not library_item:
++		return
++	_art_gen += 1
++	var gen := _art_gen
++	var item := library_item
++	var layout = BoxArtProvider.LAYOUT.GRID_PORTRAIT
++	var card_texture: Texture2D = await boxart_manager.get_boxart(item, layout)
++	if gen != _art_gen:
++		return  # dropped, or another item set, while it loaded
++	if not card_texture:
++		card_texture = boxart_manager.get_placeholder(layout)
++		show_label = true
++		text = item.name
++	set_texture(card_texture)
++
++
++## Drops the card's art; the texture is freed once no other card holds it.
++func release_art() -> void:
++	_art_gen += 1
++	set_texture(null)
++
++
++func _enter_tree() -> void:
++	if library_item and not _follow_art_window():
++		load_art()
++
++
++func _exit_tree() -> void:
++	if _art_window:
++		_art_window.remove(self)
++		_art_window = null
++
++
++## Hands the card's art to the window of its ScrollContainer; false when it is in none.
++func _follow_art_window() -> bool:
++	if _art_window:
++		_art_window.remove(self)
++	_art_window = CardArtWindow.of(self)
++	if _art_window:
++		_art_window.add(self)
++	return _art_window != null
++
++
+ func _on_focus() -> void:
+ 	highlighted.emit()
+ 	# The god-rays and shine shaders are animated, so a focused card keeps the interface
+diff --git a/core/ui/components/card_art_window.gd b/core/ui/components/card_art_window.gd
+new file mode 100644
+index 0000000..aae8862
+--- /dev/null
++++ b/core/ui/components/card_art_window.gd
+@@ -0,0 +1,177 @@
++extends RefCounted
++class_name CardArtWindow
++## Card art only where it can be seen. The cards in a ScrollContainer load their art once they come
++## within NEAR screens of its visible part, and drop it past FAR screens or after the container has
++## been hidden for HIDDEN_RELEASE seconds; a dropped texture is freed once no other card holds it.
++## A library of thousands of cards then holds the art of the few dozen around the screen, not of
++## every card it built: on an SoC that art is GPU memory taken from the RAM a game runs in.
++##
++## One window per ScrollContainer, made by the first card that enters it. A scroll costs a binary
++## search over each grid's cards in layout order; the order is read again only after a lay-out.
++## A card is anything with load_art() and release_art() (GameCard).
++
++const NEAR := 1.0  ## screens before and after the visible part whose cards get their art
++const FAR := 3.0  ## screens away from the visible part a card's art is dropped
++const HIDDEN_RELEASE := 10.0  ## seconds a hidden container keeps its cards' art
++
++static var _windows := {}  # ScrollContainer instance id -> CardArtWindow
++
++var hidden_release := HIDDEN_RELEASE
++var _scroll: ScrollContainer
++var _grids := {}  # a card's parent -> its visible cards in layout order ([]: read it again)
++# A card's parent -> laid out while visible since its last card came. A container hidden when its
++# cards are added never places them (every card sits at 0): read then, all of them look on screen.
++var _laid_out := {}
++var _loaded := {}  # card -> true while its art is loaded or loading
++var _queued := false
++var _hidden_at := -1.0
++
++
++## The window of the ScrollContainer `card` is in, made on first use; null outside one.
++static func of(card: Control) -> RefCounted:
++	var node := card.get_parent()
++	while node and not node is ScrollContainer:
++		node = node.get_parent()
++	if not node:
++		return null
++	var id := node.get_instance_id()
++	if not id in _windows:
++		_windows[id] = new(node)
++	return _windows[id]
++
++
++func _init(scroll: ScrollContainer) -> void:
++	_scroll = scroll
++	scroll.get_v_scroll_bar().value_changed.connect(_on_scrolled)
++	scroll.get_h_scroll_bar().value_changed.connect(_on_scrolled)
++	scroll.resized.connect(update)
++	scroll.visibility_changed.connect(_on_visibility_changed)
++	scroll.tree_exiting.connect(_on_scroll_exiting)
++
++
++## A card with an item entered the container: its art follows the window from now on.
++func add(card: Control) -> void:
++	var grid := card.get_parent()
++	if not grid in _grids and grid is Container:
++		grid.sort_children.connect(_on_sorted.bind(grid))
++		grid.tree_exiting.connect(func() -> void:
++			_grids.erase(grid)
++			_laid_out.erase(grid))
++	_grids[grid] = []
++	_laid_out[grid] = not grid is Container
++	update()
++
++
++## A card left the container or got another item.
++func remove(card: Control) -> void:
++	_loaded.erase(card)
++	var grid := card.get_parent()
++	if grid in _grids:
++		_grids[grid] = []
++
++
++## Brings the cards' art in line with the screen, at the end of this frame.
++func update() -> void:
++	if not _queued:
++		_queued = true
++		_apply.call_deferred()
++
++
++func _apply() -> void:
++	_queued = false
++	if not is_instance_valid(_scroll) or not _scroll.is_visible_in_tree():
++		return
++	_hidden_at = -1.0
++	var axis := 1 if _scroll.vertical_scroll_mode != ScrollContainer.SCROLL_MODE_DISABLED else 0
++	var view: float = _scroll.size[axis]
++	if view <= 0.0:
++		return
++	var top: float = _scroll.get_global_rect().position[axis]
++	for grid in _grids.keys():
++		if not is_instance_valid(grid):
++			_grids.erase(grid)
++			_laid_out.erase(grid)
++			continue
++		if not _laid_out.get(grid, false):
++			continue  # its sort, once visible, brings us back
++		var cards: Array = _grids[grid]
++		if cards.is_empty():
++			cards = _layout_order(grid)
++			_grids[grid] = cards
++		var i := _first_reaching(cards, axis, top - NEAR * view)
++		while i < cards.size():
++			var card: Control = cards[i]
++			if card.get_global_rect().position[axis] >= top + (1.0 + NEAR) * view:
++				break
++			if not card in _loaded:
++				_loaded[card] = true
++				card.call(&"load_art")
++			i += 1
++	for card in _loaded.keys():
++		if not is_instance_valid(card):
++			_loaded.erase(card)
++			continue
++		var rect: Rect2 = card.get_global_rect()
++		if rect.end[axis] < top - FAR * view or rect.position[axis] > top + (1.0 + FAR) * view:
++			_loaded.erase(card)
++			card.call(&"release_art")
++
++
++## The grid's visible cards, in the order its container lays them out.
++static func _layout_order(grid: Node) -> Array:
++	var cards := []
++	for child in grid.get_children():
++		if child is Control and child.visible and child.has_method(&"load_art"):
++			cards.append(child)
++	return cards
++
++
++## The first of `cards` (in layout order) whose far edge on `axis` is past `from`.
++static func _first_reaching(cards: Array, axis: int, from: float) -> int:
++	var lo := 0
++	var hi := cards.size()
++	while lo < hi:
++		var mid := (lo + hi) >> 1
++		var card: Control = cards[mid]
++		if not is_instance_valid(card) or card.get_global_rect().end[axis] <= from:
++			lo = mid + 1
++		else:
++			hi = mid
++	return lo
++
++
++func _on_scrolled(_value: float) -> void:
++	update()
++
++
++func _on_sorted(grid: Node) -> void:
++	_grids[grid] = []
++	_laid_out[grid] = grid.is_visible_in_tree()
++	update()
++
++
++func _on_visibility_changed() -> void:
++	if _scroll.is_visible_in_tree():
++		update()
++		return
++	if not _scroll.is_inside_tree():
++		return
++	_hidden_at = Time.get_ticks_msec() / 1000.0
++	_scroll.get_tree().create_timer(hidden_release).timeout.connect(_release_if_hidden)
++
++
++## Every card's art goes once the container has stayed hidden for hidden_release seconds.
++func _release_if_hidden() -> void:
++	if not is_instance_valid(_scroll) or _scroll.is_visible_in_tree() or _hidden_at < 0.0:
++		return
++	if Time.get_ticks_msec() / 1000.0 - _hidden_at < hidden_release - 0.05:
++		return  # shown and hidden again since: the later timer decides
++	for card in _loaded:
++		if is_instance_valid(card):
++			card.call(&"release_art")
++	_loaded.clear()
++
++
++func _on_scroll_exiting() -> void:
++	if _scroll.is_queued_for_deletion():
++		_windows.erase(_scroll.get_instance_id())
+diff --git a/core/ui/components/card_art_window.gd.uid b/core/ui/components/card_art_window.gd.uid
+new file mode 100644
+index 0000000..18e3a9c
+--- /dev/null
++++ b/core/ui/components/card_art_window.gd.uid
+@@ -0,0 +1 @@
++uid://rovpgx5t4cbb
