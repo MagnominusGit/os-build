@@ -119,6 +119,12 @@ static func card_cache_path(cards: String, system: String, rom: String) -> Strin
 	return cards.path_join(system).path_join(rom.trim_suffix("/").get_file() + ".jpg")
 
 
+## A Steam game's cached card image path: in "steam", a folder no ROM system has. Steam's own card
+## art is 600x900 or 1200x1800; the card image is CARD_SIZE, as a ROM's.
+static func steam_card_cache_path(cards: String, appid: int) -> String:
+	return cards.path_join("steam").path_join("%d.jpg" % appid)
+
+
 ## The cached card image, or null when there is none or the box is newer.
 static func cached_card(cache: String, box_path: String) -> Image:
 	if not FileAccess.file_exists(cache) or FileAccess.get_modified_time(cache) < FileAccess.get_modified_time(box_path):

@@ -29,6 +29,7 @@ two threads, 15 s per run).
 | Screenshots (gamescope) | every screenshot crashed gamescope (no cached+coherent memory type on the A610) | gamescope patch 0032 |
 | Battery state in OGUI | 50% / charging on a full battery: UPower averaged in the charger's empty companion supply; also drove the docked/undocked performance profile | kernel patch 0967 (built, not yet booted) |
 | GPU load in OGUI / PowerStation | `gpu_busy_percent` "not supported" | kernel patch 0265 (built, not yet booted) |
+| Steam cards at Steam's own art size (600x900, 1200x1800 for `_2x`), one texture per card | idle shell with 67 Steam games: 373 MiB of GPU memory (DRM fdinfo), RAM it shares with the game | plugin 0.1.80: 300x450 card images, one texture per art file: 309 MiB (2026-10-24) |
 
 ## OpenGamepadUI's frame cost (why navigation lagged)
 

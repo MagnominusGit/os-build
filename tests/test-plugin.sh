@@ -342,6 +342,15 @@ func test_card_images(media: String) -> void:
 	wide.save_png(box_path)
 	check("card cache: a newer box makes it stale", ArtPaths.cached_card(cache, box_path), null)
 	check("card cache: no box -> no card", ArtPaths.make_card(media + "/snes/None.zip-box.png", cache + ".x"), null)
+	# Steam's own card art (600x900, or 1200x1800 as _2x) becomes a CARD_SIZE card image too.
+	var steam_cache := ArtPaths.steam_card_cache_path("$T/art/cards", 1145360)
+	check("steam card cache: under <cards>/steam/<appid>.jpg", steam_cache, "$T/art/cards/steam/1145360.jpg")
+	var capsule := Image.create(1200, 1800, false, Image.FORMAT_RGB8)
+	capsule.fill(Color(0, 0, 1))
+	capsule.save_jpg("$T/art/library_600x900_2x.jpg")
+	var steam_card: Image = ArtPaths.make_card("$T/art/library_600x900_2x.jpg", steam_cache)
+	check("steam card: a 1200x1800 capsule is cached as a 300x450 card",
+		[steam_card.get_size() if steam_card else null, FileAccess.file_exists(steam_cache)], [Vector2i(300, 450), true])
 
 
 ## PortMaster ports are never scraped: each port PortMaster installs carries a gameinfo.xml (ES
@@ -783,6 +792,7 @@ extends SceneTree
 
 const ScrapeRunner := preload("$SRC/scrape_runner.gd")
 const ArtFetch := preload("$SRC/art_fetch.gd")
+const SharedArt := preload("$SRC/shared_art.gd")
 var failed := 0
 
 func check(what: String, got, want) -> void:
@@ -846,7 +856,39 @@ func run() -> void:
 	var f: Array = await r.finished
 	check("a tool that cannot start: exit -1", f[0], -1)
 	await test_art_fetch()
+	await test_shared_art()
 	quit(1 if failed else 0)
+
+# shared_art.gd: one texture per art file for every card showing it, held only while a card holds it.
+func test_shared_art() -> void:
+	var art := SharedArt.new()
+	var src := "$T/shared-art.png"
+	Image.create(4, 6, false, Image.FORMAT_RGBA8).save_png(src)
+	var decodes := []
+	var job := func() -> Image:
+		decodes.append(1)
+		return Image.load_from_file(src)
+	var both := []
+	var ask := func() -> void: both.append(await art.texture("card:" + src, src, job))
+	ask.call()
+	ask.call()
+	while both.size() < 2:
+		await process_frame
+	check("shared art: two cards asking at once get one texture, decoded once",
+		[both[0] != null, both[0] == both[1], decodes.size()], [true, true, 1])
+	var held: Texture2D = both[0]
+	both.clear()
+	var later: Texture2D = await art.texture("card:" + src, src, job)
+	check("shared art: a later card gets the one a card still holds", [later == held, decodes.size()], [true, 1])
+	later = null
+	held = null
+	var fresh: Texture2D = await art.texture("card:" + src, src, job)
+	check("shared art: once no card holds it, the file is decoded again", [fresh != null, decodes.size()], [true, 2])
+	OS.execute("touch", ["-m", "-d", "2001-01-01", src])
+	var newer: Texture2D = await art.texture("card:" + src, src, job)
+	check("shared art: a changed file is decoded again, while a card holds the old one", [newer != fresh, decodes.size()], [true, 3])
+	var none: Texture2D = await art.texture("card:none", "$T/none.png", func() -> Image: return null)
+	check("shared art: no image, no texture", none, null)
 
 # art_fetch.gd: a card of a ROM with no art fetches it (run --rom) and awaits it, as Steam's do.
 func fetcher(mode: String, allowed := true) -> ArtFetch:

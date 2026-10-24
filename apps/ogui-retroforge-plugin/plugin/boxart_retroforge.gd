@@ -2,8 +2,8 @@ extends BoxArtProvider
 ## Box art for ROM cards from what retroforge-scrape fetched (plan scraper Phase 2).
 ##
 ## A card is found through its launch item's metadata (system, rom), never its name: names carry
-## rom_names.gd's "(System)" / "(EXT)" suffixes. No texture cache: a card holds its texture, and a
-## cache would keep every texture of a 2,000-ROM library in memory after its cards are gone.
+## rom_names.gd's "(System)" / "(EXT)" suffixes. One texture per art file, shared by every card
+## showing it (shared_art.gd: weak references, so nothing outlives the cards).
 ## OGUI's own "local" provider registers first, so art dropped in user://boxart/local still wins.
 ## A ROM with no art yet is fetched there and then (art_fetch.gd, as the Steam plugin downloads its
 ## art), so the card asking for it gets it: OGUI never asks a card again.
@@ -18,14 +18,17 @@ extends BoxArtProvider
 ## Steam games (library_steam.gd) get the art the Steam client cached for its own library
 ## (steam_apps.gd art_path), else the same file from Valve's CDN, kept in ~/.cache/retroforge/steam-art
 ## (fetch_art: an owned game the client never showed has none cached). Fetched and decoded on a
-## worker thread, as above.
+## worker thread, as above. A Steam card is a card image too (cards/steam/<appid>.jpg): Steam's
+## 600x900 art as a texture took four times a card image's memory.
 
 const ArtPaths := preload("art_paths.gd")
 const SteamApps := preload("steam_apps.gd")
+const SharedArt := preload("shared_art.gd")
 const LIBRARY_ID := "retroforge-roms"
 const STEAM_LIBRARY_ID := "retroforge-steam"
 
 var fetcher: RefCounted  # art_fetch.gd, set by plugin.gd; none: no fetching
+var _art := SharedArt.new()
 
 
 # Set in _ready, not _init: overriding _init skips BoxArtProvider._init, which registers the
@@ -48,15 +51,10 @@ func get_boxart(item: LibraryItem, kind: LAYOUT) -> Texture2D:
 		path = ArtPaths.path_for(ArtPaths.media_dir(), system, rom, kind)
 	if path == "":
 		return null
-	var image: Image
-	if kind == LAYOUT.GRID_PORTRAIT:
-		image = await _off_main_thread(_card.bind(path, ArtPaths.card_cache_path(ArtPaths.cards_dir(), system, rom)))
-	else:
-		image = await _off_main_thread(ArtPaths.load_image.bind(path))
-	if not image:
+	var texture := await _texture(path, kind, ArtPaths.card_cache_path(ArtPaths.cards_dir(), system, rom))
+	if not texture:
 		logger.warn("Unreadable art: " + path)
-		return null
-	return ImageTexture.create_from_image(image)
+	return texture
 
 
 ## A Steam game's art, or null: any card that launches a Steam game, ours or another library's.
@@ -68,29 +66,24 @@ func _steam_art(item: LibraryItem, kind: LAYOUT) -> Texture2D:
 			break
 	if appid <= 0:
 		return null
-	var image := await _off_main_thread(_steam_image.bind(SteamApps.steam_root(), SteamApps.art_cache_dir(), appid, kind))
-	return ImageTexture.create_from_image(image) if image else null
-
-
-## What the client cached, else fetched from Valve's CDN (worker thread: it may download).
-static func _steam_image(root: String, cache_dir: String, appid: int, kind: int) -> Image:
-	var path := SteamApps.art_path(root, appid, kind)
+	# What the client cached, else fetched from Valve's CDN (worker thread: it may download).
+	var path := SteamApps.art_path(SteamApps.steam_root(), appid, kind)
 	if path == "":
-		path = SteamApps.fetch_art(cache_dir, appid, kind)
-	return ArtPaths.load_image(path) if path != "" else null
+		path = await _art.run(SteamApps.fetch_art.bind(SteamApps.art_cache_dir(), appid, kind))
+	if path == "":
+		return null
+	return await _texture(path, kind, ArtPaths.steam_card_cache_path(ArtPaths.cards_dir(), appid))
+
+
+## The shared texture of an art file: a card image (cached at `card_cache`) for GRID_PORTRAIT, the
+## file itself for the other layouts.
+func _texture(path: String, kind: LAYOUT, card_cache: String) -> Texture2D:
+	if kind == LAYOUT.GRID_PORTRAIT:
+		return await _art.texture("card:" + path, path, _card.bind(path, card_cache))
+	return await _art.texture("file:" + path, path, ArtPaths.load_image.bind(path))
 
 
 ## A card image: the cached one, else composed from the box and cached (worker thread).
 static func _card(box_path: String, cache: String) -> Image:
 	var image := ArtPaths.cached_card(cache, box_path)
 	return image if image else ArtPaths.make_card(box_path, cache)
-
-
-## Run `job` (returning an Image) on a worker thread; OGUI keeps drawing frames meanwhile.
-func _off_main_thread(job: Callable) -> Image:
-	var out := []
-	var task := WorkerThreadPool.add_task(func() -> void: out.append(job.call()))
-	while not WorkerThreadPool.is_task_completed(task):
-		await get_tree().process_frame
-	WorkerThreadPool.wait_for_task_completion(task)
-	return out[0] if not out.is_empty() else null
