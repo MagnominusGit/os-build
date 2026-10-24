@@ -323,6 +323,23 @@ def sarek():
     return {"on": "1", "off": "0"}.get(res.stdout.strip(), "")
 
 
+# The player's per-game choices, keyed "<store>-<id>": {"tso": "on" | "off" | "default"}.
+GAME_CHOICES = os.path.join(CONFIG_HOME, "retroforge", "store-games.json")
+
+
+def fex_tso(store, gid):
+    """STEAM_FEX_TSOENABLED for the game: x86 memory ordering emulated (TSO) unless the player turned it
+    off. A Steam game has Valve's per-game hint (retroforge-steam-direct); a store game has none, and
+    without TSO GRIP crashed a minute in with a corrupt stack (Air X, 2026-10-24), the kind of race an
+    x86 game's threads hit when their memory order is the ARM CPU's."""
+    try:
+        with open(GAME_CHOICES, encoding="utf-8") as f:
+            mine = json.load(f).get(f"{store}-{gid}", {})
+    except (OSError, ValueError, AttributeError):
+        mine = {}
+    return "0" if isinstance(mine, dict) and mine.get("tso") == "off" else "1"
+
+
 def prefix_path(store, gid):
     """The game's Wine prefix (Proton's pfx/ in its compat data folder)."""
     return os.path.join(DATA, "prefixes", f"{store}-{gid}", "pfx")
@@ -350,6 +367,7 @@ def run_windows_game(store, gid, exe, args, workdir, game_dir, extra_env=None):
         # Innermost first, as Steam lists them: Proton, then the runtime it runs in.
         "STEAM_COMPAT_TOOL_PATHS": f"{proton}:{runtime}",
         "SteamDeck": "1",
+        "STEAM_FEX_TSOENABLED": fex_tso(store, gid),
     })
     s = sarek()
     if s:

@@ -207,7 +207,7 @@ elif a[0] == "save-sync":
         sys.stdout.write("1700000000.5")
 ''')
 RUNNER = script("runner", r'''
-call(os.environ.get("STEAM_COMPAT_INSTALL_PATH", ""), os.environ.get("STEAM_COMPAT_LIBRARY_PATHS", ""),
+call(os.environ.get("STEAM_FEX_TSOENABLED", ""), os.environ.get("STEAM_COMPAT_INSTALL_PATH", ""), os.environ.get("STEAM_COMPAT_LIBRARY_PATHS", ""),
      os.getcwd(), os.environ.get("STEAM_COMPAT_DATA_PATH", ""), os.environ.get("STEAM_COMPAT_CLIENT_INSTALL_PATH", ""),
      os.environ.get("STEAM_COMPAT_TOOL_PATHS", ""))
 if "wineboot" in sys.argv:
@@ -500,6 +500,13 @@ ok(run[-4:] == [os.path.join(gamedir, "BIN"), os.path.join(DATA, "prefixes", "go
 ok(run[-6:-4] == [gamedir, os.path.join(DATA, "games", "gog")],
    "the install folder is the game's, its library the store's (drive S: has room above the program: GRIP)", str(run[-6:-4]))
 ok(json.load(open(os.path.join(DATA, "gog-saves.json"))) == {"1.saves": "1700000000.5"}, "the sync time is kept per location")
+ok(run[-7] == "1", "x86 memory ordering (FEX TSO) on by default", str(run[-7:]))
+choices = os.path.join(HOME, ".config", "retroforge", "store-games.json")
+json.dump({"gog-1": {"tso": "off"}}, open(choices, "w"))
+reset_calls()
+store("gog", "launch", "1")
+ok(game_run(calls())[-7] == "0", "off when the player turned it off for the game", str(game_run(calls())[-7:]))
+os.remove(choices)
 reset_calls()
 store("gog", "launch", "1")
 ok(not [c for c in calls() if c[0] == "runner" and "wineboot" in c], "the prefix is set up once")
