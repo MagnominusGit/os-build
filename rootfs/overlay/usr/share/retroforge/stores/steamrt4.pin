@@ -1,0 +1,7 @@
+# Steam Linux Runtime 4 arm64, which GOG and Epic games run in when Steam has not installed its own
+# (steamapps/common/SteamLinuxRuntime_4-arm64): Valve's standalone build of what Steam's depot carries, a
+# channel, not a version. /usr/lib/retroforge/store downloads it at the first install, checks it against
+# the channel's SHA256SUMS, and replaces it when the channel's VERSION.txt moves on.
+name: SteamLinuxRuntime_4-arm64
+base: https://repo.steampowered.com/steamrt4/images/latest-container-runtime-depot
+asset: SteamLinuxRuntime_4-arm64.tar.xz

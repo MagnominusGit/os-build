@@ -1,0 +1,33 @@
+# Plan: GOG and Epic stores
+
+**Complexity**: High. **Branch**: `steam-armv8-proton`. **Status**: started 2026-10-24, before the next
+dev rebuild (user: "can we add gog and epic before we rebuild").
+
+## Summary
+
+A GOG tab and an Epic tab in the library, beside Steam: every game the account owns, installed or not.
+Install, uninstall and launch from OGUI. Windows builds run with our ARMv8.0 Proton (or Proton-CachyOS on
+CPUs with LSE) inside Steam Linux Runtime 4 arm64. Cloud saves sync before a game starts and after it
+exits. Sign-in is on the player's phone: RetroForge never sees a password.
+
+## Decisions
+
+| | Decision |
+|---|---|
+| D1 | **The stores' own open tools**: legendary (Epic, derrod/legendary, GPL-3.0) and gogdl (GOG, Heroic-Games-Launcher/heroic-gogdl, GPL-3.0). Both publish Linux arm64 zipapps for the system `python3` (legendary's one native module is built for CPython 3.14 aarch64, the image's). Pinned to a release and its sha256 (`/usr/share/retroforge/stores/*.pin`), bumped by hand. Downloaded at the store's first sign-in, never shipped. |
+| D2 | **Unpacked and compiled, not run as zipapps.** A zipapp recompiles its own modules on every run: legendary took 3.7 s to start on the Air X, gogdl 2.7 s. Unpacked into the player's home and compiled once (checked-hash), with the image's stdlib bytecode: 0.7 s and 0.56 s. Both `__main__.py` skip their own unpacking when not run from a zip. |
+| D3 | **Runtime: Steam's, else our own copy** (user, 2026-10-24). `steamapps/common/SteamLinuxRuntime_4-arm64` when Steam installed it, else Valve's standalone `SteamLinuxRuntime_4-arm64.tar.xz` (repo.steampowered.com/steamrt4/images/latest-container-runtime-depot, 99 MB, checked against its SHA256SUMS) in the player's home. Proton comes from `steam-compat-tools on`, which installs the CPU's build into Steam's compatibilitytools.d whether the client is installed or not. |
+| D4 | **Proton outside Steam** the way `retroforge-steam-direct` runs it: `<runtime>/_v2-entry-point --verb=waitforexitandrun -- <proton>/proton waitforexitandrun <exe>`, with the `STEAM_COMPAT_*` variables. `STEAM_COMPAT_CLIENT_INSTALL_PATH` is a fixed empty folder of ours: Proton only copies Steam's client DLLs when they are there, and their mtimes are part of its prefix check, so a Steam update would otherwise redo every store prefix's set-up. One prefix per game. |
+| D5 | **Cloud saves around each launch** (user, 2026-10-24): download before the game starts, upload after it exits (`gogdl save-sync`, `legendary sync-saves`). A failed sync is shown and does not block playing. |
+| D6 | **Sign-in on the phone, confirmed on the device** (user, 2026-10-24). The device shows a QR code for a one-time page it serves on the LAN only while the sign-in screen is open. The page links to the store's own sign-in, and takes back what the store shows at the end (GOG's address with `code=`, Epic's `authorizationCode`). The code is XORed in the page with a one-time key that is only in the QR link's `#fragment`, which browsers never send, so someone capturing the Wi-Fi traffic does not see it. The device asks the player before it uses the code. Tokens stay in the player-only home (0700). |
+| D7 | **Windows builds only** to start with. GOG's Linux builds are x86 and would need FEX and the x86 guest. |
+| D8 | **One helper**, `/usr/lib/retroforge/store <gog|epic> <verb>`, which the plugin runs as it runs `steam-library`; a QR encoder in `/usr/lib/retroforge/python/qr.py` (checked against zbar for versions 1-10). |
+
+## Phases
+
+1. Helper: pins, tool set-up, sign-in page, status, games, install with progress, uninstall, launch with
+   saves. `tests/test-store.sh` against fake tools.
+2. Plugin: Settings > Stores (GOG, Epic: sign in, sign out, the QR panel), a library per store and its tab,
+   install progress. `tests/test-plugin.sh` cases.
+3. Air X: sign in to both by phone, install and play one free game per store, check a cloud save round
+   trip.

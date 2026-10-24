@@ -1,0 +1,1002 @@
+#!/usr/bin/env python3
+# store — the GOG and Epic stores for RetroForge: sign-in on the player's phone, the library, installs,
+# and launches of Windows builds through our Proton, with cloud saves. .claude/plans/stores.plan.md.
+#
+#   store <gog|epic> status            {"ready": bool, "signed_in": bool, "account": "..."} (no network)
+#   store <gog|epic> setup             the store's tool, into the player's home; N% lines
+#   store <gog|epic> sign-in           the phone sign-in page (SIGN-IN below): JSON events on stdout,
+#                                      `accept` / `reject` on stdin
+#   store <gog|epic> sign-out
+#   store <gog|epic> games             JSON: every game the account owns, installed or not
+#   store <gog|epic> install <id>      N% lines; exit 0 once installed
+#   store <gog|epic> uninstall <id>
+#   store <gog|epic> launch <id>       saves down, the game, saves up; the game's exit status
+#
+# Errors go to stderr as `store: ...`. Exit 0; 1 for a failure (the last stderr line says why); 2 for a
+# bad invocation; 3 when the store is not set up or not signed in; 4 when the network cannot be reached.
+#
+# THE TOOLS. legendary (Epic) and gogdl (GOG) are the stores' own open tools, as Heroic drives them. Each
+# is a zipapp for the system python3, pinned to a release and its sha256 (/usr/share/retroforge/stores/).
+# `setup` downloads it, checks it, unpacks it into <data>/retroforge/stores/tools/<name>-<tag>/ and
+# compiles it there: a zipapp recompiles its own modules on every run, 3.7 s to start on the Air X for
+# legendary, 0.7 s unpacked (2026-10-24). Both __main__.py skip their own unpacking outside a zip.
+#
+# RUNNING A GAME. Windows builds only. The game runs in its own Wine prefix with the Proton
+# steam-compat-tools keeps for this CPU (our ARMv8.0 build without LSE atomics, else Proton-CachyOS),
+# inside Steam Linux Runtime 4 arm64: Steam's copy when it installed one, else ours, downloaded at the
+# first install (steamrt4.pin). The command is the one retroforge-steam-direct replays,
+#   <runtime>/_v2-entry-point --verb=waitforexitandrun -- <proton>/proton waitforexitandrun <exe> <args>
+# with the STEAM_COMPAT_* variables. STEAM_COMPAT_CLIENT_INSTALL_PATH is an empty folder of ours: Proton
+# copies Steam's client DLLs from there only when they exist, and their mtimes are part of its prefix
+# check, so a Steam update would otherwise redo every store prefix's set-up.
+#
+# SIGN-IN. RetroForge never takes a password. `sign-in` serves a one-time page on the LAN while the
+# plugin's sign-in panel is open, and prints its address with a QR code of it. On the phone the page
+# links to the store's own sign-in and takes back what the store shows at the end (GOG: the address
+# with code=, Epic: the authorizationCode). The page XORs the code with a keystream from a key that is
+# only in the link's #fragment, which a browser never sends, so the Wi-Fi traffic does not carry it.
+# The device then asks the player (`accept` on stdin) before the code is used. Tokens stay in the
+# player's home, which only the player can read.
+#
+# TEST SEAMS (tests/test-store.sh): RETROFORGE_STORE_DATA (for <data>/retroforge/stores),
+# RETROFORGE_STORE_PINS, RETROFORGE_STORE_TOOL_<NAME> (a tool's command, instead of the set-up one),
+# RETROFORGE_STEAM_ROOT, RETROFORGE_STEAM_COMPAT_TOOLS, RETROFORGE_STORE_RUNTIME (a runtime folder),
+# RETROFORGE_STORE_RUN (a command run with the game's command line instead of it), RETROFORGE_STORE_HOST
+# (the sign-in page's address), RETROFORGE_STORE_API (a server every https:// request goes to instead,
+# as <it>/<host>/<path>).
+import base64
+import hashlib
+import html
+import json
+import os
+import re
+import secrets
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import tarfile
+import tempfile
+import threading
+import time
+import urllib.error
+import urllib.request
+import zipfile
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "python"))  # /usr/lib/retroforge/python
+import qr  # noqa: E402
+
+DATA_HOME = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+CONFIG_HOME = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+DATA = os.environ.get("RETROFORGE_STORE_DATA") or os.path.join(DATA_HOME, "retroforge", "stores")
+PINS = os.environ.get("RETROFORGE_STORE_PINS", "/usr/share/retroforge/stores")
+STEAM_ROOT = os.environ.get("RETROFORGE_STEAM_ROOT") or os.path.join(DATA_HOME, "Steam")
+COMPAT_TOOLS = os.environ.get("RETROFORGE_STEAM_COMPAT_TOOLS", "/usr/lib/retroforge/steam-compat-tools")
+SAREK = "/usr/bin/retroforge-steam-sarek"
+AGENT = "retroforge-store"
+RUNTIME_NAME = "SteamLinuxRuntime_4-arm64"
+API = os.environ.get("RETROFORGE_STORE_API", "")
+
+
+def url_of(url):
+    """url, or under RETROFORGE_STORE_API (tests)."""
+    return f"{API}/{url.split('://', 1)[1]}" if API and url.startswith("https://") else url
+
+
+class Failed(Exception):
+    code = 1
+
+
+class NotReady(Failed):
+    code = 3
+
+
+class Offline(Failed):
+    code = 4
+
+
+def log(msg):
+    print(f"store: {msg}", file=sys.stderr, flush=True)
+
+
+def event(**fields):
+    print(json.dumps(fields), flush=True)
+
+
+def read_pin(name):
+    fields = {}
+    try:
+        with open(os.path.join(PINS, name + ".pin"), encoding="utf-8") as f:
+            for line in f:
+                if ":" in line and not line.lstrip().startswith("#"):
+                    key, value = line.split(":", 1)
+                    fields[key.strip()] = value.strip()
+    except OSError as err:
+        raise Failed(f"no pin for {name}: {err}")
+    return fields
+
+
+def write_private(path, text):
+    """text into path, readable by the player only, replaced in one rename."""
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    tmp = path + ".part"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.replace(tmp, path)
+
+
+def fetch(url, dest, sha256=None, progress=None):
+    """url -> dest, refused unless its sha256 matches (when one is given). progress(done, total)."""
+    h = hashlib.sha256()
+    req = urllib.request.Request(url_of(url), headers={"User-Agent": AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r, open(dest, "wb") as out:
+            total, done = int(r.headers.get("Content-Length") or 0), 0
+            while chunk := r.read(1 << 20):
+                h.update(chunk)
+                out.write(chunk)
+                done += len(chunk)
+                if progress:
+                    progress(done, total)
+    except urllib.error.URLError as err:
+        raise Offline(f"could not download {url}: {err.reason}")
+    except OSError as err:
+        raise Failed(f"could not download {url}: {err}")
+    if sha256 and h.hexdigest() != sha256:
+        raise Failed(f"sha256 mismatch for {url}: got {h.hexdigest()}, want {sha256}")
+    return h.hexdigest()
+
+
+def get_text(url):
+    req = urllib.request.Request(url_of(url), headers={"User-Agent": AGENT})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return r.read().decode("utf-8", "replace")
+    except urllib.error.URLError as err:
+        raise Offline(f"could not reach {url}: {err.reason}")
+
+
+def percent_printer(lo=0, hi=100):
+    """A progress(done, total) that prints `N%` lines, scaled into lo..hi, each value once."""
+    last = [-1]
+
+    def progress(done, total):
+        if total > 0:
+            pct = lo + (hi - lo) * min(done, total) // total
+            if pct != last[0]:
+                last[0] = pct
+                print(f"{pct}%", flush=True)
+    return progress
+
+
+# ---- the stores' tools ----------------------------------------------------------------------------
+
+def tool_dir(name):
+    return os.path.join(DATA, "tools", f"{name}-{read_pin(name)['tag']}")
+
+
+def tool_command(name):
+    """The command that runs the tool, [] when it is not set up."""
+    seam = os.environ.get("RETROFORGE_STORE_TOOL_" + name.upper())
+    if seam:
+        return [seam]
+    folder = tool_dir(name)
+    return [sys.executable, folder] if os.path.isfile(os.path.join(folder, "__main__.py")) else []
+
+
+def set_up_tool(name, progress):
+    """The pinned release of the tool, downloaded, checked, unpacked and compiled. Older ones go."""
+    if tool_command(name):
+        progress(1, 1)
+        return
+    pin = read_pin(name)
+    final = tool_dir(name)
+    tools = os.path.dirname(final)
+    os.makedirs(tools, mode=0o700, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=tools, prefix=".setup-") as tmp:
+        app = os.path.join(tmp, name)
+        fetch(pin["url"], app, pin["sha256"], lambda d, t: progress(d * 9 // 10, t))
+        unpacked = os.path.join(tmp, "unpacked")
+        try:
+            with zipfile.ZipFile(app) as z:
+                for member in z.namelist():
+                    if member.startswith("/") or ".." in member.split("/"):
+                        raise Failed(f"{name}: a file outside its folder in the release ({member})")
+                z.extractall(unpacked)
+        except zipfile.BadZipFile as err:
+            raise Failed(f"{name}: the release is not a zipapp ({err})")
+        if not os.path.isfile(os.path.join(unpacked, "__main__.py")):
+            raise Failed(f"{name}: the release has no __main__.py")
+        subprocess.run([sys.executable, "-m", "compileall", "-q", "-j0", "--invalidation-mode", "checked-hash",
+                        unpacked], stdout=subprocess.DEVNULL, check=False)
+        shutil.rmtree(final, ignore_errors=True)
+        os.rename(unpacked, final)
+    for other in os.listdir(tools):
+        if other.startswith(name + "-") and os.path.join(tools, other) != final:
+            shutil.rmtree(os.path.join(tools, other), ignore_errors=True)
+    progress(1, 1)
+    log(f"{name} {pin['tag']} is set up in {final}")
+
+
+def run_tool(name, args, check=True, **kw):
+    cmd = tool_command(name)
+    if not cmd:
+        raise NotReady(f"{name} is not set up (store <store> setup)")
+    res = subprocess.run(cmd + args, text=True, capture_output=True, **kw)
+    if check and res.returncode != 0:
+        last = (res.stderr.strip().splitlines() or [f"exit {res.returncode}"])[-1]
+        raise Failed(f"{name} {args[0]}: {last}")
+    return res
+
+
+# ---- what a game runs in --------------------------------------------------------------------------
+
+def read_text(path):
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def runtime_dir(progress=None):
+    """Steam Linux Runtime 4 arm64: Steam's, else ours (downloaded when progress is given)."""
+    seam = os.environ.get("RETROFORGE_STORE_RUNTIME")
+    if seam:
+        return seam
+    steams = os.path.join(STEAM_ROOT, "steamapps", "common", RUNTIME_NAME)
+    if os.path.isfile(os.path.join(steams, "_v2-entry-point")):
+        return steams
+    ours = os.path.join(DATA, "runtime", RUNTIME_NAME)
+    have = os.path.isfile(os.path.join(ours, "_v2-entry-point"))
+    if progress is None:
+        if have:
+            return ours
+        raise NotReady("Steam Linux Runtime 4 arm64 is not set up")
+    pin = read_pin("steamrt4")
+    try:
+        version = get_text(f"{pin['base']}/VERSION.txt").strip()
+    except Offline:
+        if have:
+            progress(1, 1)
+            return ours
+        raise
+    stamp = os.path.join(DATA, "runtime", ".version")
+    if have and read_text(stamp).strip() == version:
+        progress(1, 1)
+        return ours
+    sums = get_text(f"{pin['base']}/SHA256SUMS")
+    want = next((line.split()[0] for line in sums.splitlines()
+                 if line.split() and line.split()[-1].lstrip("*") == pin["asset"]), None)
+    if not want:
+        raise Failed(f"{pin['base']}/SHA256SUMS lists no {pin['asset']}")
+    top = os.path.dirname(ours)
+    os.makedirs(top, mode=0o700, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=top, prefix=".setup-") as tmp:
+        tarball = os.path.join(tmp, pin["asset"])
+        fetch(f"{pin['base']}/{pin['asset']}", tarball, want, lambda d, t: progress(d * 9 // 10, t))
+        with tarfile.open(tarball) as tar:
+            tar.extractall(tmp, filter="tar")
+        if not os.path.isfile(os.path.join(tmp, RUNTIME_NAME, "_v2-entry-point")):
+            raise Failed(f"{pin['asset']} holds no {RUNTIME_NAME}/_v2-entry-point")
+        old = ours + ".old"
+        shutil.rmtree(old, ignore_errors=True)
+        if os.path.isdir(ours):
+            os.rename(ours, old)
+        os.rename(os.path.join(tmp, RUNTIME_NAME), ours)
+        shutil.rmtree(old, ignore_errors=True)
+    with open(stamp, "w", encoding="utf-8") as f:
+        f.write(version + "\n")
+    progress(1, 1)
+    log(f"Steam Linux Runtime 4 arm64 {version} is set up in {ours}")
+    return ours
+
+
+def proton_dir():
+    """The Proton steam-compat-tools keeps for this CPU, installed when it is missing."""
+    env = dict(os.environ, RETROFORGE_STEAM_ROOT=STEAM_ROOT)
+    res = subprocess.run([COMPAT_TOOLS, "on"], env=env, text=True, capture_output=True)
+    folder = res.stdout.strip().splitlines()[-1] if res.stdout.strip() else ""
+    if res.returncode != 0 or not os.path.isfile(os.path.join(folder, "proton")):
+        last = (res.stderr.strip().splitlines() or ["no Proton"])[-1]
+        raise Failed(f"no Proton to run the game with: {last}")
+    return folder
+
+
+def sarek():
+    """The player's DXVK-Sarek setting for the game's environment ("1", "0", or "" to leave it)."""
+    if not os.access(SAREK, os.X_OK):
+        return ""
+    res = subprocess.run([SAREK, "apply"], text=True, capture_output=True)
+    return {"on": "1", "off": "0"}.get(res.stdout.strip(), "")
+
+
+def prefix_path(store, gid):
+    """The game's Wine prefix (Proton's pfx/ in its compat data folder)."""
+    return os.path.join(DATA, "prefixes", f"{store}-{gid}", "pfx")
+
+
+def run_windows_game(store, gid, exe, args, workdir, extra_env=None):
+    """The game through Proton in the runtime; its exit status."""
+    runtime, proton = runtime_dir(), proton_dir()
+    compat = os.path.dirname(prefix_path(store, gid))
+    client = os.path.join(DATA, "steam-client")
+    for d in (compat, client):
+        os.makedirs(d, mode=0o700, exist_ok=True)
+    env = dict(os.environ)
+    env.update({
+        "SteamAppId": "0", "SteamGameId": "0", "STEAM_COMPAT_APP_ID": "0",
+        "STEAM_COMPAT_CLIENT_INSTALL_PATH": client,
+        "STEAM_COMPAT_DATA_PATH": compat,
+        "STEAM_COMPAT_INSTALL_PATH": workdir,
+        "STEAM_COMPAT_SHADER_PATH": os.path.join(DATA, "shadercache", f"{store}-{gid}"),
+        "STEAM_COMPAT_LIBRARY_PATHS": os.path.dirname(workdir),
+        # Innermost first, as Steam lists them: Proton, then the runtime it runs in.
+        "STEAM_COMPAT_TOOL_PATHS": f"{proton}:{runtime}",
+        "SteamDeck": "1",
+    })
+    s = sarek()
+    if s:
+        env["PROTON_DXVK_SAREK"] = s
+    env.update(extra_env or {})
+    cmd = [os.path.join(runtime, "_v2-entry-point"), "--verb=waitforexitandrun", "--",
+           os.path.join(proton, "proton"), "waitforexitandrun", exe] + list(args)
+    seam = os.environ.get("RETROFORGE_STORE_RUN")
+    if seam:
+        cmd = [seam] + cmd
+    log(f"{store} {gid}: {exe} with {os.path.basename(proton)} in {os.path.basename(runtime)}")
+    proc = subprocess.Popen(cmd, cwd=workdir, env=env)
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, lambda s, _f: proc.send_signal(s))
+    return proc.wait()
+
+
+# ---- sign-in --------------------------------------------------------------------------------------
+
+PAGE = """<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in to {store}</title>
+<style>body{{font:17px system-ui,sans-serif;margin:0 auto;max-width:34em;padding:1em;line-height:1.45}}
+a.b,button{{display:block;width:100%;box-sizing:border-box;padding:.8em;margin:.6em 0;font:inherit;
+border:0;border-radius:.5em;background:#2563eb;color:#fff;text-align:center;text-decoration:none}}
+textarea{{width:100%;box-sizing:border-box;height:7em;font:14px monospace}}#s{{font-weight:600}}</style>
+</head><body><h2>Sign in to {store} on RetroForge</h2>
+<p>1. Sign in on {store}'s own page. RetroForge never sees your password.</p>
+<a class="b" href="{login}" target="_blank" rel="noreferrer">Open {store} sign-in</a>
+<p>2. {after}</p><textarea id="t" placeholder="Paste here"></textarea>
+<button id="go">Send to my RetroForge device</button><p id="s"></p>
+<script>
+const K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,
+0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,
+0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,
+0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,
+0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,
+0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,
+0xbef9a3f7,0xc67178f2];
+function sha256(m){{const l=m.length,n=((l+9+63)>>6)<<6,b=new Uint8Array(n);b.set(m);b[l]=0x80;
+const v=new DataView(b.buffer);v.setUint32(n-4,l*8);let h=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
+0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];const w=new Array(64),r=(x,k)=>(x>>>k)|(x<<(32-k));
+for(let o=0;o<n;o+=64){{for(let i=0;i<16;i++)w[i]=v.getUint32(o+i*4);for(let i=16;i<64;i++){{
+const s0=r(w[i-15],7)^r(w[i-15],18)^(w[i-15]>>>3),s1=r(w[i-2],17)^r(w[i-2],19)^(w[i-2]>>>10);
+w[i]=(w[i-16]+s0+w[i-7]+s1)|0}}let[a,c,d,e,f,g,k,j]=h;for(let i=0;i<64;i++){{
+const t1=(j+(r(f,6)^r(f,11)^r(f,25))+((f&g)^(~f&k))+K[i]+w[i])|0,
+t2=((r(a,2)^r(a,13)^r(a,22))+((a&c)^(a&d)^(c&d)))|0;j=k;k=g;g=f;f=(e+t1)|0;e=d;d=c;c=a;a=(t1+t2)|0}}
+h=h.map((x,i)=>(x+[a,c,d,e,f,g,k,j][i])|0)}}const o=new Uint8Array(32);
+h.forEach((x,i)=>new DataView(o.buffer).setUint32(i*4,x));return o}}
+function b64d(s){{s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';
+return Uint8Array.from(atob(s),c=>c.charCodeAt(0))}}
+function b64e(a){{return btoa(String.fromCharCode(...a)).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')}}
+function stream(key,n){{const out=new Uint8Array(n);for(let i=0,c=0;i<n;c++){{
+const blk=new Uint8Array(key.length+4);blk.set(key);new DataView(blk.buffer).setUint32(key.length,c);
+const d=sha256(blk);for(let j=0;j<32&&i<n;j++)out[i++]=d[j]}}return out}}
+document.getElementById('go').onclick=async()=>{{const s=document.getElementById('s');
+const m=document.getElementById('t').value.match(/{pattern}/);
+if(!m){{s.textContent="{missing}";return}}
+const code=new TextEncoder().encode(m[1]),ks=stream(b64d(location.hash.slice(1)),code.length);
+const x=code.map((b,i)=>b^ks[i]);s.textContent="Sending...";
+try{{const r=await fetch(location.pathname,{{method:"POST",headers:{{"Content-Type":"application/json"}},
+body:JSON.stringify({{c:b64e(x)}})}});s.textContent=r.ok?"Sent. Confirm on your RetroForge device.":
+"Your RetroForge device did not take it. Open the sign-in there again."}}catch(e){{
+s.textContent="Could not reach your RetroForge device. Is the phone on the same Wi-Fi?"}}}};
+</script></body></html>"""
+
+
+def keystream(key, n):
+    """The page's keystream: SHA-256 of key + a 4-byte big-endian counter, block after block."""
+    out, counter = bytearray(), 0
+    while len(out) < n:
+        out += hashlib.sha256(key + counter.to_bytes(4, "big")).digest()
+        counter += 1
+    return bytes(out[:n])
+
+
+def lan_address():
+    """This device's IPv4 address on the network its default route leaves by (no packet is sent)."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("192.0.2.1", 9))
+        return s.getsockname()[0]
+    except OSError:
+        return ""
+    finally:
+        s.close()
+
+
+def serve_sign_in(store):
+    """The one-time sign-in page, until a code is accepted, stdin closes or 15 minutes pass."""
+    import http.server
+
+    if not tool_command(store.tool):
+        raise NotReady(f"{store.title} is not set up")
+    host = os.environ.get("RETROFORGE_STORE_HOST") or lan_address()
+    if not host:
+        raise Offline("not connected to a network")
+    token, key = secrets.token_urlsafe(16), secrets.token_bytes(16)
+    page = PAGE.format(store=store.title, login=html.escape(store.login_url), after=store.after_sign_in,
+                       pattern=store.code_pattern.replace("/", "\\/"),  # into a JS regex literal
+                       missing=f"That is not what {store.title} shows at the end. Copy it again.")
+    pending = {}
+    lock = threading.Lock()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def answer(self, status, body=b"", kind="text/plain; charset=utf-8"):
+            self.send_response(status)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            if self.path != "/" + token:
+                return self.answer(404)
+            self.answer(200, page.encode(), "text/html; charset=utf-8")
+
+        def do_POST(self):
+            if self.path != "/" + token:
+                return self.answer(404)
+            try:
+                size = min(int(self.headers.get("Content-Length") or 0), 8192)
+                sealed = base64.urlsafe_b64decode(json.loads(self.rfile.read(size))["c"] + "==")
+                code = bytes(a ^ b for a, b in zip(sealed, keystream(key, len(sealed)))).decode()
+            except (ValueError, KeyError, TypeError, UnicodeDecodeError):
+                return self.answer(400)
+            if not re.fullmatch(store.code_shape, code):
+                return self.answer(400)
+            with lock:
+                if pending:
+                    return self.answer(409)
+                pending["code"] = code
+            event(event="code", sender=self.client_address[0])
+            self.answer(200, b"ok")
+
+    server = http.server.ThreadingHTTPServer(("0.0.0.0", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    fragment = base64.urlsafe_b64encode(key).decode().rstrip("=")
+    url = f"http://{host}:{server.server_address[1]}/{token}#{fragment}"
+    event(event="page", url=url, qr=qr.matrix(url))
+    timer = threading.Timer(15 * 60, lambda: os.kill(os.getpid(), signal.SIGTERM))
+    timer.daemon = True
+    timer.start()
+    try:
+        for line in sys.stdin:
+            answer = line.strip()
+            with lock:
+                code = pending.pop("code", None)
+            if answer == "accept" and code:
+                try:
+                    account = store.sign_in(code)
+                except Failed as err:
+                    event(event="error", message=str(err))
+                    continue
+                event(event="signed_in", account=account)
+                return
+            if answer == "reject":
+                event(event="rejected")
+    finally:
+        server.shutdown()
+
+
+# ---- the stores -----------------------------------------------------------------------------------
+
+STORE_CONFIG = os.path.join(CONFIG_HOME, "retroforge", "stores")
+GAMES = os.path.join(DATA, "games")
+NOTICES = os.path.join(DATA, "notices")
+# A download's shared memory and workers. Both tools size them for desktops: legendary 2 GiB and up
+# to 16 worker processes, which a 3.5 GB board cannot spare beside OGUI (gogdl's 1 GiB is fixed).
+MAX_MEMORY_MIB = "512"
+MAX_WORKERS = "4"
+
+
+def notice(store, text):
+    """A line for the player, shown when the store's game has stopped (library_store.gd)."""
+    log(text)
+    os.makedirs(DATA, mode=0o700, exist_ok=True)
+    with open(f"{NOTICES}-{store}", "a", encoding="utf-8") as f:
+        f.write(text + "\n")
+
+
+def read_json(path, default):
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def http_json(url, token=None, headers=None):
+    hdrs = {"User-Agent": AGENT, **(headers or {})}
+    if token:
+        hdrs["Authorization"] = f"Bearer {token}"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url_of(url), headers=hdrs), timeout=30) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as err:
+        raise Failed(f"{url} answered {err.code}")
+    except urllib.error.URLError as err:
+        raise Offline(f"could not reach {url}: {err.reason}")
+    except ValueError as err:
+        raise Failed(f"{url} sent no JSON: {err}")
+
+
+def follow(name, args, progress_re, progress, env=None):
+    """The tool's download (install), progress(percent, 100) as it goes: (exit status, last error
+    line). TERM or INT here stops it the way its own Ctrl-C does: SIGINT to its whole process group."""
+    cmd = tool_command(name)
+    if not cmd:
+        raise NotReady(f"{name} is not set up")
+    proc = subprocess.Popen(cmd + args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+                            env=env, start_new_session=True)
+
+    def stop(_sig, _frame):
+        try:
+            os.killpg(proc.pid, signal.SIGINT)
+        except OSError:
+            pass
+        threading.Timer(20, lambda: proc.poll() is None and os.killpg(proc.pid, signal.SIGKILL)).start()
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, stop)
+    error = ""
+    for line in proc.stderr:
+        m = re.search(progress_re, line)
+        if m:
+            progress(min(int(float(m.group(1))), 99), 100)
+        elif "ERROR" in line or "CRITICAL" in line:
+            error = line.strip()
+            log(error)
+    return proc.wait(), error
+
+
+def prepare_prefix(store, gid):
+    """The game's prefix, set up once before its first sync: a save path resolves inside it, and a
+    new device's empty saves must not look newer than the cloud's."""
+    if os.path.isfile(os.path.join(prefix_path(store, gid), "user.reg")):
+        return
+    log(f"{store} {gid}: setting up its Wine prefix")
+    runtime, proton = runtime_dir(), proton_dir()
+    compat = os.path.dirname(prefix_path(store, gid))
+    os.makedirs(compat, mode=0o700, exist_ok=True)
+    env = dict(os.environ, STEAM_COMPAT_DATA_PATH=compat, STEAM_COMPAT_TOOL_PATHS=f"{proton}:{runtime}",
+               STEAM_COMPAT_CLIENT_INSTALL_PATH=os.path.join(DATA, "steam-client"), SteamAppId="0", SteamGameId="0")
+    os.makedirs(env["STEAM_COMPAT_CLIENT_INSTALL_PATH"], mode=0o700, exist_ok=True)
+    cmd = [os.path.join(runtime, "_v2-entry-point"), "--verb=run", "--",
+           os.path.join(proton, "proton"), "run", "wineboot", "--init"]
+    seam = os.environ.get("RETROFORGE_STORE_RUN")
+    subprocess.run(([seam] if seam else []) + cmd, env=env, stdout=subprocess.DEVNULL, check=False)
+
+
+class Epic:
+    """The Epic Games Store, through legendary. Its own config folder (LEGENDARY_CONFIG_PATH) holds
+    user.json (the tokens) and installed.json. legendary exits 0 also when a command failed, so a
+    result is read from what it logs and from installed.json."""
+
+    name, title, tool = "epic", "Epic Games", "legendary"
+    login_url = "https://legendary.gl/epiclogin"
+    after_sign_in = ("Epic then shows a page of text with an \"authorizationCode\". Select all of it, copy "
+                     "it, and paste it here.")
+    code_pattern = r'(?:"authorizationCode"\s*:\s*")?\b([0-9a-f]{32})\b'
+    code_shape = r"[0-9a-f]{32}"
+    ART = {"portrait": ("DieselGameBoxTall", "OfferImageTall", "DieselStoreFrontTall"),
+           "landscape": ("DieselGameBox", "OfferImageWide"), "hero": ("DieselGameBox", "OfferImageWide"),
+           "logo": ("DieselGameBoxLogo",)}
+
+    def __init__(self):
+        self.cfg = os.path.join(STORE_CONFIG, "legendary")
+        self.env = dict(os.environ, LEGENDARY_CONFIG_PATH=self.cfg)
+
+    def run(self, args, check=False):
+        res = run_tool(self.tool, args, check=False, env=self.env)
+        errors = [l for l in res.stderr.splitlines() if "ERROR" in l or "CRITICAL" in l]
+        if check and (res.returncode != 0 or errors):
+            raise Failed(f"legendary {args[0]}: {(errors or [res.stderr.strip()])[-1]}")
+        return res
+
+    def status(self):
+        user = read_json(os.path.join(self.cfg, "user.json"), {})
+        return {"signed_in": bool(user.get("refresh_token")), "account": str(user.get("displayName", ""))}
+
+    def sign_in(self, code):
+        os.makedirs(self.cfg, mode=0o700, exist_ok=True)
+        self.run(["auth", "--delete"])
+        res = self.run(["auth", "--code", code])
+        m = re.search(r'Successfully logged in as "(.*)"', res.stderr)
+        if not m:
+            errors = [l for l in res.stderr.splitlines() if "ERROR" in l]
+            raise Failed((errors or ["Epic did not sign in"])[-1].split(": ", 1)[-1])
+        return m.group(1)
+
+    def sign_out(self):
+        self.run(["auth", "--delete"])
+
+    def installed(self):
+        return {k: v for k, v in read_json(os.path.join(self.cfg, "installed.json"), {}).items()
+                if isinstance(v, dict) and not v.get("is_dlc")}
+
+    def games(self):
+        cache = os.path.join(DATA, "epic-games.json")
+        try:
+            owned = json.loads(self.run(["list", "--json", "--platform", "Windows"], check=True).stdout or "[]")
+            write_private(cache, json.dumps(owned))
+        except (Failed, ValueError) as err:
+            owned = read_json(cache, None)
+            if owned is None:
+                raise
+            log(f"the Epic library as last listed (now: {err})")
+        installed, out = self.installed(), []
+        for game in owned:
+            app = str(game.get("app_name", ""))
+            images = {i.get("type"): i.get("url") for i in game.get("metadata", {}).get("keyImages", [])
+                      if isinstance(i, dict)}
+            art = {}
+            for key, types in self.ART.items():
+                url = next((images[t] for t in types if images.get(t)), "")
+                if url:
+                    art[key] = url
+            inst = installed.get(app)
+            out.append({"id": app, "title": str(game.get("app_title") or app), "installed": inst is not None,
+                        "dir": inst.get("install_path", "") if inst else "", "art": art})
+        return out
+
+    def install(self, gid, progress):
+        base = os.path.join(GAMES, self.name)
+        os.makedirs(base, mode=0o700, exist_ok=True)
+        code, error = follow(self.tool, ["-y", "install", gid, "--platform", "Windows", "--base-path", base,
+                                                    "--skip-sdl", "--skip-dlcs", "--max-shared-memory", MAX_MEMORY_MIB,
+                                                    "--max-workers", MAX_WORKERS],
+                             r"= Progress: (\d+(?:\.\d+)?)%", progress, env=self.env)
+        if gid not in self.installed():
+            raise Failed(error.split(": ", 1)[-1] if error else f"legendary install exited {code}")
+
+    def uninstall(self, gid):
+        self.run(["-y", "uninstall", gid])
+        if gid in self.installed():
+            raise Failed("legendary did not uninstall it")
+
+    def launch_info(self, gid):
+        """(exe, args, working folder) from `legendary launch --json`: online for a fresh exchange
+        code, else offline (a game that runs offline still starts without the network)."""
+        res = self.run(["launch", gid, "--json", "--no-wine", "--skip-version-check"])
+        try:
+            p = json.loads(res.stdout)
+        except ValueError:
+            log("Epic could not be reached: the game starts offline")
+            p = json.loads(self.run(["launch", gid, "--json", "--no-wine", "--offline"], check=True).stdout)
+        exe = os.path.join(p["game_directory"], p["game_executable"].replace("\\", "/"))
+        args = list(p.get("game_parameters", [])) + list(p.get("user_parameters", [])) + list(p.get("egl_parameters", []))
+        return exe, args, p.get("working_directory") or p["game_directory"]
+
+    def sync_saves(self, gid, direction):
+        """down: before the game (and records the save path, from the prefix); up: after it."""
+        env = dict(self.env, STEAM_COMPAT_DATA_PATH=os.path.dirname(prefix_path(self.name, gid)))
+        args = ["-y", "sync-saves", gid] + (["--skip-upload", "--accept-path"] if direction == "down" else ["--skip-download"])
+        res = run_tool(self.tool, args, check=False, env=env)
+        errors = [l for l in res.stderr.splitlines() if "ERROR" in l]
+        if errors:
+            raise Failed(errors[-1].split(": ", 1)[-1])
+
+
+class Gog:
+    """GOG, through gogdl. gogdl lists no library and keeps no record of installs: the library comes
+    from GOG's own API (as Heroic reads it), installs are recorded here (gog-installed.json)."""
+
+    name, title, tool = "gog", "GOG", "gogdl"
+    client_id = "46899977096215655"
+    login_url = ("https://auth.gog.com/auth?client_id=46899977096215655&redirect_uri=https%3A%2F%2Fembed.gog.com"
+                 "%2Fon_login_success%3Forigin%3Dclient&response_type=code&layout=galaxy")
+    after_sign_in = ("GOG then opens an empty page. Copy that page's address (it has \"code=\" in it) and "
+                     "paste it here.")
+    code_pattern = r"[?&]code=([A-Za-z0-9_\-.~]+)"
+    code_shape = r"[A-Za-z0-9_\-.~]{10,2048}"
+
+    def __init__(self):
+        self.auth = os.path.join(STORE_CONFIG, "gog-auth.json")
+        self.account = os.path.join(STORE_CONFIG, "gog-account.json")
+        self.records = os.path.join(DATA, "gog-installed.json")
+        self.env = dict(os.environ, GOGDL_CONFIG_PATH=os.path.join(DATA, "gogdl"))
+
+    def run(self, args, check=True):
+        return run_tool(self.tool, ["--auth-config-path", self.auth] + args, check=check, env=self.env)
+
+    def status(self):
+        signed_in = bool(read_json(self.auth, {}).get(self.client_id))
+        return {"signed_in": signed_in, "account": read_json(self.account, {}).get("username", "") if signed_in else ""}
+
+    def credentials(self):
+        """The account's token, refreshed when it has expired (gogdl auth)."""
+        creds = json.loads(self.run(["auth"]).stdout or "null")
+        if not isinstance(creds, dict) or not creds.get("access_token"):
+            raise NotReady("not signed in to GOG")
+        return creds
+
+    def sign_in(self, code):
+        os.makedirs(STORE_CONFIG, mode=0o700, exist_ok=True)
+        res = self.run(["auth", "--code", code], check=False)
+        creds = json.loads(res.stdout or "null") if res.stdout.strip().startswith("{") else None
+        if not isinstance(creds, dict) or creds.get("error") or not creds.get("access_token"):
+            raise Failed("GOG did not take the code; it may have expired")
+        os.chmod(self.auth, 0o600)
+        user = http_json(f"https://users.gog.com/users/{creds['user_id']}", creds["access_token"])
+        name = str(user.get("username", ""))
+        write_private(self.account, json.dumps({"username": name, "user_id": creds["user_id"]}))
+        return name
+
+    def sign_out(self):
+        for path in (self.auth, self.account):
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                pass
+
+    def installed(self):
+        return {k: v for k, v in read_json(self.records, {}).items()
+                if os.path.isdir(v.get("path", "")) and not os.path.exists(os.path.join(v["path"], ".gogdl-resume"))}
+
+    def details(self, gid, token):
+        """gamesdb's entry for a game, kept in <data>/gog-meta/<id>.json."""
+        path = os.path.join(DATA, "gog-meta", f"{gid}.json")
+        meta = read_json(path, None)
+        if meta is None:
+            meta = http_json(f"https://gamesdb.gog.com/platforms/gog/external_releases/{gid}", token)
+            write_private(path, json.dumps(meta))
+        return meta
+
+    def games(self):
+        cache = os.path.join(DATA, "gog-games.json")
+        try:
+            creds = self.credentials()
+            ids, page = [], ""
+            while True:
+                url = f"https://galaxy-library.gog.com/users/{creds['user_id']}/releases"
+                data = http_json(url + (f"?page_token={page}" if page else ""), creds["access_token"])
+                ids += [str(i["external_id"]) for i in data.get("items", [])
+                        if i.get("platform_id") == "gog" and i.get("owned", True)]
+                page = data.get("next_page_token") or ""
+                if not page:
+                    break
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(8) as pool:
+                metas = list(pool.map(lambda g: (g, self._safe_details(g, creds["access_token"])), ids))
+            owned = []
+            for gid, meta in metas:
+                game = meta.get("game") or {}
+                oses = {o.get("slug") for o in meta.get("supported_operating_systems", []) if isinstance(o, dict)}
+                if meta.get("type") != "game" or game.get("visible_in_library") is False or "windows" not in oses:
+                    continue
+                title = (meta.get("title") or {}).get("*") or (game.get("title") or {}).get("*") or gid
+                art = {}
+                for key, field, ext in (("portrait", "vertical_cover", "jpg"), ("landscape", "background", "jpg"),
+                                        ("hero", "background", "jpg"), ("logo", "logo", "png")):
+                    fmt = (game.get(field) or {}).get("url_format", "")
+                    if fmt:
+                        art[key] = fmt.replace("{formatter}", "").replace("{ext}", ext)
+                owned.append({"id": gid, "title": title, "art": art})
+            write_private(cache, json.dumps(owned))
+        except (Failed, ValueError) as err:
+            if isinstance(err, NotReady):
+                raise
+            owned = read_json(cache, None)
+            if owned is None:
+                raise
+            log(f"the GOG library as last listed (now: {err})")
+        installed = self.installed()
+        for game in owned:
+            inst = installed.get(game["id"])
+            game.update(installed=inst is not None, dir=inst["path"] if inst else "")
+        return owned
+
+    def _safe_details(self, gid, token):
+        try:
+            return self.details(gid, token)
+        except Failed as err:
+            log(f"no details for GOG game {gid}: {err}")
+            return {}
+
+    def install(self, gid, progress):
+        info = json.loads(self.run(["info", gid, "--os", "windows", "--lang", "en-US"]).stdout or "{}")
+        folder = info.get("folder_name")
+        if not folder:
+            raise Failed("GOG lists no Windows build of it")
+        base = os.path.join(GAMES, self.name)
+        support = os.path.join(DATA, "gog-support", gid)
+        os.makedirs(base, mode=0o700, exist_ok=True)
+        code, error = follow(self.tool, ["--auth-config-path", self.auth, "download", gid, "--platform", "windows",
+                                                    "--path", base, "--support", support, "--lang", "en-US",
+                                                    "--skip-dlcs", "--max-workers", MAX_WORKERS],
+                             r"= Progress: (\d+(?:\.\d+)?) ", progress, env=self.env)
+        path = os.path.join(base, folder)
+        if code != 0 or not os.path.isfile(os.path.join(path, f"goggame-{gid}.info")):
+            raise Failed(error.split(": ", 1)[-1] if error else f"gogdl download exited {code}")
+        records = read_json(self.records, {})
+        records[gid] = {"path": path, "support": support, "build": info.get("buildId", ""),
+                        "etag": info.get("versionEtag", ""), "lang": "en-US"}
+        write_private(self.records, json.dumps(records))
+
+    def uninstall(self, gid):
+        records = read_json(self.records, {})
+        rec = records.pop(gid, None)
+        if not rec:
+            raise Failed("it is not installed")
+        for path in (rec.get("path", ""), rec.get("support", ""),
+                     os.path.join(self.env["GOGDL_CONFIG_PATH"], "heroic_gogdl", "manifests", gid)):
+            if path and os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+            elif path and os.path.isfile(path):
+                os.remove(path)
+        write_private(self.records, json.dumps(records))
+
+    def game_info(self, gid):
+        rec = self.installed().get(gid)
+        if not rec:
+            raise Failed("it is not installed")
+        info = read_json(os.path.join(rec["path"], f"goggame-{gid}.info"), None)
+        if not isinstance(info, dict):
+            raise Failed(f"goggame-{gid}.info is missing or unreadable")
+        return rec["path"], info
+
+    def launch_info(self, gid):
+        """(exe, args, working folder) of the build's primary play task (goggame-<id>.info)."""
+        import shlex
+        path, info = self.game_info(gid)
+        tasks = [t for t in info.get("playTasks", []) if t.get("type", "FileTask") == "FileTask" and t.get("path")]
+        task = next((t for t in tasks if t.get("isPrimary")), tasks[0] if tasks else None)
+        if not task:
+            raise Failed("the game lists nothing to run")
+        exe = self._file(path, task["path"])
+        args = shlex.split(task.get("arguments", "").replace("\\", "/"))
+        workdir = self._file(path, task["workingDir"]) if task.get("workingDir") else os.path.dirname(exe)
+        return exe, args, workdir
+
+    @staticmethod
+    def _file(root, rel):
+        """root/rel with rel's backslashes, matched case-insensitively as Windows would."""
+        cur = root
+        for part in [p for p in rel.replace("\\", "/").split("/") if p and p != "."]:
+            nxt = os.path.join(cur, part)
+            if not os.path.exists(nxt) and os.path.isdir(cur):
+                nxt = os.path.join(cur, next((e for e in os.listdir(cur) if e.lower() == part.lower()), part))
+            cur = nxt
+        return cur
+
+    def save_locations(self, gid):
+        """[(name, folder)] of the game's cloud saves, inside its prefix; [] without cloud saves."""
+        path, info = self.game_info(gid)
+        client = info.get("clientId", "")
+        if not client:
+            return []
+        conf = http_json(f"https://remote-config.gog.com/components/galaxy_client/clients/{client}?component_version=2.0.45")
+        cloud = conf.get("content", {}).get("Windows", {}).get("cloudStorage", {})
+        if not cloud.get("enabled"):
+            return []
+        user = os.path.join(prefix_path(self.name, gid), "drive_c", "users", "steamuser")
+        where = {"INSTALL": path, "SAVED_GAMES": os.path.join(user, "Saved Games"),
+                 "APPLICATION_DATA_LOCAL": os.path.join(user, "AppData", "Local"),
+                 "APPLICATION_DATA_LOCAL_LOW": os.path.join(user, "AppData", "LocalLow"),
+                 "APPLICATION_DATA_ROAMING": os.path.join(user, "AppData", "Roaming"),
+                 "DOCUMENTS": os.path.join(user, "Documents")}
+        locations = cloud.get("locations") or [{"name": "__default", "location":
+                    f"<?APPLICATION_DATA_LOCAL?>/GOG.com/Galaxy/Applications/{client}/Storage/Shared/Files"}]
+        out = []
+        for loc in locations:
+            text = str(loc.get("location", ""))
+            if re.search(r"<\?(\w+)\?>", text) and all(m in where for m in re.findall(r"<\?(\w+)\?>", text)):
+                folder = re.sub(r"<\?(\w+)\?>", lambda m: where[m.group(1)], text).replace("\\", "/")
+                out.append((str(loc.get("name", "__default")), os.path.normpath(folder)))
+        return out
+
+    def sync_saves(self, gid, direction):
+        """One gogdl save-sync per location. The time of the last sync is kept per location; after a
+        conflict (both sides changed) it is NOT moved on, so nothing is overwritten later: gogdl
+        transfers nothing on a conflict but still prints a fresh time."""
+        stamps_path = os.path.join(DATA, "gog-saves.json")
+        stamps = read_json(stamps_path, {})
+        conflicts = []
+        for name, folder in self.save_locations(gid):
+            key = f"{gid}.{name}"
+            res = self.run(["save-sync", folder, gid, "--os", "windows", "--ts", stamps.get(key, "0"),
+                            "--name", name, "--skip-upload" if direction == "down" else "--skip-download"], check=False)
+            if res.returncode != 0:
+                raise Failed((res.stderr.strip().splitlines() or [f"exit {res.returncode}"])[-1].split(": ", 1)[-1])
+            if "Files in conflict" in res.stderr:
+                conflicts.append(name)
+            elif re.fullmatch(r"\d+(\.\d+)?", res.stdout.strip()):
+                stamps[key] = res.stdout.strip()
+        write_private(stamps_path, json.dumps(stamps))
+        if conflicts:
+            raise Failed("its saves changed both here and in GOG's cloud; both were left as they are")
+
+
+STORES = {"gog": Gog, "epic": Epic}
+
+
+def launch(store, gid):
+    """Saves down, the game, saves up. No upload after a failed download: this device's saves could
+    then be older than the cloud's and still win."""
+    exe, args, workdir = store.launch_info(gid)
+    try:
+        prepare_prefix(store.name, gid)
+        store.sync_saves(gid, "down")
+        synced = True
+    except Failed as err:
+        notice(store.name, f"Cloud saves were not synced this time, so the cloud copy stays as it was: {err}")
+        synced = False
+    code = run_windows_game(store.name, gid, exe, args, workdir)
+    if synced:
+        try:
+            store.sync_saves(gid, "up")
+        except Failed as err:
+            notice(store.name, f"Cloud saves were not uploaded: {err}")
+    return code
+
+
+def main(argv):
+    if len(argv) < 3 or argv[1] not in STORES:
+        print("usage: store <gog|epic> status|setup|sign-in|sign-out|games|install <id>|uninstall <id>|launch <id>",
+              file=sys.stderr)
+        return 2
+    store, verb, rest = STORES[argv[1]](), argv[2], argv[3:]
+    if verb in ("install", "uninstall", "launch") and len(rest) != 1:
+        print(f"usage: store {store.name} {verb} <id>", file=sys.stderr)
+        return 2
+    try:
+        if verb == "status":
+            print(json.dumps({"ready": bool(tool_command(store.tool)), **store.status()}))
+        elif verb == "setup":
+            set_up_tool(store.tool, percent_printer())
+        elif verb == "sign-in":
+            serve_sign_in(store)
+        elif verb == "sign-out":
+            store.sign_out()
+        elif verb == "games":
+            if not store.status()["signed_in"]:
+                raise NotReady(f"not signed in to {store.title}")
+            print(json.dumps(store.games()))
+        elif verb == "install":
+            if not tool_command(store.tool):
+                set_up_tool(store.tool, lambda d, t: None)
+            # The game, then what it runs in (a first one may download both), so that its first
+            # launch does not wait for them.
+            store.install(rest[0], percent_printer(0, 90))
+            runtime_dir(percent_printer(90, 99))
+            proton_dir()
+            print("100%", flush=True)
+        elif verb == "uninstall":
+            store.uninstall(rest[0])
+        elif verb == "launch":
+            return launch(store, rest[0])
+        else:
+            print(f"store: unknown command {verb}", file=sys.stderr)
+            return 2
+    except Failed as err:
+        log(str(err))
+        return err.code
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

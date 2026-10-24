@@ -1,0 +1,6 @@
+# gogdl (Heroic-Games-Launcher/heroic-gogdl, GPL-3.0), the GOG tool: its Linux arm64 zipapp of one release
+# and that file's sha256 (GitHub's digest). Fields as in legendary.pin.
+name: gogdl
+tag: v1.3.1
+url: https://github.com/Heroic-Games-Launcher/heroic-gogdl/releases/download/v1.3.1/gogdl_linux_arm64
+sha256: 9c70af33f5ca74d08236b4d50ca5f54262d9b4712d4a34c479e4263792fe55fc

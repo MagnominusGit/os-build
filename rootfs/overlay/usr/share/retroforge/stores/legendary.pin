@@ -1,0 +1,7 @@
+# legendary (derrod/legendary, GPL-3.0), the Epic Games Store tool: its Linux arm64 zipapp of one release
+# and that file's sha256 (GitHub's digest). /usr/lib/retroforge/store downloads it into the player's home at
+# the first Epic sign-in, unpacks it and compiles it. A bump is by hand: tag, url and sha256 together.
+name: legendary
+tag: 0.21.1
+url: https://github.com/legendary-gl/legendary/releases/download/0.21.1/legendary_linux_arm64
+sha256: e901cb52ada10d5cef6ffb2a0985099958124457bfb455a571023d1e042143d9
