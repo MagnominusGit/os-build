@@ -80,6 +80,8 @@ ROUTES = {
                                                            "supported_operating_systems": [{"slug": "windows"}]},
     "/gamesdb.gog.com/platforms/gog/external_releases/3": {"type": "game", "title": {"*": "Linux Only"},
                                                            "supported_operating_systems": [{"slug": "linux"}]},
+    "/images.gog.com/v1_glx_vertical_cover.jpg": b"\xff\xd8\xff gog cover",
+    "/cdn.epic/tall.jpg?w=360&resize=1&quality=medium": b"\xff\xd8\xff epic cover",
     "/remote-config.gog.com/components/galaxy_client/clients/c1?component_version=2.0.45": {
         "content": {"Windows": {"cloudStorage": {"enabled": True, "locations": [
             {"name": "saves", "location": "<?APPLICATION_DATA_LOCAL?>/Game One/Saves"}]}}}},
@@ -386,7 +388,7 @@ CASE = "games gog"
 r = store("gog", "games")
 games = json.loads(r.stdout or "[]")
 ok(r.returncode == 0 and [g["id"] for g in games] == ["1"], "owned Windows games only (no DLC, no Linux-only, no other platform)", r.stdout + r.stderr)
-ok(games and games[0]["title"] == "Game One" and games[0]["art"].get("portrait") == "https://images.gog.com/v1.jpg"
+ok(games and games[0]["title"] == "Game One" and games[0]["art"].get("portrait") == "https://images.gog.com/v1_glx_vertical_cover.jpg"
    and games[0]["art"].get("logo") == "https://images.gog.com/l1_glx_logo.png" and games[0]["installed"] is False,
    "title, art sized by GOG's suffixes, not installed", str(games))
 r = store("gog", "games", env={"RETROFORGE_STORE_API": "http://127.0.0.1:9"})
@@ -402,6 +404,31 @@ ok(set(games) == {"Fortnite2", "Plain"} and games["Fortnite2"]["art"] == {
    "hero": "https://cdn.epic/wide.jpg?w=1600&resize=1&quality=medium"}, "games and their art, resized by Epic's CDN", r.stdout + r.stderr)
 r = store("epic", "games", env={"XDG_CONFIG_HOME": os.path.join(T, "nobody")})
 ok(r.returncode == 3, "not signed in: exit 3", r.stderr)
+
+CASE = "art"
+CACHE = os.path.join(T, "cache")
+art_env = {"XDG_CACHE_HOME": CACHE}
+
+
+def cached(store_name, gid, url):
+    return os.path.join(CACHE, "retroforge", "store-art", store_name, gid, "portrait-" + hashlib.sha1(url.encode()).hexdigest()[:12])
+
+
+store("gog", "games", env=art_env)
+store("epic", "games", env=art_env)
+r1, r2 = store("gog", "art", env=art_env), store("epic", "art", env=art_env)
+gog_cover = cached("gog", "1", "https://images.gog.com/v1_glx_vertical_cover.jpg")
+epic_cover = cached("epic", "Fortnite2", "https://cdn.epic/tall.jpg?w=360&resize=1&quality=medium")
+ok(r1.returncode == 0 and os.path.isfile(gog_cover) and open(gog_cover, "rb").read() == b"\xff\xd8\xff gog cover",
+   "the listed games' covers, where the cards look for them (library_store.gd: <key>-<url sha1>)", r1.stderr)
+ok(r2.returncode == 0 and os.path.isfile(epic_cover) and "1 fetched" in r2.stderr, "epic too; a game with no cover is skipped", r2.stderr)
+before = len(SEEN)
+r = store("gog", "art", env=art_env)
+ok(r.returncode == 0 and len(SEEN) == before and r.stderr == "", "a cached cover is not fetched again", r.stderr)
+ROUTES["/images.gog.com/v1_glx_vertical_cover.jpg"] = None
+os.remove(gog_cover)
+store("gog", "art", env=art_env)
+ok(os.path.isfile(gog_cover + ".missing"), "one the store does not have is marked missing (not asked again for a day)")
 
 
 # ---- install -------------------------------------------------------------------------------------

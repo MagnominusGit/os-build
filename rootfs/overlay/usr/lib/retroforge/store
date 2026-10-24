@@ -8,6 +8,7 @@
 #                                      closing stdin cancels it
 #   store <gog|epic> sign-out
 #   store <gog|epic> games             JSON: every game the account owns, installed or not
+#   store <gog|epic> art               the listed games' covers into the cards' cache (ART below)
 #   store <gog|epic> install <id>      N% lines; exit 0 once installed
 #   store <gog|epic> uninstall <id>
 #   store <gog|epic> launch <id>       saves down, the game, saves up; the game's exit status
@@ -40,6 +41,12 @@
 # shows whom it signed in. Neither store has a device sign-in this can use: GOG has no device-code
 # grant, and Epic's is open only to its own apps' clients. Tokens stay in the player's home, which
 # only the player can read.
+#
+# ART. A Steam card's cover is on disk already (the client's library cache); a store's is on its CDN,
+# and a card that fetched its own (library_store.gd: one curl, one TLS handshake each) came in slowly
+# as the player scrolled. So once a library is listed, `art` fetches every portrait cover into the
+# same cache, on a few kept-alive connections at a low priority: the cards then read them from disk.
+# A card shown before then still fetches its own.
 #
 # TEST SEAMS (tests/test-store.sh): RETROFORGE_STORE_DATA (for <data>/retroforge/stores),
 # RETROFORGE_STORE_PINS, RETROFORGE_STORE_TOOL_<NAME> (a tool's command, instead of the set-up one),
@@ -798,10 +805,11 @@ class Gog:
                 if meta.get("type") != "game" or game.get("visible_in_library") is False or "windows" not in oses:
                     continue
                 title = (meta.get("title") or {}).get("*") or (game.get("title") or {}).get("*") or gid
-                # GOG's image service sizes by a suffix ("{formatter}"): a background is 365 KB as
-                # it is and 63 KB at _800, a logo 2.1 MB as it is and 14 KB as _glx_logo.
+                # GOG's image service sizes by a suffix ("{formatter}"): a cover is 54 KB as it is
+                # and 30 KB as _glx_vertical_cover (both 342x482), a background 365 KB and 63 KB at
+                # _800, a logo 2.1 MB and 14 KB as _glx_logo.
                 art = {}
-                for key, field, size, ext in (("portrait", "vertical_cover", "", "jpg"), ("landscape", "background", "_800", "jpg"),
+                for key, field, size, ext in (("portrait", "vertical_cover", "_glx_vertical_cover", "jpg"), ("landscape", "background", "_800", "jpg"),
                                               ("hero", "background", "_1600", "jpg"), ("logo", "logo", "_glx_logo", "png")):
                     fmt = (game.get(field) or {}).get("url_format", "")
                     if fmt:
@@ -945,6 +953,73 @@ class Gog:
 STORES = {"gog": Gog, "epic": Epic}
 
 
+def art_path(store, gid, key, url):
+    """Where library_store.gd keeps a game's art: <cache>/retroforge/store-art/<store>/<id>/<key>-<the
+    url's sha1, 12 hex> (Godot's validate_filename on the id, sha1_text on the url)."""
+    cache = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    safe = re.sub(r'[:/\\?*"|%<>]', "_", gid)
+    return os.path.join(cache, "retroforge", "store-art", store, safe, f"{key}-{hashlib.sha1(url.encode()).hexdigest()[:12]}")
+
+
+def prefetch_art(name):
+    """Every listed game's portrait cover that is not cached yet (ART above). One run per store at a time."""
+    import fcntl
+    import http.client
+    import urllib.parse
+    from concurrent.futures import ThreadPoolExecutor
+    os.makedirs(DATA, mode=0o700, exist_ok=True)
+    lock = open(os.path.join(DATA, f".art-{name}.lock"), "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return
+    todo = []
+    for game in read_json(os.path.join(DATA, f"{name}-library.json"), []):
+        url = str((game.get("art") or {}).get("portrait", ""))
+        dest = art_path(name, str(game.get("id", "")), "portrait", url) if url.startswith("https://") else ""
+        if dest and not os.path.exists(dest) and not os.path.exists(dest + ".missing"):
+            todo.append((url, dest))
+    local = threading.local()
+
+    def get(url, dest):
+        target = urllib.parse.urlsplit(url_of(url))
+        conns = local.__dict__.setdefault("conns", {})
+        status, body = 0, b""
+        for _ in range(2):  # a kept-alive connection the server closed: once more, on a new one
+            conn = conns.get(target.netloc)
+            if conn is None:
+                kind = http.client.HTTPSConnection if target.scheme == "https" else http.client.HTTPConnection
+                conn = conns[target.netloc] = kind(target.netloc, timeout=20)
+            try:
+                conn.request("GET", target.path + (f"?{target.query}" if target.query else ""), headers={"User-Agent": AGENT})
+                r = conn.getresponse()
+                status, body = r.status, r.read()
+                if status in (301, 302, 303, 307, 308):
+                    with urllib.request.urlopen(urllib.request.Request(r.getheader("Location", ""), headers={"User-Agent": AGENT}),
+                                                timeout=20) as moved:
+                        status, body = moved.status, moved.read()
+                break
+            except (OSError, http.client.HTTPException, ValueError):
+                conn.close()
+                conns.pop(target.netloc, None)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        if status == 200 and body:
+            with open(dest + ".part", "wb") as f:
+                f.write(body)
+            os.replace(dest + ".part", dest)
+            return "fetched"
+        if 400 <= status < 500:  # as library_store.gd: not asked again for a day
+            open(dest + ".missing", "w").close()
+            return "missing"
+        return "failed"
+
+    with ThreadPoolExecutor(4) as pool:
+        results = list(pool.map(lambda t: get(*t), todo))
+    if todo:
+        log(f"{name} covers: {results.count('fetched')} fetched, {results.count('missing')} missing, "
+            f"{results.count('failed')} failed, of {len(todo)} not cached")
+
+
 def launch(store, gid):
     """Saves down, the game, saves up. No upload after a failed download: this device's saves could
     then be older than the cloud's and still win."""
@@ -971,7 +1046,7 @@ def main(argv):
               file=sys.stderr)
         return 2
     store, verb, rest = STORES[argv[1]](), argv[2], argv[3:]
-    if verb in ("setup", "games", "install", "uninstall"):
+    if verb in ("setup", "games", "art", "install", "uninstall"):
         os.nice(10)  # behind OGUI and a running game: a download decompresses on every core
     if verb in ("install", "uninstall", "launch") and len(rest) != 1:
         print(f"usage: store {store.name} {verb} <id>", file=sys.stderr)
@@ -988,7 +1063,11 @@ def main(argv):
         elif verb == "games":
             if not store.status()["signed_in"]:
                 raise NotReady(f"not signed in to {store.title}")
-            print(json.dumps(store.games()))
+            games = store.games()
+            write_private(os.path.join(DATA, f"{store.name}-library.json"), json.dumps(games))  # for `art`
+            print(json.dumps(games))
+        elif verb == "art":
+            prefetch_art(store.name)
         elif verb == "install":
             if not tool_command(store.tool):
                 set_up_tool(store.tool, lambda d, t: None)

@@ -6,6 +6,7 @@ extends Library
 ## with its progress on the card (install_progressed). Signed out, the library is empty.
 
 const Runner := preload("store_runner.gd")
+const Spawn := preload("spawn.gd")
 const TOOL := "/usr/lib/retroforge/store"
 const TITLES := {"gog": "GOG", "epic": "Epic Games"}
 ## `store games`' art keys, by OGUI BoxArtProvider.LAYOUT (as steam_apps.gd ART).
@@ -58,6 +59,8 @@ func get_library_launch_items() -> Array[LibraryLaunchItem]:
 			installed += 1 if game.get("installed", false) else 0
 	_drop_stale(items)
 	logger.info("Found %d %s game(s), %d installed" % [items.size(), TITLES[store], installed])
+	if not items.is_empty():
+		Spawn.run(tool, [store, "art"])  # the covers into the cache before the cards ask (store's ART)
 	return items
 
 
