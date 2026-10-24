@@ -67,7 +67,7 @@ Pocket Max's `52-pocket-max-dp.conf` (S16LE, fixed periods, no mmap on `hw:Pocke
 until that verb returns.
 
 **System hygiene — identity, memory, and the `/var` shape**
-Four files that are not a subsystem but are load-bearing for the immutable A/B model, because on
+Files that are not a subsystem but are load-bearing for the immutable A/B model, because on
 this image `/etc/passwd` and `/var` are *build products* rather than device state:
 
 - `usr/lib/sysusers.d/01-retroforge-enforce-ids.conf` — pins every system UID/GID that
@@ -85,6 +85,11 @@ this image `/etc/passwd` and `/var` are *build products* rather than device stat
   (RAM spans 8–16 GB across supported SKUs, so percentages mean different headroom per unit),
   reports off (the default is one journal line per second, onto an SD card), and the session spine
   protected. Enabled by `60-retroforge-earlyoom.preset` + a `multi-user.target.wants` symlink.
+- `usr/lib/systemd/system/user@.service.d/10-retroforge-oom.conf` and the spine's
+  `usr/lib/systemd/user/{pipewire,pipewire-pulse,wireplumber,dbus-broker}.service.d/10-retroforge-oom.conf`
+  — the same victim order for the kernel's OOM killer, which MGLRU's `min_ttl_ms` guard
+  (`usr/lib/tmpfiles.d/retroforge-mm.conf`) calls long before earlyoom acts: the spine at the
+  session's 0 instead of systemd's 200, so a game (900 on every launch path) goes first.
 - `usr/lib/systemd/zram-generator.conf` — the image's only swap device, `min(ram, 8192)` compressed in RAM
   with zstd level 1 (lz4 first ran Hades out of memory on the 3.5 GB Air X; the file says why).
   **Coupled to the kernel:** it needs `CONFIG_ZRAM` + the zstd backend, which `kernel/build.sh`
