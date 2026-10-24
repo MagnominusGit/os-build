@@ -1437,9 +1437,9 @@ GD
     # shell's own display (gamescope's Xwayland 0) is set to the design size at the output's aspect
     # and Godot draws it 1:1; the viewport stretch is left for a full-size shell behind a game. The
     # stretch drew the same pixels and then copied them, scaled, into an output-sized window every
-    # frame (1.9 ms more GPU per frame on the Air X's Adreno 610).
+    # frame (1.9 ms more GPU per frame on the Air X's Adreno 610). The Vulkan renderer switch below it.
     CASE="display"
-    mkdir -p "$T/display/bin" "$T/display/d"
+    mkdir -p "$T/display/bin" "$T/display/d" "$T/display/home"
     printf '#!/bin/sh\nfor a; do last=$a; done\necho "$last" >> "$FAKE_DIR/xprop-calls"\n' >"$T/display/bin/xprop"
     chmod +x "$T/display/bin/xprop"
     cat >"$OGUI_PROJECT/retroforge_display_test.gd" <<'GD'
@@ -1483,9 +1483,42 @@ func run() -> void:
 	check("off, brought up over the game: the output size again", root.content_scale_mode, Window.CONTENT_SCALE_MODE_CANVAS_ITEMS)
 	DisplaySettings._output = Vector2i(1280, 960)
 	check("a panel no bigger than the design size (Air Y, 1280x960) keeps its size", d.reduced_size(), Vector2i(1280, 960))
+	await test_renderer(DisplaySettings)
 	quit(failed)
+
+# Vulkan renderer: offered only where the board starts the shell on OpenGL; the choice goes to
+# ~/.config/retroforge/display.conf as UI_RENDERER=, which retroforge-session reads.
+func test_renderer(DisplaySettings) -> void:
+	var conf := OS.get_environment("HOME").path_join(".config/retroforge/display.conf")
+	var menu: Node = load("res://core/ui/common/settings/display_settings_menu.tscn").instantiate()
+	root.add_child(menu)
+	await process_frame
+	OS.set_environment("RETROFORGE_UI_RENDERER", "")
+	var plain = DisplaySettings.new()
+	plain.tree = self
+	plain.attach()
+	check("renderer: no Vulkan switch on a board with no default", menu.find_child("RetroForgeVulkanRenderer", true, false), null)
+	plain.detach()
+	await process_frame
+	OS.set_environment("RETROFORGE_UI_RENDERER", "opengl")
+	DirAccess.make_dir_recursive_absolute(conf.get_base_dir())
+	FileAccess.open(conf, FileAccess.WRITE).store_string("OTHER=1\n")
+	var d = DisplaySettings.new()
+	d.tree = self
+	d.attach()
+	var toggle: Node = menu.find_child("RetroForgeVulkanRenderer", true, false)
+	check("renderer: the switch is offered, off (OpenGL, the board's default)", [toggle != null, toggle.button_pressed if toggle else null, d.chosen_renderer()], [true, false, "opengl"])
+	check("renderer: right under Reduced UI resolution", toggle.get_index(), menu.find_child("RetroForgeReducedUI", true, false).get_index() + 1)
+	toggle.button_pressed = true
+	toggle.toggled.emit(true)  # as a press does (OGUI's Toggle)
+	check("renderer: on writes UI_RENDERER=vulkan, keeping the file's other lines", FileAccess.get_file_as_string(conf), "OTHER=1\nUI_RENDERER=vulkan\n")
+	toggle.button_pressed = false
+	toggle.toggled.emit(false)  # as a press does (OGUI's Toggle)
+	check("renderer: off writes UI_RENDERER=opengl, once", FileAccess.get_file_as_string(conf), "OTHER=1\nUI_RENDERER=opengl\n")
+	FileAccess.open(conf, FileAccess.WRITE).store_string("UI_RENDERER=vulkan\n")
+	check("renderer: a stored vulkan shows the switch on", DisplaySettings.new().chosen_renderer(), "vulkan")
 GD
-    out="$(cd "$OGUI_PROJECT" && FAKE_DIR="$T/display/d" PATH="$T/display/bin:$PATH" timeout 120 "$GODOT" --headless --path . --script res://retroforge_display_test.gd 2>&1)"; rc=$?
+    out="$(cd "$OGUI_PROJECT" && FAKE_DIR="$T/display/d" HOME="$T/display/home" PATH="$T/display/bin:$PATH" timeout 120 "$GODOT" --headless --path . --script res://retroforge_display_test.gd 2>&1)"; rc=$?
     rm -f "$OGUI_PROJECT/retroforge_display_test.gd"
     printf '%s\n' "$out" | grep -E '^  (ok|FAIL) '
     n_ok="$(printf '%s\n' "$out" | grep -c '^  ok ')"; n_bad="$(printf '%s\n' "$out" | grep -c '^  FAIL ')"

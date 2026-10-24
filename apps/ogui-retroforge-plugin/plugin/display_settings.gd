@@ -19,8 +19,12 @@ extends RefCounted
 ##    the foreground a full-size shell still draws at the design size that way (set_backgrounded):
 ##    it is only an overlay then, and goes back to the output size the moment it is brought up
 ##    over the game, with no display mode change.
+##  - Vulkan renderer: only on a board whose profile starts the shell on OpenGL
+##    (RETROFORGE_UI_RENDERER=opengl, the SM6115 boards: ~130 MiB more RAM left to games, more long
+##    frames while navigating). retroforge-session reads the choice from UI_RENDERER=vulkan|opengl
+##    in ~/.config/retroforge/display.conf when it starts the shell, so it applies after a restart.
 ##
-## Both are stored in OGUI's settings (section "retroforge"); absent = the profile default.
+## The first two are stored in OGUI's settings (section "retroforge"); absent = the profile default.
 
 const SECTION := "retroforge"
 const RESOLUTIONS := [
@@ -39,6 +43,7 @@ var logger := Log.get_logger("RetroForgeDisplay", Log.LEVEL.INFO)
 var tree: SceneTree
 var _resolution: Control  # OGUI Dropdown
 var _reduced_ui: Control  # OGUI Toggle
+var _vulkan: Control  # OGUI Toggle, only where the board starts the shell on OpenGL
 var _backgrounded := false  # a game has the foreground; the shell is only an overlay
 ## The output size, read once before the shell's display is first resized; shared with the game
 ## settings page's instance, which asks only later.
@@ -83,11 +88,21 @@ func attach() -> bool:
 	box.move_child(_reduced_ui, index + 1)
 	_reduced_ui.button_pressed = reduced_ui_enabled()
 	_reduced_ui.toggled.connect(_on_reduced_ui_toggled)
+
+	if board_renderer() != "":
+		_vulkan = toggle_scene.instantiate()
+		_vulkan.name = "RetroForgeVulkanRenderer"
+		_vulkan.text = "Vulkan renderer"
+		_vulkan.description = "Draw this interface with Vulkan instead of OpenGL: fewer stutters while navigating, about 130 MB less memory left for games. Takes effect after a restart."
+		box.add_child(_vulkan)
+		box.move_child(_vulkan, index + 2)
+		_vulkan.button_pressed = chosen_renderer() == "vulkan"
+		_vulkan.toggled.connect(func(on: bool): set_renderer("vulkan" if on else "opengl"))
 	return true
 
 
 func detach() -> void:
-	for n in [_resolution, _reduced_ui]:
+	for n in [_resolution, _reduced_ui, _vulkan]:
 		if is_instance_valid(n):
 			n.queue_free()
 
@@ -184,6 +199,44 @@ func set_display_size(server: int, s: Vector2i) -> bool:
 		logger.warn("could not set display %d to %d x %d (xprop exit %d): %s" % [server, s.x, s.y, rc, "".join(out)])
 		return false
 	return true
+
+
+## The board's default renderer for the shell ("opengl"), or "" where the board offers no choice.
+func board_renderer() -> String:
+	return OS.get_environment("RETROFORGE_UI_RENDERER")
+
+
+func _renderer_conf() -> String:
+	return OS.get_environment("HOME").path_join(".config/retroforge/display.conf")
+
+
+## The renderer the shell starts with next: the player's choice, else the board's.
+func chosen_renderer() -> String:
+	var chosen := ""
+	if FileAccess.file_exists(_renderer_conf()):
+		for line in FileAccess.get_file_as_string(_renderer_conf()).split("\n", false):
+			var value := line.strip_edges().trim_prefix("UI_RENDERER=")
+			if line.begins_with("UI_RENDERER=") and value in ["opengl", "vulkan"]:
+				chosen = value
+	return chosen if chosen != "" else board_renderer()
+
+
+## Stores the player's choice for retroforge-session, keeping the file's other lines.
+func set_renderer(renderer: String) -> void:
+	var path := _renderer_conf()
+	var lines := PackedStringArray()
+	if FileAccess.file_exists(path):
+		for line in FileAccess.get_file_as_string(path).split("\n", false):
+			if not line.begins_with("UI_RENDERER="):
+				lines.append(line)
+	lines.append("UI_RENDERER=" + renderer)
+	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
+	var f := FileAccess.open(path, FileAccess.WRITE)
+	if not f:
+		logger.warn("could not write %s: %s" % [path, error_string(FileAccess.get_open_error())])
+		return
+	f.store_string("\n".join(lines) + "\n")
+	logger.info("the shell renders with %s from its next start" % renderer)
 
 
 func reduced_ui_enabled() -> bool:
