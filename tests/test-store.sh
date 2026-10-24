@@ -207,7 +207,8 @@ elif a[0] == "save-sync":
         sys.stdout.write("1700000000.5")
 ''')
 RUNNER = script("runner", r'''
-call(os.getcwd(), os.environ.get("STEAM_COMPAT_DATA_PATH", ""), os.environ.get("STEAM_COMPAT_CLIENT_INSTALL_PATH", ""),
+call(os.environ.get("STEAM_COMPAT_INSTALL_PATH", ""), os.environ.get("STEAM_COMPAT_LIBRARY_PATHS", ""),
+     os.getcwd(), os.environ.get("STEAM_COMPAT_DATA_PATH", ""), os.environ.get("STEAM_COMPAT_CLIENT_INSTALL_PATH", ""),
      os.environ.get("STEAM_COMPAT_TOOL_PATHS", ""))
 if "wineboot" in sys.argv:
     pfx = os.path.join(os.environ["STEAM_COMPAT_DATA_PATH"], "pfx")
@@ -496,6 +497,8 @@ ok(run[1:4] == [os.path.join(RUNTIME, "_v2-entry-point"), "--verb=waitforexitand
    "Proton in the runtime, the primary task's program (case-insensitive) and arguments", str(run))
 ok(run[-4:] == [os.path.join(gamedir, "BIN"), os.path.join(DATA, "prefixes", "gog-1"), os.path.join(DATA, "steam-client"),
                 f"{PROTON}:{RUNTIME}"], "its folder, prefix, empty client folder, tools", str(run[-4:]))
+ok(run[-6:-4] == [gamedir, os.path.join(DATA, "games", "gog")],
+   "the install folder is the game's, its library the store's (drive S: has room above the program: GRIP)", str(run[-6:-4]))
 ok(json.load(open(os.path.join(DATA, "gog-saves.json"))) == {"1.saves": "1700000000.5"}, "the sync time is kept per location")
 reset_calls()
 store("gog", "launch", "1")

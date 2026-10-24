@@ -328,8 +328,12 @@ def prefix_path(store, gid):
     return os.path.join(DATA, "prefixes", f"{store}-{gid}", "pfx")
 
 
-def run_windows_game(store, gid, exe, args, workdir, extra_env=None):
-    """The game through Proton in the runtime; its exit status."""
+def run_windows_game(store, gid, exe, args, workdir, game_dir, extra_env=None):
+    """The game through Proton in the runtime; its exit status. game_dir is its install folder: Proton
+    maps drive S: to the library folder holding it (STEAM_COMPAT_LIBRARY_PATHS), and a game that
+    climbs from its program to its content (Unreal: Binaries/Win64 -> ../../) needs room above the
+    program. With the working folder there, GRIP saw itself as S:\\Win64\\... and could not find its
+    content ("Failed to load Grip.uproject", Air X, 2026-10-24)."""
     runtime, proton = runtime_dir(), proton_dir()
     compat = os.path.dirname(prefix_path(store, gid))
     client = os.path.join(DATA, "steam-client")
@@ -340,9 +344,9 @@ def run_windows_game(store, gid, exe, args, workdir, extra_env=None):
         "SteamAppId": "0", "SteamGameId": "0", "STEAM_COMPAT_APP_ID": "0",
         "STEAM_COMPAT_CLIENT_INSTALL_PATH": client,
         "STEAM_COMPAT_DATA_PATH": compat,
-        "STEAM_COMPAT_INSTALL_PATH": workdir,
+        "STEAM_COMPAT_INSTALL_PATH": game_dir,
         "STEAM_COMPAT_SHADER_PATH": os.path.join(DATA, "shadercache", f"{store}-{gid}"),
-        "STEAM_COMPAT_LIBRARY_PATHS": os.path.dirname(workdir),
+        "STEAM_COMPAT_LIBRARY_PATHS": os.path.dirname(game_dir.rstrip("/")),
         # Innermost first, as Steam lists them: Proton, then the runtime it runs in.
         "STEAM_COMPAT_TOOL_PATHS": f"{proton}:{runtime}",
         "SteamDeck": "1",
@@ -695,7 +699,7 @@ class Epic:
             raise Failed("legendary did not uninstall it")
 
     def launch_info(self, gid):
-        """(exe, args, working folder) from `legendary launch --json`: online for a fresh exchange
+        """(exe, args, working folder, install folder) from `legendary launch --json`: online for a fresh exchange
         code, else offline (a game that runs offline still starts without the network)."""
         res = self.run(["launch", gid, "--json", "--no-wine", "--skip-version-check"])
         try:
@@ -705,7 +709,7 @@ class Epic:
             p = json.loads(self.run(["launch", gid, "--json", "--no-wine", "--offline"], check=True).stdout)
         exe = os.path.join(p["game_directory"], p["game_executable"].replace("\\", "/"))
         args = list(p.get("game_parameters", [])) + list(p.get("user_parameters", [])) + list(p.get("egl_parameters", []))
-        return exe, args, p.get("working_directory") or p["game_directory"]
+        return exe, args, p.get("working_directory") or p["game_directory"], p["game_directory"]
 
     def sync_saves(self, gid, direction):
         """down: before the game (and records the save path, from the prefix); up: after it."""
@@ -879,7 +883,7 @@ class Gog:
         return rec["path"], info
 
     def launch_info(self, gid):
-        """(exe, args, working folder) of the build's primary play task (goggame-<id>.info)."""
+        """(exe, args, working folder, install folder) of the build's primary play task (goggame-<id>.info)."""
         import shlex
         path, info = self.game_info(gid)
         tasks = [t for t in info.get("playTasks", []) if t.get("type", "FileTask") == "FileTask" and t.get("path")]
@@ -889,7 +893,7 @@ class Gog:
         exe = self._file(path, task["path"])
         args = shlex.split(task.get("arguments", "").replace("\\", "/"))
         workdir = self._file(path, task["workingDir"]) if task.get("workingDir") else os.path.dirname(exe)
-        return exe, args, workdir
+        return exe, args, workdir, path
 
     @staticmethod
     def _file(root, rel):
@@ -1023,7 +1027,7 @@ def prefetch_art(name):
 def launch(store, gid):
     """Saves down, the game, saves up. No upload after a failed download: this device's saves could
     then be older than the cloud's and still win."""
-    exe, args, workdir = store.launch_info(gid)
+    exe, args, workdir, game_dir = store.launch_info(gid)
     try:
         prepare_prefix(store.name, gid)
         store.sync_saves(gid, "down")
@@ -1031,7 +1035,7 @@ def launch(store, gid):
     except Failed as err:
         notice(store.name, f"Cloud saves were not synced this time, so the cloud copy stays as it was: {err}")
         synced = False
-    code = run_windows_game(store.name, gid, exe, args, workdir)
+    code = run_windows_game(store.name, gid, exe, args, workdir, game_dir)
     if synced:
         try:
             store.sync_saves(gid, "up")
