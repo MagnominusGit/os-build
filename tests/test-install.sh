@@ -1060,6 +1060,10 @@ got="$(cd "$hs" 2>/dev/null && find . | sort | tr '\n' ' ')"
 [ "$(stat -c %u "$hs/player" 2>/dev/null)" = "$(id -u)" ] \
   && ok "owned by PLAYER_UID" \
   || bad "player/ is not owned by PLAYER_UID"
+# Steam's saved sign-in lives under it: no other account on the device may read the home.
+[ "$(stat -c %a "$hs/player" 2>/dev/null)" = 700 ] \
+  && ok "player/ is the player's alone (0700)" \
+  || bad "player/ is $(stat -c %a "$hs/player" 2>/dev/null), readable by other accounts"
 CASE="lib-homestage: a missing home root is fatal, not silent"
 ( PLAYER_UID="$(id -u)"; PLAYER_GID="$(id -g)"; . "$HOMESTAGE"; \
   stage_player_home "$T/no-such-root" ) >/dev/null 2>&1 \

@@ -47,6 +47,11 @@ shares() { grep -E '^[[:space:]]*\[[^]]+\]' "$CONF" | tr -d '[] \t' | grep -vxE 
 CASE="share policy"
 [ "$(val global 'map to guest')" = "bad user" ] && ok "any login maps to the guest account (map to guest = bad user)" || bad "map to guest is '$(val global 'map to guest')'"
 [ "$(val global 'guest account')" = player ] && ok "guest account is player: copied files are the player's" || bad "guest account is '$(val global 'guest account')', not player"
+# The home is 0700 (Steam's saved sign-in is in it): guests still reach the four folders because
+# they are the player; any other guest account would be locked out of every share.
+PRIVATE="$OV/usr/lib/tmpfiles.d/retroforge-home-private.conf"
+grep -qE '^z[[:space:]]+/home/player[[:space:]]+0700[[:space:]]+player[[:space:]]+player' "$PRIVATE" 2>/dev/null \
+  && ok "the home is made the player's alone (0700) at every boot" || bad "no tmpfiles line makes /home/player 0700"
 [ "$(shares | sort | tr '\n' ' ')" = "bios roms saves states " ] && ok "exactly four shares: bios roms saves states" || bad "shares are: $(shares | tr '\n' ' ')"
 for s in $(shares); do
   p="$(val "$s" path)"

@@ -26,7 +26,10 @@ stage_player_home() {  # <home-root>
   local playerhome="$root/player"
 
   [ -d "$root" ] || die "no home root at $root"
-  install -d -m 0755 "$playerhome" "$playerhome/.config" "$playerhome/.local/share" \
+  # The home is the player's alone (0700): Steam keeps its saved sign-in in it. The SMB guests reach
+  # the shared folders as the player (ksmbd.conf's guest account), and no service of another user
+  # reads it. /usr/lib/tmpfiles.d/retroforge-home-private.conf applies the same to existing homes.
+  install -d -m 0700 "$playerhome" && install -d -m 0755 "$playerhome/.config" "$playerhome/.local/share" \
     || die "cannot create the player home under $root"
 
   chown -R "$PLAYER_UID:$PLAYER_GID" "$playerhome" \
