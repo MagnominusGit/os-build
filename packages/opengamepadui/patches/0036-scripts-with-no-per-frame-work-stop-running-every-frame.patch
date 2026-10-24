@@ -1,0 +1,93 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Sat, 24 Oct 2026 14:30:00 -0700
+Subject: [PATCH] perf: scripts with no per-frame work stop running every
+ frame
+
+Godot calls a script's _process every frame whether or not it has work.
+The card UI's 164 Buttons (button.gd) had an empty one, the context bar
+rebuilt its hidden debug label's state-stack text every frame, and each
+of the 19 ScrollerJoysticks checked its stick every frame. OGUI's main
+thread idle in the menu on a MANGMI Air X: 12% of a core with them, 9.5%
+without.
+
+Button has no _process now, the debug label follows state_changed, and a
+ScrollerJoystick processes only while its stick is out of the dead zone.
+
+---
+ core/systems/input/scroller_joystick.gd        | 12 ++++++++----
+ core/ui/card_ui/navigation/context_bar_menu.gd | 11 ++---------
+ core/ui/components/button.gd                   |  4 ----
+ 3 files changed, 10 insertions(+), 17 deletions(-)
+
+diff --git a/core/systems/input/scroller_joystick.gd b/core/systems/input/scroller_joystick.gd
+index 85d509f..52072ca 100644
+--- a/core/systems/input/scroller_joystick.gd
++++ b/core/systems/input/scroller_joystick.gd
+@@ -16,11 +16,14 @@ var direction := Vector2.ZERO
+ var remainder := Vector2.ZERO
+ 
+ 
++# Processes only while the stick is out of its dead zone (_input).
++func _ready() -> void:
++	set_process(false)
++
++
+ func _process(delta: float) -> void:
+ 	if not parent.is_visible_in_tree():
+ 		return
+-	if abs(direction.x) < dead_zone.x and abs(direction.y) < dead_zone.y:
+-		return
+ 	var current_pos := Vector2(parent.scroll_horizontal, parent.scroll_vertical)
+ 	var target_pos := current_pos + (direction * scroll_speed * delta)
+ 	
+@@ -53,5 +56,6 @@ func _input(event: InputEvent) -> void:
+ 
+ 	if joy_event.axis == JOY_AXIS_RIGHT_X:
+ 		direction.x = joy_event.axis_value
+-		return
+-	direction.y = joy_event.axis_value
++	else:
++		direction.y = joy_event.axis_value
++	set_process(abs(direction.x) >= dead_zone.x or abs(direction.y) >= dead_zone.y)
+diff --git a/core/ui/card_ui/navigation/context_bar_menu.gd b/core/ui/card_ui/navigation/context_bar_menu.gd
+index e072a0a..51d1ec1 100644
+--- a/core/ui/card_ui/navigation/context_bar_menu.gd
++++ b/core/ui/card_ui/navigation/context_bar_menu.gd
+@@ -16,15 +16,7 @@ func _ready() -> void:
+ 	time_timer.autostart = true
+ 	add_child(time_timer)
+ 	_on_update_time()
+-
+-
+-func _process(delta: float) -> void:
+-	var stack = []
+-	for s in state_machine._state_stack:
+-		var state := s as State
+-		stack.push_back(state.name)
+-	var state_stack = "-> ".join(stack)
+-	$%DebugLabel.text = state_stack
++	_on_state_changed(null, null)
+ 
+ 
+ func _on_state_changed(from: State, to: State):
+@@ -33,6 +25,7 @@ func _on_state_changed(from: State, to: State):
+ 		var state := s as State
+ 		stack.push_back(state.name)
+ 	var state_stack = "-> ".join(stack)
++	$%DebugLabel.text = state_stack
+ 	logger.debug(state_stack)
+ 
+ 
+diff --git a/core/ui/components/button.gd b/core/ui/components/button.gd
+index 93a5fcf..49f811b 100644
+--- a/core/ui/components/button.gd
++++ b/core/ui/components/button.gd
+@@ -14,7 +14,3 @@ func _play_sound(stream: AudioStream) -> void:
+ 	var audio_player: AudioStreamPlayer = $AudioStreamPlayer
+ 	audio_player.stream = stream
+ 	audio_player.play()
+-
+-# Called every frame. 'delta' is the elapsed time since the previous frame.
+-func _process(delta: float) -> void:
+-	pass
