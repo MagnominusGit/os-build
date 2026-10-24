@@ -9,12 +9,23 @@
 #
 # apply installs or updates the channel's build in the background (steam-compat-tools), and once it is
 # installed and the client is not running, sets it as Steam's default compatibility tool: entry "0" of
-# CompatToolMapping in config.vdf. A game set to another tool keeps it. The channel is
-# PROTON_CHANNEL=stable|experimental in ~/.config/retroforge/steam.conf (the last such line counts).
+# CompatToolMapping in config.vdf. The channel is PROTON_CHANNEL=stable|experimental in
+# ~/.config/retroforge/steam.conf (the last such line counts).
+#
+# EACH WINDOWS GAME TOO. Steam picks a game's tool by priority: one set for the game (250), Valve's
+# recommendation for it (85), the default (75). Valve recommends its own Proton for most Windows games,
+# so the client ran them with Valve's build while the launches without the client ran ours, and each
+# switch made the next launch redo Wine's prefix set-up (~45 s on the Air X: Hades, 2026-10-24). So each
+# installed game appinfo.vdf lists for Windows and not Linux gets its own entry for our build, as the
+# player would set it in its Properties; a game set to any other tool keeps it, one set to our other
+# channel follows the channel. Native Linux games are left to Steam.
 #
 # TEST SEAMS (tests/test-steam-proton.sh): RETROFORGE_STEAM_ROOT, RETROFORGE_CPUINFO,
 # RETROFORGE_STEAM_COMPAT_TOOLS (the helper), RETROFORGE_STEAM_PROTON_START (a command run with the
-# helper and `on` as arguments instead of systemd-run).
+# helper and `on` as arguments instead of systemd-run), RETROFORGE_STEAM_LIBRARY (the steam-library
+# whose readers this uses).
+import importlib.machinery
+import importlib.util
 import os
 import subprocess
 import sys
@@ -27,8 +38,10 @@ HELPER = os.environ.get("RETROFORGE_STEAM_COMPAT_TOOLS", "/usr/lib/retroforge/st
 START = os.environ.get("RETROFORGE_STEAM_PROTON_START")
 LOG = os.path.join(DATA, "retroforge", "steam-compat-tools.log")
 DIRS = {"stable": "proton-armv8-retroforge", "experimental": "proton-armv8-experimental-retroforge"}
+STEAM_LIBRARY = os.environ.get("RETROFORGE_STEAM_LIBRARY", "/usr/lib/retroforge/steam-library")
 VDF = os.path.join(STEAM_ROOT, "config", "config.vdf")
-DEFAULT = ["InstallConfigStore", "Software", "Valve", "Steam", "CompatToolMapping", "0"]
+MAPPING = ["InstallConfigStore", "Software", "Valve", "Steam", "CompatToolMapping"]
+DEFAULT = MAPPING + ["0"]
 
 
 def log(msg):
@@ -196,7 +209,54 @@ def set_entry(text, path, values):
     return text
 
 
-def set_default(name):
+def mappings(text):
+    """{entry key: tool name} of CompatToolMapping in text ({} without one)."""
+    toks = list(tokens(text))
+    lo, hi = 0, len(toks)
+    for key in MAPPING:
+        hit = find(toks, lo, hi, key)
+        if hit is None or toks[hit[1]][0] != "{":
+            return {}
+        lo, hi = hit[1] + 1, closing(toks, hit[1])
+    out, i = {}, lo
+    while i < hi:
+        j = i + 1
+        if toks[j][0] == "{":
+            name = find(toks, j + 1, closing(toks, j), "name")
+            out[toks[i][1]] = toks[name[1]][1] if name and toks[name[1]][0] == "str" else ""
+            i = closing(toks, j) + 1
+        else:
+            i = j + 1
+    return out
+
+
+def steam_library():
+    """/usr/lib/retroforge/steam-library as a module: its manifest and appinfo.vdf readers."""
+    loader = importlib.machinery.SourceFileLoader("steam_library", STEAM_LIBRARY)
+    spec = importlib.util.spec_from_loader("steam_library", loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def windows_games():
+    """{appid: name} of the installed games appinfo.vdf lists for Windows and not for Linux."""
+    lib = steam_library()
+    installed = lib.installed_apps(STEAM_ROOT)
+    if not installed:
+        return {}
+    nodes = lib.read_app_nodes(os.path.join(STEAM_ROOT, "appcache", "appinfo.vdf"), set(installed))
+    games = {}
+    for appid, node in nodes.items():
+        common = node.get("appinfo", node).get("common", {})
+        oslist = str(common.get("oslist", "")).lower().split(",")
+        if str(common.get("type", "")).lower() in ("game", "demo") and "windows" in oslist and "linux" not in oslist:
+            games[appid] = installed[appid]["name"]
+    return games
+
+
+def set_tools(name):
+    """Our build as Steam's default and as each Windows game's own tool (see EACH WINDOWS GAME TOO)."""
     try:
         with open(VDF, encoding="utf-8") as f:
             text = f.read()
@@ -204,6 +264,20 @@ def set_default(name):
         log("Steam has no config.vdf yet; the default is set at a later start")
         return
     new = set_entry(text, DEFAULT, {"name": name, "config": "", "priority": "75"})
+    try:
+        games = windows_games()
+    except Exception as err:  # appinfo.vdf unreadable: the default alone
+        log(f"could not read the installed games' platforms: {err}")
+        games = {}
+    tools, added = mappings(new), []
+    for appid, game in sorted(games.items()):
+        have = tools.get(str(appid))
+        if have == name or (have is not None and have not in DIRS.values()):
+            continue
+        new = set_entry(new, MAPPING + [str(appid)], {"name": name, "config": "", "priority": "250"})
+        added.append(game)
+    if added:
+        log(f"{name} is now the tool of {', '.join(added)}")
     if new == text:
         return
     backup = VDF + ".before-retroforge-proton"
@@ -213,7 +287,8 @@ def set_default(name):
     with open(VDF + ".part", "w", encoding="utf-8") as f:
         f.write(new)
     os.replace(VDF + ".part", VDF)
-    log(f"Steam's default compatibility tool is now {name}")
+    if mappings(text).get("0") != name:
+        log(f"Steam's default compatibility tool is now {name}")
 
 
 def apply():
@@ -228,7 +303,7 @@ def apply():
         log("the Steam client is running; its default tool is set at its next start")
     else:
         try:
-            set_default(DIRS[ch])
+            set_tools(DIRS[ch])
         except (OSError, ValueError) as err:
             log(f"could not set Steam's default tool in {VDF}: {err}")
     return ch
