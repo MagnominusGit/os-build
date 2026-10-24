@@ -1431,6 +1431,71 @@ GD
     if printf '%s\n' "$out" | grep -q 'SCRIPT ERROR'; then
       bad "a script did not compile: $(printf '%s\n' "$out" | grep 'SCRIPT ERROR' | head -3)"
     fi
+
+    # ===============================================================================================
+    # Settings > Display > Reduced UI resolution (display_settings.gd), against a fake xprop: on, the
+    # shell's own display (gamescope's Xwayland 0) is set to the design size at the output's aspect
+    # and Godot draws it 1:1; the viewport stretch is left for a full-size shell behind a game. The
+    # stretch drew the same pixels and then copied them, scaled, into an output-sized window every
+    # frame (1.9 ms more GPU per frame on the Air X's Adreno 610).
+    CASE="display"
+    mkdir -p "$T/display/bin" "$T/display/d"
+    printf '#!/bin/sh\nfor a; do last=$a; done\necho "$last" >> "$FAKE_DIR/xprop-calls"\n' >"$T/display/bin/xprop"
+    chmod +x "$T/display/bin/xprop"
+    cat >"$OGUI_PROJECT/retroforge_display_test.gd" <<'GD'
+extends SceneTree
+
+var failed := 0
+var D := OS.get_environment("FAKE_DIR")
+
+func check(what: String, got, want) -> void:
+	if got == want:
+		print("  ok   display -- ", what)
+	else:
+		failed += 1
+		print("  FAIL display -- ", what, ": got ", got, ", want ", want)
+
+func _initialize() -> void:
+	run.call_deferred()
+
+func calls() -> Array:
+	return Array(FileAccess.get_file_as_string(D.path_join("xprop-calls")).split("\n", false))
+
+func run() -> void:
+	var DisplaySettings = load("res://plugins/retroforge/display_settings.gd")
+	DisplaySettings._output = Vector2i(1920, 1080)  # a headless Godot has no screen
+	root.content_scale_size = Vector2i(1280, 800)
+	var settings := load("res://core/global/settings_manager.tres") as SettingsManager
+	settings.set_value("retroforge", "reduced_ui_resolution", true)
+	var d = DisplaySettings.new()
+	d.apply_all(self)
+	check("reduced: the shell's display is the design size at the output's aspect", calls(), ["1,1920,1080,0", "0,1422,800,0"])
+	check("reduced: Godot draws it 1:1", root.content_scale_mode, Window.CONTENT_SCALE_MODE_CANVAS_ITEMS)
+	d.set_backgrounded(true)
+	check("reduced, behind a game: no display change, still 1:1", [calls().size(), root.content_scale_mode], [2, Window.CONTENT_SCALE_MODE_CANVAS_ITEMS])
+	d.set_backgrounded(false)
+	d._on_reduced_ui_toggled(false)
+	check("off: the shell's display goes back to the output size", calls().back(), "0,1920,1080,0")
+	check("off: Game resolution's Native is still the output size", d.size_for("native"), Vector2i(1920, 1080))
+	d.set_backgrounded(true)
+	check("off, behind a game: the design size through Godot's stretch, no display change", [calls().size(), root.content_scale_mode], [3, Window.CONTENT_SCALE_MODE_VIEWPORT])
+	d.set_backgrounded(false)
+	check("off, brought up over the game: the output size again", root.content_scale_mode, Window.CONTENT_SCALE_MODE_CANVAS_ITEMS)
+	DisplaySettings._output = Vector2i(1280, 960)
+	check("a panel no bigger than the design size (Air Y, 1280x960) keeps its size", d.reduced_size(), Vector2i(1280, 960))
+	quit(failed)
+GD
+    out="$(cd "$OGUI_PROJECT" && FAKE_DIR="$T/display/d" PATH="$T/display/bin:$PATH" timeout 120 "$GODOT" --headless --path . --script res://retroforge_display_test.gd 2>&1)"; rc=$?
+    rm -f "$OGUI_PROJECT/retroforge_display_test.gd"
+    printf '%s\n' "$out" | grep -E '^  (ok|FAIL) '
+    n_ok="$(printf '%s\n' "$out" | grep -c '^  ok ')"; n_bad="$(printf '%s\n' "$out" | grep -c '^  FAIL ')"
+    PASS=$((PASS + n_ok)); FAIL=$((FAIL + n_bad))
+    if [ "$rc" -ne 0 ] && [ "$n_bad" -eq 0 ]; then
+      bad "Godot failed (rc $rc): $(printf '%s\n' "$out" | grep -E 'ERROR' | head -3)"
+    fi
+    if printf '%s\n' "$out" | grep -q 'SCRIPT ERROR'; then
+      bad "a script did not compile: $(printf '%s\n' "$out" | grep 'SCRIPT ERROR' | head -3)"
+    fi
   fi
 fi
 

@@ -10,11 +10,15 @@ extends RefCounted
 ##    Y's 4:3 panel, 1280 x 720 on a 16:9 one), so the game display is scaled to fill the
 ##    screen: a fixed 16:9 size on a 4:3 panel was letterboxed by gamescope, and a 4:3 game
 ##    inside it pillarboxed again (bars on all four sides). As ROCKNIX's fullscreen scale hint.
-##  - Reduced UI resolution: the shell itself renders at its 1280x800 design size and is scaled
-##    up (Godot viewport stretch) instead of drawing every frame at the output size. Default from
-##    the board profile (RETROFORGE_UI_VIEWPORT_RENDER). While a game has the foreground the shell
-##    always renders at the design size (set_backgrounded): it is only an overlay then, and goes
-##    back to the chosen size the moment it is brought up over the game.
+##  - Reduced UI resolution: the shell's own display (the first Xwayland) is set to the shell's
+##    1280x800 design size at the output's aspect ratio (1422 x 800 on a 16:9 output), so OGUI
+##    draws it 1:1 and the panel plane scales it up. Default from the board profile
+##    (RETROFORGE_UI_VIEWPORT_RENDER). It was Godot's viewport stretch, which draws the same pixels
+##    and then copies them, scaled, into an output-sized window every frame: 1.9 ms more GPU per
+##    frame on an Adreno 610 (Air X, 2026-10-24), nearest-filtered under OpenGL. While a game has
+##    the foreground a full-size shell still draws at the design size that way (set_backgrounded):
+##    it is only an overlay then, and goes back to the output size the moment it is brought up
+##    over the game, with no display mode change.
 ##
 ## Both are stored in OGUI's settings (section "retroforge"); absent = the profile default.
 
@@ -36,11 +40,16 @@ var tree: SceneTree
 var _resolution: Control  # OGUI Dropdown
 var _reduced_ui: Control  # OGUI Toggle
 var _backgrounded := false  # a game has the foreground; the shell is only an overlay
+## The output size, read once before the shell's display is first resized; shared with the game
+## settings page's instance, which asks only later.
+static var _output := Vector2i.ZERO
+var _shell := Vector2i.ZERO  # the size the shell's display was last set to
 
 
 ## Apply the stored (or default) choices; call once at startup, menu or not.
 func apply_all(scene_tree: SceneTree) -> void:
 	tree = scene_tree
+	_shell = native_size()  # gamescope starts it at the output size
 	apply_game_resolution(stored_resolution())
 	apply_reduced_ui(reduced_ui_enabled())
 
@@ -109,9 +118,23 @@ func _label_for(key: String, label: String) -> String:
 	return "%s, %d x %d" % [label, s.x, s.y]
 
 
-## The output size gamescope gives the shell's own display.
+## The output size: the size gamescope starts the shell's own display at, until Reduced UI
+## resolution makes that display smaller.
 func native_size() -> Vector2i:
-	return DisplayServer.screen_get_size()
+	if _output == Vector2i.ZERO:
+		_output = DisplayServer.screen_get_size()
+	return _output
+
+
+## The shell's design size (the project's 1280x800) grown to the output's aspect ratio, as OGUI's
+## "expand" stretch lays it out, with an even width; the output size when that is no bigger.
+func reduced_size() -> Vector2i:
+	var n := native_size()
+	var design := Vector2(tree.root.content_scale_size)
+	var scale := minf(n.x / design.x, n.y / design.y)
+	if scale <= 1.0:
+		return n
+	return Vector2i(roundi(n.x / scale / 2.0) * 2, roundi(n.y / scale))
 
 
 ## The board profile's game-display size, or the output size when it sets none.
@@ -147,14 +170,20 @@ func aspect_size(height: int) -> Vector2i:
 
 func apply_game_resolution(key: String) -> void:
 	var s := size_for(key)
-	# [xwayland server, width, height, allow super-resolution]; server 1 is the game display.
-	var value := "1,%d,%d,0" % [s.x, s.y]
+	if set_display_size(1, s):
+		logger.info("game resolution %s -> %d x %d" % [key, s.x, s.y])
+
+
+## Sets one of gamescope's displays (Xwayland servers) to a size: 0 is the shell's, 1 the game's.
+func set_display_size(server: int, s: Vector2i) -> bool:
+	# [xwayland server, width, height, allow super-resolution]
+	var value := "%d,%d,%d,0" % [server, s.x, s.y]
 	var out := []
 	var rc := OS.execute("xprop", ["-root", "-f", "GAMESCOPE_XWAYLAND_MODE_CONTROL", "32c", "-set", "GAMESCOPE_XWAYLAND_MODE_CONTROL", value], out, true)
 	if rc != 0:
-		logger.warn("could not set the game resolution (xprop exit %d): %s" % [rc, "".join(out)])
-		return
-	logger.info("game resolution %s -> %d x %d" % [key, s.x, s.y])
+		logger.warn("could not set display %d to %d x %d (xprop exit %d): %s" % [server, s.x, s.y, rc, "".join(out)])
+		return false
+	return true
 
 
 func reduced_ui_enabled() -> bool:
@@ -171,13 +200,15 @@ func set_backgrounded(on: bool) -> void:
 
 
 func apply_reduced_ui(on: bool) -> void:
-	on = on or _backgrounded
+	var s := reduced_size() if on else native_size()
+	if s != _shell and set_display_size(0, s):
+		_shell = s
+		logger.info("UI display is %d x %d, scaled to %d x %d" % [s.x, s.y, native_size().x, native_size().y])
 	var root := tree.root
-	var mode := Window.CONTENT_SCALE_MODE_VIEWPORT if on else Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
-	if root.content_scale_mode == mode:
-		return
-	root.content_scale_mode = mode
-	logger.info("UI renders at %s" % (str(root.content_scale_size) + ", scaled to " + str(root.size) if on else "the output size"))
+	var mode := Window.CONTENT_SCALE_MODE_VIEWPORT if _backgrounded and _shell == native_size() else Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
+	if root.content_scale_mode != mode:
+		root.content_scale_mode = mode
+		logger.info("UI draws at %s" % (str(root.content_scale_size) + " behind the game" if mode == Window.CONTENT_SCALE_MODE_VIEWPORT else "the display size"))
 
 
 func _on_resolution_selected(index: int) -> void:
