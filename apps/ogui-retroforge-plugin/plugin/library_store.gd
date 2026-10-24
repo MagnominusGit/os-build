@@ -144,16 +144,19 @@ static func art_cache_dir() -> String:
 	return cache.path_join("retroforge/store-art")
 
 
-## A store game's art for a layout, from the URL `store games` gave, kept in
-## cache_dir/<store>/<id>/<key>: its path, or "" when there is none or it could not be fetched (not
-## tried again for ART_RETRY). Blocks for the download: call it off the main thread.
+## A store game's art for a layout, from the URL `store games` gave (already sized for it), kept in
+## cache_dir/<store>/<id>/<key>-<url hash>, so a new URL is fetched anew: its path, or "" when there is
+## none or it could not be fetched. Only an HTTP error (curl exit 22: the store has no such file) is
+## not tried again for ART_RETRY; a timeout or a dropped connection is tried at the card's next ask.
+## curl runs at a low priority, behind OGUI. Blocks for the download: call it off the main thread.
 static func fetch_art(cache_dir: String, launch: LibraryLaunchItem, kind: int) -> String:
 	if kind < 0 or kind >= ART_KEYS.size():
 		return ""
 	var url := str((launch.metadata.get("art", {}) as Dictionary).get(ART_KEYS[kind], ""))
 	if not url.begins_with("https://"):
 		return ""
-	var dest := cache_dir.path_join(str(launch.metadata.get("store", ""))).path_join(launch.provider_app_id.validate_filename()).path_join(ART_KEYS[kind])
+	var dest := cache_dir.path_join(str(launch.metadata.get("store", ""))).path_join(launch.provider_app_id.validate_filename()).path_join(
+		"%s-%s" % [ART_KEYS[kind], url.sha1_text().left(12)])
 	if FileAccess.file_exists(dest):
 		return dest
 	var missing := dest + ".missing"
@@ -161,13 +164,14 @@ static func fetch_art(cache_dir: String, launch: LibraryLaunchItem, kind: int) -
 		return ""
 	DirAccess.make_dir_recursive_absolute(dest.get_base_dir())
 	var part := dest + ".part"
-	var code := OS.execute("curl", ["-fsSL", "--max-time", "20", "-o", part, url])
+	var code := OS.execute("nice", ["-n", "10", "curl", "-fsSL", "--max-time", "20", "-o", part, url])
 	if code == 0 and FileAccess.file_exists(part) and FileAccess.get_size(part) > 0:
 		DirAccess.rename_absolute(part, dest)
 		DirAccess.remove_absolute(missing)
 		return dest
 	DirAccess.remove_absolute(part)
-	var mark := FileAccess.open(missing, FileAccess.WRITE)
-	if mark:
-		mark.close()
+	if code == 22:
+		var mark := FileAccess.open(missing, FileAccess.WRITE)
+		if mark:
+			mark.close()
 	return ""

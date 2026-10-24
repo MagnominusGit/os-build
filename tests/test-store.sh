@@ -293,14 +293,15 @@ ok("fake tool ['x']" in r.stdout, "it runs unpacked", r.stdout + r.stderr)
 
 
 # ---- sign-in -------------------------------------------------------------------------------------
-def sign_in(name, code, answers):
-    """Run the page, post `code` sealed as the page does, answer; (events, page html, statuses)."""
+def sign_in(name, codes):
+    """Run the page and post each code sealed as the page does; (events, page html, statuses, replies,
+    the process's exit status). The page ends once a code signs in."""
     proc = subprocess.Popen([sys.executable, STORE, name, "sign-in"], env=BASE_ENV, text=True,
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     events = [json.loads(proc.stdout.readline())]
     path_part, frag = events[0]["url"].split("#")
     key = base64.urlsafe_b64decode(frag + "==")
-    statuses = {}
+    statuses, replies = {}, []
     page = urllib.request.urlopen(path_part, timeout=10).read().decode()
     try:
         urllib.request.urlopen(path_part.rsplit("/", 1)[0] + "/wrong", timeout=10)
@@ -312,9 +313,12 @@ def sign_in(name, code, answers):
         req = urllib.request.Request(path_part, data=json.dumps(raw).encode(), method="POST",
                                      headers={"Content-Type": "application/json"})
         try:
-            return urllib.request.urlopen(req, timeout=10).status
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return r.status, json.loads(r.read() or b"null")
         except urllib.error.HTTPError as err:
-            return err.code
+            return err.code, None
+        except urllib.error.URLError:
+            return "gone", None
 
     def seal(text):
         data = text.encode()
@@ -324,31 +328,34 @@ def sign_in(name, code, answers):
             counter += 1
         return base64.urlsafe_b64encode(bytes(a ^ b for a, b in zip(data, ks))).decode().rstrip("=")
 
-    statuses["garbage"] = post({"c": "!!"})
-    statuses["plain"] = post({"c": base64.urlsafe_b64encode(code.encode()).decode()})
-    for answer in answers:
-        statuses.setdefault("posts", []).append(post({"c": seal(code)}))
-        statuses.setdefault("again", []).append(post({"c": seal(code)}))
+    statuses["garbage"] = post({"c": "!!"})[0]
+    statuses["plain"] = post({"c": base64.urlsafe_b64encode(codes[0].encode()).decode()})[0]
+    for code in codes:
+        replies.append(post({"c": seal(code)}))
         events.append(json.loads(proc.stdout.readline()))
-        proc.stdin.write(answer + "\n")
-        proc.stdin.flush()
         events.append(json.loads(proc.stdout.readline()))
-    proc.stdin.close()
-    proc.wait(timeout=20)
-    return events, page, statuses
+    try:
+        rc = proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.stdin.close()
+        rc = proc.wait(timeout=10)
+        rc = f"still serving, stopped by closing stdin ({rc})"
+    statuses["after"] = post({"c": seal(codes[-1])})[0]
+    return events, page, statuses, replies, rc
 
 
 CASE = "sign-in gog"
-events, page, st = sign_in("gog", "goodcode123", ["reject", "accept"])
+events, page, st, replies, rc = sign_in("gog", ["goodcode123"])
 ok(events[0]["event"] == "page" and events[0]["url"].startswith("http://127.0.0.1:") and len(events[0]["qr"]) >= 21,
    "the page's link and QR code come first", str(events[0])[:200])
-ok("auth.gog.com/auth?client_id=46899977096215655" in page and "Open GOG sign-in" in page and "password" in page,
-   "the page links to GOG's own sign-in")
+ok("auth.gog.com/auth?client_id=46899977096215655" in page and "Open GOG sign-in" in page and "password" in page
+   and "'paste'" in page, "the page links to GOG's own sign-in and sends as it is pasted")
 ok(st["wrong"] == 404, "any other path is a 404")
 ok(st["garbage"] == 400 and st["plain"] == 400, "a code not sealed with the link's key is refused", str(st))
-ok(st["posts"] == [200, 200] and st["again"] == [409, 409], "one code at a time", str(st))
-ok([e["event"] for e in events[1:]] == ["code", "rejected", "code", "signed_in"], "nothing is used before accept", str(events[1:]))
-ok(events[-1].get("account") == "gogtester", "signed in as the account's name", str(events[-1]))
+ok([e["event"] for e in events[1:]] == ["code", "signed_in"] and events[-1].get("account") == "gogtester",
+   "a code signs in as it arrives, as the account's name", str(events[1:]))
+ok(replies == [(200, {"ok": True, "account": "gogtester"})], "the phone is told whom it signed in", str(replies))
+ok(rc == 0 and st["after"] == "gone", "and the page is gone", f"rc={rc} after={st['after']}")
 ok(("/users.gog.com/users/u1", "Bearer tok") in SEEN, "the name comes from GOG's users API with the token")
 ok(mode(os.path.join(CONF, "gog-auth.json")) == 0o600 and mode(os.path.join(CONF, "gog-account.json")) == 0o600,
    "the tokens and the account are the player's only")
@@ -356,25 +363,32 @@ r = store("gog", "status")
 ok(json.loads(r.stdout) == {"ready": True, "signed_in": True, "account": "gogtester"}, "status", r.stdout)
 
 CASE = "sign-in epic"
-events, page, st = sign_in("epic", "0123456789abcdef0123456789abcdef", ["accept"])
-ok(events[-1] == {"event": "signed_in", "account": "Tester"}, "signed in", str(events))
+events, page, st, replies, rc = sign_in("epic", ["ffffffffffffffffffffffffffffffff", "0123456789abcdef0123456789abcdef"])
 ok("legendary.gl/epiclogin" in page and "authorizationCode" in page, "the page links to Epic's sign-in")
+ok([e["event"] for e in events[1:]] == ["code", "error", "code", "signed_in"] and events[-1]["account"] == "Tester",
+   "a code Epic refuses is an error and the page stays; the next one signs in", str(events[1:]))
+ok(replies[0][0] == 200 and replies[0][1]["ok"] is False and "Logging in failed" in replies[0][1]["message"]
+   and replies[1] == (200, {"ok": True, "account": "Tester"}), "the phone is told each time", str(replies))
 legend = [c for c in calls() if c[0] == "legendary"]
 ok(legend[-2][1:3] == ["auth", "--delete"] and legend[-1][1:3] == ["auth", "--code"],
    "an earlier sign-in is dropped first (legendary keeps it over a new code)")
 r = store("epic", "status")
 ok(json.loads(r.stdout)["account"] == "Tester", "status reads the account without the network", r.stdout)
-events, _, _ = sign_in("epic", "ffffffffffffffffffffffffffffffff", ["accept"])
-ok(events[-1]["event"] == "error", "a code Epic refuses is an error, and the page stays", str(events[-1]))
-sign_in("epic", "0123456789abcdef0123456789abcdef", ["accept"])
+CASE = "sign-in cancel"
+proc = subprocess.Popen([sys.executable, STORE, "gog", "sign-in"], env=BASE_ENV, text=True,
+                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+proc.stdout.readline()
+proc.stdin.close()
+ok(proc.wait(timeout=10) == 0, "closing stdin (the plugin's Cancel) ends the page")
 
-# ---- games ---------------------------------------------------------------------------------------
+
 CASE = "games gog"
 r = store("gog", "games")
 games = json.loads(r.stdout or "[]")
 ok(r.returncode == 0 and [g["id"] for g in games] == ["1"], "owned Windows games only (no DLC, no Linux-only, no other platform)", r.stdout + r.stderr)
 ok(games and games[0]["title"] == "Game One" and games[0]["art"].get("portrait") == "https://images.gog.com/v1.jpg"
-   and games[0]["art"].get("logo") == "https://images.gog.com/l1.png" and games[0]["installed"] is False, "title, art, not installed", str(games))
+   and games[0]["art"].get("logo") == "https://images.gog.com/l1_glx_logo.png" and games[0]["installed"] is False,
+   "title, art sized by GOG's suffixes, not installed", str(games))
 r = store("gog", "games", env={"RETROFORGE_STORE_API": "http://127.0.0.1:9"})
 ok(r.returncode == 0 and [g["id"] for g in json.loads(r.stdout or "[]")] == ["1"] and "as last listed" in r.stderr,
    "offline: the library as last listed", r.stderr)
@@ -382,8 +396,10 @@ ok(r.returncode == 0 and [g["id"] for g in json.loads(r.stdout or "[]")] == ["1"
 CASE = "games epic"
 r = store("epic", "games")
 games = {g["id"]: g for g in json.loads(r.stdout or "[]")}
-ok(set(games) == {"Fortnite2", "Plain"} and games["Fortnite2"]["art"] == {"portrait": "https://cdn.epic/tall.jpg",
-   "landscape": "https://cdn.epic/wide.jpg", "hero": "https://cdn.epic/wide.jpg"}, "games and their art", r.stdout + r.stderr)
+ok(set(games) == {"Fortnite2", "Plain"} and games["Fortnite2"]["art"] == {
+   "portrait": "https://cdn.epic/tall.jpg?w=360&resize=1&quality=medium",
+   "landscape": "https://cdn.epic/wide.jpg?w=800&resize=1&quality=medium",
+   "hero": "https://cdn.epic/wide.jpg?w=1600&resize=1&quality=medium"}, "games and their art, resized by Epic's CDN", r.stdout + r.stderr)
 r = store("epic", "games", env={"XDG_CONFIG_HOME": os.path.join(T, "nobody")})
 ok(r.returncode == 3, "not signed in: exit 3", r.stderr)
 

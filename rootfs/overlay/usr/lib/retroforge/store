@@ -4,8 +4,8 @@
 #
 #   store <gog|epic> status            {"ready": bool, "signed_in": bool, "account": "..."} (no network)
 #   store <gog|epic> setup             the store's tool, into the player's home; N% lines
-#   store <gog|epic> sign-in           the phone sign-in page (SIGN-IN below): JSON events on stdout,
-#                                      `accept` / `reject` on stdin
+#   store <gog|epic> sign-in           the phone sign-in page (SIGN-IN below): JSON events on stdout;
+#                                      closing stdin cancels it
 #   store <gog|epic> sign-out
 #   store <gog|epic> games             JSON: every game the account owns, installed or not
 #   store <gog|epic> install <id>      N% lines; exit 0 once installed
@@ -33,10 +33,13 @@
 # SIGN-IN. RetroForge never takes a password. `sign-in` serves a one-time page on the LAN while the
 # plugin's sign-in panel is open, and prints its address with a QR code of it. On the phone the page
 # links to the store's own sign-in and takes back what the store shows at the end (GOG: the address
-# with code=, Epic: the authorizationCode). The page XORs the code with a keystream from a key that is
-# only in the link's #fragment, which a browser never sends, so the Wi-Fi traffic does not carry it.
-# The device then asks the player (`accept` on stdin) before the code is used. Tokens stay in the
-# player's home, which only the player can read.
+# with code=, Epic: the authorizationCode), and sends it as it is pasted. The page XORs the code with
+# a keystream from a key that is only in the link's #fragment, which a browser never sends, so the
+# Wi-Fi traffic does not carry it, and the link is unguessable and lives only while the panel is open:
+# the code is used as it arrives (no second confirm on the device; user, 2026-10-24) and the phone
+# shows whom it signed in. Neither store has a device sign-in this can use: GOG has no device-code
+# grant, and Epic's is open only to its own apps' clients. Tokens stay in the player's home, which
+# only the player can read.
 #
 # TEST SEAMS (tests/test-store.sh): RETROFORGE_STORE_DATA (for <data>/retroforge/stores),
 # RETROFORGE_STORE_PINS, RETROFORGE_STORE_TOOL_<NAME> (a tool's command, instead of the set-up one),
@@ -364,8 +367,9 @@ textarea{{width:100%;box-sizing:border-box;height:7em;font:14px monospace}}#s{{f
 </head><body><h2>Sign in to {store} on RetroForge</h2>
 <p>1. Sign in on {store}'s own page. RetroForge never sees your password.</p>
 <a class="b" href="{login}" target="_blank" rel="noreferrer">Open {store} sign-in</a>
-<p>2. {after}</p><textarea id="t" placeholder="Paste here"></textarea>
-<button id="go">Send to my RetroForge device</button><p id="s"></p>
+<p>2. {after} It is sent to your RetroForge device as you paste it.</p>
+<textarea id="t" placeholder="Paste here"></textarea>
+<button id="go">Send again</button><p id="s"></p>
 <script>
 const K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
 0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,
@@ -391,15 +395,19 @@ function b64e(a){{return btoa(String.fromCharCode(...a)).replace(/\\+/g,'-').rep
 function stream(key,n){{const out=new Uint8Array(n);for(let i=0,c=0;i<n;c++){{
 const blk=new Uint8Array(key.length+4);blk.set(key);new DataView(blk.buffer).setUint32(key.length,c);
 const d=sha256(blk);for(let j=0;j<32&&i<n;j++)out[i++]=d[j]}}return out}}
-document.getElementById('go').onclick=async()=>{{const s=document.getElementById('s');
+let sending=false;
+async function send(){{const s=document.getElementById('s');
 const m=document.getElementById('t').value.match(/{pattern}/);
-if(!m){{s.textContent="{missing}";return}}
+if(!m){{s.textContent="{missing}";return}}if(sending)return;sending=true;
 const code=new TextEncoder().encode(m[1]),ks=stream(b64d(location.hash.slice(1)),code.length);
 const x=code.map((b,i)=>b^ks[i]);s.textContent="Sending...";
 try{{const r=await fetch(location.pathname,{{method:"POST",headers:{{"Content-Type":"application/json"}},
-body:JSON.stringify({{c:b64e(x)}})}});s.textContent=r.ok?"Sent. Confirm on your RetroForge device.":
-"Your RetroForge device did not take it. Open the sign-in there again."}}catch(e){{
-s.textContent="Could not reach your RetroForge device. Is the phone on the same Wi-Fi?"}}}};
+body:JSON.stringify({{c:b64e(x)}})}});const a=r.ok?await r.json():null;
+s.textContent=!a?"Your RetroForge device did not take it. Open the sign-in there again.":
+a.ok?"Signed in to {store} as "+a.account+". You can close this page.":a.message+" Sign in on {store}'s page again."}}
+catch(e){{s.textContent="Could not reach your RetroForge device. Is the phone on the same Wi-Fi?"}}sending=false}}
+document.getElementById('go').onclick=send;
+document.getElementById('t').addEventListener('paste',()=>setTimeout(send,0));
 </script></body></html>"""
 
 
@@ -425,7 +433,8 @@ def lan_address():
 
 
 def serve_sign_in(store):
-    """The one-time sign-in page, until a code is accepted, stdin closes or 15 minutes pass."""
+    """The one-time sign-in page, until a code signs in, stdin closes or 15 minutes pass. A code is
+    used as it arrives and the page gets the result: {"ok": true, "account"} or {"ok": false, "message"}."""
     import http.server
 
     if not tool_command(store.tool):
@@ -437,8 +446,8 @@ def serve_sign_in(store):
     page = PAGE.format(store=store.title, login=html.escape(store.login_url), after=store.after_sign_in,
                        pattern=store.code_pattern.replace("/", "\\/"),  # into a JS regex literal
                        missing=f"That is not what {store.title} shows at the end. Copy it again.")
-    pending = {}
-    lock = threading.Lock()
+    busy = threading.Lock()  # one code at a time
+    done = threading.Event()
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -469,36 +478,32 @@ def serve_sign_in(store):
                 return self.answer(400)
             if not re.fullmatch(store.code_shape, code):
                 return self.answer(400)
-            with lock:
-                if pending:
-                    return self.answer(409)
-                pending["code"] = code
-            event(event="code", sender=self.client_address[0])
-            self.answer(200, b"ok")
+            if done.is_set() or not busy.acquire(blocking=False):
+                return self.answer(409)
+            try:
+                event(event="code", sender=self.client_address[0])
+                try:
+                    result = {"ok": True, "account": store.sign_in(code)}
+                    event(event="signed_in", account=result["account"])
+                    done.set()
+                except Failed as err:
+                    result = {"ok": False, "message": str(err)}
+                    event(event="error", message=str(err))
+            finally:
+                busy.release()
+            self.answer(200, json.dumps(result).encode(), "application/json")
 
     server = http.server.ThreadingHTTPServer(("0.0.0.0", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     fragment = base64.urlsafe_b64encode(key).decode().rstrip("=")
     url = f"http://{host}:{server.server_address[1]}/{token}#{fragment}"
     event(event="page", url=url, qr=qr.matrix(url))
-    timer = threading.Timer(15 * 60, lambda: os.kill(os.getpid(), signal.SIGTERM))
-    timer.daemon = True
-    timer.start()
+    # stdin closing is the plugin's Cancel (or the plugin gone).
+    threading.Thread(target=lambda: (sys.stdin.read(), done.set()), daemon=True).start()
     try:
-        for line in sys.stdin:
-            answer = line.strip()
-            with lock:
-                code = pending.pop("code", None)
-            if answer == "accept" and code:
-                try:
-                    account = store.sign_in(code)
-                except Failed as err:
-                    event(event="error", message=str(err))
-                    continue
-                event(event="signed_in", account=account)
-                return
-            if answer == "reject":
-                event(event="rejected")
+        done.wait(15 * 60)
+        with busy:  # a sign-in that is going finishes, and its page gets the answer
+            pass
     finally:
         server.shutdown()
 
@@ -602,9 +607,13 @@ class Epic:
                      "it, and paste it here.")
     code_pattern = r'(?:"authorizationCode"\s*:\s*")?\b([0-9a-f]{32})\b'
     code_shape = r"[0-9a-f]{32}"
-    ART = {"portrait": ("DieselGameBoxTall", "OfferImageTall", "DieselStoreFrontTall"),
-           "landscape": ("DieselGameBox", "OfferImageWide"), "hero": ("DieselGameBox", "OfferImageWide"),
-           "logo": ("DieselGameBoxLogo",)}
+    # Art key -> (keyImages types, best first; the CDN's resize query, "" for the file as it is). The
+    # files are up to 1200x1600 PNGs of 2-3 MB, which a card shows at 300x450: resized, a 360 px JPEG is
+    # ~25 KB. A logo keeps its PNG, for its transparency.
+    ART = {"portrait": (("DieselGameBoxTall", "OfferImageTall", "DieselStoreFrontTall"), "w=360&resize=1&quality=medium"),
+           "landscape": (("DieselGameBox", "OfferImageWide"), "w=800&resize=1&quality=medium"),
+           "hero": (("DieselGameBox", "OfferImageWide"), "w=1600&resize=1&quality=medium"),
+           "logo": (("DieselGameBoxLogo",), "")}
 
     def __init__(self):
         self.cfg = os.path.join(STORE_CONFIG, "legendary")
@@ -654,10 +663,10 @@ class Epic:
             images = {i.get("type"): i.get("url") for i in game.get("metadata", {}).get("keyImages", [])
                       if isinstance(i, dict)}
             art = {}
-            for key, types in self.ART.items():
+            for key, (types, size) in self.ART.items():
                 url = next((images[t] for t in types if images.get(t)), "")
                 if url:
-                    art[key] = url
+                    art[key] = url + ("&" if "?" in url else "?") + size if size else url
             inst = installed.get(app)
             out.append({"id": app, "title": str(game.get("app_title") or app), "installed": inst is not None,
                         "dir": inst.get("install_path", "") if inst else "", "art": art})
@@ -789,12 +798,14 @@ class Gog:
                 if meta.get("type") != "game" or game.get("visible_in_library") is False or "windows" not in oses:
                     continue
                 title = (meta.get("title") or {}).get("*") or (game.get("title") or {}).get("*") or gid
+                # GOG's image service sizes by a suffix ("{formatter}"): a background is 365 KB as
+                # it is and 63 KB at _800, a logo 2.1 MB as it is and 14 KB as _glx_logo.
                 art = {}
-                for key, field, ext in (("portrait", "vertical_cover", "jpg"), ("landscape", "background", "jpg"),
-                                        ("hero", "background", "jpg"), ("logo", "logo", "png")):
+                for key, field, size, ext in (("portrait", "vertical_cover", "", "jpg"), ("landscape", "background", "_800", "jpg"),
+                                              ("hero", "background", "_1600", "jpg"), ("logo", "logo", "_glx_logo", "png")):
                     fmt = (game.get(field) or {}).get("url_format", "")
                     if fmt:
-                        art[key] = fmt.replace("{formatter}", "").replace("{ext}", ext)
+                        art[key] = fmt.replace("{formatter}", size).replace("{ext}", ext)
                 owned.append({"id": gid, "title": title, "art": art})
             write_private(cache, json.dumps(owned))
         except (Failed, ValueError) as err:
@@ -960,6 +971,8 @@ def main(argv):
               file=sys.stderr)
         return 2
     store, verb, rest = STORES[argv[1]](), argv[2], argv[3:]
+    if verb in ("setup", "games", "install", "uninstall"):
+        os.nice(10)  # behind OGUI and a running game: a download decompresses on every core
     if verb in ("install", "uninstall", "launch") and len(rest) != 1:
         print(f"usage: store {store.name} {verb} <id>", file=sys.stderr)
         return 2
