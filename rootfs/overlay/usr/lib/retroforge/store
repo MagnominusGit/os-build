@@ -30,6 +30,10 @@
 # with the STEAM_COMPAT_* variables. STEAM_COMPAT_CLIENT_INSTALL_PATH is an empty folder of ours: Proton
 # copies Steam's client DLLs from there only when they exist, and their mtimes are part of its prefix
 # check, so a Steam update would otherwise redo every store prefix's set-up.
+# The game and its prefix's set-up start at oom_score_adj 900, as Steam's launch wrapper starts a Steam
+# game, so either OOM killer takes the game first. GRIP ran at the session's 0 on the Air X and the
+# kernel killed the session's audio and bus instead (2026-10-24). This process keeps the session's
+# value, to upload the saves after the game.
 #
 # PROTONFIXES. Our Proton runs umu-protonfixes' per-game fixes (proton-armv8 patch 0003), which find a
 # store game by UMU_ID and STORE (gog, egs) in its environment, as umu-run sets them. The umu-database
@@ -96,6 +100,7 @@ SAREK = "/usr/bin/retroforge-steam-sarek"
 AGENT = "retroforge-store"
 RUNTIME_NAME = "SteamLinuxRuntime_4-arm64"
 API = os.environ.get("RETROFORGE_STORE_API", "")
+OOM_SCORE_ADJ = 900  # `steam-launch-wrapper --oom-score-adjust 900`, as Steam starts its games
 
 
 def url_of(url):
@@ -481,6 +486,16 @@ def prefix_path(store, gid):
     return os.path.join(DATA, "prefixes", f"{store}-{gid}", "pfx")
 
 
+def game_child():
+    """The preexec_fn of every Proton process: in the child, before exec, the OOM killer's first choice
+    (header). Its children inherit it."""
+    try:
+        with open("/proc/self/oom_score_adj", "w") as f:
+            f.write(str(OOM_SCORE_ADJ))
+    except OSError:
+        pass  # never a reason not to start the game
+
+
 def run_windows_game(store, gid, exe, args, workdir, game_dir, extra_env=None):
     """The game through Proton in the runtime; its exit status. game_dir is its install folder: Proton
     maps drive S: to the library folder holding it (STEAM_COMPAT_LIBRARY_PATHS), and a game that
@@ -519,7 +534,7 @@ def run_windows_game(store, gid, exe, args, workdir, game_dir, extra_env=None):
         cmd = [seam] + cmd
     log(f"{store} {gid}: {exe} with {os.path.basename(proton)} in {os.path.basename(runtime)}, protonfixes "
         + ("off" if "PROTONFIXES_DISABLE" in env else env.get("UMU_ID", "")))
-    proc = subprocess.Popen(cmd, cwd=workdir, env=env)
+    proc = subprocess.Popen(cmd, cwd=workdir, env=env, preexec_fn=game_child)
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(sig, lambda s, _f: proc.send_signal(s))
     return proc.wait()
@@ -762,7 +777,8 @@ def prepare_prefix(store, gid):
     cmd = [os.path.join(runtime, "_v2-entry-point"), "--verb=run", "--",
            os.path.join(proton, "proton"), "run", "wineboot", "--init"]
     seam = os.environ.get("RETROFORGE_STORE_RUN")
-    subprocess.run(([seam] if seam else []) + cmd, env=env, stdout=subprocess.DEVNULL, check=False)
+    subprocess.run(([seam] if seam else []) + cmd, env=env, stdout=subprocess.DEVNULL, check=False,
+                   preexec_fn=game_child)
 
 
 class Epic:

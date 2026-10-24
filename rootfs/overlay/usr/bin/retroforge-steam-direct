@@ -130,6 +130,7 @@ FULLY_INSTALLED = 4
 READY = FULLY_INSTALLED | 2 | 64
 # Steam's own programs in a launch, which have to be there: its launch wrapper and its reaper.
 LAUNCHERS = ("steam-launch-wrapper", "reaper")
+OOM_SCORE_ADJ = 900  # `steam-launch-wrapper --oom-score-adjust 900`, as Steam starts its games
 XWAYLAND = os.environ.get("RETROFORGE_STEAM_XWAYLAND", "")
 DETACH = os.environ.get("RETROFORGE_STEAM_DETACH", "systemd-run --user --quiet --collect --")
 XA_CARDINAL, PROP_MODE_REPLACE = 6, 0
@@ -761,7 +762,10 @@ def restore_resolution(pid, display, was, now):
 def run(appid, launch):
     """Become the launch: Steam's command, through /bin/sh as Steam ran it, from its working folder.
     SIGPIPE and SIGXFSZ go back to their defaults: Python ignores them, and an ignored signal stays
-    ignored across exec, in the reaper, pressure-vessel, Proton and the game."""
+    ignored across exec, in the reaper, pressure-vessel, Proton and the game. And the launch starts at
+    oom_score_adj 900, the OOM killer's first choice. Steam's wrapper also sets it from the logged
+    `--oom-score-adjust 900`, without a client too (Air X, 2026-10-24), but the logged line is Steam's
+    to change."""
     log(f"starting app {appid} without the Steam client, as Steam started it at {launch['stamp']}")
     if launch["waiting"]:
         log(f"app {appid} has an update waiting: Steam installs it once it runs (Main menu > Emulators > Steam Client)")
@@ -773,6 +777,11 @@ def run(appid, launch):
     env.update(launch["env"], PWD=launch["workdir"])
     for sig in (signal.SIGPIPE, signal.SIGXFSZ):
         signal.signal(sig, signal.SIG_DFL)
+    try:
+        with open("/proc/self/oom_score_adj", "w") as f:
+            f.write(str(OOM_SCORE_ADJ))
+    except OSError:
+        pass  # never a reason not to start the game
     try:
         os.chdir(launch["workdir"])
         os.execve("/bin/sh", ["/bin/sh", "-c", launch["command"]], env)

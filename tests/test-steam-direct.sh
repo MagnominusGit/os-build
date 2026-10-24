@@ -12,8 +12,9 @@
 #     beside the other Steam settings (DXVK_SAREK, KEEP_RUNNING), which stay; an override for testing;
 #   what is replayed: Steam's own newest logged launch of that game ("Game process added"), from
 #     console_log.txt or console_log.previous.txt, kept in a cache so a rotated log does not lose it;
-#     run as Steam ran it (/bin/sh -c), word for word, from the launch entry's working folder, with
-#     Steam's compat variables (the game's library on an SD card too) and the launch's own environment;
+#     run as Steam ran it (/bin/sh -c, at oom_score_adj 900), word for word, from the launch entry's
+#     working folder, with Steam's compat variables (the game's library on an SD card too) and the
+#     launch's own environment;
 #   when it is not: the setting off (silently), a client running (a stale steam.pid is not one), a game
 #     Steam never started here, not installed or changing, an x86 game (Steam's FEX tool), a compat
 #     tool that is gone; each says why, and nothing runs;
@@ -49,6 +50,7 @@ mkdir -p "$S/logs" "$S/linuxarm64" "$S/steamrtarm64" "$SLR" "$PROTON" "$GAME/x64
 cat >"$S/linuxarm64/steam-launch-wrapper" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$@" >"$T/ran.args"; pwd >"$T/ran.cwd"; env >"$T/ran.env"; trap -p >"$T/ran.traps"
+cat /proc/self/oom_score_adj >"$T/ran.oom"
 exit "\$(cat "$T/game.rc" 2>/dev/null || echo 0)"
 EOF
 for f in "$S/steamrtarm64/reaper" "$SLR/_v2-entry-point" "$PROTON/proton" "$GAME/x64Vk/Hades.exe" "$GAME/x64/Hades.exe"; do
@@ -155,7 +157,7 @@ direct() {  # direct [VAR=value...] -- args...
   ERR="$(cat "$T/err")"
 }
 ran_env() { grep -m1 "^$1=" "$T/ran.env" | cut -d= -f2-; }
-reset_run() { rm -f "$T/ran.args" "$T/ran.cwd" "$T/ran.env" "$T/game.rc"; }
+reset_run() { rm -f "$T/ran.args" "$T/ran.cwd" "$T/ran.env" "$T/ran.oom" "$T/game.rc"; }
 
 # ================================================================================================
 CASE="setting"
@@ -313,6 +315,9 @@ grep -q "starting app 1145360 without the Steam client, as Steam started it at 2
   && ok "and says so, with which of Steam's launches" || bad "err=$ERR"
 [ -f "$T/ran.traps" ] && ! grep -q SIGPIPE "$T/ran.traps" \
   && ok "SIGPIPE is not left ignored (Python ignores it, and exec keeps that)" || bad "traps: $(cat "$T/ran.traps" 2>&1)"
+[ "$(cat "$T/ran.oom" 2>/dev/null)" = 900 ] \
+  && ok "the launch starts at oom_score_adj 900, the OOM killer's first choice, before Steam's wrapper sets anything" \
+  || bad "oom_score_adj: $(cat "$T/ran.oom" 2>&1)"
 reset_run; echo 3 >"$T/game.rc"
 direct -- run 1145360
 [ "$RC" = 3 ] && ok "the game's exit status is the launch's (the helper becomes the launch)" || bad "rc=$RC"

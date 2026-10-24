@@ -11,11 +11,12 @@
 # uses it only after `accept`; tokens are the player's only (0600); the libraries list owned Windows
 # games with art and their install state; installs report N% and fail on what the tool logs (legendary
 # exits 0 either way); a launch sets the prefix up once, syncs saves down, runs the game through
-# Proton in the runtime, syncs them up, and does not upload after a failed download; a GOG conflict
-# keeps the last sync time; the game's environment names its umu id and store for protonfixes, from the
-# umu-database cached at install and fetched again only when a day old (kept when that fails), or turns
-# protonfixes off when the player did; RetroForge's own fixes (game-fixes.json) set their INI keys in the
-# prefix before the game starts, keeping the file's other lines, and go off with protonfixes.
+# Proton in the runtime (both at oom_score_adj 900, the store at the session's), syncs them up, and
+# does not upload after a failed download; a GOG conflict keeps the last sync time; the game's
+# environment names its umu id and store for protonfixes, from the umu-database cached at install and
+# fetched again only when a day old (kept when that fails), or turns protonfixes off when the player
+# did; RetroForge's own fixes (game-fixes.json) set their INI keys in the prefix before the game starts,
+# keeping the file's other lines, and go off with protonfixes.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -218,6 +219,9 @@ elif a[0] == "save-sync":
         sys.stdout.write("1700000000.5")
 ''')
 RUNNER = script("runner", r'''
+with open(os.path.join(os.path.dirname(CALLS), "oom"), "a") as f:
+    f.write(json.dumps(["boot" if "wineboot" in sys.argv else "game", open("/proc/self/oom_score_adj").read().strip(),
+                        open(f"/proc/{os.getppid()}/oom_score_adj").read().strip()]) + "\n")
 w = os.environ.get("FAKE_WATCH")
 call({**{k: os.environ.get(k) for k in ("UMU_ID", "STORE", "PROTONFIXES_DISABLE")}, **({"watch": os.path.exists(w)} if w else {})}, os.environ.get("STEAM_FEX_TSOENABLED", ""), os.environ.get("STEAM_COMPAT_INSTALL_PATH", ""), os.environ.get("STEAM_COMPAT_LIBRARY_PATHS", ""),
      os.getcwd(), os.environ.get("STEAM_COMPAT_DATA_PATH", ""), os.environ.get("STEAM_COMPAT_CLIENT_INSTALL_PATH", ""),
@@ -490,8 +494,17 @@ for f in ("gog-saves.json", "notices-gog"):
     if os.path.exists(os.path.join(DATA, f)):
         os.remove(os.path.join(DATA, f))
 reset_calls()
+OOMS = os.path.join(FAKE, "oom")
+if os.path.exists(OOMS):
+    os.remove(OOMS)
 r = store("gog", "launch", "1", env={"FAKE_GAME_RC": "7"})
 cs = calls()
+ooms = [json.loads(line) for line in open(OOMS)] if os.path.exists(OOMS) else []
+ok([o[:2] for o in ooms] == [["boot", "900"], ["game", "900"]],
+   "the prefix's set-up and the game start at oom_score_adj 900, the OOM killer's first choice", str(ooms))
+session = open("/proc/self/oom_score_adj").read().strip()
+ok(ooms and all(o[2] == session for o in ooms), "the store keeps the session's, to upload the saves after the game",
+   f"session {session}: {ooms}")
 order = []
 for c in cs:
     if c[0] == "runner":
