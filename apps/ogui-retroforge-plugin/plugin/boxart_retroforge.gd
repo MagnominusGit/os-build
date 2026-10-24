@@ -24,8 +24,12 @@ extends BoxArtProvider
 const ArtPaths := preload("art_paths.gd")
 const SteamApps := preload("steam_apps.gd")
 const SharedArt := preload("shared_art.gd")
+const LibraryStore := preload("library_store.gd")
 const LIBRARY_ID := "retroforge-roms"
 const STEAM_LIBRARY_ID := "retroforge-steam"
+## GOG and Epic games (library_store.gd) get the art their store lists, fetched on a worker thread
+## into ~/.cache/retroforge/store-art, and a card image as a Steam game's (cards/<store>/<id>.jpg).
+const STORES := ["gog", "epic"]
 
 var fetcher: RefCounted  # art_fetch.gd, set by plugin.gd; none: no fetching
 var _art := SharedArt.new()
@@ -42,6 +46,10 @@ func _ready() -> void:
 func get_boxart(item: LibraryItem, kind: LAYOUT) -> Texture2D:
 	var launch: LibraryLaunchItem = item.get_launch_item(LIBRARY_ID)
 	if not launch:
+		for store in STORES:
+			var store_launch: LibraryLaunchItem = item.get_launch_item("retroforge-" + store)
+			if store_launch:
+				return await _store_art(store_launch, kind)
 		return await _steam_art(item, kind)
 	var system := str(launch.metadata.get("system", ""))
 	var rom := str(launch.metadata.get("rom", ""))
@@ -73,6 +81,15 @@ func _steam_art(item: LibraryItem, kind: LAYOUT) -> Texture2D:
 	if path == "":
 		return null
 	return await _texture(path, kind, ArtPaths.steam_card_cache_path(ArtPaths.cards_dir(), appid))
+
+
+## A GOG or Epic game's art, or null.
+func _store_art(launch: LibraryLaunchItem, kind: LAYOUT) -> Texture2D:
+	var path: String = await _art.run(LibraryStore.fetch_art.bind(LibraryStore.art_cache_dir(), launch, kind))
+	if path == "":
+		return null
+	var card := ArtPaths.cards_dir().path_join(str(launch.metadata.get("store", ""))).path_join(launch.provider_app_id.validate_filename() + ".jpg")
+	return await _texture(path, kind, card)
 
 
 ## The shared texture of an art file: a card image (cached at `card_cache`) for GRID_PORTRAIT, the

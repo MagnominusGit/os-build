@@ -3,9 +3,10 @@ extends RefCounted
 ## settings_menu.tscn builds General: the button replaces the settings state and, on focus, sets the
 ## TabContainer's tab and the section title; the page focuses its FocusGroup when the state is entered,
 ## and Back pops it. The Steam rows (steam_proton.gd, steam_sarek.gd, steam_keep.gd, steam_direct.gd)
-## attach to `box`.
+## attach to `box`. Settings > Stores (store_settings.gd) is a second one, set up with its own title
+## and placed after Steam's entry.
 
-const TITLE := "Steam"
+var title := "Steam"
 
 var settings_state_machine := load("res://assets/state/state_machines/settings_state_machine.tres") as StateMachine
 var card_button_scene := load("res://core/ui/components/card_button.tscn") as PackedScene
@@ -24,13 +25,15 @@ var _page: ScrollContainer
 var _state := State.new()
 
 
-func setup(scene_tree: SceneTree) -> RefCounted:
+func setup(scene_tree: SceneTree, page_title := "Steam") -> RefCounted:
 	tree = scene_tree
+	title = page_title
 	return self
 
 
-## False when OGUI's Settings layout differs: the rows then stay in Settings > General.
-func attach() -> bool:
+## False when OGUI's Settings layout differs: the rows then stay in Settings > General. The entry goes
+## after the button named `after` when there is one, else after General's.
+func attach(after := "") -> bool:
 	var menu: Node = tree.get_first_node_in_group("settings_menu")
 	var general: Node = menu.find_child("GeneralSettings", true, false) if menu else null
 	var tabs := general.get_parent() as TabContainer if general else null
@@ -38,10 +41,10 @@ func attach() -> bool:
 	var title_label: Node = menu.find_child("SectionLabel", true, false) if menu else null
 	if not (tabs and general_button and title_label):
 		return false
-	_state.name = "settings_retroforge_steam"
+	_state.name = "settings_retroforge_" + title.to_lower()
 
 	_page = ScrollContainer.new()
-	_page.name = "RetroForgeSteamSettings"
+	_page.name = "RetroForge%sSettings" % title
 	_page.follow_focus = true
 	_page.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -79,8 +82,8 @@ func attach() -> bool:
 	tabs.add_child(_page)
 
 	_button = card_button_scene.instantiate()
-	_button.name = "RetroForgeSteamButton"
-	_button.text = TITLE
+	_button.name = "RetroForge%sButton" % title
+	_button.text = title
 	var open = state_updater_scene.instantiate()
 	open.state_machine = settings_state_machine
 	open.state = _state
@@ -94,12 +97,13 @@ func attach() -> bool:
 	_button.add_child(tab)
 	var text: Node = text_setter_script.new()
 	text.target = title_label
-	text.text = TITLE
+	text.text = title
 	text.on_signal = "focus_entered"
 	_button.add_child(text)
 	var buttons := general_button.get_parent()
+	var before: Node = buttons.get_node_or_null(after) if after != "" else null
 	buttons.add_child(_button)
-	buttons.move_child(_button, general_button.get_index() + 1)
+	buttons.move_child(_button, (before if before else general_button).get_index() + 1)
 	var buttons_focus := buttons.find_child("FocusGroup", false, false)
 	if buttons_focus:
 		buttons_focus.recalculate_focus()

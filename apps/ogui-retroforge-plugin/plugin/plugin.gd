@@ -11,6 +11,9 @@ const LIBRARY_ID := "retroforge-roms"
 ## The Steam games, owned and installed (library_steam.gd, no second sign-in), and their tab.
 const STEAM_LIBRARY_ID := "retroforge-steam"
 const STEAM_TAB := "steam"
+## The GOG and Epic games (library_store.gd, .claude/plans/stores.plan.md): store -> its tab's title.
+## Each store's library is "retroforge-<store>" and its tab is keyed by the store.
+const STORE_TABS := {"gog": "GOG", "epic": "Epic Games"}
 ## OGUI's own library of .desktop files (core/systems/library/library_desktop.tscn).
 const DESKTOP_LIBRARY_ID := "desktop"
 const SteamApps := preload("steam_apps.gd")
@@ -30,7 +33,8 @@ var scroller_scene := load("res://core/systems/input/scroller_joystick.tscn") as
 
 var roms  # our Library subclass; untyped so roms.SYSTEMS resolves at runtime
 var steam  # library_steam.gd
-## system (or STEAM_TAB) -> {"tab": ScrollContainer, "grid": HFlowContainer}
+var stores := {}  # store -> its library_store.gd
+## system (or STEAM_TAB, or a store) -> {"tab": ScrollContainer, "grid": HFlowContainer}
 var _tabs := {}
 var _scroll_tween: Tween  # a library tab's scroll to its focused card (_scroll_to_card)
 var _emulators_button: Control
@@ -55,6 +59,8 @@ var _sarek: RefCounted  # steam_sarek.gd
 var _keep: RefCounted  # steam_keep.gd
 var _direct: RefCounted  # steam_direct.gd
 var _steam_page: RefCounted  # steam_settings.gd: Settings > Steam, where the Steam rows go
+var _stores_page: RefCounted  # steam_settings.gd again: Settings > Stores
+var _store_rows: RefCounted  # store_settings.gd: GOG and Epic sign-in
 var _proton: RefCounted  # steam_proton.gd
 var _watch: RefCounted  # rom_watch.gd
 var _steam_watch: RefCounted  # steam_watch.gd
@@ -70,6 +76,10 @@ func _ready() -> void:
 	add_library(roms)
 	steam = load(plugin_base.path_join("library_steam.gd")).new()
 	add_library(steam)
+	for store in STORE_TABS:
+		stores[store] = load(plugin_base.path_join("library_store.gd")).new()
+		stores[store].store = store
+		add_library(stores[store])
 	library_manager.library_launch_item_added.connect(_drop_steam_shortcut)
 	for app in library_manager.get_library_items([]):
 		var shortcut := app.get_launch_item(DESKTOP_LIBRARY_ID)
@@ -130,6 +140,13 @@ func _ready() -> void:
 	_direct = load(plugin_base.path_join("steam_direct.gd")).new().setup(get_tree())
 	if not _direct.attach(steam_box):
 		logger.warn("OGUI general settings layout or retroforge-steam-direct not found; no start-without-Steam toggle")
+	_stores_page = load(plugin_base.path_join("steam_settings.gd")).new().setup(get_tree(), "Stores")
+	_store_rows = load(plugin_base.path_join("store_settings.gd")).new().setup(get_tree())
+	if _stores_page.attach("RetroForgeSteamButton") and _store_rows.attach(_stores_page.box):
+		_store_rows.changed.connect(func(store: String) -> void: library_manager.load_library("retroforge-" + store))
+	else:
+		_stores_page.detach()
+		logger.warn("OGUI settings menu layout or the store tool not found; no Settings > Stores")
 	_setup_input_boost()
 
 
@@ -173,6 +190,10 @@ func unload() -> void:
 		_keep.detach()
 	if _direct:
 		_direct.detach()
+	if _store_rows:
+		_store_rows.detach()
+	if _stores_page:
+		_stores_page.detach()
 	if _proton:
 		_proton.detach()
 	if _steam_page:
@@ -309,6 +330,10 @@ func _on_library_loaded(library_id: String) -> void:
 		_steam_rescanning = false
 		_refresh_system(STEAM_TAB)
 		return
+	for store in STORE_TABS:
+		if library_id == "retroforge-" + store:
+			_refresh_system(store)
+			return
 	if library_id != LIBRARY_ID:
 		return
 	_watch.mark_loaded()
@@ -331,9 +356,9 @@ func _drop_steam_shortcut(item: LibraryLaunchItem) -> void:
 
 
 ## Library items of one tab, sorted by name: the ROMs whose retroforge-roms launch item is tagged
-## with the system, or for STEAM_TAB the installed Steam games.
+## with the system, or for STEAM_TAB the Steam games, or for a store its games.
 func _items_for(system: String) -> Array[LibraryItem]:
-	var library := STEAM_LIBRARY_ID if system == STEAM_TAB else LIBRARY_ID
+	var library := STEAM_LIBRARY_ID if system == STEAM_TAB else ("retroforge-" + system if system in STORE_TABS else LIBRARY_ID)
 	var items: Array[LibraryItem] = []
 	for item in library_manager.get_library_items():
 		var launch := item.get_launch_item(library)
@@ -362,7 +387,9 @@ func _refresh_system(system: String) -> void:
 
 
 func _tab_text(system: String) -> String:
-	return "Steam" if system == STEAM_TAB else roms.SYSTEMS[system]["name"]
+	if system == STEAM_TAB:
+		return "Steam"
+	return STORE_TABS[system] if system in STORE_TABS else roms.SYSTEMS[system]["name"]
 
 
 ## Same node layout as the library menu's AllGamesTab: library_menu.gd focuses the first card of a

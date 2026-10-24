@@ -1114,6 +1114,83 @@ GD
   fi
 
   # =================================================================================================
+  # store_runner.gd against a fake /usr/lib/retroforge/store: N% lines, JSON events, a line written to
+  # its stdin (the sign-in page's accept), the exit code and the last stderr line.
+  CASE="store runner"
+  cat >"$T/fake-store" <<'SH'
+#!/bin/bash
+echo "store: noise" >&2
+echo "10%"; echo '{"event": "page", "url": "http://x/y"}'
+read -r answer
+printf '{"event": "said", "line": "%s"}\n' "$answer"
+echo "55%"
+[ "$2" = fail ] && { echo "store: GOG did not take the code" >&2; exit 4; }
+exit 0
+SH
+  chmod +x "$T/fake-store"
+  cat >"$T/store_runner_test.gd" <<GD
+extends SceneTree
+
+const StoreRunner := preload("$SRC/store_runner.gd")
+var failed := 0
+
+func check(what: String, got, want) -> void:
+	if got == want:
+		print("  ok   $CASE -- ", what)
+	else:
+		failed += 1
+		print("  FAIL $CASE -- ", what, ": got ", got, ", want ", want)
+
+func _initialize() -> void:
+	run()
+
+func job(verb: String) -> Dictionary:
+	var r := StoreRunner.new()
+	r.tool = "$T/fake-store"
+	var seen := {"percent": [], "events": []}
+	r.progressed.connect(func(p: int) -> void: seen["percent"].append(p))
+	r.event.connect(func(e: Dictionary) -> void:
+		seen["events"].append(e)
+		if e.get("event") == "page":
+			r.say("accept"))
+	check(verb + ": starts", r.start(["gog", verb]), true)
+	check(verb + ": a second start while running is refused", r.start(["gog", verb]), false)
+	var res: Array = await r.finished
+	return {"code": res[0], "error": res[1], "percent": seen["percent"], "events": seen["events"], "running": r.running}
+
+func run() -> void:
+	check("line: percent", StoreRunner.parse_line("42%"), {"percent": 42})
+	check("line: event", StoreRunner.parse_line('{"event": "code", "sender": "1.2.3.4"}'), {"event": {"event": "code", "sender": "1.2.3.4"}})
+	check("line: anything else is ignored", [StoreRunner.parse_line("101%"), StoreRunner.parse_line("noise"), StoreRunner.parse_line("[1]")], [{}, {}, {}])
+	check("failure: not signed in", StoreRunner.failure_text("GOG", 3, "x"), "Sign in to GOG first: Settings > Stores.")
+	check("failure: offline", "could not be reached" in StoreRunner.failure_text("Epic Games", 4, "x"), true)
+	check("failure: the tool's reason", StoreRunner.failure_text("GOG", 1, "it is not installed"), "it is not installed")
+
+	var a := await job("sign-in")
+	check("progress lines", a.percent, [10, 55])
+	check("events, and the line said to stdin comes back", a.events, [{"event": "page", "url": "http://x/y"}, {"event": "said", "line": "accept"}])
+	check("exit 0: no error, stderr noise is not one", [a.code, a.error, a.running], [0, "", false])
+	var b := await job("fail")
+	check("a failure: its exit code and its last stderr line, unprefixed", [b.code, b.error], [4, "GOG did not take the code"])
+	var r := StoreRunner.new()
+	r.tool = "$T/no-such-tool"
+	r.start(["gog", "status"])
+	var f: Array = await r.finished
+	check("a tool that cannot start: exit -1", f[0], -1)
+	quit(1 if failed else 0)
+GD
+  out="$(XDG_CONFIG_HOME="$T/config" timeout 60 "$GODOT" --headless --script "$T/store_runner_test.gd" 2>&1)"; rc=$?
+  printf '%s\n' "$out" | grep -E '^  (ok|FAIL) '
+  n_ok="$(printf '%s\n' "$out" | grep -c '^  ok ')"; n_bad="$(printf '%s\n' "$out" | grep -c '^  FAIL ')"
+  PASS=$((PASS + n_ok)); FAIL=$((FAIL + n_bad))
+  if [ "$rc" -ne 0 ] && [ "$n_bad" -eq 0 ]; then
+    bad "Godot failed (rc $rc): $(printf '%s\n' "$out" | grep -E 'ERROR|error' | head -3)"
+  fi
+  if printf '%s\n' "$out" | grep -q 'SCRIPT ERROR'; then
+    bad "a script did not compile: $(printf '%s\n' "$out" | grep 'SCRIPT ERROR' | head -3)"
+  fi
+
+  # =================================================================================================
   # Settings > General > Updates (retroforge_os.gd) in OGUI's own settings scene, against a fake
   # retroforge-update: OGUI's updater goes, the one button walks Check -> Install -> Restart now, the
   # channel switch checks at once, and a session restarted with an update waiting offers Restart now.
