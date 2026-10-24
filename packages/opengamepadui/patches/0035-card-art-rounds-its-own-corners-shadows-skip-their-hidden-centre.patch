@@ -1,0 +1,200 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Sat, 24 Oct 2026 14:00:00 -0700
+Subject: [PATCH] perf(GameCard): card art rounds its own corners, shadows
+ skip their hidden centre
+
+Each card masked its art to its rounded corners with clip_children on its
+PanelContainer: a canvas group, an offscreen pass per card every frame.
+Its shadow (a StyleBoxFlat with shadow_size 20) also filled the whole card
+behind the art twice, with the shadow's interior and the style's
+transparent centre, though neither shows.
+
+Measured on a MANGMI Air X (Adreno 610, Library > All Games, 18 cards,
+OGUI redrawing continuously, GPU time from the msm submit tracepoint):
+under Vulkan the masks cost 3.2 ms of GPU per frame and the hidden fills
+2.1 ms, of 14.4. Under OpenGL each group also flushes the frame: the page
+drew at 31 fps with the GPU 42% busy, and at 59 fps with the art rounded
+by a shader.
+
+The art now rounds its own corners (rounded_texture.gdshader: a rounded
+rectangle's distance, anti-aliased over one pixel, sized from the
+TextureRect), and the panel masks its children only while something else
+is drawn over the art: the progress bar, or the focus effects with
+Animated Effects on. The shadow draws its ring only (draw_center = false),
+offset 4 px instead of 5 so the ring meets the card's bottom edge where
+the hidden interior used to show (the shadow is inset 4 px). Corners
+match the old mask's within two pixels.
+
+---
+ assets/shaders/rounded_texture.gdshader     | 20 ++++++++++++++++++++
+ assets/shaders/rounded_texture.gdshader.uid |  1 +
+ core/ui/components/card.gd                  | 25 +++++++++++++++++++++++++
+ core/ui/components/card.tscn                | 19 +++++++++++++++----
+ 4 files changed, 61 insertions(+), 4 deletions(-)
+
+diff --git a/assets/shaders/rounded_texture.gdshader b/assets/shaders/rounded_texture.gdshader
+new file mode 100644
+index 0000000..5f19db2
+--- /dev/null
++++ b/assets/shaders/rounded_texture.gdshader
+@@ -0,0 +1,20 @@
++shader_type canvas_item;
++
++// Rounds the corners of whatever the item draws, anti-aliased over one screen pixel. The item's own
++// size goes in rect_size (in its local pixels, as VERTEX is): a TextureRect that crops its texture
++// (keep aspect covered) draws a region, so UV does not span the rect.
++uniform vec2 rect_size = vec2(200.0, 300.0);
++uniform float radius = 26.0;
++
++varying vec2 local_pos;
++
++void vertex() {
++	local_pos = VERTEX;
++}
++
++void fragment() {
++	vec2 half_size = rect_size * 0.5;
++	vec2 q = abs(local_pos - half_size) - (half_size - vec2(radius));
++	float d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
++	COLOR.a *= clamp(0.5 - d / max(fwidth(d), 1e-4), 0.0, 1.0);
++}
+diff --git a/assets/shaders/rounded_texture.gdshader.uid b/assets/shaders/rounded_texture.gdshader.uid
+new file mode 100644
+index 0000000..2c51115
+--- /dev/null
++++ b/assets/shaders/rounded_texture.gdshader.uid
+@@ -0,0 +1 @@
++uid://kpk3su3ll2gj
+diff --git a/core/ui/components/card.gd b/core/ui/components/card.gd
+index d88887a..b69928d 100644
+--- a/core/ui/components/card.gd
++++ b/core/ui/components/card.gd
+@@ -33,6 +33,8 @@ signal unhighlighted
+ 		value = v
+ 		if progress:
+ 			progress.value = v
++## The panel's mask, used only while something besides the art is drawn over it (_update_clip).
++@export var art_mask: StyleBox
+ 
+ var library_item: LibraryItem
+ var tapped_count := 0
+@@ -47,6 +49,8 @@ var _art_gen := 0  # bumped when the art is dropped or the item changes, so a la
+ @onready var tap_timer := $%TapTimer as Timer
+ @onready var shine_rect := $%ShineShader as ColorRect
+ @onready var god_rays_rect := $%GodRaysShader as ColorRect
++@onready var panel := $PanelContainer as PanelContainer
++@onready var no_mask := panel.get_theme_stylebox("panel")
+ 
+ 
+ # Called when the node enters the scene tree for the first time.
+@@ -59,6 +63,11 @@ func _ready() -> void:
+ 	focus_exited.connect(_on_unfocus)
+ 	texture.mouse_entered.connect(_on_focus)
+ 	texture.mouse_exited.connect(_on_unfocus)
++	texture.resized.connect(_update_art_shape)
++	for node in [progress, shine_rect, god_rays_rect]:
++		node.visibility_changed.connect(_update_clip)
++	_update_art_shape()
++	_update_clip()
+ 
+ 	# Setup a timer callback to clear number of taps on the card
+ 	var on_timeout := func():
+@@ -76,6 +85,22 @@ func set_texture(new_texture: Texture2D) -> void:
+ 	texture_rect.texture = new_texture
+ 
+ 
++## The art rounds its own corners (rounded_texture.gdshader), sized to the TextureRect.
++func _update_art_shape() -> void:
++	var shape := texture.material as ShaderMaterial
++	if shape:
++		shape.set_shader_parameter("rect_size", texture.size)
++
++
++## The panel masks its children to the rounded card only while the progress bar or a focus effect is
++## drawn over the art. A mask is an offscreen pass per card: on an Adreno 610 a library page of 18
++## cards spent 3.2 ms of every frame on them.
++func _update_clip() -> void:
++	var clip: bool = progress.visible or shine_rect.visible or god_rays_rect.visible
++	panel.clip_children = CLIP_CHILDREN_ONLY if clip else CLIP_CHILDREN_DISABLED
++	panel.add_theme_stylebox_override("panel", art_mask if clip else no_mask)
++
++
+ ## Configures the card with the given library item.
+ func set_library_item(item: LibraryItem, free_on_remove: bool = true) -> void:
+ 	# Set the name based on the library item
+diff --git a/core/ui/components/card.tscn b/core/ui/components/card.tscn
+index 733b382..e38078e 100644
+--- a/core/ui/components/card.tscn
++++ b/core/ui/components/card.tscn
+@@ -1,4 +1,4 @@
+-[gd_scene load_steps=13 format=3 uid="uid://bkhrcemal7uxo"]
++[gd_scene load_steps=16 format=3 uid="uid://bkhrcemal7uxo"]
+ 
+ [ext_resource type="Script" uid="uid://b4hydv7h311py" path="res://core/ui/components/card.gd" id="1_aiin0"]
+ [ext_resource type="Texture2D" uid="uid://blc0qyvt1qhci" path="res://assets/images/placeholder-grid-portrait.png" id="2_2hlyj"]
+@@ -6,6 +6,7 @@
+ [ext_resource type="PackedScene" uid="uid://bui0u88oe8jr" path="res://core/systems/effects/raise_effect.tscn" id="3_gyi80"]
+ [ext_resource type="Shader" uid="uid://dw8by7ras0c8n" path="res://assets/shaders/highlight_shine.gdshader" id="5_0n631"]
+ [ext_resource type="Shader" uid="uid://dmrh6bodc1vy7" path="res://assets/shaders/god_rays.gdshader" id="7_8n7dp"]
++[ext_resource type="Shader" uid="uid://kpk3su3ll2gj" path="res://assets/shaders/rounded_texture.gdshader" id="8_rnd7x"]
+ 
+ [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_ygsnb"]
+ corner_radius_top_left = 26
+@@ -13,6 +14,14 @@ corner_radius_top_right = 26
+ corner_radius_bottom_right = 26
+ corner_radius_bottom_left = 26
+ 
++[sub_resource type="StyleBoxEmpty" id="StyleBoxEmpty_n0msk"]
++
++[sub_resource type="ShaderMaterial" id="ShaderMaterial_rnd7x"]
++resource_local_to_scene = true
++shader = ExtResource("8_rnd7x")
++shader_parameter/rect_size = Vector2(200, 300)
++shader_parameter/radius = 26.0
++
+ [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_gtppc"]
+ bg_color = Color(0.156863, 0.164706, 0.211765, 0.698039)
+ 
+@@ -57,13 +66,14 @@ shader_parameter/seed = 5.96
+ [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_st1t5"]
+ resource_local_to_scene = true
+ bg_color = Color(0, 0, 0, 0)
++draw_center = false
+ corner_radius_top_left = 26
+ corner_radius_top_right = 26
+ corner_radius_bottom_right = 26
+ corner_radius_bottom_left = 26
+ shadow_color = Color(0, 0, 0, 0.486275)
+ shadow_size = 20
+-shadow_offset = Vector2(0, 5)
++shadow_offset = Vector2(0, 4)
+ 
+ [node name="GameCard" type="Control"]
+ custom_minimum_size = Vector2(200, 300)
+@@ -75,6 +85,7 @@ size_flags_vertical = 3
+ focus_mode = 2
+ mouse_filter = 1
+ script = ExtResource("1_aiin0")
++art_mask = SubResource("StyleBoxFlat_ygsnb")
+ 
+ [node name="PlayFocusAudioEffect" parent="." instance=ExtResource("2_701dj")]
+ on_signal = "focus_entered"
+@@ -94,15 +105,15 @@ lower_signal = "unhighlighted"
+ on_signal = "highlighted"
+ 
+ [node name="PanelContainer" type="PanelContainer" parent="."]
+-clip_children = 1
+ layout_mode = 0
+ offset_right = 200.0
+ offset_bottom = 300.0
+ mouse_filter = 1
+-theme_override_styles/panel = SubResource("StyleBoxFlat_ygsnb")
++theme_override_styles/panel = SubResource("StyleBoxEmpty_n0msk")
+ 
+ [node name="TextureRect" type="TextureRect" parent="PanelContainer"]
+ unique_name_in_owner = true
++material = SubResource("ShaderMaterial_rnd7x")
+ custom_minimum_size = Vector2(200, 300)
+ layout_mode = 2
+ texture = ExtResource("2_2hlyj")
