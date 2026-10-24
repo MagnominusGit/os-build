@@ -93,6 +93,12 @@ grep -q '_show_progress_file.bind(str(emu.get("progress")), id)' "$SRC/emulators
   && ! grep -qE '_show_progress(_file)?\.bind\(.*, row\)' "$SRC/emulators_page.gd" \
   && ok "the download progress poll finds its row by emulator id, not a row the page may have freed" \
   || bad "emulators_page.gd binds a row to its progress poll: it freezes once the page rebuilds its rows"
+# Steam's download ends with the client updated and closed: nothing said the next step is opening it,
+# where Steam's own sign-in (QR) comes up.
+grep -q 'elif code == 0 and emu.get("kind") == "steam" and before == null:' "$SRC/emulators_page.gd" \
+  && grep -q 'Open it from Main menu > Steam to sign in' "$SRC/emulators_page.gd" \
+  && ok "Steam's first download says to open it from Main menu > Steam to sign in" \
+  || bad "Steam's first download ends without saying where to sign in"
 # OGUI's desktop library lists the shortcut Steam writes for each game it installs, on the same card
 # as our entry: launched through it Steam came up in its desktop mode, and Home showed the game twice,
 # once without its cover (HW, Pocket FIT, 2026-10-21). The plugin drops those entries as they arrive,

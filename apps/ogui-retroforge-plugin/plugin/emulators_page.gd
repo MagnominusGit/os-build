@@ -341,6 +341,9 @@ func _install(id: String, name_text: String, args: Array, emu: Dictionary, row: 
 	_progress_rows.erase(id)
 	if code == 0 and before != null and _installed(id) == before:
 		_notify(name_text + " is up to date")
+	elif code == 0 and emu.get("kind") == "steam" and before == null:
+		# Its first start is Steam's own sign-in (a QR code for the Steam Mobile App).
+		_notify("Steam is ready. Open it from Main menu > Steam to sign in.")
 	elif code == 0:
 		_notify(name_text + " installed")
 	else:
