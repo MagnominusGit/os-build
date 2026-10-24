@@ -318,6 +318,21 @@ if [ -f "$P32" ]; then
 else
   bad "0032: $P32 is missing"
 fi
+# 0033: install scripts' Proton windows set a client launch running; Steam was stopped at its shader
+# prompt before the game started (HW, MANGMI Air X, 2026-10-24).
+P33="$PKG/patches/0033-running-app-a-steam-launch-counts-once-steam-starts-the-game.patch"
+if [ -f "$P33" ]; then
+  [ "$(grep -E '^\+\+\+ b/' "$P33" | sed 's#^+++ b/##' | sort -u)" = "core/systems/launcher/running_app.gd" ] \
+    && ok "0033: changes running_app.gd only" || bad "0033 touches more than running_app.gd"
+  grep -qE '^\+\s+steam_game_launched = _steam_launch_running\(true\)' "$P33" && grep -qE '^\+\s+if not steam_game_launched:' "$P33" \
+    && ok "0033: a Steam launch stays started until Steam's reaper for the game has run" || bad "0033: windows before the game still set it running"
+  grep -qE '^\+\s+if game_only and "Install=1" in argv' "$P33" \
+    && ok "0033: Steam's install-script reaper (Install=1) is not the game's" || bad "0033: an install-script reaper counts as the game"
+  grep -q "0032-launch-manager-recent-apps-names-only.patch 0033-running-app-a-steam-launch-counts-once-steam-starts-the-game.patch" "$PKG/source.pin" \
+    && ok "0033: listed in source.pin, after 0032" || bad "0033: not in source.pin's patches"
+else
+  bad "0033: $P33 is missing"
+fi
 # One file of the tree as 0018 leaves it, hunk by hunk (context and added lines; a new file whole).
 newside() { python3 - "$P18" "$1" <<'PY'
 import sys
