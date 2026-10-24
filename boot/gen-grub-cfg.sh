@@ -109,7 +109,11 @@ ESP_MARKER="/SteamOS/conf/$SLOT.conf"
 # them all, which is the only place anyone reads them on a board with no serial console.
 # cpuidle.governor=teo picks the TEO idle governor over menu, which would otherwise win on rating;
 # see the cpuidle block in kernel/kernel.config for why.
-BOOT_CMDLINE="quiet loglevel=3 video=efifb:off console=tty0 cgroup.memory=nokmem,nosocket nosoftlockup panic=5 cpuidle.governor=teo"
+# audit=0: journald (systemd 260, Audit=yes by default) switches kernel auditing on at start, after
+# which every process takes the audited syscall path and kmsg fills with records nothing reads
+# (auditd ships disabled). audit=0 keeps the subsystem from initializing, so there is nothing to
+# switch on. Measured on the Air X: ~3000 audit records in 7 h had pushed the boot log out of kmsg.
+BOOT_CMDLINE="quiet loglevel=3 video=efifb:off console=tty0 cgroup.memory=nokmem,nosocket nosoftlockup panic=5 cpuidle.governor=teo audit=0"
 
 # --- board catalog ------------------------------------------------------------------------------
 declare -a pids=() pnames=() pdtbs=() pbootargs=()
