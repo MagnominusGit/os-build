@@ -206,6 +206,48 @@ kernel config change needs a rebuild on the buildbox; the cmdline changes ride i
 - Already good: `cgroup.memory=nokmem,nosocket`, RCU NOCB + LAZY, `TRANSPARENT_HUGEPAGE_MADVISE`, BTF for
   sched_ext, KFENCE/KASAN/lockdep off.
 
+## Recheck, 2026-10-24 21:55 (same boot, up 18 h, no game running)
+The first round ran while games were starting and stopping, so every benchmark was repeated in a known
+state (OGUI idle, MemAvailable 2.5 GB, three 5 s samples each):
+
+| measurement | first round | recheck |
+|---|---|---|
+| CPU freq changes | ~110/s | 117–124/s (policy0 68–74, policy4 45–52) |
+| RPM vote per change, median / p90 | 1.0–1.1 / 1.5–2.3 ms | 1.18–1.28 / 1.70–1.87 ms |
+| kworker time blocked on those votes | ~120 ms/s | 145–150 ms/s |
+| glink-rpm IRQs | 456/s | 606–629/s |
+| SD 4K direct read: unmap / sync median | 7.3 / 1.8 us | 7.1–7.4 / 1.8 us (~3.8% of a core at ~4,300 IOPS) |
+| Wi-Fi: unmaps per packet, unmap time per packet | 3.2, 31 us | 3.3, 36 us (sync 27%) |
+| swiotlb high-water | 2 slabs | 2 slabs (18 h) |
+| 64 KB mTHP, 16 MB chase A73 / A53 | 18 vs 36 / 45 vs 78 ns | 15–16.5 vs 32–33 / 41–43 vs 77 ns |
+| cpuidle too-deep ratio cpu0 / A73s | 50% / 27–29% | 47–67% (15 entries) / 21–37% |
+
+Everything repeats within ~20%. Two things moved since the first round: 19 kernel OOM runs now (16 then),
+and the last three, at 21:35, 21:38 and 21:44, killed `Grip-Win64-Ship` rather than the session. The
+victim fix on `steam-armv8-proton` (f270ba3, 06ebb7d) is doing its job, and GRIP still does not fit in RAM.
+Audit records grow by ~10 per SSH login (6,536 now).
+
+## Does it apply to the other SoCs?
+Fleet: SM8250 (Kryo 585 = A77 + A55, ARMv8.2), SM8550 / SM8650 (Cortex-X/A7xx/A5xx, ARMv9), SM8750
+(Oryon), SM6115 (Kryo 260 = A73 + A53, ARMv8.0). Only the Air X was measured; "expected" below is
+reasoning from the code, not a measurement.
+
+| change | SM6115 | SM8250 | SM8550 / SM8650 | SM8750 |
+|---|---|---|---|---|
+| `audit=0` (committed) | yes | yes | yes | yes — same systemd/journald on every board |
+| full preempt pinned + `PREEMPT_DYNAMIC` (committed) | yes | yes | yes | yes — one unified kernel |
+| OOM victim fix (on `steam-armv8-proton`) | yes | yes | yes | yes — userspace; min_ttl fires less with 8–16 GB |
+| `iommu.strict=0` (committed for SM6115) | measured | expected to help more: UFS and PCIe Wi-Fi (ath11k) run far higher I/O rates than SD | same, plus ath12k Wi-Fi 7 and the PCIe USB3 hub | same arm-smmu; expected |
+| `swiotlb=4096` (committed for SM6115) | measured | same 64 MB pool, under 1% of 8+ GB; check `io_tlb_used_hiwater` first (PCIe devices) | same | same |
+| ondemand's ~1 ms bandwidth vote per freq change | measured (SMD-RPM) | votes go through RPMh, expected to be tens of us | RPMh, same | unknown (SCMI/EPSS) — trace `icc_set_bw` on one board |
+| HZ=1000 (proposal) | ondemand's 8 ms floor | same floor | same | same |
+| `kpti=off` | already set | **probably KPTI is ON**: A77/A55 have no E0PD, so KASLR forces it (`cpufeature.c:1883`); check `dmesg \| grep -i isolation` and add `kpti=off` to the SM8250 rows if so | no: ARMv9 has E0PD | no |
+| `nospectre_v2` (proposal) | firmware SMC per mm switch on the A73s | the A77 mitigates in hardware (CSV2), the A55 is unaffected | same (CSV2) | same — nothing to gain |
+| 64 KB mTHP (kept) | measured here | measured on SM8550 originally | same | expected |
+| MGLRU MMU walk | inert (no hardware access flag) | active (ARMv8.2 HAFDBS) | active | active |
+| IRQ placement | all on cpu0, no irqaffinity | none set either | `irqaffinity=0-2` / `0-1` already | `irqaffinity=0-1` already |
+| DT carve-outs | SM6115 only | — | — | — |
+
 ## Next steps (each needs your OK)
 1. Build the kernel on the buildbox with be0fc47 (`~/retroforge-steamtest`), and the image with bad7a19
    and 6abd0e2.
