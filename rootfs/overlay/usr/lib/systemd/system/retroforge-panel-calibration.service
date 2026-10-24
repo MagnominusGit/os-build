@@ -1,6 +1,7 @@
 # Re-applies this unit's persisted panel frame-length trim at boot (and nothing else: there is
 # deliberately NO boot-time calibration — measuring and stepping the DDIC is operator-triggered,
-# as root over SSH: `/usr/lib/retroforge/panel-calibration calibrate`).
+# from the quick bar's Hardware card through retroforge-paneld, or as root over SSH:
+# `/usr/lib/retroforge/panel-calibration calibrate`).
 #
 # The values are per-UNIT, keyed by SoC serial in /var/lib/retroforge/panel-calibration.json, so a
 # card moved between two boards of the same model applies nothing on the one that never

@@ -14,6 +14,13 @@ extends VBoxContainer
 ## The controls carry OGUI FocusGroups on the quick bar's focus stack: the quick bar card hands
 ## gamepad focus to the first FocusGroup it finds in its content when A opens it. Without one, A
 ## only expanded the card and moving down left it (and closed the menu).
+##
+## Under Backlight: the panel's measured refresh rate, through retroforge-paneld (panel_client.gd),
+## and on a panel with frame_len_* knobs its calibration (docs/panel-calibration.md): which rates
+## are calibrated and a Calibrate button for the rate scanning now. The button's FocusGroup is only
+## built once a status says the panel is supported, AFTER the quick bar card has picked its focus
+## target: the card takes the first FocusGroup in the tree, hidden or not, so one built up front
+## would take the LED controls' place on every board without knobs.
 
 const FOCUS_GROUP := "res://core/systems/input/focus_group.tscn"
 const QB_FOCUS_STACK := "res://core/ui/card_ui/quick_bar/quick_bar_menu_focus.tres"
@@ -34,6 +41,7 @@ const ROWS := [
 	["fan", "Fan"],
 	["clocks", "Clocks"],
 	["backlight", "Backlight"],
+	["panel", "Refresh rate"],
 	["leds", "LEDs"],
 	["device", "Board"],
 ]
@@ -48,6 +56,15 @@ var _led_toggle: Control  # OGUI Toggle
 var _led_slider: Control  # OGUI ValueSlider
 var _led_debounce: Timer
 var _led_syncing := false
+var _led_group: Node  # the LED controls' FocusGroup
+var panel  # panel_client.gd
+var _panel_box: VBoxContainer
+var _panel_saved: Label
+var _panel_button: Control  # OGUI CardButton
+var _panel_message: Label
+var _panel_timer: Timer
+var _calibrating := false
+const PANEL_REFRESH_SECS := 5.0  # each measured status waits ~0.5 s of vblanks in paneld
 
 const LED_COLORS := [
 	["Blue", [0, 96, 255]], ["Cyan", [0, 200, 255]], ["Green", [0, 255, 64]],
@@ -61,6 +78,9 @@ func setup(plugin_base: String, hw_root: String = "") -> void:
 	if hw_root != "":
 		info.root = hw_root
 	power = load(plugin_base.path_join("power_client.gd")).new()
+	panel = load(plugin_base.path_join("panel_client.gd")).new()
+	panel.status_received.connect(_on_panel_status)
+	panel.calibrated.connect(_on_calibrated)
 
 
 func _ready() -> void:
@@ -85,6 +105,12 @@ func _ready() -> void:
 		if row[0] == "leds":
 			_led_box = _build_led_controls()
 			add_child(_led_box)
+		if row[0] == "panel":
+			box.visible = false  # until paneld answers
+			_panel_box = VBoxContainer.new()
+			_panel_box.name = "PanelControls"
+			_panel_box.visible = false
+			add_child(_panel_box)
 	_timer = Timer.new()
 	_timer.wait_time = REFRESH_SECS
 	_timer.autostart = true
@@ -92,8 +118,15 @@ func _ready() -> void:
 	add_child(_timer)
 	visibility_changed.connect(refresh)
 	visibility_changed.connect(_sync_leds)
+	_panel_timer = Timer.new()
+	_panel_timer.wait_time = PANEL_REFRESH_SECS
+	_panel_timer.autostart = true
+	_panel_timer.timeout.connect(_request_panel)
+	add_child(_panel_timer)
+	visibility_changed.connect(_request_panel)
 	refresh()
 	_sync_leds()
+	_request_panel()
 
 
 func _build_led_controls() -> VBoxContainer:
@@ -142,6 +175,7 @@ func _build_led_controls() -> VBoxContainer:
 		colors.add_child(button)
 	box.add_child(colors)
 	var controls_group := add_focus_group(box)
+	_led_group = controls_group
 	# first child: the quick bar card focuses the FIRST FocusGroup its depth-first search meets,
 	# and the swatches' group (inside the HFlow) must not be it
 	box.move_child(controls_group, 0)
@@ -198,3 +232,75 @@ func refresh() -> void:
 func _set(key: String, text: String) -> void:
 	_values[key].text = text
 	_rows[key].visible = text != ""
+
+
+## Ask paneld for the measured status while the card shows; never during a calibration.
+func _request_panel() -> void:
+	if panel and is_visible_in_tree() and not _calibrating:
+		panel.request_status(true)
+
+
+func _on_panel_status(status: Dictionary) -> void:
+	if _calibrating:
+		# Calibrate was pressed while this status was in flight: the client is free now.
+		panel.request_calibrate()
+		return
+	# No paneld (an older image) or a refused poll: keep what the row shows, hidden or not.
+	if status.has("error"):
+		return
+	_set("panel", panel.format_rate(status))
+	var saved: String = panel.format_saved(status)
+	if saved == "":
+		return
+	if _panel_button == null:
+		_build_panel_controls()
+	_panel_box.visible = true
+	_panel_saved.text = saved
+
+
+func _build_panel_controls() -> void:
+	_panel_saved = Label.new()
+	_panel_saved.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_panel_box.add_child(_panel_saved)
+	var buttons := VBoxContainer.new()
+	_panel_box.add_child(buttons)
+	# In the tree before anything is set on it: OGUI is a release export, where touching a
+	# component's @onready children before they exist segfaults.
+	_panel_button = (load("res://core/ui/components/card_button.tscn") as PackedScene).instantiate()
+	buttons.add_child(_panel_button)
+	_panel_button.text = "Calibrate panel"
+	_panel_button.button_up.connect(_on_calibrate)
+	_panel_message = Label.new()
+	_panel_message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_panel_message.add_theme_font_size_override("font_size", 14)
+	_panel_message.text = "Trims the rate the screen runs at now; stored for this unit."
+	_panel_box.add_child(_panel_message)
+	var group := add_focus_group(buttons)
+	if _led_box.visible:
+		group.set("focus_neighbor_bottom", _led_group)
+		_led_group.set("focus_neighbor_top", group)
+		_led_group.call("recalculate_focus")
+	else:
+		# No LED controls to take the quick bar card's focus: hand it this group instead.
+		var qb_card: Node = find_parent("QuickBarCard*")
+		if qb_card and qb_card.get("focus_group_setter"):
+			qb_card.set("focus_group", group)
+			qb_card.get("focus_group_setter").set("target", group)
+
+
+func _on_calibrate() -> void:
+	if _calibrating:
+		return
+	_calibrating = true
+	panel.request_calibrate()  # false while a status is in flight; _on_panel_status starts it then
+	_panel_button.disabled = true
+	_panel_button.text = "Calibrating…"
+	_panel_message.text = "Measuring and trimming the panel: up to a minute. Keep the screen on."
+
+
+func _on_calibrated(result: Dictionary) -> void:
+	_calibrating = false
+	_panel_button.disabled = false
+	_panel_button.text = "Calibrate panel"
+	_panel_message.text = panel.format_result(result)
+	_request_panel()

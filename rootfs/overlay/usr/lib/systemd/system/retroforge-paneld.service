@@ -1,0 +1,10 @@
+# Root side of the quick bar's panel calibration (org.retroforge.Panel1, see retroforge-paneld).
+# D-Bus activated only, so no [Install]: it starts on the shell's first call and exits by itself
+# when idle. The boot-time re-apply is retroforge-panel-calibration.service, not this.
+[Unit]
+Description=RetroForge panel calibration service
+
+[Service]
+Type=dbus
+BusName=org.retroforge.Panel
+ExecStart=/usr/bin/retroforge-paneld

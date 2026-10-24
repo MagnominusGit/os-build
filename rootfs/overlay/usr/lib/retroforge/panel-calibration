@@ -6,8 +6,9 @@
   panel-calibration calibrate         trim the currently-scanning rate, persist, stay applied
   panel-calibration apply             boot-time re-apply of this unit's persisted values
 
-Consumers: retroforge-panel-calibration.service (apply); status/calibrate are run by hand as root
-over SSH (the sysfs knob writes need root).
+Consumers: retroforge-panel-calibration.service (apply); status/calibrate by hand as root over SSH
+(the sysfs knob writes need root). The quick bar goes through retroforge-paneld, which imports
+the same module.
 """
 
 import json

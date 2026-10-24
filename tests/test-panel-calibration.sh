@@ -178,6 +178,35 @@ except RuntimeError as e:
 '
 [[ $(run_py) == ok ]] && ok || fail "unmatchable rate refuses"
 
+# ---------- the display going away mid-run restores the stock value too ----------
+# NoDisplay is not an OSError: a screen that blanks during a calibration must not leave the
+# trial value scanning (only saved values are re-applied at boot).
+PY_BODY='
+knob = np.panel_knobs()[1][120]
+open(knob, "w").write("76")
+class Panel:
+    t = 0.0
+    n = 0
+    def rate(self):
+        Panel.t += np.MEASURE_S
+        Panel.n += 1
+        if Panel.n > 3:
+            raise np.NoDisplay("no CRTC answers")
+        return 118.4 + (76 - int(open(knob).read())) * 0.05
+    def sleep(self, s):
+        Panel.t += s
+    def clock(self):
+        return Panel.t
+p = Panel()
+try:
+    np.calibrate(rate_fn=p.rate, sleep=p.sleep, clock=p.clock)
+    print("no-error")
+except np.NoDisplay:
+    assert int(open(knob).read()) == 76, open(knob).read()
+    print("ok")
+'
+[[ $(run_py) == ok ]] && ok || fail "a blank screen mid-run restores the stock value"
+
 # ---------- apply: this unit's values land, another unit's never do ----------
 PY_BODY='
 knobs = np.panel_knobs()[1]
@@ -230,6 +259,106 @@ out=$("$CLI" bogus 2>/dev/null); [[ $? -eq 1 && $out == *'"error"'* ]] && ok || 
 # comes back uncalibrated (HW, Odin 3 internal install, 2026-10-23).
 [[ -L $ROOT/rootfs/overlay/etc/systemd/system/multi-user.target.wants/retroforge-panel-calibration.service ]] \
   && ok || fail "retroforge-panel-calibration.service has no multi-user.target.wants symlink: enablement rides on first-boot presets alone"
+
+# ---------- retroforge-paneld: the shell's root side, over a private D-Bus ----------
+# The quick bar's Hardware card calibrates through org.retroforge.Panel1, so the daemon is driven
+# for real here: its own code on a dbus-run-session bus, the module patched only where hardware
+# would answer (the vblank measurement, as the simulated panel above) and the loop's wall-time
+# windows shortened. Pinned: the JSON the card parses, Busy refusing a second measurement while a
+# calibration runs (an extra vblank waiter jitters it) while a quick status still answers, a
+# failure as Error.Failed with the module's reason, and the idle exit that lets D-Bus activation
+# start it again on the next call.
+DAEMON="$ROOT/rootfs/overlay/usr/bin/retroforge-paneld"
+if ! command -v dbus-run-session >/dev/null || ! python3 -c 'import gi' 2>/dev/null; then
+  echo "skip: retroforge-paneld (no dbus-run-session or python gi)" >&2
+else
+  printf 'SERIAL-D\0' > "$TMP/serial"
+  echo 76 > "$SYS/ae94000.dsi.0/frame_len_120"
+  cat > "$TMP/paneld_test.py" <<PYEOF
+import importlib.util, json, os, threading, time
+from importlib.machinery import SourceFileLoader
+os.environ.update(RETROFORGE_PANEL_LIB="$LIB_DIR", RETROFORGE_PANELD_BUS="session", RETROFORGE_PANELD_IDLE_S="2")
+loader = SourceFileLoader("paneld", "$DAEMON")
+paneld = importlib.util.module_from_spec(importlib.util.spec_from_loader("paneld", loader))
+loader.exec_module(paneld)
+rp = paneld.retroforge_panel
+rp.SETTLE_S, rp.ADJUST_WINDOW_S, rp.VERIFY_WINDOW_S = 0.01, 1.0, 0.3
+
+def fake_rate(seconds=rp.MEASURE_S):  # the simulated Odin 3: 76 scans 118.4 Hz, 0.05 Hz per count
+    time.sleep(0.05)
+    return 118.4 + (76 - rp.read_knob(rp.panel_knobs()[1][120])) * 0.05
+rp.measure_rate = fake_rate
+
+daemon = threading.Thread(target=paneld.main)
+daemon.start()
+from gi.repository import Gio, GLib
+bus = Gio.bus_get_sync(Gio.BusType.SESSION)
+def call(method, args=None):
+    try:
+        reply = bus.call_sync("org.retroforge.Panel", "/org/retroforge/Panel", "org.retroforge.Panel1", method,
+                              args, GLib.VariantType("(s)"), Gio.DBusCallFlags.NONE, 30000, None)
+        return json.loads(reply.unpack()[0])
+    except GLib.Error as e:
+        return {"dbus_error": Gio.DBusError.get_remote_error(e), "message": e.message}
+for _ in range(100):
+    if bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameHasOwner",
+                     GLib.Variant("(s)", ("org.retroforge.Panel",)), None, 0, 1000, None).unpack()[0]:
+        break
+    time.sleep(0.05)
+
+def check(name, cond):
+    print(("ok " if cond else "FAIL ") + name)
+
+s = call("Status", GLib.Variant("(b)", (False,)))
+check("quick Status is the module's JSON", s.get("supported") is True and s.get("rates") == [60, 120] and s.get("measuredHz") is None)
+s = call("Status", GLib.Variant("(b)", (True,)))
+check("measured Status names the nominal rate", abs(s.get("measuredHz", 0) - 118.4) < 0.01 and s.get("nominalHz") == 120)
+
+result = {}
+calibrating = threading.Thread(target=lambda: result.update(call("Calibrate")))
+calibrating.start()
+time.sleep(0.3)
+busy = call("Status", GLib.Variant("(b)", (True,)))
+check("a measurement during a calibration is refused", busy.get("dbus_error") == "org.retroforge.Panel.Error.Busy")
+check("a second Calibrate is refused", call("Calibrate").get("dbus_error") == "org.retroforge.Panel.Error.Busy")
+check("a quick Status still answers", call("Status", GLib.Variant("(b)", (False,))).get("supported") is True)
+calibrating.join()
+check("Calibrate returns the module's result", result.get("rate") == 120 and 0 <= result.get("endHz", 0) - 120 <= 0.2)
+state = json.load(open(os.environ["RETROFORGE_PANEL_STATE"]))
+check("Calibrate persisted this unit's value", state.get("SERIAL-D", {}).get("120") == result.get("value"))
+
+os.environ["RETROFORGE_PANEL_SYSFS_GLOB"] = "$TMP/nowhere/*"
+failed = call("Calibrate")
+check("a failure is Error.Failed with the reason", failed.get("dbus_error") == "org.retroforge.Panel.Error.Failed" and "no frame_len" in failed.get("message", ""))
+
+daemon.join(timeout=6)
+check("idle exit after RETROFORGE_PANELD_IDLE_S", not daemon.is_alive())
+PYEOF
+  out=$(PYTHONDONTWRITEBYTECODE=1 timeout 60 dbus-run-session -- python3 "$TMP/paneld_test.py" 2>&1)
+  while IFS= read -r line; do
+    case $line in
+      "ok "*) ok ;;
+      "FAIL "*) fail "paneld: ${line#FAIL }" ;;
+    esac
+  done <<< "$out"
+  [[ $out == *"idle exit"* ]] || fail "paneld harness did not finish: $(tail -3 <<< "$out")"
+fi
+
+# ---------- paneld's bus wiring: activation file, policy and unit agree ----------
+OV="$ROOT/rootfs/overlay"
+ACT="$OV/usr/share/dbus-1/system-services/org.retroforge.Panel.service"
+POL="$OV/usr/share/dbus-1/system.d/org.retroforge.Panel.conf"
+UNIT="$OV/usr/lib/systemd/system/retroforge-paneld.service"
+grep -qx 'SystemdService=retroforge-paneld.service' "$ACT" && grep -qx 'BusName=org.retroforge.Panel' "$UNIT" \
+  && ok || fail "the activation file and retroforge-paneld.service do not name each other"
+python3 - "$POL" <<'PYEOF' && ok || fail "the bus policy must let root own and wheel (player) call org.retroforge.Panel"
+import sys, xml.etree.ElementTree as ET
+pol = {p.get("user") or p.get("group"): [(a.attrib) for a in p] for p in ET.parse(sys.argv[1]).getroot()}
+assert {"own": "org.retroforge.Panel"} in pol["root"]
+assert {"send_destination": "org.retroforge.Panel"} in pol["wheel"]
+PYEOF
+! grep -q '^\[Install\]' "$UNIT" && ok || fail "retroforge-paneld.service has an [Install] section: it is activated by its first call, never at boot"
+[[ -x $DAEMON ]] && ok || fail "retroforge-paneld is not executable"
 
 echo
 echo "panel-calibration: $PASS passed, $FAIL failed"

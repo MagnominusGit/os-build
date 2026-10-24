@@ -291,6 +291,11 @@ def calibrate(rate_fn=None, sleep=time.sleep, clock=time.monotonic, deadline_s=D
     except OSError as e:
         write_knob(knob, start_value)
         raise RuntimeError("knob write failed at %d: %s" % (value, e))
+    except BaseException:
+        # NoDisplay (the screen blanked mid-run) and anything else: never leave a trial value
+        # scanning, since boot only re-applies saved values and this one is not saved.
+        write_knob(knob, start_value)
+        raise
     write_knob(knob, start_value)
     raise RuntimeError(
         "no stable value within %.0fs (target %d Hz, started %.2f Hz)"

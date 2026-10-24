@@ -988,6 +988,75 @@ GD
     bad "a script did not compile: $(printf '%s\n' "$out" | grep 'SCRIPT ERROR' | head -3)"
   fi
 
+  # panel_client.gd: the Hardware card's busctl to retroforge-paneld, on a worker thread. Against
+  # the REAL daemon on a dbus-run-session bus over a fabricated sysfs (busctl --user), so what is
+  # pinned is busctl's actual --json=short reply and its "Call failed:" text, not a guess at them.
+  # No display here: a measured status carries measureError and Calibrate fails, which is the path
+  # the card must show rather than swallow.
+  CASE="panel client"
+  PANELD="$ROOT/rootfs/overlay/usr/bin/retroforge-paneld"
+  if ! command -v dbus-run-session >/dev/null || ! command -v busctl >/dev/null || ! python3 -c 'import gi' 2>/dev/null; then
+    printf '  skip %s -- no dbus-run-session, busctl or python gi\n' "$CASE"
+  else
+    mkdir -p "$T/panel/sys/ae94000.dsi.0" "$T/panel/dri"
+    echo 76 > "$T/panel/sys/ae94000.dsi.0/frame_len_120"; echo 2006 > "$T/panel/sys/ae94000.dsi.0/frame_len_60"
+    printf 'SERIAL-P\0' > "$T/panel/serial"
+    echo '{"SERIAL-P": {"120": 48}}' > "$T/panel/state.json"
+    cat >"$T/panel_test.gd" <<GD
+extends SceneTree
+
+const PanelClient := preload("$SRC/panel_client.gd")
+var failed := 0
+
+func check(what: String, got, want) -> void:
+	if got == want:
+		print("  ok   $CASE -- ", what)
+	else:
+		failed += 1
+		print("  FAIL $CASE -- ", what, ": got ", got, ", want ", want)
+
+func _initialize() -> void:
+	run()
+
+func run() -> void:
+	var c := PanelClient.new()
+	c.bus = "--user"
+	check("a call starts", c.request_status(false), true)
+	check("one call at a time", c.request_status(false), false)
+	var s: Dictionary = await c.status_received
+	check("quick status: supported", s.get("supported"), true)
+	check("quick status: saved line, highest rate first", PanelClient.format_saved(s), "120 Hz: calibrated · 60 Hz: factory")
+	c.request_status(true)
+	s = await c.status_received
+	check("measured status without a display: the reason, not an error", PanelClient.format_rate(s).begins_with("no CRTC"), true)
+	c.request_calibrate()
+	var r: Dictionary = await c.calibrated
+	check("a failed Calibrate carries paneld's reason", str(r.get("error", "")).begins_with("no CRTC"), true)
+	check("free again after a reply", c.busy, false)
+	check("rate line", PanelClient.format_rate({"measuredHz": 118.35, "nominalHz": 120}), "118.35 Hz · nominal 120 (-1.65)")
+	check("rate line above nominal", PanelClient.format_rate({"measuredHz": 120.1, "nominalHz": 120}), "120.10 Hz · nominal 120 (+0.10)")
+	check("rate line, no knob", PanelClient.format_rate({"measuredHz": 59.94, "nominalHz": null}), "59.94 Hz")
+	check("no saved line without knobs", PanelClient.format_saved({"supported": false}), "")
+	check("result line", PanelClient.format_result({"rate": 120, "startHz": 118.35, "endHz": 120.08}), "120 Hz calibrated: 118.35 → 120.08 Hz")
+	check("busctl failure text", PanelClient.parse_reply(1, "Call failed: a measurement or calibration is running\n"), {"error": "a measurement or calibration is running"})
+	check("garbage reply", PanelClient.parse_reply(0, "nope").has("error"), true)
+	quit(1 if failed else 0)
+GD
+    out="$(RETROFORGE_PANEL_SYSFS_GLOB="$T/panel/sys/*" RETROFORGE_PANEL_SERIAL="$T/panel/serial" \
+      RETROFORGE_PANEL_STATE="$T/panel/state.json" RETROFORGE_PANEL_DRM_GLOB="$T/panel/dri/card*" \
+      RETROFORGE_PANEL_LIB="$ROOT/rootfs/overlay/usr/lib/retroforge" RETROFORGE_PANELD_BUS=session PYTHONDONTWRITEBYTECODE=1 XDG_CONFIG_HOME="$T/config" GODOT="$GODOT" \
+      timeout 60 dbus-run-session -- bash -c '"$1" & for _ in $(seq 100); do busctl --user list 2>/dev/null | grep -q "^org.retroforge.Panel " && break; sleep 0.1; done; exec "$GODOT" --headless --script "$2"' _ "$PANELD" "$T/panel_test.gd" 2>&1)"; rc=$?
+    printf '%s\n' "$out" | grep -E '^  (ok|FAIL) '
+    n_ok="$(printf '%s\n' "$out" | grep -c '^  ok ')"; n_bad="$(printf '%s\n' "$out" | grep -c '^  FAIL ')"
+    PASS=$((PASS + n_ok)); FAIL=$((FAIL + n_bad))
+    if [ "$rc" -ne 0 ] && [ "$n_bad" -eq 0 ]; then
+      bad "Godot failed (rc $rc): $(printf '%s\n' "$out" | grep -E 'ERROR|error' | head -3)"
+    fi
+    if printf '%s\n' "$out" | grep -q 'SCRIPT ERROR'; then
+      bad "a script did not compile: $(printf '%s\n' "$out" | grep 'SCRIPT ERROR' | head -3)"
+    fi
+  fi
+
   # =================================================================================================
   # Settings > General > Updates (retroforge_os.gd) in OGUI's own settings scene, against a fake
   # retroforge-update: OGUI's updater goes, the one button walks Check -> Install -> Restart now, the

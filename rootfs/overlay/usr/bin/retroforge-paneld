@@ -1,0 +1,163 @@
+#!/usr/bin/env python3
+"""org.retroforge.Panel1 -- panel frame-length calibration for the shell, over the system bus.
+
+The quick bar's Hardware card shows the measured refresh rate and, on a panel with frame_len_*
+knobs, a Calibrate button. Calibrating writes sysfs knobs and the per-unit state file, both
+root-only; the shell runs as player. This daemon is the root side: D-Bus activated by the first
+call (no [Install], nothing runs at boot), it exits after IDLE_EXIT_S without a call. The bus
+policy lets root and `wheel` call it, like org.retroforge.Power.
+
+The work is retroforge_panel.py's, the same module the panel-calibration CLI drives:
+
+  Status(b measure) -> s   status() as JSON; measure=false skips the ~0.5 s vblank measurement
+  Calibrate()       -> s   calibrate() as JSON; up to ~60 s (callers: busctl --timeout=120)
+
+Both run on a worker thread so the bus stays answered. A measurement or calibration while
+another one runs is refused (Error.Busy) rather than queued: an extra vblank waiter would jitter
+the running calibration's own measurements. A quick Status (no measurement) is always answered.
+Failures are Error.Failed with retroforge_panel's message.
+"""
+import json
+import os
+import sys
+import threading
+import warnings
+
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+BUS_NAME = "org.retroforge.Panel"
+OBJECT_PATH = "/org/retroforge/Panel"
+IFACE = "org.retroforge.Panel1"
+# Overridable so tests/test-panel-calibration.sh can run the daemon from the source tree on a session bus.
+LIB_DIR = os.environ.get("RETROFORGE_PANEL_LIB", "/usr/lib/retroforge")
+BUS_TYPE = os.environ.get("RETROFORGE_PANELD_BUS", "system")
+IDLE_EXIT_S = int(os.environ.get("RETROFORGE_PANELD_IDLE_S", "60"))
+
+XML = f"""
+<node>
+  <interface name="{IFACE}">
+    <method name="Status">
+      <arg type="b" name="measure" direction="in"/>
+      <arg type="s" name="json" direction="out"/>
+    </method>
+    <method name="Calibrate">
+      <arg type="s" name="json" direction="out"/>
+    </method>
+  </interface>
+</node>
+"""
+
+sys.path.insert(0, LIB_DIR)
+import retroforge_panel  # noqa: E402
+
+
+class Paneld:
+    def __init__(self, loop):
+        self.loop = loop
+        self.busy = False  # a measurement or calibration is running; main thread only
+        self.pending = 0   # calls in flight; main thread only
+        self.idle_id = 0
+        self.owner_id = 0
+        self.node = None
+        self.arm_idle()
+
+    def arm_idle(self):
+        if self.idle_id:
+            GLib.source_remove(self.idle_id)
+        self.idle_id = GLib.timeout_add_seconds(IDLE_EXIT_S, self.idle_exit)
+
+    def idle_exit(self):
+        self.idle_id = 0
+        if self.pending:
+            self.arm_idle()
+            return False
+        # Release the name BEFORE leaving: a call sent from here on re-activates a fresh daemon
+        # instead of reaching this one as it exits ("disconnected without replying").
+        self.release_name()
+        self.loop.quit()
+        return False
+
+    def run(self, invocation, work, exclusive):
+        """Run work() on a thread; answer the call with its JSON, or a D-Bus error."""
+        if exclusive:
+            if self.busy:
+                invocation.return_dbus_error(f"{BUS_NAME}.Error.Busy", "a measurement or calibration is running")
+                return
+            self.busy = True
+        self.pending += 1
+
+        def thread():
+            try:
+                reply = ("ok", json.dumps(work()))
+            except (retroforge_panel.NoDisplay, RuntimeError, OSError) as e:
+                reply = ("error", str(e))
+            except Exception as e:  # a bug must still answer the caller, not leave it hanging
+                reply = ("error", f"{type(e).__name__}: {e}")
+            GLib.idle_add(self.finish, invocation, reply, exclusive)
+
+        threading.Thread(target=thread, daemon=True).start()
+
+    def finish(self, invocation, reply, exclusive):
+        if exclusive:
+            self.busy = False
+        self.pending -= 1
+        self.arm_idle()
+        kind, value = reply
+        if kind == "ok":
+            invocation.return_value(GLib.Variant("(s)", (value,)))
+        else:
+            print(f"retroforge-paneld: {value}", file=sys.stderr)
+            invocation.return_dbus_error(f"{BUS_NAME}.Error.Failed", value)
+        return False
+
+    def handle_method_call(self, _conn, _sender, _path, iface, method, params, invocation):
+        self.arm_idle()
+        if iface != IFACE:
+            invocation.return_dbus_error(f"{BUS_NAME}.Error.UnknownInterface", iface)
+            return
+        if method == "Status":
+            (measure,) = params.unpack()
+            self.run(invocation, lambda: retroforge_panel.status(measure=measure), exclusive=measure)
+            return
+        if method == "Calibrate":
+            self.run(invocation, retroforge_panel.calibrate, exclusive=True)
+            return
+        invocation.return_dbus_error(f"{BUS_NAME}.Error.UnknownMethod", method)
+
+    def release_name(self):
+        if self.owner_id:
+            Gio.bus_unown_name(self.owner_id)
+            self.owner_id = 0
+
+    def register(self, connection):
+        # Keep a reference to the node: Gio does not own the DBusInterfaceInfo we hand it.
+        self.node = Gio.DBusNodeInfo.new_for_xml(XML)
+        connection.register_object(OBJECT_PATH, self.node.interfaces[0], self.handle_method_call, None, None)
+
+
+def main():
+    global GLib, Gio
+    import gi
+
+    gi.require_version("Gio", "2.0")
+    from gi.repository import GLib, Gio
+
+    loop = GLib.MainLoop()
+    paneld = Paneld(loop)
+    bus = Gio.BusType.SESSION if BUS_TYPE == "session" else Gio.BusType.SYSTEM
+    paneld.owner_id = Gio.bus_own_name(
+        bus,
+        BUS_NAME,
+        Gio.BusNameOwnerFlags.NONE,
+        lambda connection, _name: paneld.register(connection),
+        None,
+        lambda _connection, _name: loop.quit(),
+    )
+    try:
+        loop.run()
+    finally:
+        paneld.release_name()
+
+
+if __name__ == "__main__":
+    main()
