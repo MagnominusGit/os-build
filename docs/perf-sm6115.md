@@ -70,7 +70,7 @@ only when its main loop next wakes to paint.
 - **Pre-rotation is a latency fix, not only a copy move.** With it off, gamescope's rotation
   copy is submitted at flip time behind the client's GPU work on the A610's single ring and
   waits for it synchronously: flips slip past vblank (one paint took 46 ms).
-- **OGUI misses the latch by ~2 ms every frame at full resolution.** It starts each frame just
+- **At full resolution, OGUI's frames land ~2 ms after gamescope's latch.** It starts each frame just
   after vblank (FIFO), its GPU work is ~14.5 ms (render 11.6 + blit to the swapchain 2.3 + the
   pre-rotation copy 1.0), and gamescope latches ~2.4 ms before vblank (1.65 ms redzone + its
   paint time). Every frame waits one more refresh. Reduced UI resolution (9.6 ms of GPU) makes

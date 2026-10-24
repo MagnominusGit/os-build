@@ -7,7 +7,7 @@ When a launched app's window list changes, OGUI switches the gamescope
 baselayer to the FIRST new window, and RunningApp.window_ids is sorted.
 Steam's Big Picture window arrives together with helper windows that
 have lower ids and never become focusable (a 200x200 steamwebhelper, a
-64x24 one, Chromium's clipboard window), so OGUI focused a helper. The
+64x24 one, Chromium's clipboard window), so a helper got the focus. The
 focusable-windows handler then dropped that baselayer window as soon as
 it was not focusable, and nothing switched to Big Picture: gamescope
 stayed on OGUI's own transparent layer, a black screen over a running

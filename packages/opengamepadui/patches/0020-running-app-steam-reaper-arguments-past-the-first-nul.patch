@@ -11,7 +11,7 @@ NULs. In Godot 4.7.1 get_string_from_utf8() stops at the first NUL
 for every reaper, and the check never found one. A Steam game started
 from the library with Steam not yet running was then cut off: Steam sets
 up Proton's prefix in a run of its own, its windows go, and 4 seconds
-later OGUI stopped Steam while the game's own launch was starting (HW,
+later Steam was stopped while the game's own launch was starting (HW,
 KONKR Pocket FIT, 2026-10-19: Hades, three times). The NULs become
 newlines before the decode. Checked on the device with Godot 4.7.1 and
 the check's own code: Steam's reaper found, OGUI's own reaper and no

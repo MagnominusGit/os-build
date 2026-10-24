@@ -5,9 +5,9 @@ Subject: [PATCH] fix(network): a join keeps one working profile, Connected
  means activated, networks can be forgotten
 
 Joining a network from Settings > Network saved a password one character
-longer than the real one, and nothing in the UI could undo it (HW, MANGMI
+longer than the real one, and the UI had no way to undo it (HW, MANGMI
 Air X, 2026-10-18). What NetworkManager stored was exactly what the dialog
-held: the dialog still held those 15 characters hours later. Faults:
+held: the dialog still held those 15 characters hours later. Causes:
 
  - The password field was never cleared. It kept what was typed for the
    last dialog, behind dots, so a mistyped password was submitted again on
@@ -15,8 +15,8 @@ held: the dialog still held those 15 characters hours later. Faults:
  - Every join added a profile (the core's connect() always calls
    AddConnection) next to the ones already saved, so a corrected password
    sat beside the wrong one, and a failed join left its profile for
-   NetworkManager to retry in the background. Nothing could forget a
-   network.
+   NetworkManager to retry in the background. There was no way to
+   forget a network.
  - "Connected" was shown for the access point NetworkManager was only
    trying (it becomes the active one at the first association attempt),
    and a join could read the previous connection's ACTIVATED right after
@@ -25,7 +25,7 @@ held: the dialog still held those 15 characters hours later. Faults:
    the next Submit also joined that earlier network with the new password.
  - After NetworkManager restarted, the core instance had missed the
    devices exported in its first moments (it knew only the Wi-Fi P2P
-   device), and every join silently did nothing until OGUI restarted.
+   device), and joins had no effect until OGUI was restarted.
 
 The dialog now opens empty and hidden, with a Show password toggle, B
 closes it, and a saved network can be forgotten (all its profiles are
@@ -58,7 +58,7 @@ index 6dab85b..7e12e6d 100644
 +## The instance learns NetworkManager's devices when it is created and then follows its signals,
 +## which miss whatever a restarted NetworkManager exports in its first moments: after a restart it
 +## knew only the Wi-Fi P2P device, so the Wi-Fi settings logged "No wifi devices found" and every
-+## join silently did nothing until OGUI restarted (HW, Air X, 2026-10-18). When the instance no
++## join had no effect until OGUI was restarted (HW, Air X, 2026-10-18). When the instance no
 +## longer knows the Wi-Fi device it knew before, a new one takes over the resource path (code that
 +## loads it again gets the new one). The replaced instance is still processed: its signals queue.
  

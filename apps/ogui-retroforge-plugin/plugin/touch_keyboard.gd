@@ -2,7 +2,7 @@ extends RefCounted
 ## Touch for OpenGamepadUI's text fields and toggles.
 ##
 ## Toggles: OGUI's Toggle flips only on ui_accept (the gamepad's A); a tap reaches Godot as a
-## left click, which the row's panel swallowed (the switch itself ignores the mouse). A tap on the
+## left click, which the row's panel takes (the switch itself ignores the mouse). A tap on the
 ## row now does what A does. Every toggle in OGUI's settings, and ours.
 ##
 ## Text fields: tapping one opens OpenGamepadUI's on-screen keyboard.
@@ -23,7 +23,7 @@ extends RefCounted
 ##
 ## Also: a keyboard opened from a text field never puts the OSK state on the popup stack, and the
 ## main menu / quick bar only REPLACE that state, so opening one left the keyboard open underneath.
-## Leaving the menu (e.g. its Home entry) then showed a keyboard nobody owned, whose popup layer ate
+## Leaving the menu (e.g. its Home entry) then showed a keyboard with no owner, whose popup layer took
 ## every tap on the screen -- cards and the search bar stopped responding. Any other popup taking
 ## over now dismisses the keyboard.
 

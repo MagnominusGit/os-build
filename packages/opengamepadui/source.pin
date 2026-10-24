@@ -1,7 +1,7 @@
 # OpenGamepadUI — the gamepad shell gamescope hosts. Local PKGBUILD (packages/opengamepadui/PKGBUILD).
 #
 # Was a prebuilt pin of upstream's aarch64 release tarball until 2026-10-02, when the first hardware
-# boot (KONKR Pocket FIT, SM8650) showed v0.46.1 cannot run on these boards:
+# boot (KONKR Pocket FIT, SM8650) showed v0.46.1 needs the first two patches below on these boards:
 #
 #   0001  upstream #542: HardwareManager reads /sys/devices/virtual/dmi/id/product_name, which does
 #         not exist on a devicetree board (no SMBIOS from the ABL UEFI), and calls a method on the
@@ -71,27 +71,27 @@
 #         Steam plugin's library refresh after login queued forever and the Steam library never
 #         loaded (HW, Pocket ACE, 2026-10-17). exec() starts the pool on first use; the resource's
 #         `size = null` is dropped.
-#   0017  ours, for upstream: OGUI SIGTERMed the Steam client when only Steam windows were left for 4 s,
-#         which a first Proton launch always hits (driver query, prefix setup, windowless install
+#   0017  ours, for upstream: a Steam launch ended (the client SIGTERMed) once only Steam windows were
+#         left for 4 s, which a first Proton launch always reaches (driver query, prefix setup, windowless install
 #         scripts: DirectX, PhysX, EOS). A launch now counts as alive while Steam's own
 #         "reaper SteamLaunch" runs (HW, Pocket ACE, 2026-10-17, Trine on Proton 11 arm64).
 #   0018  ours, for upstream: joining Wi-Fi from Settings > Network saved a password one character
-#         too long and the UI could not undo it (HW, Air X, 2026-10-18). NetworkManager stored
+#         too long and the UI had no way to undo it (HW, Air X, 2026-10-18). NetworkManager stored
 #         exactly what the dialog held, and the dialog never cleared its field: a mistyped password
 #         stayed behind the dots and went out again on every retry. Every join also added a profile
 #         beside the saved ones (a corrected password sat next to the wrong one; a failed join stayed
-#         for NetworkManager to retry), nothing could forget a network, "Connected" showed for an
+#         for NetworkManager to retry), networks could not be forgotten, "Connected" showed for an
 #         access point still being tried, and a dialog left unsubmitted kept its submit handler (the
 #         next Submit joined that network too). Now: a fresh hidden field per dialog with Show
 #         password, B closes it, Forget network (all its profiles, via nmcli), a join that follows
 #         its own activation and keeps one profile (the new one once it works, else the old ones),
 #         Connected only when activated, and a new core instance once the old one loses the Wi-Fi
-#         device (after a NetworkManager restart it knew only the P2P device, so every join did
-#         nothing). First boot: same field/submit fixes.
+#         device (after a NetworkManager restart it knew only the P2P device, so joins had no
+#         effect). First boot: same field/submit fixes.
 #   0019  ours, for upstream: a launched app's new windows switched the gamescope baselayer to the
 #         first new one, and the ids come sorted: Steam's Big Picture window arrived with helper
-#         windows of lower id that never become focusable, OGUI focused one, then dropped it as
-#         not focusable, and nothing switched to Big Picture -- a black screen over a running
+#         windows of lower id that never become focusable, one of those got the focus and was then
+#         dropped as not focusable, and nothing switched to Big Picture -- a black screen over a running
 #         Steam (HW, KONKR Pocket FIT, 2026-10-19). Now a focusable new window is preferred, and
 #         with none focused, a running app's window that becomes focusable gets the focus, deferred
 #         out of gamescope's signal (switch_window calls back into GamescopeInstance, which

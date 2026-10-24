@@ -7,7 +7,7 @@ Subject: [PATCH] fix(LaunchManager): warn about orphan windows once per change,
 check_running() runs every second and warned about every window no
 running app claims, each time. A window that belongs to no OGUI launch
 stays an orphan for as long as it lives: Steam kept running between games
-(RetroForge's Settings > General) has a dozen, so OGUI's journal took two
+(RetroForge's Settings > General) has a dozen, so the journal got two
 lines a second while idle in the menu and ~4.5 a second during a game
 (HW, KONKR Pocket FIT, 2026-10-22: 1164 lines in 5 minutes).
 

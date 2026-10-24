@@ -304,7 +304,7 @@ app id and OGUI's Steam handling (patch 0017) works as with the client.
 `/usr/bin/steam` starts Steam as before:
 - the setting is off (nothing is said);
 - a client already runs (`~/.steam/steam.pid` names a live `steam`; the client leaves a stale one
-  behind when OGUI kills it). That client gets the game, with the overlay, cloud and achievements,
+  behind when OGUI stops it). That client gets the game, with the overlay, cloud and achievements,
   at no more memory;
 - Steam has not started the game on this device yet. Its first launch goes through Steam, which
   also runs the game's install scripts (DirectX, VC++ redistributables) and sets up its prefix;

@@ -8,8 +8,8 @@ OGUI decides a Steam game has closed when, after one non-Steam window
 was seen, only Steam windows remain for 4 seconds, and then SIGTERMs the
 Steam client. A first launch under Proton has longer gaps than that:
 Steam's D3D driver query and Proton's prefix setup, then the game's
-install scripts (DirectX, PhysX, EOS), which run windowless. OGUI killed
-Steam in the middle of them every time (HW, Pocket ACE, 2026-10-17,
+install scripts (DirectX, PhysX, EOS), which run windowless. Steam was
+stopped in the middle of them each time (HW, Pocket ACE, 2026-10-17,
 Trine under Proton 11 arm64).
 
 Steam runs a launch, install scripts included, under its own reaper
