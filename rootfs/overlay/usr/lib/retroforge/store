@@ -31,6 +31,12 @@
 # copies Steam's client DLLs from there only when they exist, and their mtimes are part of its prefix
 # check, so a Steam update would otherwise redo every store prefix's set-up.
 #
+# PROTONFIXES. Our Proton runs umu-protonfixes' per-game fixes (proton-armv8 patch 0003), which find a
+# store game by UMU_ID and STORE (gog, egs) in its environment, as umu-run sets them. The umu-database
+# maps the store's id to the umu id; it is cached in <data>/umu-database.csv, fetched again when a day
+# old, and a game it does not list is umu-default (only the store's defaults run). The fixes were
+# written for x86 GE-Proton: a player turns them off per game in store-games.json (GAME_CHOICES).
+#
 # SIGN-IN. RetroForge never takes a password. `sign-in` serves a one-time page on the LAN while the
 # plugin's sign-in panel is open, and prints its address with a QR code of it. On the phone the page
 # links to the store's own sign-in and takes back what the store shows at the end (GOG: the address
@@ -55,6 +61,7 @@
 # (the sign-in page's address), RETROFORGE_STORE_API (a server every https:// request goes to instead,
 # as <it>/<host>/<path>).
 import base64
+import csv
 import hashlib
 import html
 import json
@@ -159,10 +166,10 @@ def fetch(url, dest, sha256=None, progress=None):
     return h.hexdigest()
 
 
-def get_text(url):
+def get_text(url, timeout=30):
     req = urllib.request.Request(url_of(url), headers={"User-Agent": AGENT})
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             return r.read().decode("utf-8", "replace")
     except urllib.error.URLError as err:
         raise Offline(f"could not reach {url}: {err.reason}")
@@ -333,7 +340,8 @@ def sarek():
 
 # The player's per-game choices, keyed "<store>-<id>": {"tso": "on" | "off" | "default", "proton": the
 # folder name of a Proton in Steam's compatibilitytools.d or steamapps/common, e.g. "Proton
-# Experimental (ARM64)"; unset or not there: the one steam-compat-tools keeps for this CPU}.
+# Experimental (ARM64)"; unset or not there: the one steam-compat-tools keeps for this CPU,
+# "protonfixes": "off" for none of umu-protonfixes' fixes}.
 GAME_CHOICES = os.path.join(CONFIG_HOME, "retroforge", "store-games.json")
 
 
@@ -352,6 +360,60 @@ def fex_tso(store, gid):
     without TSO GRIP crashed a minute in with a corrupt stack (Air X, 2026-10-24), the kind of race an
     x86 game's threads hit when their memory order is the ARM CPU's."""
     return "0" if game_choice(store, gid, "tso") == "off" else "1"
+
+
+UMU_DATABASE = "https://raw.githubusercontent.com/Open-Wine-Components/umu-database/main/umu-database.csv"
+UMU_STORES = {"gog": "gog", "epic": "egs"}  # our store -> the database's (and protonfixes') name for it
+
+
+def umu_database():
+    """The umu-database's CSV in <data>, fetched when it is missing or a day old; "" without one. When
+    that fails the cached one stays, and is not tried again for a day."""
+    path = os.path.join(DATA, "umu-database.csv")
+    try:
+        if time.time() - os.path.getmtime(path) < 86400:
+            return path
+    except OSError:
+        pass
+    try:
+        text = get_text(UMU_DATABASE, timeout=10)
+        header = next(csv.reader([text.split("\n", 1)[0]]), [])
+        if not {"STORE", "CODENAME", "UMU_ID"} <= set(header):
+            raise Failed(f"{UMU_DATABASE} sent no umu-database")
+        write_private(path, text)
+    except (Failed, OSError, ValueError) as err:
+        if not os.path.isfile(path):
+            log(f"no umu-database: {err}")
+            return ""
+        log(f"the umu-database as last fetched (now: {err})")
+        os.utime(path)
+    return path
+
+
+def umu_id(store, gid):
+    """The game's umu id in the umu-database ("umu-<n>"), "" when it has none. Its store's id is matched
+    exactly, else ignoring case."""
+    path, name, found = umu_database(), UMU_STORES.get(store), ""
+    if not path or not name:
+        return ""
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                if row.get("STORE") == name and (row.get("CODENAME") or "").lower() == gid.lower():
+                    found = str(row.get("UMU_ID") or "").strip()
+                    if row["CODENAME"] == gid:
+                        break
+    except (OSError, csv.Error, UnicodeDecodeError):
+        return ""
+    return found
+
+
+def protonfixes_env(store, gid):
+    """What umu-protonfixes picks the game's fixes by (fix.py: UMU_ID, and STORE for its gamefixes-<store>),
+    as umu-run sets them; PROTONFIXES_DISABLE when the player turned them off."""
+    if game_choice(store, gid, "protonfixes") == "off":
+        return {"PROTONFIXES_DISABLE": "1"}
+    return {"UMU_ID": umu_id(store, gid) or "umu-default", "STORE": UMU_STORES[store]}
 
 
 def prefix_path(store, gid):
@@ -386,13 +448,15 @@ def run_windows_game(store, gid, exe, args, workdir, game_dir, extra_env=None):
     s = sarek()
     if s:
         env["PROTON_DXVK_SAREK"] = s
+    env.update(protonfixes_env(store, gid))
     env.update(extra_env or {})
     cmd = [os.path.join(runtime, "_v2-entry-point"), "--verb=waitforexitandrun", "--",
            os.path.join(proton, "proton"), "waitforexitandrun", exe] + list(args)
     seam = os.environ.get("RETROFORGE_STORE_RUN")
     if seam:
         cmd = [seam] + cmd
-    log(f"{store} {gid}: {exe} with {os.path.basename(proton)} in {os.path.basename(runtime)}")
+    log(f"{store} {gid}: {exe} with {os.path.basename(proton)} in {os.path.basename(runtime)}, protonfixes "
+        + ("off" if "PROTONFIXES_DISABLE" in env else env.get("UMU_ID", "")))
     proc = subprocess.Popen(cmd, cwd=workdir, env=env)
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(sig, lambda s, _f: proc.send_signal(s))
@@ -1107,11 +1171,12 @@ def main(argv):
         elif verb == "install":
             if not tool_command(store.tool):
                 set_up_tool(store.tool, lambda d, t: None)
-            # The game, then what it runs in (a first one may download both), so that its first
-            # launch does not wait for them.
+            # The game, then what it runs in (a first one may download both) and the umu-database,
+            # so that its first launch does not wait for them, and has its fixes offline.
             store.install(rest[0], percent_printer(0, 90))
             runtime_dir(percent_printer(90, 99))
             proton_dir()
+            umu_database()
             print("100%", flush=True)
         elif verb == "uninstall":
             store.uninstall(rest[0])

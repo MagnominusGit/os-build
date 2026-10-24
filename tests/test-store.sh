@@ -12,7 +12,9 @@
 # games with art and their install state; installs report N% and fail on what the tool logs (legendary
 # exits 0 either way); a launch sets the prefix up once, syncs saves down, runs the game through
 # Proton in the runtime, syncs them up, and does not upload after a failed download; a GOG conflict
-# keeps the last sync time.
+# keeps the last sync time; the game's environment names its umu id and store for protonfixes, from the
+# umu-database cached at install and fetched again only when a day old (kept when that fails), or turns
+# protonfixes off when the player did.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,7 +24,7 @@ T="$(mktemp -d)" && [ -d "$T" ] || { echo "mktemp -d failed" >&2; exit 1; }
 trap 'rm -rf "$T"' EXIT
 
 python3 - "$STORE" "$T" "$ROOT" <<'PY'
-import base64, hashlib, http.server, io, json, os, re, shutil, stat, subprocess, sys, tarfile, threading
+import base64, hashlib, http.server, io, json, os, re, shutil, stat, subprocess, sys, tarfile, threading, time
 import urllib.error, urllib.request, zipfile
 
 STORE, T, ROOT = sys.argv[1:4]
@@ -61,7 +63,13 @@ with tarfile.open(fileobj=buf, mode="w:xz") as tar:
     info.size, info.mode = len(body), 0o755
     tar.addfile(info, io.BytesIO(body))
 RT = buf.getvalue()
+UMU_ROUTE = "/raw.githubusercontent.com/Open-Wine-Components/umu-database/main/umu-database.csv"
+UMU_HEAD = "TITLE,STORE,CODENAME,UMU_ID,COMMON ACRONYM (Optional),NOTE (Optional),EXE_STRINGS (Optional)\n"
+# GOG 1 and Epic's Fortnite2 (its app name in another case), each also listed under the other store.
+UMU_CSV = (UMU_HEAD + "Game One,gog,1,umu-1001,,,\nElsewhere,egs,1,umu-9999,,,\nGame Two,egs,fortnite2,umu-2002,g2,,\n"
+           "Misfiled,gog,Fortnite2,umu-8888,,,\n").encode()
 ROUTES = {
+    UMU_ROUTE: UMU_CSV,
     "/github.com/x/tool": ZIPAPP,
     "/repo.steampowered.com/rt/VERSION.txt": b"4.0.1\n",
     "/repo.steampowered.com/rt/SHA256SUMS": (hashlib.sha256(RT).hexdigest() + " *SteamLinuxRuntime_4-arm64.tar.xz\n").encode(),
@@ -207,7 +215,7 @@ elif a[0] == "save-sync":
         sys.stdout.write("1700000000.5")
 ''')
 RUNNER = script("runner", r'''
-call(os.environ.get("STEAM_FEX_TSOENABLED", ""), os.environ.get("STEAM_COMPAT_INSTALL_PATH", ""), os.environ.get("STEAM_COMPAT_LIBRARY_PATHS", ""),
+call({k: os.environ.get(k) for k in ("UMU_ID", "STORE", "PROTONFIXES_DISABLE")}, os.environ.get("STEAM_FEX_TSOENABLED", ""), os.environ.get("STEAM_COMPAT_INSTALL_PATH", ""), os.environ.get("STEAM_COMPAT_LIBRARY_PATHS", ""),
      os.getcwd(), os.environ.get("STEAM_COMPAT_DATA_PATH", ""), os.environ.get("STEAM_COMPAT_CLIENT_INSTALL_PATH", ""),
      os.environ.get("STEAM_COMPAT_TOOL_PATHS", ""))
 if "wineboot" in sys.argv:
@@ -444,6 +452,8 @@ ok(r.returncode == 0 and p == sorted(p) and p[-1] == 100 and all(x <= 90 for x i
 inst = [c for c in calls() if c[0] == "legendary" and "install" in c]
 ok(inst and "--skip-dlcs" in inst[-1] and "--skip-sdl" in inst[-1] and inst[-1][inst[-1].index("--max-shared-memory") + 1] == "512",
    "no DLC, no prompts, 512 MiB of shared memory", str(inst[-1:]))
+ok(os.path.isfile(os.path.join(DATA, "umu-database.csv")) and [s[0] for s in SEEN].count(UMU_ROUTE) == 1,
+   "the umu-database is cached, for a first launch offline")
 r = store("epic", "games")
 ok({g["id"]: g["installed"] for g in json.loads(r.stdout)}["Fortnite2"] is True, "installed in the library")
 r = store("epic", "install", "broken")
@@ -545,6 +555,76 @@ r = store("epic", "launch", "Fortnite2", env={"FAKE_SYNC_FAIL": "1"})
 syncs = [c for c in calls() if c[0] == "legendary" and "sync-saves" in c]
 ok(r.returncode == 0 and len(syncs) == 1 and game_run(calls()), "no upload after a failed download, and the game still runs", str(syncs))
 ok("cloud copy stays as it was" in open(os.path.join(DATA, "notices-epic")).read(), "the player is told")
+
+CASE = "protonfixes"
+UMU_CACHE = os.path.join(DATA, "umu-database.csv")
+DEAD_API = {"RETROFORGE_STORE_API": "http://127.0.0.1:9"}
+
+
+def fetches():
+    return [s[0] for s in SEEN].count(UMU_ROUTE)
+
+
+def pf_run(name, gid, env=None):
+    """(what the game's environment says to protonfixes, the TSO setting, the launch's stderr)."""
+    reset_calls()
+    r = store(name, "launch", gid, env=env)
+    run = game_run(calls())
+    return (run[-8], run[-7], r.stderr) if run else (None, None, r.stderr)
+
+
+def stale():
+    if os.path.exists(UMU_CACHE):
+        old = time.time() - 2 * 86400
+        os.utime(UMU_CACHE, (old, old))
+
+
+if os.path.exists(UMU_CACHE):
+    os.remove(UMU_CACHE)
+n = fetches()
+pf, _, err = pf_run("gog", "1")
+ok(pf == {"UMU_ID": "umu-1001", "STORE": "gog", "PROTONFIXES_DISABLE": None},
+   "a GOG game: its umu id by its GOG id (not another store's same id), store gog", str(pf))
+ok(fetches() == n + 1 and os.path.isfile(UMU_CACHE) and open(UMU_CACHE, "rb").read() == UMU_CSV and mode(UMU_CACHE) == 0o600,
+   "the umu-database is fetched once and cached in the store data folder", str(fetches() - n))
+ok("protonfixes umu-1001" in err, "the launch logs it", err)
+pf, _, _ = pf_run("epic", "Fortnite2")
+ok(pf == {"UMU_ID": "umu-2002", "STORE": "egs", "PROTONFIXES_DISABLE": None} and fetches() == n + 1,
+   "an Epic game by its app name (in any case), store egs, from the cache", str(pf))
+stale()
+ROUTES[UMU_ROUTE] = UMU_CSV.replace(b"umu-1001", b"umu-1002")
+pf, _, _ = pf_run("gog", "1")
+ok(pf["UMU_ID"] == "umu-1002" and fetches() == n + 2, "a day old, it is fetched again", str(pf))
+stale()
+ROUTES[UMU_ROUTE] = b"<html>rate limited</html>"
+pf, _, err = pf_run("gog", "1")
+ok(pf["UMU_ID"] == "umu-1002" and os.path.isfile(UMU_CACHE) and b"umu-1002" in open(UMU_CACHE, "rb").read()
+   and "as last fetched" in err,
+   "what is not the umu-database does not replace the cached one", err)
+ok(os.path.isfile(UMU_CACHE) and time.time() - os.path.getmtime(UMU_CACHE) < 600, "and it is not asked again for a day")
+stale()
+pf, _, _ = pf_run("gog", "1", env=DEAD_API)
+ok(pf["UMU_ID"] == "umu-1002" and os.path.isfile(UMU_CACHE) and time.time() - os.path.getmtime(UMU_CACHE) < 600, "offline: the cached one, not asked again for a day", str(pf))
+ROUTES[UMU_ROUTE] = UMU_HEAD.encode()
+stale()
+pf, _, _ = pf_run("gog", "1")
+ok(pf == {"UMU_ID": "umu-default", "STORE": "gog", "PROTONFIXES_DISABLE": None},
+   "a game the database does not list is umu-default (the store's defaults), as umu-run names it", str(pf))
+if os.path.exists(UMU_CACHE):
+    os.remove(UMU_CACHE)
+pf, _, err = pf_run("gog", "1", env=DEAD_API)
+ok(pf == {"UMU_ID": "umu-default", "STORE": "gog", "PROTONFIXES_DISABLE": None} and "no umu-database" in err,
+   "offline without a cached database: umu-default, and the game runs", err)
+ROUTES[UMU_ROUTE] = UMU_CSV
+n = fetches()
+json.dump({"gog-1": {"tso": "off", "protonfixes": "off"}}, open(choices, "w"))
+pf, tso, err = pf_run("gog", "1")
+ok(pf == {"UMU_ID": None, "STORE": None, "PROTONFIXES_DISABLE": "1"} and tso == "0" and "protonfixes off" in err,
+   "off for the game: PROTONFIXES_DISABLE and no umu id, beside its TSO choice", str(pf))
+ok(fetches() == n, "and the umu-database is not fetched for it")
+pf, _, _ = pf_run("epic", "Fortnite2")
+ok(pf["UMU_ID"] == "umu-2002" and fetches() == n + 1, "another game keeps its fixes", str(pf))
+os.remove(choices)
 
 # ---- uninstall, sign-out -------------------------------------------------------------------------
 CASE = "uninstall"
