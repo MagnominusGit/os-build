@@ -45,8 +45,9 @@
 #      Steam client, the FEX x86 guest and Proton-CachyOS are downloaded into /home on
 #      demand, never shipped; no box64 or x86 binfmt_misc entry either); and (9b)
 #      the shell landed where the session looks for it, without its self-updater
-#  10. no __pycache__ — host-CPython bytecode the device cannot load, which rootfs/overlay's verbatim
-#      copy will carry in whenever an offline suite has imported one of its Python clients
+#  10. Python bytecode is the image's own: no host-CPython __pycache__, which rootfs/overlay's
+#      verbatim copy carries in whenever an offline suite has imported one of its Python clients,
+#      and the stdlib compiled by the image's interpreter (customize-base.sh)
 #  11. every path is owned by a uid and gid this tree's own /etc/passwd and /etc/group declare, and
 #      no setuid/setgid file arrived that the permit list does not name
 #  12. a size delta against the previous build (report only — never fails a build)
@@ -869,7 +870,7 @@ done
 [ "$shell_ok" = 1 ] && echo "    ok  OpenGamepadUI present and executable, its self-updater absent"
 
 # ------------------------------------------------------------------------------------------
-# 10. No host Python bytecode rode in.
+# 10. Python bytecode is the image's own: no host bytecode rode in, and the stdlib has its own.
 #
 # rootfs/overlay/ is injected with `cp -a` of the WORKING TREE, and the offline suites import its
 # Python clients as modules — CPython then writes a __pycache__ next to the source, inside the
@@ -880,13 +881,39 @@ done
 # CPython (3.14) into an image whose interpreter is 3.13, so the device could never load a byte
 # of it — dead weight that also silently defeats the startup caching it looks like it provides.
 # Found on hardware 2026-08-10, not by any check.
+#
+# The image's own bytecode is the other side of it. The root is read-only, so Python cannot cache
+# at runtime, and without bytecode every Python program compiled each module it imported on every
+# run (~1.9 s of the helpers before each Steam launch on the Air X, 2026-10-24). customize-base.sh
+# compiles the stdlib with the image's interpreter as checked-hash .pyc, which a host run does not
+# write by default. So every __pycache__ is under the image's usr/lib/python3.N, holds only
+# cpython-3N .pyc whose header says checked-hash, and os.py has one (the compile ran).
 # ------------------------------------------------------------------------------------------
-pycache="$(find "$STAGE" -name __pycache__ -type d -printf '%P\n' | LC_ALL=C sort)"
+pydir="$(cd "$STAGE" && ls -d usr/lib/python3.*/os.py 2>/dev/null | head -1 || true)"
+pydir="${pydir%/os.py}"
+pytag="cpython-$(sed 's|^usr/lib/python||; s|\.||' <<<"$pydir")"
+pycache="$(find "$STAGE" -name __pycache__ -type d -printf '%P\n' | { grep -v "^$pydir/" || true; } | LC_ALL=C sort)"
+pyc_wrong="$({ [ -z "$pydir" ] || find "$STAGE/$pydir" -path '*/__pycache__/*' -type f -printf '%P\n'; } | python3 -c '
+import struct, sys
+root, tag = sys.argv[1:3]
+for p in sys.stdin.read().splitlines():
+    with open(f"{root}/{p}", "rb") as f:
+        head = f.read(8)
+    if not p.endswith(f".{tag}.pyc") or len(head) < 8 or struct.unpack("<I", head[4:])[0] != 3:
+        print(p)
+' "$STAGE/$pydir" "$pytag" | LC_ALL=C sort)"
 if [ -n "$pycache" ]; then
   bad "host Python bytecode in the tree — the assembler's __pycache__ prune did not run:"
   printf '      %s\n' $pycache >&2
+elif [ -n "$pyc_wrong" ]; then
+  bad "bytecode in $pydir the bootstrap did not compile (not $pytag checked-hash):"
+  printf '      %s\n' $(head -20 <<<"$pyc_wrong") >&2
+elif [ -z "$pydir" ]; then
+  echo "    ok  no Python in the tree, no __pycache__ staged"
+elif [ ! -f "$STAGE/$pydir/__pycache__/os.$pytag.pyc" ]; then
+  bad "no bytecode for the image's Python ($pydir): every Python program compiles its imports on every run"
 else
-  echo "    ok  no __pycache__ staged"
+  echo "    ok  Python bytecode is the image's own ($pydir, $pytag checked-hash)"
 fi
 
 # ------------------------------------------------------------------------------------------

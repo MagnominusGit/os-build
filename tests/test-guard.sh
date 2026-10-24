@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Offline tests for rootfs/guard-rootfs.sh assertion 11 — file ownership and setuid.
+# Offline tests for rootfs/guard-rootfs.sh assertion 11 — file ownership and setuid — and for
+# assertions 8 and 10 (the id pin, Python bytecode).
 #
 #   tests/test-guard.sh
 #
@@ -224,6 +225,50 @@ if grep -q '2 pinned system ids match' <<<"$out"; then
   ok "a package-fixed id below the band (dbus 81) is not asked to be pinned"
 else
   bad "a package-fixed low id failed assertion 8: $out"
+fi
+
+echo
+echo "assertion 10 wants the image's own Python bytecode and nothing else"
+
+# pyc <path> <flags>: a .pyc header with that flags word (3: checked-hash, 0: timestamp).
+pyc() { mkdir -p "${1%/*}"; python3 -c 'import struct, sys; open(sys.argv[1], "wb").write(b"\0\0\r\n" + struct.pack("<I", int(sys.argv[2])) + bytes(8))' "$1" "$2"; }
+pystage() {  # the image's stdlib, os.py compiled checked-hash
+  mkstage "$1"; mkdir -p "$1/usr/lib/python3.14"; : >"$1/usr/lib/python3.14/os.py"
+  pyc "$1/usr/lib/python3.14/__pycache__/os.cpython-314.pyc" 3
+}
+guard10() { bash "$GUARD" "$1" 2>&1 | grep -i -A3 "bytecode\|__pycache__"; }
+
+stage="$TMP/py-clean"; pystage "$stage"
+out="$(guard10 "$stage")"
+if grep -q "ok  Python bytecode is the image's own (usr/lib/python3.14, cpython-314 checked-hash)" <<<"$out"; then
+  ok "the stdlib's checked-hash bytecode passes"
+else
+  bad "the image's own bytecode did not pass assertion 10: $out"
+fi
+
+stage="$TMP/py-overlay"; pystage "$stage"; pyc "$stage/usr/lib/retroforge/__pycache__/emuopts.cpython-314.pyc" 0
+out="$(guard10 "$stage")"
+if grep -q "GUARD FAIL: host Python bytecode" <<<"$out" && grep -q "usr/lib/retroforge/__pycache__" <<<"$out"; then
+  ok "a __pycache__ outside the stdlib fails, and the message names it"
+else
+  bad "host bytecode outside the stdlib passed assertion 10: $out"
+fi
+
+stage="$TMP/py-stamp"; pystage "$stage"; pyc "$stage/usr/lib/python3.14/__pycache__/abc.cpython-314.pyc" 0
+pyc "$stage/usr/lib/python3.14/__pycache__/abc.cpython-313.pyc" 3
+out="$(guard10 "$stage")"
+if grep -q "did not compile" <<<"$out" && grep -q "abc.cpython-314.pyc" <<<"$out" && grep -q "abc.cpython-313.pyc" <<<"$out"; then
+  ok "timestamp bytecode and another version's bytecode in the stdlib fail"
+else
+  bad "bytecode the bootstrap did not write passed assertion 10: $out"
+fi
+
+stage="$TMP/py-none"; mkstage "$stage"; mkdir -p "$stage/usr/lib/python3.14"; : >"$stage/usr/lib/python3.14/os.py"
+out="$(guard10 "$stage")"
+if grep -q "GUARD FAIL: no bytecode for the image's Python" <<<"$out"; then
+  ok "a stdlib without bytecode fails"
+else
+  bad "a stdlib without bytecode passed assertion 10: $out"
 fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

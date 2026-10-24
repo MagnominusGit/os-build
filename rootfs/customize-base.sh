@@ -744,6 +744,17 @@ ctr run --rm --platform linux/arm64 -v "$PREBUILT_DIR":/prebuilt:ro \
     echo "[retroforge] journalctl --root --update-catalog exited $? (no message catalog)" >&2
   fi
 
+  # Python bytecode, compiled by the image`s own interpreter. The packaged .pyc record source mtimes
+  # the installed files no longer have, and the root is read-only at runtime, so without this every
+  # Python program compiled each module it imported on every run: ~0.4 s of steam-bootstrap`s
+  # 0.55 s, ~1.9 s of the helpers before each Steam launch (Air X, 2026-10-24). checked-hash, so
+  # mtimes do not matter; level 0 only, as nothing runs -O. Not fatal, like the steps above: a
+  # module that does not compile is reported and left without bytecode.
+  find /target/usr/lib/python3.* -name "*.opt-[12].pyc" -delete
+  if ! chroot /target sh -c "python3 -m compileall -q -f -j0 -o 0 --invalidation-mode checked-hash /usr/lib/python3.*"; then
+    echo "[retroforge] compileall reported modules it could not compile (see above)" >&2
+  fi
+
   # Record the install-set marker LAST, so its presence proves the whole bootstrap ran. The host
   # reuse-check keys off it: a run that died anywhere above leaves no marker, so the next build
   # re-bootstraps instead of shipping a half-populated root. (It used to be written before this

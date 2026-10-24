@@ -217,8 +217,9 @@ if [ -d "$OVERLAY" ]; then
   # cp copies verbatim. .gitignore covers the repo but NOT this copy, and the difference is not
   # theoretical: v0.2.x dev cards shipped .pyc files that the device can never load, because they
   # are the HOST's CPython ABI (3.14) and the image runs 3.13. Pruned here rather than left to the
-  # release-only guard, since a dev card is exactly where it happened.
-  find "$stage" -name __pycache__ -type d -prune -exec rm -rf {} +
+  # release-only guard, since a dev card is exactly where it happened. Only the overlay's own: the
+  # base's __pycache__ is the image's bytecode, compiled by its own interpreter (customize-base.sh).
+  (cd "$OVERLAY" && find . -name __pycache__ -type d -prune -print0) | (cd "$stage" && xargs -0r rm -rf --)
 else
   echo "  (no rootfs/overlay/ tree — skipping overlay injection)" >&2
 fi
