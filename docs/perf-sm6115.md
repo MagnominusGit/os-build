@@ -53,7 +53,43 @@ from a throwaway probe plugin, OGUI forced to redraw continuously, hiding one br
 - Not the cause: renderer choice (Forward+, Mobile equal; GL compatibility worse), vsync, the
   gamescope WSI layer, or the GPU clock ramp after idle (full clock within ~70 ms).
 - Left alone: the cards' and icons' `clip_children` masks are real shape masks (rounded corners);
-  replacing them saves ~1.3 ms but squares the cards.
+  replacing them saves ~1.3 ms but squares the cards. (Done since without squaring them, below.)
+
+## OpenGamepadUI's frame cost, round 2 (2026-10-24)
+
+Profiled on the Air X with a throwaway autoload (an `override.cfg` next to the engine binary, through
+an overlayfs on `/usr/share/opengamepadui`; `--main-pack` is compiled out of upstream's release
+binary) that hides nodes and toggles properties live, GPU time per process from
+`msm_gpu_submit_retired`, OGUI redrawing continuously, Reduced UI resolution on.
+
+The Adreno 610 is fill-bound at about 1 Mpx per ms: every full 1422x800 layer costs ~1.1 ms, a
+1920x1080 one ~2 ms. Library > All Games (18 cards) under Vulkan, 14.4 ms of GPU per frame:
+
+| Cost | GPU per frame | Fix |
+|---|---|---|
+| Cards' `clip_children` masks (a canvas group each) | 3.2 ms | OGUI patch 0035: the art rounds its own corners in a shader |
+| Card shadows filling the card behind the art twice | 2.1 ms | 0035: the shadow draws its ring only |
+| Godot's scaled copy of the 1422x800 render into the 1920x1080 window | 1.9 ms | plugin 0.1.85: Reduced UI shrinks the shell's own Xwayland; the panel plane scales it |
+| Full-screen background panel | 1.2 ms | none (an opaque clear instead saves only 0.5 ms and risks the in-game overlay) |
+
+Under OpenGL the canvas groups were the stutter: each flushes the frame, and the same page drew at
+31 fps with the GPU 42% busy (59 fps after 0035). Per-frame scripts (164 Buttons with an empty
+`_process`, ...) took the idle main thread to 12% of a core; OGUI patch 0036: 9.5%.
+
+| Before -> after (fps, p99 frame interval) | Vulkan (Forward+) | OpenGL |
+|---|---|---|
+| Home, navigating | 59.7 fps, 28 ms -> 59.8 fps, 24 ms | 57.6 fps, 34 ms -> 58.2 fps, 33 ms |
+| Library, static | 59.9 fps, 14.5 ms GPU -> 59.9 fps, 8.1 ms | 31 fps -> 58.9 fps, 8.8 ms (with gamescope's copy) |
+| Library, scrolling | 57.7 fps, 29 ms -> 57.6 fps, 28 ms | -> 55.3 fps, 32 ms |
+
+- **Renderer, boards under 4.5 GiB: keep Vulkan (Forward+, session.conf's default).** After the fixes
+  both hold 55-60 fps, but GL still has more long frames while navigating (freedreno's flushes and its
+  driver work on OGUI's main thread); GL leaves ~130 MiB more RAM available.
+- Not worth changing: AA on the panel or the shadows, the top bar icons' masks, vsync, MSAA/AA (off
+  already). Settings and the quick bar's `CardButton` masks cost ~1.5 ms under GL with no stall.
+- CPU: no hot loop to hand-vectorise; scrolling the library spreads ~75% of a core over the GDScript
+  VM and the engine (top address 1.6%). Idle, Godot 4.7's own threads poll every millisecond: the X11
+  event thread (~7% of a core) and the PulseAudio thread (~3.5%); only an engine change fixes those.
 
 ## Latency: from a frame to the panel
 
