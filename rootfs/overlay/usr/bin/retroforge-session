@@ -99,6 +99,9 @@ export ENABLE_GAMESCOPE_WSI="${ENABLE_GAMESCOPE_WSI:-1}"
 # The shell's render mode, per board (device-env RETROFORGE_UI_VIEWPORT_RENDER); the RetroForge OGUI
 # plugin reads it at startup.
 export RETROFORGE_UI_VIEWPORT_RENDER="${RETROFORGE_UI_VIEWPORT_RENDER:-0}"
+# The board's default renderer for the shell (device-env RETROFORGE_UI_RENDERER), which the plugin's
+# Settings > Display > Vulkan renderer switch starts from; used below.
+export RETROFORGE_UI_RENDERER="${RETROFORGE_UI_RENDERER:-}"
 # And the game display's default size, which Settings > Display > Game resolution calls "Default".
 export RETROFORGE_GAMESCOPE_NESTED_W="${RETROFORGE_GAMESCOPE_NESTED_W:-}" RETROFORGE_GAMESCOPE_NESTED_H="${RETROFORGE_GAMESCOPE_NESTED_H:-}"
 
@@ -368,6 +371,25 @@ shell_vram_mib() {
 if [ -n "${RETROFORGE_GPU_CHIP_ID:-}" ] && _mib=$(shell_vram_mib); then
   RETROFORGE_SESSION_CMD="env ENABLE_MESA_VRAM_REPORT_LIMIT=1 VK_VRAM_REPORT_LIMIT_HEAP_SIZE=$_mib VK_VRAM_REPORT_LIMIT_DEVICE_ID=$RETROFORGE_GPU_CHIP_ID $RETROFORGE_SESSION_CMD"
 fi
+
+# The shell's renderer. A low-memory board's profile makes OpenGL the default
+# (RETROFORGE_UI_RENDERER=opengl, the SM6115 boards): ~130 MiB less memory than Vulkan, at the cost of
+# more long frames while navigating (Air X, docs/perf-sm6115.md). On those boards the player can pick
+# Vulkan instead (Settings > Display > Vulkan renderer: UI_RENDERER=vulkan|opengl in
+# ~/.config/retroforge/display.conf, the last such line counts), from the shell's next start. A board
+# with no default, a command that names a renderer itself, or one that is not OGUI is left alone.
+ui_renderer() {
+  [ -n "$RETROFORGE_UI_RENDERER" ] || return 0
+  _r=$(sed -nE 's/^UI_RENDERER=(opengl|vulkan)[[:space:]]*$/\1/p' "$HOME/.config/retroforge/display.conf" 2>/dev/null | tail -n1)
+  echo "${_r:-$RETROFORGE_UI_RENDERER}"
+}
+case "$RETROFORGE_SESSION_CMD" in
+  *--rendering-method*|*--rendering-driver*) ;;
+  *opengamepadui*)
+    if [ "$(ui_renderer)" = opengl ]; then
+      RETROFORGE_SESSION_CMD="$RETROFORGE_SESSION_CMD --rendering-method gl_compatibility --rendering-driver opengl3"
+    fi ;;
+esac
 
 set +e
 exec 3<&0

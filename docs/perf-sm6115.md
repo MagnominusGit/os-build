@@ -82,9 +82,11 @@ Under OpenGL the canvas groups were the stutter: each flushes the frame, and the
 | Library, static | 59.9 fps, 14.5 ms GPU -> 59.9 fps, 8.1 ms | 31 fps -> 58.9 fps, 8.8 ms (with gamescope's copy) |
 | Library, scrolling | 57.7 fps, 29 ms -> 57.6 fps, 28 ms | -> 55.3 fps, 32 ms |
 
-- **Renderer, boards under 4.5 GiB: keep Vulkan (Forward+, session.conf's default).** After the fixes
-  both hold 55-60 fps, but GL still has more long frames while navigating (freedreno's flushes and its
-  driver work on OGUI's main thread); GL leaves ~130 MiB more RAM available.
+- **Renderer:** after the fixes both hold 55-60 fps, but GL still has more long frames while
+  navigating (freedreno's flushes and its driver work on OGUI's main thread); GL leaves ~130 MiB more
+  RAM available. The SM6115 boards start the shell on OpenGL for the RAM (board profile
+  `RETROFORGE_UI_RENDERER=opengl`), and Settings > Display > Vulkan renderer switches it from the
+  next start; every other board stays on Vulkan (Forward+) with no choice offered.
 - Not worth changing: AA on the panel or the shadows, the top bar icons' masks, vsync, MSAA/AA (off
   already). Settings and the quick bar's `CardButton` masks cost ~1.5 ms under GL with no stall.
 - CPU: no hot loop to hand-vectorise; scrolling the library spreads ~75% of a core over the GDScript

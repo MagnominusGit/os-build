@@ -519,6 +519,7 @@ cat > "$T/client" <<EOF
 #!/bin/bash
 echo "stdin=\$(readlink /proc/\$\$/fd/0)" >> "$T/log"
 echo "vram=\${ENABLE_MESA_VRAM_REPORT_LIMIT-}:\${VK_VRAM_REPORT_LIMIT_HEAP_SIZE-}:\${VK_VRAM_REPORT_LIMIT_DEVICE_ID-}" >> "$T/log"
+echo "args=\$*" >> "$T/log"
 trap 'echo client-term >> "$T/log"; exit 0' TERM
 if [ -e "$T/with-game" ]; then "$T/reaper" "$T/reaper.sh" & fi
 echo client-up >> "$T/log"
@@ -549,7 +550,7 @@ EOF
 chmod +x "$T/bin/gamescope" "$T/client" "$T/game"
 run_session() {
   : > "$T/log"; rm -f "$T/client-exit"
-  PATH="$T/bin:$PATH" XDG_RUNTIME_DIR="$T/run" HOME="$T/home" RETROFORGE_SESSION_CMD="$T/client" \
+  PATH="$T/bin:$PATH" XDG_RUNTIME_DIR="$T/run" HOME="$T/home" RETROFORGE_SESSION_CMD="${SESSION_CMD:-$T/client}" \
     RETROFORGE_OGUI_REAPER="$T/reaper" RETROFORGE_GAME_STOP_TIMEOUT=1 \
     sh "$SESSION" < "$T/stdin" > "$T/session.out" 2>&1 &
   spid=$!; spids+=("$spid")
@@ -627,6 +628,41 @@ else
     wait "$spid" 2>/dev/null
   done
   rm -f "$T/meminfo"
+fi
+
+# -------------------------------------------------------------------------------------------------
+CASE="the shell's renderer"
+# A low-memory board's profile starts OGUI on OpenGL (RETROFORGE_UI_RENDERER=opengl); there, the
+# player's Settings > Display > Vulkan renderer (UI_RENDERER= in ~/.config/retroforge/display.conf,
+# the last line counts) wins. No board default: no choice. A command naming a renderer, or one that
+# is not OGUI (a vkcube check), is left as it is.
+if [ -e /etc/retroforge/session.conf ] || [ -e /usr/lib/retroforge/device-env ]; then
+  ok "skipped: this host has RetroForge's session.conf/device-env, which would override the fakes"
+else
+  ln -sf "$T/client" "$T/opengamepadui"
+  gl="--rendering-method gl_compatibility --rendering-driver opengl3"
+  while IFS='|' read -r what board conf cmd want; do
+    rm -rf "$T/home/.config/retroforge"
+    if [ -n "$conf" ]; then mkdir -p "$T/home/.config/retroforge"; printf "$conf" > "$T/home/.config/retroforge/display.conf"; fi
+    SESSION_CMD="$T/$cmd" RETROFORGE_UI_RENDERER="$board" run_session
+    if waitfor 'grep -qx client-up "$T/log"'; then
+      got=$(sed -n 's/^args=//p' "$T/log")
+      [ "$got" = "${want/GL/$gl}" ] && ok "$what" || bad "$what: the shell got '$got'"
+    else
+      bad "the fake client never started ($what)"
+    fi
+    touch "$T/client-exit"
+    waitfor "! kill -0 $spid 2>/dev/null" || kill -KILL "$spid"
+    wait "$spid" 2>/dev/null
+  done <<'ROWS'
+OpenGL board, no choice stored: OpenGL|opengl||opengamepadui --skip-update-pack|--skip-update-pack GL
+OpenGL board, the player chose Vulkan: no renderer flags|opengl|OTHER=1\nUI_RENDERER=vulkan\n|opengamepadui --skip-update-pack|--skip-update-pack
+the last UI_RENDERER= line counts|opengl|UI_RENDERER=vulkan\nUI_RENDERER=opengl\n|opengamepadui --skip-update-pack|--skip-update-pack GL
+an unknown value falls back to the board's default|opengl|UI_RENDERER=metal\n|opengamepadui --skip-update-pack|--skip-update-pack GL
+a board with no default ignores a stored OpenGL choice||UI_RENDERER=opengl\n|opengamepadui --skip-update-pack|--skip-update-pack
+a command that names a renderer keeps it|opengl||opengamepadui --skip-update-pack --rendering-driver vulkan|--skip-update-pack --rendering-driver vulkan
+a command that is not OGUI gets no Godot flags|opengl||client|
+ROWS
 fi
 
 # -------------------------------------------------------------------------------------------------
