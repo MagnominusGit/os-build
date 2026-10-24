@@ -227,6 +227,35 @@ and the last three, at 21:35, 21:38 and 21:44, killed `Grip-Win64-Ship` rather t
 victim fix on `steam-armv8-proton` (f270ba3, 06ebb7d) is doing its job, and GRIP still does not fit in RAM.
 Audit records grow by ~10 per SSH login (6,536 now).
 
+### With a game running (Hades via Steam's Proton path, 22:24-22:25, three 5 s samples after 45 s of play)
+| measurement | no game | UI animating | Hades |
+|---|---|---|---|
+| freq changes, little / big policy | 68–74 / 45–52 per s | 77–82 / 60–63 | 75–79 / **2–31** (the A73s sit at max) |
+| RPM vote median, little policy | 1.2 ms | 1.1–1.2 ms | 0.76–0.86 ms (p90 1.6 ms, max 5.9 ms) |
+| kworker time blocked on votes | 145–150 ms/s | 133–150 ms/s | 78–124 ms/s, now almost all on the A53s |
+| GPU devfreq votes | ~1/s | 25–28/s at ~1 ms | 0–2/s (pinned at 1050 MHz) |
+| glink-rpm IRQs | 606–629/s | 721–749/s | 418–638/s |
+| gpu-irq / MDSS vblank | 0–1 / 0–1 per s | 44–56 / 41 | 136–214 / 38–62 |
+| function-call IPIs | 2,100–2,300/s | 2,600–2,700/s | **9,600–12,500/s** |
+| deep idle entries (8 CPUs, 5 s) | ~1,500–2,000 | ~2,700 | 0–270 |
+| MemAvailable | 2.5 GB | 2.5 GB | 300–470 MB |
+| swiotlb high-water | 2 slabs | 2 slabs | 2 slabs |
+
+What the game round adds:
+- Every process in the game's tree runs at `oom_score_adj` 900 (Hades.exe, reaper, srt-bwrap, pv-adverb,
+  pw-audio-namespace, python3), and no OOM fired. Memory is the constraint: 369 MB available with
+  1.18 GB unevictable (GPU buffers) and 1.5 GB compressed into 624 MB of zram. The 56 MB from
+  `swiotlb=4096` lands exactly where it is short.
+- Once a game loads the big cores the governor pins them at max and their votes vanish. The vote cost
+  stays on the little cluster, where the audio, input, wineserver and compositor threads run.
+- cpuidle is irrelevant in play: the CPUs almost never reach a deep state.
+- The IPIs are the scheduler's remote-wakeup queue: 10.6k/s of `ttwu_queue_wakelist`, 63% sent by
+  Hades.exe threads waking threads on other CPUs. The two clusters share no cache, so a cross-cluster
+  wakeup is always an IPI. 240/s more are ondemand's own `dbs_irq_work`. Candidate A/B, runtime only:
+  `NO_TTWU_QUEUE` in `/sys/kernel/debug/sched/features` (the waker takes the remote run-queue lock
+  instead). Upstream defaults to queueing because the lock bouncing is usually worse; measure frame
+  times before changing it.
+
 ## Does it apply to the other SoCs?
 Fleet: SM8250 (Kryo 585 = A77 + A55, ARMv8.2), SM8550 / SM8650 (Cortex-X/A7xx/A5xx, ARMv9), SM8750
 (Oryon), SM6115 (Kryo 260 = A73 + A53, ARMv8.0). Only the Air X was measured; "expected" below is
