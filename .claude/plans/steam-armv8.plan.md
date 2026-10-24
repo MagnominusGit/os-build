@@ -194,7 +194,13 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
   the first frame, the stream window focused under OGUI.
 
 ### Phase 5 (TODO, last): seamless Steam login
-- [ ] Discuss first. Ideas: a "Sign in to Steam" button that opens Steam's own sign-in; check QR sign-in in Big Picture on the arm64 client; keep the session on /home; a cloud sync around clientless sessions.
+- [ ] Discuss first. Ideas: a "Sign in to Steam" button that opens Steam's own sign-in; keep the session on /home; a cloud sync around clientless sessions.
+- [x] QR sign-in on the arm64 client (Air X, 2026-10-24): Steam's own sign-in screen shows a QR code
+  (BeginAuthSessionViaQR in steamui/sp.js). Signed out in Steam, scanned with the Steam Mobile App,
+  logged on 'OK' with RememberPassword 1. The saved session already lasts: Steam logged on with no
+  prompt after an OTA update and reboots, on the same /etc/machine-id since first boot.
+- Direction (discussed 2026-10-24): RetroForge only opens Steam's sign-in and reads loginusers.vdf for
+  the state ("Signed in as ..."); it never reads or copies Steam's session files, and takes no password.
 
 ## Validation
 - The LSE scan passes on every release. On the Air X, Hades shows about 0 kernel LSE emulations with the new tool.
