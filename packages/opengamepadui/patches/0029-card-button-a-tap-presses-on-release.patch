@@ -1,0 +1,41 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Sat, 24 Oct 2026 10:00:00 -0700
+Subject: [PATCH] fix(CardButton): a click or tap presses on release
+
+A left click emitted "pressed" on the way down. Settings > Network's
+Submit closes its dialog on "pressed", so the finger's release landed on
+the Wi-Fi row behind it, which then took the tap (HW, MANGMI Air X,
+2026-10-24).
+
+As Godot's buttons do, a click now emits "pressed" on release, and only
+when released over the button; button_down stays on the press (the power
+menu acts on it). The gamepad's A and the keyboard's Enter are unchanged.
+
+---
+ core/ui/components/card_button.gd | 8 ++++++--
+ 1 file changed
+
+--- a/core/ui/components/card_button.gd
++++ b/core/ui/components/card_button.gd
+@@ -125,13 +125,17 @@
+ 	if disabled:
+ 		return
+ 	var dbus_path := event.get_meta("dbus_path", "") as String
++	# A click or tap presses on release, over the button, as Godot's buttons do: pressed on the way
++	# down closed a dialog under the finger, and the release then landed on what was behind it.
+ 	if event is InputEventMouseButton and not click_focuses:
+-		if (event as InputEventMouseButton).button_index != MOUSE_BUTTON_LEFT:
++		var mouse := event as InputEventMouseButton
++		if mouse.button_index != MOUSE_BUTTON_LEFT:
+ 			return
+-		if event.is_pressed():
++		if mouse.is_pressed():
+ 			button_down.emit()
+-			pressed.emit()
+ 		else:
++			if Rect2(Vector2.ZERO, size).has_point(mouse.position):
++				pressed.emit()
+ 			button_up.emit()
+ 	if not event.is_action("ui_accept"):
+ 		return
