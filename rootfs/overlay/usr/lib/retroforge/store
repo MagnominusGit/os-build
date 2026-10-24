@@ -304,8 +304,16 @@ def runtime_dir(progress=None):
     return ours
 
 
-def proton_dir():
-    """The Proton steam-compat-tools keeps for this CPU, installed when it is missing."""
+def proton_dir(store=None, gid=None):
+    """The game's chosen Proton (game_choice "proton"), else the one steam-compat-tools keeps for this
+    CPU, installed when it is missing."""
+    name = game_choice(store, gid, "proton") if store else ""
+    for base in ("compatibilitytools.d", os.path.join("steamapps", "common")):
+        folder = os.path.join(STEAM_ROOT, base, name)
+        if name and "/" not in name and os.path.isfile(os.path.join(folder, "proton")):
+            return folder
+    if name:
+        log(f"{store} {gid}: no Proton {name!r}; the default one")
     env = dict(os.environ, RETROFORGE_STEAM_ROOT=STEAM_ROOT)
     res = subprocess.run([COMPAT_TOOLS, "on"], env=env, text=True, capture_output=True)
     folder = res.stdout.strip().splitlines()[-1] if res.stdout.strip() else ""
@@ -323,8 +331,19 @@ def sarek():
     return {"on": "1", "off": "0"}.get(res.stdout.strip(), "")
 
 
-# The player's per-game choices, keyed "<store>-<id>": {"tso": "on" | "off" | "default"}.
+# The player's per-game choices, keyed "<store>-<id>": {"tso": "on" | "off" | "default", "proton": the
+# folder name of a Proton in Steam's compatibilitytools.d or steamapps/common, e.g. "Proton
+# Experimental (ARM64)"; unset or not there: the one steam-compat-tools keeps for this CPU}.
 GAME_CHOICES = os.path.join(CONFIG_HOME, "retroforge", "store-games.json")
+
+
+def game_choice(store, gid, key):
+    try:
+        with open(GAME_CHOICES, encoding="utf-8") as f:
+            mine = json.load(f).get(f"{store}-{gid}", {})
+    except (OSError, ValueError, AttributeError):
+        mine = {}
+    return str(mine.get(key, "")) if isinstance(mine, dict) else ""
 
 
 def fex_tso(store, gid):
@@ -332,12 +351,7 @@ def fex_tso(store, gid):
     off. A Steam game has Valve's per-game hint (retroforge-steam-direct); a store game has none, and
     without TSO GRIP crashed a minute in with a corrupt stack (Air X, 2026-10-24), the kind of race an
     x86 game's threads hit when their memory order is the ARM CPU's."""
-    try:
-        with open(GAME_CHOICES, encoding="utf-8") as f:
-            mine = json.load(f).get(f"{store}-{gid}", {})
-    except (OSError, ValueError, AttributeError):
-        mine = {}
-    return "0" if isinstance(mine, dict) and mine.get("tso") == "off" else "1"
+    return "0" if game_choice(store, gid, "tso") == "off" else "1"
 
 
 def prefix_path(store, gid):
@@ -351,7 +365,7 @@ def run_windows_game(store, gid, exe, args, workdir, game_dir, extra_env=None):
     climbs from its program to its content (Unreal: Binaries/Win64 -> ../../) needs room above the
     program. With the working folder there, GRIP saw itself as S:\\Win64\\... and could not find its
     content ("Failed to load Grip.uproject", Air X, 2026-10-24)."""
-    runtime, proton = runtime_dir(), proton_dir()
+    runtime, proton = runtime_dir(), proton_dir(store, gid)
     compat = os.path.dirname(prefix_path(store, gid))
     client = os.path.join(DATA, "steam-client")
     for d in (compat, client):
@@ -613,7 +627,7 @@ def prepare_prefix(store, gid):
     if os.path.isfile(os.path.join(prefix_path(store, gid), "user.reg")):
         return
     log(f"{store} {gid}: setting up its Wine prefix")
-    runtime, proton = runtime_dir(), proton_dir()
+    runtime, proton = runtime_dir(), proton_dir(store, gid)
     compat = os.path.dirname(prefix_path(store, gid))
     os.makedirs(compat, mode=0o700, exist_ok=True)
     env = dict(os.environ, STEAM_COMPAT_DATA_PATH=compat, STEAM_COMPAT_TOOL_PATHS=f"{proton}:{runtime}",
