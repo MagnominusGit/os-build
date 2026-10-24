@@ -105,15 +105,37 @@ kernel config change needs a rebuild on the buildbox; the cmdline changes ride i
   | GPU devfreq | 14/s | 414 us | 739 us | 1.7 ms |
 
   They share one SMD channel, so GPU and SD votes queue behind the CPU ones. glink-rpm interrupts:
-  ~456/s at idle, all on cpu0. **schedutil's fast-switch path (`qcom_cpufreq_hw_fast_switch`) writes the
-  register and makes no bandwidth vote**: no kworker, no RPM round trip. DDR bandwidth is then left to
-  the bwmon and the GPU's own votes.
-- **Recommendation:** A/B on the Air X: schedutil with EAS off vs ondemand, frame-time capture on two
-  titles (Hades + one native), and glink-rpm/s logged. Pick by frame time. If ondemand wins, try HZ=1000
-  with it. Keep sched_ext off on this SoC until a scheduler with big.LITTLE-aware placement measures
-  better. This is a powerd setting, not a kernel change.
-- **Risk:** low to test (runtime governor switch), but it changes the device's state for other sessions,
-  so it needs your OK. Medium to ship: it reverses an earlier measured choice.
+  ~456/s at idle, all on cpu0.
+- **Correction (found in the A/B below): schedutil does not escape the vote on this board.**
+  `qcom-cpufreq-hw` allows fast switching only when the CPUs have **no** OPP table
+  (`qcom-cpufreq-hw.c:236`, the `-ENODEV` branch). `kernel/dts/qcom/sm6115-mangmi-air-x-base.dtsi` adds
+  `opp-table-cpu0`/`opp-table-cpu4` with `opp-peak-kBps` and an `interconnects` path on every CPU
+  (ported from ROCKNIX in 51c7263). Mainline `sm6115.dtsi` has neither. With them, schedutil runs its
+  slow path through the `sugov` thread and votes on every change: 244 votes/s on the little cluster
+  under Hades, 740 us median, ~197 ms/s blocked, 1,070 glink-rpm IRQs/s.
+- **A/B under Hades (2026-10-24 22:30, Steam/Proton, same room, 20 s windows alternating, EAS off for
+  schedutil):**
+  | governor | fps | p95 / p99 frame | frames > 40 ms | little / big avg MHz | GPU | battery | RPM IRQs |
+  |---|---|---|---|---|---|---|---|
+  | ondemand (3 windows) | 34.2–34.7 (34.4) | 34.2 / 40.4 ms | 0.8% | 1607 / 2080 | 81% @1050 | 4.29 W | 399/s |
+  | schedutil (3 windows) | 35.5–35.7 (35.6) | 33.8 / 34.4 ms | 0.2% | 1645 / 2109 | 83% @1050 | 4.71 W | 1132/s |
+
+  Frame interval = gap between display commits (`msm_atomic_commit_tail_start`); gamescope flips on
+  demand, so it is the game's frame time quantised to 16.7 ms vblanks. Hades ran at a ~30 fps cadence
+  (p50 33.3 ms) in this scene: GPU-bound, GPU at its 1050 MHz ceiling, the A73s ~46% busy. schedutil won
+  every pair (+3.5% fps, a tighter tail) for ~10% more power (the per-window spread is ±0.3 W).
+- **Recommendation:**
+  1. **Governor:** schedutil with EAS off is ahead on this title. Repeat on one CPU-bound title (an
+     emulator) before changing powerd's default for the SM6115. One GPU-bound scene is not enough to
+     reverse a measured choice.
+  2. **DT, the bigger lever (not committed):** drop the CPU OPP tables and the per-CPU `interconnects`
+     from the Air X base dtsi, as mainline has it. The driver then builds its OPPs from the hardware LUT
+     (EM and LMh keep working), schedutil fast-switches from scheduler context with no `sugov` thread,
+     and no governor blocks on the RPM. DDR for the CPUs is left to the CPU bwmon (`1b8e300.pmu`), which
+     already votes 12–21/s. Risk: medium. A memory-bound CPU burst may run at a lower DDR clock until the
+     bwmon reacts. Needs a rebuild and the same A/B (fps, frame tail, power, `glink-rpm`/s).
+  3. Keep sched_ext off on this SoC until a scheduler with big.LITTLE-aware placement measures better.
+- **Risk:** governor switch: low (runtime, restored to ondemand after the test). DT change: medium, as above.
 
 ### Spectre/Meltdown mitigations
 - **Current:** `ssbd=force-off kpti=off` (ROCKNIX parity); Meltdown not affected. `spectre_v2: Mitigation:
@@ -268,7 +290,7 @@ reasoning from the code, not a measurement.
 | OOM victim fix (on `steam-armv8-proton`) | yes | yes | yes | yes — userspace; min_ttl fires less with 8–16 GB |
 | `iommu.strict=0` (committed for SM6115) | measured | expected to help more: UFS and PCIe Wi-Fi (ath11k) run far higher I/O rates than SD | same, plus ath12k Wi-Fi 7 and the PCIe USB3 hub | same arm-smmu; expected |
 | `swiotlb=4096` (committed for SM6115) | measured | same 64 MB pool, under 1% of 8+ GB; check `io_tlb_used_hiwater` first (PCIe devices) | same | same |
-| ondemand's ~1 ms bandwidth vote per freq change | measured (SMD-RPM) | votes go through RPMh, expected to be tens of us | RPMh, same | unknown (SCMI/EPSS) — trace `icc_set_bw` on one board |
+| ~1 ms bandwidth vote per freq change, both governors | measured (SMD-RPM; the CPU OPP tables come from our dtsi) | mainline's CPU OPP tables carry bandwidth too, so neither governor fast-switches; votes go through RPMh, expected tens of us | same | mainline `sm8750.dtsi` has no CPU OPP tables: fast switch, no CPU votes |
 | HZ=1000 (proposal) | ondemand's 8 ms floor | same floor | same | same |
 | `kpti=off` | already set | **probably KPTI is ON**: A77/A55 have no E0PD, so KASLR forces it (`cpufeature.c:1883`); check `dmesg \| grep -i isolation` and add `kpti=off` to the SM8250 rows if so | no: ARMv9 has E0PD | no |
 | `nospectre_v2` (proposal) | firmware SMC per mm switch on the A73s | the A77 mitigates in hardware (CSV2), the A55 is unaffected | same (CSV2) | same — nothing to gain |
@@ -284,4 +306,6 @@ reasoning from the code, not a measurement.
    dmesg shows `lazy mode` and `(8MB)`; iommu groups show `DMA-FQ`; `/sys/kernel/debug/sched/preempt` reads
    `(full)`; no `audit:` lines.
 3. Decide the OOM policy (option 1 or 2 above).
-4. Governor A/B (schedutil + EAS off vs ondemand) on the Air X, then HZ=1000 if ondemand stays.
+4. Governor: repeat the Hades A/B (schedutil ahead: +3.5% fps, p99 34 vs 40 ms, +10% power) on a
+   CPU-bound title. Try the DT change (no CPU OPP tables, so fast switch and no RPM votes) in the same
+   build, and HZ=1000 only if ondemand stays.
