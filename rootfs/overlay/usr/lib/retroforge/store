@@ -34,8 +34,10 @@
 # PROTONFIXES. Our Proton runs umu-protonfixes' per-game fixes (proton-armv8 patch 0003), which find a
 # store game by UMU_ID and STORE (gog, egs) in its environment, as umu-run sets them. The umu-database
 # maps the store's id to the umu id; it is cached in <data>/umu-database.csv, fetched again when a day
-# old, and a game it does not list is umu-default (only the store's defaults run). The fixes were
-# written for x86 GE-Proton: a player turns them off per game in store-games.json (GAME_CHOICES).
+# old, and a game it does not list is umu-default (only the store's defaults run). RetroForge's own
+# fixes, for what umu-protonfixes does not cover on ARM, are in <pins>/game-fixes.json: before the game
+# runs, each sets an INI key in its prefix. A player turns both off per game in store-games.json
+# (GAME_CHOICES): umu-protonfixes' were written for x86 GE-Proton.
 #
 # SIGN-IN. RetroForge never takes a password. `sign-in` serves a one-time page on the LAN while the
 # plugin's sign-in panel is open, and prints its address with a QR code of it. On the phone the page
@@ -341,7 +343,7 @@ def sarek():
 # The player's per-game choices, keyed "<store>-<id>": {"tso": "on" | "off" | "default", "proton": the
 # folder name of a Proton in Steam's compatibilitytools.d or steamapps/common, e.g. "Proton
 # Experimental (ARM64)"; unset or not there: the one steam-compat-tools keeps for this CPU,
-# "protonfixes": "off" for none of umu-protonfixes' fixes}.
+# "protonfixes": "off" for none of umu-protonfixes' fixes or RetroForge's own (OWN_FIXES)}.
 GAME_CHOICES = os.path.join(CONFIG_HOME, "retroforge", "store-games.json")
 
 
@@ -416,6 +418,64 @@ def protonfixes_env(store, gid):
     return {"UMU_ID": umu_id(store, gid) or "umu-default", "STORE": UMU_STORES[store]}
 
 
+# RetroForge's own per-game fixes, keyed "<store>-<id>": {"title", "why", "ini": [{"file": a path in the
+# prefix, "section", "key", "value"}]}.
+OWN_FIXES = os.path.join(PINS, "game-fixes.json")
+
+
+def set_ini(path, section, key, value):
+    """key=value in [section] of an INI file (made when missing), every line for the key; the file's other
+    lines, encoding (UTF-8, or UTF-16 as Unreal saves non-ASCII ones) and line ends stay. True if it changed."""
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except FileNotFoundError:
+        raw = b""
+    enc = "utf-16" if raw[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8-sig" if raw[:3] == b"\xef\xbb\xbf" else "utf-8"
+    text = raw.decode(enc, "strict" if enc == "utf-16" else "surrogateescape")
+    nl, lines, want = "\r\n" if "\r\n" in text else "\n", text.splitlines(), f"{key}={value}"
+    start = next((i for i, line in enumerate(lines) if line.strip().lower() == f"[{section.lower()}]"), None)
+    if start is None:
+        lines += ([""] if lines and lines[-1].strip() else []) + [f"[{section}]", want]
+    else:
+        stop = next((i for i in range(start + 1, len(lines)) if lines[i].lstrip().startswith("[")), len(lines))
+        hits = [i for i in range(start + 1, stop) if lines[i].split("=", 1)[0].strip().lower() == key.lower()]
+        for i in hits:
+            lines[i] = want
+        if not hits:
+            at = stop
+            while at > start + 1 and not lines[at - 1].strip():
+                at -= 1
+            lines.insert(at, want)
+    new = nl.join(lines) + nl
+    if new == text:
+        return False
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".part", "wb") as f:
+        f.write(new.encode(enc, "strict" if enc == "utf-16" else "surrogateescape"))
+    os.replace(path + ".part", path)
+    return True
+
+
+def apply_own_fixes(store, gid):
+    """The game's entry in OWN_FIXES, into its prefix (set up by then: the prefix is Proton's to make). A
+    folder of a file's path is matched case-insensitively, as Windows would; a fix that fails is logged."""
+    fix = read_json(OWN_FIXES, {}).get(f"{store}-{gid}")
+    pfx = prefix_path(store, gid)
+    if not isinstance(fix, dict) or not os.path.isfile(os.path.join(pfx, "user.reg")):
+        return
+    for ini in fix.get("ini", []):
+        rel = str(ini.get("file", ""))
+        if not rel or rel.startswith("/") or ".." in rel.replace("\\", "/").split("/"):
+            log(f"{store} {gid}: a fix outside its prefix ({rel!r}) is skipped")
+            continue
+        try:
+            if set_ini(Gog._file(pfx, rel), ini["section"], ini["key"], str(ini["value"])):
+                log(f"{store} {gid}: RetroForge fix: {rel.rsplit('/', 1)[-1]} [{ini['section']}] {ini['key']}={ini['value']}")
+        except (OSError, KeyError, ValueError) as err:
+            log(f"{store} {gid}: a RetroForge fix failed ({rel}): {err}")
+
+
 def prefix_path(store, gid):
     """The game's Wine prefix (Proton's pfx/ in its compat data folder)."""
     return os.path.join(DATA, "prefixes", f"{store}-{gid}", "pfx")
@@ -448,6 +508,8 @@ def run_windows_game(store, gid, exe, args, workdir, game_dir, extra_env=None):
     s = sarek()
     if s:
         env["PROTON_DXVK_SAREK"] = s
+    if game_choice(store, gid, "protonfixes") != "off":
+        apply_own_fixes(store, gid)
     env.update(protonfixes_env(store, gid))
     env.update(extra_env or {})
     cmd = [os.path.join(runtime, "_v2-entry-point"), "--verb=waitforexitandrun", "--",

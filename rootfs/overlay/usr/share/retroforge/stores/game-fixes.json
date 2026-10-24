@@ -1,0 +1,10 @@
+{
+  "gog-1342466874": {
+    "title": "GRIP",
+    "why": "About 70 s in, its HttpManagerThread jumped to x86 address 0x3C after its CPU state was captured from outside (FEX: NoExec instruction in entry block: 3C), a Wine/FEX-on-ARM bug, on every Proton tried. Without UE4's HTTP it runs past that to its menu (Air X, 2026-10-24); its online features go with it. umu-database lists no GOG GRIP.",
+    "ini": [
+      {"file": "drive_c/users/steamuser/AppData/Local/GRIP/Saved/Config/WindowsNoEditor/Engine.ini",
+       "section": "HTTP", "key": "bUseNullHttp", "value": "True"}
+    ]
+  }
+}

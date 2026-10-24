@@ -14,7 +14,8 @@
 # Proton in the runtime, syncs them up, and does not upload after a failed download; a GOG conflict
 # keeps the last sync time; the game's environment names its umu id and store for protonfixes, from the
 # umu-database cached at install and fetched again only when a day old (kept when that fails), or turns
-# protonfixes off when the player did.
+# protonfixes off when the player did; RetroForge's own fixes (game-fixes.json) set their INI keys in the
+# prefix before the game starts, keeping the file's other lines, and go off with protonfixes.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -124,6 +125,8 @@ os.makedirs(PINS)
 for name in ("legendary", "gogdl"):
     with open(os.path.join(PINS, f"{name}.pin"), "w") as f:
         f.write(f"name: {name}\ntag: 1.0\nurl: https://github.com/x/tool\nsha256: {hashlib.sha256(ZIPAPP).hexdigest()}\n")
+OWN_FIXES = os.path.join(ROOT, "rootfs/overlay/usr/share/retroforge/stores/game-fixes.json")
+shutil.copy(OWN_FIXES, PINS)
 with open(os.path.join(PINS, "steamrt4.pin"), "w") as f:
     f.write("name: rt\nbase: https://repo.steampowered.com/rt\nasset: SteamLinuxRuntime_4-arm64.tar.xz\n")
 
@@ -197,12 +200,12 @@ if a[:2] == ["auth", "--code"]:
 elif a == ["auth"]:
     print(json.dumps(creds) if os.path.exists(auth) else "null")
 elif a[0] == "info":
-    print(json.dumps({"folder_name": "Game One", "buildId": "b1", "versionEtag": "e1"}))
+    print(json.dumps({"folder_name": "Game One" if a[1] == "1" else f"Game {a[1]}", "buildId": "b1", "versionEtag": "e1"}))
 elif a[0] == "download":
     base = a[a.index("--path") + 1]
     for p in ("12.50", "99.00"):
         print(f"[PROGRESS] INFO: = Progress: {p} 1/8, Running for: 00:00:01, ETA: 00:00:01", file=sys.stderr, flush=True)
-    d = os.path.join(base, "Game One")
+    d = os.path.join(base, "Game One" if a[1] == "1" else f"Game {a[1]}")
     os.makedirs(os.path.join(d, "BIN"), exist_ok=True)
     json.dump({"clientId": "c1", "playTasks": [{"type": "FileTask", "path": "bin\\game.exe", "isPrimary": True,
                "arguments": "-a \"two words\"", "workingDir": "bin"}]}, open(os.path.join(d, f"goggame-{a[1]}.info"), "w"))
@@ -215,7 +218,8 @@ elif a[0] == "save-sync":
         sys.stdout.write("1700000000.5")
 ''')
 RUNNER = script("runner", r'''
-call({k: os.environ.get(k) for k in ("UMU_ID", "STORE", "PROTONFIXES_DISABLE")}, os.environ.get("STEAM_FEX_TSOENABLED", ""), os.environ.get("STEAM_COMPAT_INSTALL_PATH", ""), os.environ.get("STEAM_COMPAT_LIBRARY_PATHS", ""),
+w = os.environ.get("FAKE_WATCH")
+call({**{k: os.environ.get(k) for k in ("UMU_ID", "STORE", "PROTONFIXES_DISABLE")}, **({"watch": os.path.exists(w)} if w else {})}, os.environ.get("STEAM_FEX_TSOENABLED", ""), os.environ.get("STEAM_COMPAT_INSTALL_PATH", ""), os.environ.get("STEAM_COMPAT_LIBRARY_PATHS", ""),
      os.getcwd(), os.environ.get("STEAM_COMPAT_DATA_PATH", ""), os.environ.get("STEAM_COMPAT_CLIENT_INSTALL_PATH", ""),
      os.environ.get("STEAM_COMPAT_TOOL_PATHS", ""))
 if "wineboot" in sys.argv:
@@ -625,6 +629,57 @@ ok(fetches() == n, "and the umu-database is not fetched for it")
 pf, _, _ = pf_run("epic", "Fortnite2")
 ok(pf["UMU_ID"] == "umu-2002" and fetches() == n + 1, "another game keeps its fixes", str(pf))
 os.remove(choices)
+
+CASE = "own fixes"
+fixes = json.load(open(OWN_FIXES))
+ok(fixes and all(re.fullmatch(r"(gog|epic)-\S+", k) and v.get("why") and v.get("ini") and
+                 all({"file", "section", "key", "value"} <= set(i) for i in v["ini"]) for k, v in fixes.items()),
+   "game-fixes.json: entries keyed <store>-<id>, each with why and its INI keys", str(list(fixes)))
+GRIP = "1342466874"
+r = store("gog", "install", GRIP)
+ok(r.returncode == 0, "GRIP installs", r.stderr)
+grip_local = os.path.join(DATA, "prefixes", f"gog-{GRIP}", "pfx", "drive_c", "users", "steamuser", "AppData", "Local")
+ini = os.path.join(grip_local, "GRIP", "Saved", "Config", "WindowsNoEditor", "Engine.ini")
+
+
+def text_of(path):
+    return open(path).read() if os.path.isfile(path) else ""
+
+
+pf, _, err = pf_run("gog", GRIP, env={"FAKE_WATCH": ini})
+ok(pf and pf.get("watch") is True and text_of(ini) == "[HTTP]\nbUseNullHttp=True\n",
+   "GRIP: no UE4 HTTP, in its prefix's user Engine.ini, before it starts", str(pf) + err)
+ok("RetroForge fix: Engine.ini [HTTP] bUseNullHttp=True" in err and pf["UMU_ID"] == "umu-default" and pf["STORE"] == "gog",
+   "logged, and umu-protonfixes runs too", err)
+pf, _, err = pf_run("gog", GRIP)
+ok(text_of(ini) == "[HTTP]\nbUseNullHttp=True\n" and "RetroForge fix" not in err, "a fix in place is left as it is", err)
+saved = "[Core.System]\r\nPaths=../../../Engine/Content\r\n\r\n[HTTP]\r\nHttpTimeout=30\r\nbUseNullHttp=False\r\n\r\n[Audio]\r\nVolume=1\r\n"
+os.makedirs(os.path.dirname(ini), exist_ok=True)
+open(ini, "wb").write(saved.encode("utf-16"))
+pf_run("gog", GRIP)
+raw = open(ini, "rb").read() if os.path.isfile(ini) else b""
+ok(raw[:2] == b"\xff\xfe" and raw.decode("utf-16") == saved.replace("bUseNullHttp=False", "bUseNullHttp=True"),
+   "an Engine.ini as the game saved it (UTF-16, CRLF): the key set in place, the rest as it was", repr(raw[:80]))
+for before, after in (("[HTTP]\nHttpTimeout=30\n\n[Audio]\nVolume=1\n", "[HTTP]\nHttpTimeout=30\nbUseNullHttp=True\n\n[Audio]\nVolume=1\n"),
+                      ("[Audio]\nVolume=1\n", "[Audio]\nVolume=1\n\n[HTTP]\nbUseNullHttp=True\n")):
+    os.makedirs(os.path.dirname(ini), exist_ok=True)
+    open(ini, "w").write(before)
+    pf_run("gog", GRIP)
+    ok(text_of(ini) == after, "added to its section, or the section added: " + before.split("\n")[0], repr(text_of(ini)))
+shutil.rmtree(os.path.join(grip_local, "GRIP"), ignore_errors=True)
+other_case = os.path.join(grip_local, "Grip", "Saved", "Config", "WindowsNoEditor")
+os.makedirs(other_case)
+pf_run("gog", GRIP)
+ok(os.path.isfile(os.path.join(other_case, "Engine.ini")) and not os.path.exists(os.path.join(grip_local, "GRIP")),
+   "into the game's folder as Windows matches it (any case)")
+shutil.rmtree(os.path.join(grip_local, "Grip"))
+json.dump({f"gog-{GRIP}": {"protonfixes": "off"}}, open(choices, "w"))
+pf, _, _ = pf_run("gog", GRIP)
+ok(not os.path.exists(os.path.join(grip_local, "GRIP")) and pf["PROTONFIXES_DISABLE"] == "1",
+   "off with umu-protonfixes when the player turned them off for the game", str(pf))
+os.remove(choices)
+ok(not os.path.exists(os.path.join(DATA, "prefixes", "gog-1", "pfx", "drive_c", "users", "steamuser", "AppData", "Local", "GRIP")),
+   "a game without an entry gets none")
 
 # ---- uninstall, sign-out -------------------------------------------------------------------------
 CASE = "uninstall"
