@@ -1,8 +1,8 @@
 # Kernel config and cmdline tuning for the SM6115 (MANGMI Air X) — report
 
-Status: review done 2026-10-24 on branch `claude/kernel-tuning-7b4d5c`. Three low-risk changes are
-committed (below); nothing is built, flashed or changed on the device. The rest needs a decision or a
-hardware A/B.
+Status: review done 2026-10-24 on branch `claude/kernel-tuning-7b4d5c`. Five changes are committed
+(below); nothing is built or flashed, and every runtime test on the device was restored afterwards.
+The rest needs a decision or a hardware A/B.
 
 Device: Air X MQ66, kernel 7.2.11 (`/proc/config.gz`, built 2026-10-24 01:24 UTC), up ~7 h with an OGUI
 session plus Steam/Proton games (Hades, GRIP) run by other sessions. Cmdline read from `/proc/cmdline`.
@@ -21,9 +21,12 @@ Comparison: ROCKNIX `projects/ROCKNIX/devices/SM6115/linux/linux.aarch64.conf` (
 | be0fc47 | `CONFIG_PREEMPT=y` pinned, `CONFIG_PREEMPT_DYNAMIC=y` | all boards; no behaviour change by default |
 | bad7a19 | `audit=0` in `BOOT_CMDLINE` (both generators) | all boards |
 | 6abd0e2 | `iommu.strict=0 swiotlb=4096` on the four SM6115 rows of `boot/boards.map` | Air X MQ65/MQ66/MQ66B, Air Y |
+| 2e35b19 | patch `0132`: `icc-rpm` skips bandwidth requests the RPM already holds | every `icc-rpm` (SMD-RPM) SoC; in this fleet only the SM6115 |
+| c3b6185 | `CONFIG_SWIOTLB_DYNAMIC=y`: the bounce pool grows instead of failing a mapping | all boards; inert until a pool fills |
 
-`tests/test-stage2-grub.sh` (413 ok) and `tests/test-mkimage.sh` (64 ok) pass. None of it is built: the
-kernel config change needs a rebuild on the buildbox; the cmdline changes ride in the next image/OTA.
+`tests/test-stage2-grub.sh` (413 ok) and `tests/test-mkimage.sh` (64 ok) pass; `0132` applies exactly to
+7.2.11 (`git apply --check`) and `check-order.py` is clean. None of it is built: the kernel changes need
+a rebuild on the buildbox; the cmdline changes ride in the next image/OTA.
 
 ## Knob by knob
 
@@ -54,7 +57,10 @@ kernel config change needs a rebuild on the buildbox; the cmdline changes ride i
   Wi-Fi and games. Every DMA master sits in an IOMMU group (the GPU and display in identity ones). What
   still bounces is small unaligned kmalloc buffers for non-coherent devices
   (`DMA_BOUNCE_UNALIGNED_KMALLOC`).
-- **Recommendation:** `swiotlb=4096` (8 MB, 8 areas of 512 slabs) — **committed** on the SM6115 rows.
+- **Recommendation:** `swiotlb=4096` (8 MB, 8 areas of 512 slabs) — **committed** on the SM6115 rows,
+  with `CONFIG_SWIOTLB_DYNAMIC=y` (c3b6185) as the safety margin instead of a bigger static pool: 8 MB is
+  ~2,000x the measured peak (one mapping is at most 256 KB, so 32 maximal bounces at once), and if a
+  device ever does fill it the kernel adds a pool rather than failing the mapping.
   Returns 56 MB to the page allocator on a 3.5 GB device that hits the kernel OOM killer (below).
 - **Risk:** low. If a future driver ever bounces more than 8 MB at once, mappings fail with
   `swiotlb buffer is full`. Watch `io_tlb_used_hiwater`.
@@ -128,14 +134,29 @@ kernel config change needs a rebuild on the buildbox; the cmdline changes ride i
   1. **Governor:** schedutil with EAS off is ahead on this title. Repeat on one CPU-bound title (an
      emulator) before changing powerd's default for the SM6115. One GPU-bound scene is not enough to
      reverse a measured choice.
-  2. **DT, the bigger lever (not committed):** drop the CPU OPP tables and the per-CPU `interconnects`
-     from the Air X base dtsi, as mainline has it. The driver then builds its OPPs from the hardware LUT
-     (EM and LMh keep working), schedutil fast-switches from scheduler context with no `sugov` thread,
-     and no governor blocks on the RPM. DDR for the CPUs is left to the CPU bwmon (`1b8e300.pmu`), which
-     already votes 12–21/s. Risk: medium. A memory-bound CPU burst may run at a lower DDR clock until the
-     bwmon reacts. Needs a rebuild and the same A/B (fps, frame tail, power, `glink-rpm`/s).
-  3. Keep sched_ext off on this SoC until a scheduler with big.LITTLE-aware placement measures better.
-- **Risk:** governor switch: low (runtime, restored to ondemand after the test). DT change: medium, as above.
+  2. **The vote itself — fixed properly, OPP tables kept: patch `0132` (committed, 2e35b19).** The ~1 ms
+     is not the RPM doing work. `qcom_icc_rpm_set()` (`drivers/interconnect/qcom/icc-rpm.c:207`) resends
+     every node's bandwidth, for both contexts and both master and slave IDs, on every `icc_set_bw()`;
+     only the bus clock rate is cached. A CPU OPP vote is peak-only (`avg_bw=0`), and the RPM requests
+     carry the summed *averages*: across 1,234 CPU votes under schedutil + Hades those averages changed
+     8 times, each time because another voter (SD) moved. So ~99% of those blocking writes resend what
+     the RPM already holds. Downstream does not have the cost: the msm-4.19 SM6115 tree
+     (`~/Documents/GitHub/sm6115_lineage`) commits only `dirty` arbitration entries
+     (`msm_bus_rpm_smd.c:140`, `msm_bus_rpm_commit_arb()`), and scales CPU-DDR from separate devfreq
+     voters (bwmon, `arm-memlat-mon`, `arm-compute-mon` in `bengal.dtsi`) off the frequency-switch path.
+     `0132` does the same in `icc-rpm`: it remembers the last value sent per node and context and skips
+     an unchanged one. Expected: a CPU vote costs an RPM round trip only when the bus clock rate moves
+     (~10% of today's writes), so the `kworker`/`sugov` blocking and most glink-rpm IRQs go, and GPU and
+     SD votes stop queueing behind CPU ones. Risk: low. The RPM keeps the last request per resource and
+     only `icc-rpm` writes these resources, so skipping a resend changes nothing it holds; the first
+     request still goes out. Verify with the same `icc_set_bw` trace (median vote → microseconds) and
+     the governor A/B.
+  3. **Not taken:** deleting the CPU OPP tables from the dtsi (mainline has none, and the driver would then
+     fast-switch). It throws away the CPU's DDR floor that downstream keeps; `0132` removes the cost and
+     keeps the floor. If schedutil wins on more titles, the next step would be letting `qcom-cpufreq-hw`
+     fast-switch with OPP bandwidth by moving the vote to a work item, so the sugov thread goes too.
+  4. Keep sched_ext off on this SoC until a scheduler with big.LITTLE-aware placement measures better.
+- **Risk:** governor switch: low (runtime, restored to ondemand after the test). `0132`: low, as above.
 
 ### Spectre/Meltdown mitigations
 - **Current:** `ssbd=force-off kpti=off` (ROCKNIX parity); Meltdown not affected. `spectre_v2: Mitigation:
@@ -212,8 +233,13 @@ kernel config change needs a rebuild on the buildbox; the cmdline changes ride i
 - **Current:** no irqaffinity, no irqbalance. Every device IRQ lands on cpu0 (an A53): gpu-irq, MDSS
   vblank, WLAN_CE, SD, USB, the gamepad MCU UART (~249/s) and glink-rpm (~456/s).
 - **Evidence:** cpu0 hard-IRQ time 1,672 s vs ~590 s for cpu1-3 and ~250 s for the A73s over 7 h.
-- **Recommendation:** a userspace experiment, not a kernel change. Pin gpu-irq + MDSS to cpu3 (ROCKNIX)
-  or to cpu1-3, and measure frame-time variance against the default. Not done: it changes the device.
+- **Tested under Hades (2026-10-24 22:40, ondemand, 20 s windows, two each):** gpu-irq (122) on cpu0
+  34.4 fps / p99 34.7 ms, on cpu3 (ROCKNIX's choice) 34.1 / 35.6, on cpu6 (an A73) 34.5 / 35.7. Long
+  frames 0.5–0.7% in every placement: no difference above window-to-window noise. The MDSS interrupt
+  cannot be moved at runtime: its `msm_mdss` irqchip rejects affinity writes, and the GIC line it chains
+  from (hwirq 218, Linux irq 106) has no `/proc/irq` entry. Moving it would take `irqaffinity=` at boot.
+- **Recommendation:** leave the default. GPU interrupts run ~180/s in play and their placement does not
+  show in frame times on this GPU-bound title; revisit only on a CPU-bound one.
 
 ### Memory carve-outs (DT), for later
 - 295 MB is `no-map` reserved-memory. Candidates: the 15 MB + 1 MB splash/dfps regions at 0x5c000000
@@ -273,10 +299,10 @@ What the game round adds:
 - cpuidle is irrelevant in play: the CPUs almost never reach a deep state.
 - The IPIs are the scheduler's remote-wakeup queue: 10.6k/s of `ttwu_queue_wakelist`, 63% sent by
   Hades.exe threads waking threads on other CPUs. The two clusters share no cache, so a cross-cluster
-  wakeup is always an IPI. 240/s more are ondemand's own `dbs_irq_work`. Candidate A/B, runtime only:
-  `NO_TTWU_QUEUE` in `/sys/kernel/debug/sched/features` (the waker takes the remote run-queue lock
-  instead). Upstream defaults to queueing because the lock bouncing is usually worse; measure frame
-  times before changing it.
+  wakeup is always an IPI. 240/s more are ondemand's own `dbs_irq_work`. **Tested** (22:45, ondemand,
+  three 20 s windows each): `TTWU_QUEUE` 34.3 fps, p95 34.2 ms, 0.8% frames > 40 ms, A73s 45% busy;
+  `NO_TTWU_QUEUE` 33.8 fps, p95 34.7 ms, 2.0% > 40 ms, A73s 48% busy (the wakers spin on remote run-queue
+  locks instead). The kernel default stays.
 
 ## Does it apply to the other SoCs?
 Fleet: SM8250 (Kryo 585 = A77 + A55, ARMv8.2), SM8550 / SM8650 (Cortex-X/A7xx/A5xx, ARMv9), SM8750
@@ -290,7 +316,7 @@ reasoning from the code, not a measurement.
 | OOM victim fix (on `steam-armv8-proton`) | yes | yes | yes | yes — userspace; min_ttl fires less with 8–16 GB |
 | `iommu.strict=0` (committed for SM6115) | measured | expected to help more: UFS and PCIe Wi-Fi (ath11k) run far higher I/O rates than SD | same, plus ath12k Wi-Fi 7 and the PCIe USB3 hub | same arm-smmu; expected |
 | `swiotlb=4096` (committed for SM6115) | measured | same 64 MB pool, under 1% of 8+ GB; check `io_tlb_used_hiwater` first (PCIe devices) | same | same |
-| ~1 ms bandwidth vote per freq change, both governors | measured (SMD-RPM; the CPU OPP tables come from our dtsi) | mainline's CPU OPP tables carry bandwidth too, so neither governor fast-switches; votes go through RPMh, expected tens of us | same | mainline `sm8750.dtsi` has no CPU OPP tables: fast switch, no CPU votes |
+| ~1 ms bandwidth vote per freq change, both governors; fix `0132` | measured (SMD-RPM `icc-rpm`; the CPU OPP tables come from our dtsi); `0132` applies | mainline's CPU OPP tables carry bandwidth too, so neither governor fast-switches; votes go through RPMh (`icc-rpmh`, a different driver), expected tens of us; `0132` does not touch it | same | mainline `sm8750.dtsi` has no CPU OPP tables: fast switch, no CPU votes |
 | HZ=1000 (proposal) | ondemand's 8 ms floor | same floor | same | same |
 | `kpti=off` | already set | **probably KPTI is ON**: A77/A55 have no E0PD, so KASLR forces it (`cpufeature.c:1883`); check `dmesg \| grep -i isolation` and add `kpti=off` to the SM8250 rows if so | no: ARMv9 has E0PD | no |
 | `nospectre_v2` (proposal) | firmware SMC per mm switch on the A73s | the A77 mitigates in hardware (CSV2), the A55 is unaffected | same (CSV2) | same — nothing to gain |
@@ -300,12 +326,12 @@ reasoning from the code, not a measurement.
 | DT carve-outs | SM6115 only | — | — | — |
 
 ## Next steps (each needs your OK)
-1. Build the kernel on the buildbox with be0fc47 (`~/retroforge-steamtest`), and the image with bad7a19
-   and 6abd0e2.
+1. Build the kernel on the buildbox (`~/retroforge-steamtest`) with be0fc47, 2e35b19 and c3b6185, and
+   the image with bad7a19 and 6abd0e2.
 2. Flash/OTA the Air X and reboot. Check: `/proc/cmdline` has `audit=0 iommu.strict=0 swiotlb=4096`;
    dmesg shows `lazy mode` and `(8MB)`; iommu groups show `DMA-FQ`; `/sys/kernel/debug/sched/preempt` reads
-   `(full)`; no `audit:` lines.
-3. Decide the OOM policy (option 1 or 2 above).
-4. Governor: repeat the Hades A/B (schedutil ahead: +3.5% fps, p99 34 vs 40 ms, +10% power) on a
-   CPU-bound title. Try the DT change (no CPU OPP tables, so fast switch and no RPM votes) in the same
-   build, and HZ=1000 only if ondemand stays.
+   `(full)`; no `audit:` lines; the `icc_set_bw` trace shows CPU votes in microseconds and glink-rpm well
+   under the ~400-1,100/s measured here.
+3. Decide the OOM policy (option 1 or 2 above) — the victim fix is already on `steam-armv8-proton`.
+4. Governor: rerun the Hades A/B on the new kernel (with `0132` the vote cost no longer penalises
+   schedutil's higher change rate), then a CPU-bound title. HZ=1000 only if ondemand stays.
