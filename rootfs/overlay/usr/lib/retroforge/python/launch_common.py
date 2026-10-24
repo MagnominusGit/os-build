@@ -18,6 +18,7 @@ DEVICE_ENV = ENV.get("RETROFORGE_DEVICE_ENV", "/usr/lib/retroforge/device-env")
 # (retroforge-session), and an emulator must not get the shell's.
 VRAM_REPORT_LIMIT_VARS = ("ENABLE_MESA_VRAM_REPORT_LIMIT", "VK_VRAM_REPORT_LIMIT_HEAP_SIZE",
                           "VK_VRAM_REPORT_LIMIT_DEVICE_ID")
+OOM_SCORE_ADJ = 900  # `steam-launch-wrapper --oom-score-adjust 900`, as Steam starts its games
 
 
 class Exit(Exception):
@@ -44,6 +45,15 @@ def device_field(name):
 
 
 
-def no_core_dumps():
-    """In the emulator's child, before exec: no core file (core_dumps false)."""
-    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+def emulator_child(core_dumps=False):
+    """The preexec_fn of every emulator process: in the child, before exec, the OOM killer's first
+    choice (retroforge-launch's header), and no core file unless core_dumps."""
+    def preexec():
+        try:
+            with open("/proc/self/oom_score_adj", "w") as f:
+                f.write(str(OOM_SCORE_ADJ))
+        except OSError:
+            pass  # never a reason not to start the game
+        if not core_dumps:
+            resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    return preexec

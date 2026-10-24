@@ -70,22 +70,22 @@ read -r _ _ _ _ pgid sid _< <(cut -d' ' -f1-7 /proc/\$\$/stat)
   echo "sharun_sys=\${SHARUN_ALLOW_SYS_VKICD-}"; echo "no_updates=\${DISABLE_AUTO_UPDATES-}"; echo "core=\$(ulimit -c)"
   echo "lowprio=\${RETROFORGE_GAME_LOWPRIO-}"; echo "tu_autotune=\${TU_AUTOTUNE_FLAGS-}"
   echo "vram_on=\${ENABLE_MESA_VRAM_REPORT_LIMIT-}"; echo "vram_mib=\${VK_VRAM_REPORT_LIMIT_HEAP_SIZE-}"
-  echo "vram_id=\${VK_VRAM_REPORT_LIMIT_DEVICE_ID-}"; echo "opt_env=\${FAKE_OPT-}"
+  echo "vram_id=\${VK_VRAM_REPORT_LIMIT_DEVICE_ID-}"; echo "opt_env=\${FAKE_OPT-}"; echo "oom=\$(cat /proc/self/oom_score_adj)"
   printf 'arg=%s\n' "\$@"; } >> "\$log"
 if [ "\${1-}" = --fake-setup ]; then  # a setup run (emulator.json "setup_args"), not a game
-  echo "setup \$*" >> "$T/setup.log"
+  echo "setup \$*" >> "$T/setup.log"; echo "oom=\$(cat /proc/self/oom_score_adj)" >> "$T/setup.log"
   [ -f "$T/setup-fails" ] && exit 9
   exit 0
 fi
 if [ "\${1-}" = --headless ] && [ "\${2-}" = --installpkg ]; then  # the PSN inbox (--psn-install)
-  echo "psn-install \$*" >> "$T/psn.log"
+  echo "psn-install \$*" >> "$T/psn.log"; echo "oom=\$(cat /proc/self/oom_score_adj)" >> "$T/psn.log"
   echo "RPCS3-LOG-NOISE"  # RPCS3 logs to stdout: it must never land on the result lines
   [ -f "$T/psn-fake.sh" ] && . "$T/psn-fake.sh"
   exit 0  # RPCS3's --installpkg exits 0 even when it failed: success is per file, on disk
 fi
 if [ "\${1-}" = --fake-install ]; then  # an install step (emulator.json "install"), not a game
   echo "install \$*" >> "$T/install.log"
-  echo "core-limit=\$(ulimit -c)" >> "$T/install.log"
+  echo "core-limit=\$(ulimit -c)" >> "$T/install.log"; echo "oom=\$(cat /proc/self/oom_score_adj)" >> "$T/install.log"
   if [ -f "$T/install-crash" ]; then  # RPCS3: installs, then aborts in a destructor on its way out
     mkdir -p "\$HOME/.config/fake"; : > "\$HOME/.config/fake/fw-ok"; kill -ABRT \$\$
   fi
@@ -827,6 +827,7 @@ wait_for emu_up && [ -f "$HOME/.config/fake/fw-ok" ] && grep -q "but ~/.config/f
   && ok "an installer that crashes after a good install: the marker is there, the game starts" \
   || bad "crashing installer: $(cat "$T/launch.err")"
 grep -qx "core-limit=0" "$T/install.log" && ok "install steps run with no core file" || bad "install core limit: $(grep core-limit "$T/install.log")"
+grep -qx "oom=900" "$T/install.log" && ok "install steps run at oom_score_adj 900" || bad "install oom_score_adj: $(grep '^oom=' "$T/install.log")"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs; rm -f "$T/install-crash"
 
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["args"] = ["-C", "saves=/home/player/saves/{system}", "{rom}"]
@@ -917,6 +918,14 @@ wait_for emu_up; [ "$(field core)" = 0 ] && ok "core_dumps false: the emulator r
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
 ( ulimit -c unlimited; exec "$LAUNCH" psx "$ROM" 2>"$T/launch.err" ) & lpid=$!; echo "$lpid" >> "$T/pids"
 wait_for emu_up; [ "$(field core)" = unlimited ] && ok "by default the emulator keeps the session's core limit" || bad "default core limit changed: '$(field core)'"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
+# OOM victim (header): the emulator starts at 900, as Steam's games do; the launcher keeps ours.
+start_launcher; wait_for emu_up
+[ "$(field oom)" = 900 ] && ok "the emulator starts at oom_score_adj 900, the OOM killer's first choice" \
+  || bad "emulator oom_score_adj is '$(field oom)'"
+[ "$(cat "/proc/$lpid/oom_score_adj" 2>/dev/null)" = "$(cat /proc/self/oom_score_adj)" ] \
+  && ok "the launcher keeps the session's oom_score_adj, so it outlives the game to release the mount" \
+  || bad "launcher oom_score_adj is '$(cat "/proc/$lpid/oom_score_adj" 2>/dev/null)'"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["core_dumps"] = "no"; json.dump(d, open(sys.argv[2], "w"))' \
   "$DS_DEF" "$INST/duckstation/emulator.json"
@@ -1504,6 +1513,8 @@ stl n64 "$NROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
 wait_for emu_up || bad "the game never started: $(cat "$T/launch.err")"
 grep -qx "setup --fake-setup" "$T/setup.log" 2>/dev/null \
   && ok "the setup ran with the definition's setup_args before the game" || bad "no setup run: $(cat "$T/setup.log" 2>/dev/null)"
+grep -qx "oom=900" "$T/setup.log" 2>/dev/null && ok "the setup run is at oom_score_adj 900" \
+  || bad "setup oom_score_adj: $(grep '^oom=' "$T/setup.log" 2>/dev/null)"
 touch "$T/stop-emu"; reap_launcher "$lpid"
 reset_logs; rm -f "$T/setup.log"
 stl --gui fakeset 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
@@ -1748,6 +1759,8 @@ STUB="$HOME/roms/ps3/Mario's Adventure: Go Stop.psn"
 [ "$rc" = 0 ] && ok "a base game and its rap: exit 0" || bad "happy path: rc=$rc out='$out' err: $(tail -2 "$T/launch.err")"
 grep -q "^psn-install --headless --installpkg $INBOX\$" "$T/psn.log" \
   && ok "one headless --installpkg run on the whole inbox" || bad "psn.log: $(cat "$T/psn.log" 2>/dev/null)"
+grep -qx "oom=900" "$T/psn.log" && ok "the PSN installer runs at oom_score_adj 900" \
+  || bad "PSN installer oom_score_adj: $(grep '^oom=' "$T/psn.log" 2>/dev/null)"
 [ -f "$HOME/.config/rpcs3/vfs.yml" ] \
   && ok "the emulator's seed ran first (vfs.yml places dev_hdd0 before the first install)" || bad "vfs.yml was not seeded"
 printf '%s\n' "$out" | grep -qP "^ok\tA Game\.pkg\tNPUB30024\tMario's Adventure: Go Stop\.psn$" \

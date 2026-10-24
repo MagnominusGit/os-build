@@ -106,6 +106,13 @@
 # already the smaller one there. The shell's own report (retroforge-session) is never passed on:
 # the layer's variables are dropped from what we inherit. A definition's "env" overrides it.
 #
+# OOM victim: every emulator process (game, --gui, install, setup, the PSN installer) starts with
+# oom_score_adj 900, the value Steam's launch wrapper gives a Steam game, and its children inherit
+# it. Neither the kernel's OOM killer nor earlyoom counts GPU memory (msm buffers are outside RSS),
+# and the session scope runs at 0: on the Air X (2026-10-24) an emulator would have scored below
+# OGUI, and pipewire-pulse and wireplumber (200, systemd's user@ default) above both. Raising a
+# child needs no privilege. The launcher stays at 0 so it is still there to release the mount.
+#
 # core_dumps false: the emulator starts with RLIMIT_CORE 0, so systemd-coredump logs a crash in the
 # journal but stores no core. For an emulator known to crash on a normal exit (Snes9x 1.63 did, until
 # the sigdefer shim moved its exit out of its SIGTERM handler): ~14 MB per Exit otherwise.
@@ -132,7 +139,7 @@ sys.dont_write_bytecode = True
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib", "retroforge", "python"))
 import emuopts  # noqa: E402
 from launch_common import (CONFIG_HOME, EMU_DATA_DIR, EMU_DIR, ENV, HOME, VRAM_REPORT_LIMIT_VARS,  # noqa: E402
-                           Exit, device_field, log, no_core_dumps)
+                           Exit, device_field, emulator_child, log)
 from launch_def import (FILE, ROM, SYSTEM, SYSTEM_ID, TEXT, apply_system_settings,  # noqa: E402
                         emulator_for, load_definition, seed_first_run, sync_files, systems_of)
 from launch_formats import FORMATS  # noqa: E402
@@ -301,7 +308,7 @@ def run_installs(emulator, binary, env, todo, interrupted):
             # after a successful install; dumping its address space held the launch ~1 min
             # (HW 2026-10-07, Pocket FIT).
             rc = subprocess.run([binary] + args, env=env, start_new_session=True,
-                                preexec_fn=no_core_dumps).returncode
+                                preexec_fn=emulator_child()).returncode
         except (OSError, ValueError) as err:
             fail("install-failed", emulator, f"could not run {binary}: {err}")
         # OGUI's Exit reached the install (and us): the player left. Never start the game after
@@ -332,7 +339,7 @@ def run_setup(emulator, binary, env, setup_args, interrupted):
     log(f"{emulator}: setup: {binary} {' '.join(setup_args)}")
     try:
         rc = subprocess.run([binary] + setup_args, env=env, start_new_session=True,
-                            preexec_fn=no_core_dumps, timeout=SETUP_TIMEOUT).returncode
+                            preexec_fn=emulator_child(), timeout=SETUP_TIMEOUT).returncode
     except subprocess.TimeoutExpired:
         log(f"warning: {emulator}: the setup run did not finish in {SETUP_TIMEOUT} s")
     except (OSError, ValueError) as err:
@@ -516,7 +523,7 @@ def run(argv):
             # lock outlives even a SIGKILLed launcher for as long as the game runs.
             emu = subprocess.Popen(pin + [program] + args, env=env, start_new_session=True,
                                    pass_fds=() if psn_lock is None else (psn_lock.fileno(),),
-                                   preexec_fn=None if definition["core_dumps"] else no_core_dumps)
+                                   preexec_fn=emulator_child(definition["core_dumps"]))
         except (OSError, ValueError) as err:
             fail("mount-failed", emulator, f"could not start {binary}: {err}")
         rc = wait_emulator(emu, definition["exit_resend"], interrupted)

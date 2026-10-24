@@ -41,7 +41,7 @@ import tempfile
 import time
 
 import emuopts
-from launch_common import CONFIG_HOME, EMU_DIR, ENV, HOME, VRAM_REPORT_LIMIT_VARS, Exit, log, no_core_dumps
+from launch_common import CONFIG_HOME, EMU_DIR, ENV, HOME, VRAM_REPORT_LIMIT_VARS, Exit, emulator_child, log
 from launch_def import emulator_for, load_definition, seed_first_run
 from launch_formats import FORMATS
 
@@ -324,7 +324,7 @@ def psn_install():
             # The installer RPCS3 inherits the lock's fd (flock follows the open file
             # description): a SIGKILLed launcher then cannot free a game launch mid-extract.
             subprocess.run([binary, "--headless", "--installpkg", PSN_INBOX],
-                           env=env, start_new_session=True, preexec_fn=no_core_dumps,
+                           env=env, start_new_session=True, preexec_fn=emulator_child(),
                            pass_fds=(lock.fileno(),),
                            stdin=subprocess.DEVNULL, stdout=sys.stderr)
         except (OSError, ValueError) as err:
