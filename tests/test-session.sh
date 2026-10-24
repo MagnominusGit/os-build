@@ -333,6 +333,18 @@ if [ -f "$P33" ]; then
 else
   bad "0033: $P33 is missing"
 fi
+# 0034: the library tabs kept a card on a replaced LibraryItem (no art, no Play): Hades, HW 2026-10-24.
+P34="$PKG/patches/0034-library-menu-a-card-is-rebuilt-when-its-library-item-is-replaced.patch"
+if [ -f "$P34" ]; then
+  [ "$(grep -E '^\+\+\+ b/' "$P34" | sed 's#^+++ b/##' | sort -u)" = "core/ui/card_ui/library/library_menu.gd" ] \
+    && ok "0034: changes library_menu.gd only" || bad "0034 touches more than library_menu.gd"
+  grep -qE '^\+\s+if is_instance_valid\(old\) and \(old as GameCard\).library_item == item:' "$P34" \
+    && ok "0034: a library card is reused only while it shows the very item" || bad "0034: cards are still reused by name"
+  grep -q "0033-running-app-a-steam-launch-counts-once-steam-starts-the-game.patch 0034-library-menu-a-card-is-rebuilt-when-its-library-item-is-replaced.patch" "$PKG/source.pin" \
+    && ok "0034: listed in source.pin, after 0033" || bad "0034: not in source.pin's patches"
+else
+  bad "0034: $P34 is missing"
+fi
 # One file of the tree as 0018 leaves it, hunk by hunk (context and added lines; a new file whole).
 newside() { python3 - "$P18" "$1" <<'PY'
 import sys

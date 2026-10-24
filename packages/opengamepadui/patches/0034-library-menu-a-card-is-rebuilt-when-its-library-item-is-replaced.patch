@@ -1,0 +1,47 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Sat, 24 Oct 2026 08:00:00 -0700
+Subject: [PATCH] fix(LibraryMenu): a card is rebuilt when its library item is
+ replaced
+
+The library tabs kept a card per name. A library that drops a game and
+adds it again leaves LibraryManager with a new LibraryItem of the same
+name, and the Installed and All Games tabs kept their card on the old one,
+which has no launch item: its art lookup found no game, so it showed the
+placeholder, and Play had nothing to launch (HW, MANGMI Air X, 2026-10-24:
+Hades, whose Steam desktop shortcut the RetroForge plugin drops in favour
+of its Steam library's entry). The card listens for removed_from_library
+only once it is built, and the removal came first.
+
+As the home screen does since 0023, a card is now reused only while it
+shows the very item; otherwise the old one is freed and a new one built.
+
+---
+ core/ui/card_ui/library/library_menu.gd | 15 +++++++++++----
+ 1 file changed
+
+--- a/core/ui/card_ui/library/library_menu.gd
++++ b/core/ui/card_ui/library/library_menu.gd
+@@ -185,11 +185,18 @@
+ 		if is_hidden:
+ 			continue
+ 		
+-		# If the card node already exists, move it to the correct place
++		# If the card node already exists, move it to the correct place. Reuse one only while it
++		# shows this very item: a library that drops a game and adds it again makes a new
++		# LibraryItem of the same name, and a card left on the old one has no launch item (no art;
++		# Play does nothing). Its removed_from_library can come while the card is being built.
+ 		if tab_num in _library and item.name in _library[tab_num]:
+-			var card := _library[tab_num][item.name] as GameCard
+-			grid.move_child(card, i)
+-			continue
++			var old = _library[tab_num][item.name]  # untyped: a freed card may still be listed
++			if is_instance_valid(old) and (old as GameCard).library_item == item:
++				grid.move_child(old, i)
++				continue
++			_library[tab_num].erase(item.name)
++			if is_instance_valid(old):
++				old.queue_free()
+ 		
+ 		# Build a card for each library item
+ 		var card := await _build_card(item)
