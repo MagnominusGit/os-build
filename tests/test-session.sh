@@ -306,6 +306,18 @@ if [ -f "$P24" ]; then
 else
   bad "0024: $P24 is missing"
 fi
+# 0032: one null in launcher.json's recents emptied the home screen's row (HW, Pocket FIT, 2026-10-22).
+P32="$PKG/patches/0032-launch-manager-recent-apps-names-only.patch"
+if [ -f "$P32" ]; then
+  [ "$(grep -E '^\+\+\+ b/' "$P32" | sed 's#^+++ b/##' | sort -u)" = "core/global/launch_manager.gd" ] \
+    && ok "0032: changes launch_manager.gd only" || bad "0032 touches more than launch_manager.gd"
+  grep -qE '^\+\s+if not app is String:' "$P32" && grep -qE '^\+\s+var recent: Array = .*filter\(func\(n\): return n is String\)' "$P32" \
+    && ok "0032: recent apps are read and saved as names only" || bad "0032: a non-name recent entry still reaches the home screen"
+  grep -q "0031-card-art-only-near-the-screen.patch 0032-launch-manager-recent-apps-names-only.patch" "$PKG/source.pin" \
+    && ok "0032: listed in source.pin, after 0031" || bad "0032: not in source.pin's patches"
+else
+  bad "0032: $P32 is missing"
+fi
 # One file of the tree as 0018 leaves it, hunk by hunk (context and added lines; a new file whole).
 newside() { python3 - "$P18" "$1" <<'PY'
 import sys

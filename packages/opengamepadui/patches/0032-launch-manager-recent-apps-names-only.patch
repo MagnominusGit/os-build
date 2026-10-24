@@ -1,0 +1,43 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Thu, 22 Oct 2026 07:40:00 -0700
+Subject: [PATCH] fix(LaunchManager): recent apps are names only
+
+launcher.json's "recent" list held a null (HW, KONKR Pocket FIT,
+2026-10-22: {"recent":["Hades",null,"Steam"]}). Play on a home card left
+on a replaced library item (patch 0023 fixes that card) saves its launch
+item's name, and that card had none: in a release build the script error
+carries on with null, and update_recent_apps() put it first. Every reader
+then gets a null where a name belongs; the home screen reads each into a
+String, which is a script error of its own.
+
+get_recent_apps() now returns names only, and update_recent_apps() drops
+anything else when it saves the list, so launcher.json heals at the next
+launch.
+
+---
+ core/global/launch_manager.gd | 6 +++++-
+ 1 file changed
+
+--- a/core/global/launch_manager.gd
++++ b/core/global/launch_manager.gd
+@@ -440,6 +440,10 @@
+ 	for app in _persist_data["recent"]:
+ 		if i > max_recent:
+ 			break
++		# Names only: the home screen reads each one into a String, and one null in launcher.json
++		# stopped it there, so no recent app showed at all.
++		if not app is String:
++			continue
+ 		recent.push_back(app)
+ 		i += 1
+ 	return recent
+@@ -449,7 +453,7 @@
+ func update_recent_apps(app: LibraryLaunchItem) -> void:
+ 	if not "recent" in _persist_data:
+ 		_persist_data["recent"] = []
+-	var recent: Array = _persist_data["recent"]
++	var recent: Array = (_persist_data["recent"] as Array).filter(func(n): return n is String)
+ 	recent.erase(app.name)
+ 	recent.push_front(app.name)
+ 
