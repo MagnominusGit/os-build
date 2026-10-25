@@ -1,14 +1,15 @@
 # Kernel config and cmdline tuning for the SM6115 (MANGMI Air X) — report
 
 Status: review done 2026-10-24 on branch `claude/kernel-tuning-7b4d5c`. Five changes are committed
-(below); nothing is built or flashed, and every runtime test on the device was restored afterwards.
-The rest needs a decision or a hardware A/B.
+(below), built and running on the Air X since 2026-10-25 00:09 (slot A; see "On the device" at the
+end). Every runtime test was restored afterwards. The rest needs a decision or a hardware A/B.
 
 Device: Air X MQ66, kernel 7.2.11 (`/proc/config.gz`, built 2026-10-24 01:24 UTC), up ~7 h with an OGUI
 session plus Steam/Proton games (Hades, GRIP) run by other sessions. Cmdline read from `/proc/cmdline`.
 All measurements are read-only: `/sys`, `/proc`, the journal, and short ftrace runs in private trace
-instances (`instances/kt-*`, removed afterwards). The one load generated was a direct read of the SD
-card (no page cache) and a 40 MB transfer to `/dev/null` over SSH. Function-graph timings include the
+instances (`instances/kt-*`, removed afterwards). The one load generated was a direct read of the
+internal eMMC (`mmcblk1` = `4744000.mmc`, no page cache; the system itself runs from the SD card,
+`mmcblk0` = `4784000.mmc`, the same SMMU and DMA path) and a 40 MB transfer to `/dev/null` over SSH. Function-graph timings include the
 tracer's own overhead, so per-call numbers are upper bounds; ratios between them hold.
 
 Comparison: ROCKNIX `projects/ROCKNIX/devices/SM6115/linux/linux.aarch64.conf` (local
@@ -38,7 +39,7 @@ a rebuild on the buildbox; the cmdline changes ride in the next image/OTA.
   `qcom_smmu_def_domain_type()` bypasses `qcom,adreno` and `qcom,sm6115-mdss`, and drm/msm runs its own
   page tables and invalidations. So strict vs lazy changes nothing for rendering or scanout.
 - **Evidence:** strict unmap = page-table clear + TLBI + `qcom_smmu_tlb_sync`.
-  SD, 8,704 direct reads: 9,336 unmaps, median 7.3 us (sync 1.8 us), ~4% of cpu0 at 4K IOPS.
+  eMMC, 8,704 direct reads: 9,336 unmaps, median 7.3 us (sync 1.8 us), ~4% of cpu0 at 4K IOPS.
   Wi-Fi receive of 40 MB: 27,653 packets, 89,004 unmaps (3.2 per packet), 865 ms of unmap in 27 s, of
   which 233 ms TLB sync — ~3% of a core at only ~12 Mbit/s, so a fast Steam download pays several times
   that. arm-smmu advertises `IOMMU_CAP_DEFERRED_FLUSH`, so lazy gives these groups a DMA-FQ domain.
@@ -264,7 +265,7 @@ state (OGUI idle, MemAvailable 2.5 GB, three 5 s samples each):
 | RPM vote per change, median / p90 | 1.0–1.1 / 1.5–2.3 ms | 1.18–1.28 / 1.70–1.87 ms |
 | kworker time blocked on those votes | ~120 ms/s | 145–150 ms/s |
 | glink-rpm IRQs | 456/s | 606–629/s |
-| SD 4K direct read: unmap / sync median | 7.3 / 1.8 us | 7.1–7.4 / 1.8 us (~3.8% of a core at ~4,300 IOPS) |
+| eMMC 4K direct read: unmap / sync median | 7.3 / 1.8 us | 7.1–7.4 / 1.8 us (~3.8% of a core at ~4,300 IOPS) |
 | Wi-Fi: unmaps per packet, unmap time per packet | 3.2, 31 us | 3.3, 36 us (sync 27%) |
 | swiotlb high-water | 2 slabs | 2 slabs (18 h) |
 | 64 KB mTHP, 16 MB chase A73 / A53 | 18 vs 36 / 45 vs 78 ns | 15–16.5 vs 32–33 / 41–43 vs 77 ns |
@@ -303,6 +304,39 @@ What the game round adds:
   three 20 s windows each): `TTWU_QUEUE` 34.3 fps, p95 34.2 ms, 0.8% frames > 40 ms, A73s 45% busy;
   `NO_TTWU_QUEUE` 33.8 fps, p95 34.7 ms, 2.0% > 40 ms, A73s 48% busy (the wakers spin on remote run-queue
   locks instead). The kernel default stays.
+
+## On the device (built and flashed 2026-10-25)
+Build: buildbox branch `kernel-tuning-test` = `devbuild-armv8` (52ccef4, what the Air X ran) + this
+branch's 10 commits via `git am`, `make bundle` with `dev.env` (37 min) →
+`retroforge-20261024T234715Z.raucb` (git b447b50, dev-signed), `rauc install` to slot A, reboot.
+Slot B still holds 52ccef4 as the fallback. Boot status good, `systemctl is-system-running` = running,
+no failed units, Wi-Fi/gamescope/OGUI up. The one boot error, `hci0: Reading QCA version information
+failed (-110)`, also appears on 4 of the previous 7 boots and recovers on retry: not from this change.
+
+| check | old kernel (52ccef4) | new kernel (b447b50) |
+|---|---|---|
+| cmdline | — | `audit=0 … iommu.strict=0 swiotlb=4096` |
+| preempt | full, not switchable | `(full) lazy` |
+| IOMMU groups | 20 DMA (strict) + 2 identity | **20 DMA-FQ (lazy)** + 2 identity |
+| audit records in kmsg | ~3,000 per 7 h | **0** |
+| swiotlb | 64 MB | **8 MB**, dynamic |
+| MemTotal | 3,650,640 kB | **3,708,660 kB (+56.7 MB)** |
+| glink-rpm IRQs, idle | 606–629/s | **127–140/s** |
+| CPU vote median, little / big | 1.2 / 1.2 ms | **0.27 / 0.49 ms** |
+| kworker time blocked on votes, idle | 145–150 ms/s | **50–54 ms/s** |
+| RPM writes per 2 s, idle | 1,594 | **257** (225 bus-clock changes, 32 bandwidth changes) |
+| eMMC 4K read: unmap median / total, TLB syncs | 7.1 us / 76 ms, 8,687 | **3.6 us / 40 ms, 235** |
+| SD card 4K read: unmap median, TLB syncs | — | 4.0 us, 265 |
+| Wi-Fi 40 MB receive: unmap time per packet, TLB syncs | 36 us, 92,011 | **12 us, 1,575** |
+
+`0132` removed 84% of the RPM writes. What remains is real: each CPU frequency step that changes its
+OPP's peak-bandwidth tier changes the bimc bus clock, and that request does go out. Taking that off the
+frequency path too would mean moving the vote to a work item (and letting `qcom-cpufreq-hw`
+fast-switch), or coarser peak tiers in the CPU OPP tables. Both are follow-ups, not needed for this round.
+
+Still to do on this kernel: the Hades governor A/B again (schedutil changed frequency 244 times a second
+on the little cluster and paid for every vote; that cost is now ~4x smaller), and a memory comparison
+under the same game.
 
 ## Does it apply to the other SoCs?
 Fleet: SM8250 (Kryo 585 = A77 + A55, ARMv8.2), SM8550 / SM8650 (Cortex-X/A7xx/A5xx, ARMv9), SM8750
