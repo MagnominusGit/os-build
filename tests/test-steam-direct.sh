@@ -235,8 +235,14 @@ fresh_log
 logline "$SLOG" "2026-10-22 10:30:00" 42 "/usr/bin/true SteamLaunch AppId=4242 -- x"
 acf "$S" 42 FortyTwo 4
 direct -- check 42
-[ "$RC" = 1 ] && grep -q "not one this can replay" <<<"$ERR" && ok "a logged command that is not Steam's reaper for that app is refused" || bad "rc=$RC err=$ERR"
+[ "$RC" = 1 ] && grep -q "has not started it on this device yet" <<<"$ERR" \
+  && ok "a logged command that is not Steam's reaper for that app is not a launch of it" || bad "rc=$RC err=$ERR"
 rm -f "$S/steamapps/appmanifest_42.acf"
+fresh_log
+logline "$SLOG" "2026-10-25 03:16:37" 1145360 ""
+direct -- check 1145360
+[ "$RC" = 0 ] && grep -q 'x64Vk/Hades.exe' "$CACHE/1145360.json" \
+  && ok "a game the client did not start (logged by the kept client with an empty command) is not Steam's newest launch" || bad "rc=$RC err=$ERR"
 
 CASE="check: the game"
 acf "$S" 1145360 Hades 1026

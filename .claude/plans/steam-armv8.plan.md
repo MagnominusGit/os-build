@@ -276,8 +276,22 @@ saves. Test tools: `~player/.cache/rf-lite/rf-lite.sh` on the Air X (one command
   most; only with a remembered sign-in). `retroforge-steam-direct check` lets a game start without the
   client while the kept one (cgroup `retroforge-steam.service`) runs. Plugin texts, docs, tests
   (steam 117, steam-direct 103).
-- [ ] On the Air X: the image's own path end to end (first launch after boot waits for the sign-in,
-  later ones start at once; Steam's UI from Main menu thaws and refreezes).
+- [x] On the Air X (2026-10-25, the three scripts bind-mounted over build b447b50): the first launch
+  started the client, which signed in and froze 18 s after the press, then Hades clientless (Steam
+  initialized, Steam Input, peak 5930 MiB, 1209 free). Three bugs, fixed: (1) the kept client logs a game
+  it did not start as `Game process added : AppID 1145360 ""`, and the helper took that for Steam's newest
+  launch, so the second launch went through Steam; such lines are skipped now. (2) A game Steam launched,
+  frozen 15 s after its process appeared but before its window, never got Steam Input (no controls); it
+  is frozen once `OnFocusWindowChanged to game window type` is logged. (3) Steam's UI from a minimal
+  client: `steam://open/bigpicture` sent while the UI was starting again was lost (window unmapped, OGUI's
+  loading screen); it is sent once the UI has made its first calls (~14 s in all). After the fixes:
+  second launch clientless in 3 s, controls fine, Cloud upload on exit; Steam's UI came up.
+- [x] The restarted helper frozen after Steam's UI has run is born bigger (~110 MB private, ~60 MB anon,
+  files cached), against 4 MB on the client's first start; the catch is not late (frozen within 0.6 s).
+  It goes to zram when a game needs the memory. The client's own idle CPU is ~6% of a core, frozen or not.
+- [ ] Steam Input beside a frozen client is not consistent: it switched to the clientless Hades on the
+  first launch (the player felt lag) and not on the retest (felt better). Open: whether the lag was Steam
+  Input through a swapped-out client or the client's first-start work; MemoryLow on the unit if the former.
 
 ## Validation
 - The LSE scan passes on every release. On the Air X, Hades shows about 0 kernel LSE emulations with the new tool.

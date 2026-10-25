@@ -16,7 +16,8 @@
 #                                        Steam has picked the launch up, `unknown` without Steam's log
 #   retroforge-steam-keep stop-idle      stop the kept client unless it runs a game
 #   retroforge-steam-keep full [PID]     give the kept client its UI back (its web helper running); with
-#                                        PID, keep it so while PID runs (a launch that needs Steam's UI)
+#                                        PID, keep it so while PID runs (a launch that needs Steam's UI).
+#                                        Prints `woke` when the UI was frozen: it starts up again (~11 s)
 #   retroforge-steam-keep minimal [PID]  drop PID's hold, then freeze the client's web helper unless
 #                                        another live launch holds it
 #
@@ -183,11 +184,20 @@ client() {  # the client's PID: ~/.steam/steam.pid, while that names a live proc
 }
 
 helpers() {  # helpers CLIENT: the client's web helpers (its children that run steamwebhelper)
-  local d line ppid
-  for d in "$PROC"/[0-9]*; do
-    { read -r line <"$d/stat"; } 2>/dev/null || continue
-    read -r _ ppid _ <<<"${line##*) }"
-    [ "$ppid" = "$1" ] && grep -qaF steamwebhelper "$d/cmdline" 2>/dev/null && echo "${d##*/}"
+  local d line ppid kids=""
+  # The kernel's list of the client's children (CONFIG_PROC_CHILDREN) when there is one, else a scan.
+  for d in "$PROC/$1"/task/*/children; do
+    [ -r "$d" ] && kids="$kids $(cat "$d" 2>/dev/null)"
+  done
+  if [ -z "${kids// /}" ]; then
+    for d in "$PROC"/[0-9]*; do
+      { read -r line <"$d/stat"; } 2>/dev/null || continue
+      read -r _ ppid _ <<<"${line##*) }"
+      [ "$ppid" = "$1" ] && kids="$kids ${d##*/}"
+    done
+  fi
+  for d in $kids; do
+    grep -qaF steamwebhelper "$PROC/$d/cmdline" 2>/dev/null && echo "$d"
   done
 }
 
@@ -207,8 +217,9 @@ full() {  # full [PID]
   [ -z "${1-}" ] || { mkdir -p "$HOLDS" && : >"$HOLDS/$1"; }
   c="$(client)" || return 0
   for h in $(helpers "$c"); do
-    frozen "$h" && "$KILL" -CONT "$h" 2>/dev/null
+    frozen "$h" && "$KILL" -CONT "$h" 2>/dev/null && woke=1
   done
+  [ -z "${woke-}" ] || echo woke
   return 0
 }
 
@@ -224,8 +235,8 @@ minimal() {  # minimal [PID]
   [ -n "$old" ] && [ -z "$awake" ] && return 0   # minimal already
   # shellcheck disable=SC2086
   [ -z "$old" ] || "$KILL" -KILL $old 2>/dev/null
-  for _ in $(seq $((PARK_WAIT * 4))); do
-    sleep 0.25
+  for _ in $(seq $((PARK_WAIT * 20))); do
+    sleep 0.05   # a restarted helper is past 100 MB within a fraction of a second, its files cached
     for h in $(helpers "$c"); do
       case "$old " in *" $h "*) continue ;; esac   # a killed one not yet reaped
       "$KILL" -STOP "$h" 2>/dev/null || continue

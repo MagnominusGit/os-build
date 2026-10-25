@@ -617,6 +617,7 @@ for p in "\$@"; do
         echo "\$n (steamwebhelper) S 7000 \$n \$n 0 -1" >"$P/\$n/stat"
         echo steamwebhelper >"$P/\$((n + 1))/comm"; printf '%s\0' "$WROOT/steamrtarm64/steamwebhelper" --type=zygote >"$P/\$((n + 1))/cmdline"
         echo "\$((n + 1)) (steamwebhelper) S \$n \$n \$n 0 -1" >"$P/\$((n + 1))/stat"
+        [ -d "$P/7000/task/7000" ] && echo "\$n 7050" >"$P/7000/task/7000/children"
       fi
       rm -rf "$P/\${p:?}" ;;
     -STOP) printf 'State:\tT (stopped)\n' >"$P/\$p/status" ;;
@@ -648,11 +649,21 @@ grep -q "client stays signed in" "$W/kerr" && ok "and it is said" || bad "$(cat 
 : >"$W/kills"
 "${MENV[@]}" bash "$KEEP" minimal 2>/dev/null; RC=$?
 [ "$RC" = 0 ] && [ ! -s "$W/kills" ] && ok "frozen already: nothing is killed" || bad "rc=$RC kills=$(cat "$W/kills")"
-"${MENV[@]}" bash "$KEEP" full 2>/dev/null
-[ "$(state_of 7200)" = S ] && grep -qx -- "-CONT 7200" "$W/kills" && ok "full: the frozen helper goes on (Steam's UI comes back)" || bad "kills=$(cat "$W/kills")"
+out="$("${MENV[@]}" bash "$KEEP" full 2>/dev/null)"
+[ "$(state_of 7200)" = S ] && grep -qx -- "-CONT 7200" "$W/kills" && [ "$out" = woke ] \
+  && ok "full: the frozen helper goes on (Steam's UI comes back), and says it woke it" || bad "out=$out kills=$(cat "$W/kills")"
+out="$("${MENV[@]}" bash "$KEEP" full 2>/dev/null)"
+[ -z "$out" ] && ok "full again: nothing to wake, nothing said" || bad "out=$out"
 : >"$W/kills"
 "${MENV[@]}" bash "$KEEP" minimal 2>/dev/null
 [ "$(state_of 7300)" = T ] && grep -qx -- "-KILL 7200" "$W/kills" && ok "minimal again after it ran: killed and frozen anew" || bad "kills=$(cat "$W/kills")"
+
+CASE="keep: minimal, the kernel's list of children"
+reset_minimal; mkdir -p "$P/7000/task/7000"; echo "7100 7050" >"$P/7000/task/7000/children"
+fakeproc 7400 7000 steamwebhelper "$WROOT/steamrtarm64/steamwebhelper"   # not in the list
+"${MENV[@]}" bash "$KEEP" minimal 2>/dev/null; RC=$?
+[ "$RC" = 0 ] && [ "$(state_of 7200)" = T ] && grep -qx -- "-KILL 7100" "$W/kills" && ! grep -q 7400 "$W/kills" \
+  && ok "read from /proc/<client>/task/*/children when the kernel has it, not by scanning every process" || bad "rc=$RC kills=$(cat "$W/kills" 2>&1)"
 
 CASE="keep: holds"
 reset_minimal; fakeproc 4444 1 bash /usr/bin/steam -gamepadui
@@ -686,19 +697,52 @@ EOF
 chmod +x "$W/bin/keeplog"
 
 CASE="keep: a game through the kept client"
-reset_keep; rm -f "$W/keep.calls"; touch "$W/unit-active"
+CTL="$WROOT/logs/controller_ui.txt"
+reset_keep; rm -f "$W/keep.calls"; touch "$W/unit-active"; mkdir -p "${CTL%/*}"
+echo "[2026-10-25 03:16:43] OnFocusWindowChanged to game window type: AppID 42, 42" >"$CTL"   # an earlier run's
 bg_wrap RETROFORGE_STEAM_KEEP=on RETROFORGE_STEAM_KEEP_CLI="$W/bin/keeplog" RETROFORGE_STEAM_MINIMAL_DELAY=1 -- steam://rungameid/42
 until_true '[ -e "$W/call1" ]'
 [ "$(head -1 "$W/keep.calls" 2>/dev/null)" = "full pid first" ] \
   && ok "Steam's UI comes back before the launch is handed over (its dialogs, install scripts, shader prompt)" || bad "keep: $(cat "$W/keep.calls" 2>&1)"
 step 42 Completed; fakeproc 4242 1 reaper "$STEAM_REAPER" SteamLaunch AppId=42 -- game
+sleep 2.5
+! grep -q "^minimal" "$W/keep.calls" && ok "not minimal while Steam has not switched the controller to the game (an earlier run's line does not count)" \
+  || bad "keep: $(cat "$W/keep.calls" 2>&1)"
+echo "[2026-10-25 03:30:20] OnFocusWindowChanged to game window type: AppID 42, 42" >>"$CTL"
 until_true 'grep -q "^minimal pid" "$W/keep.calls"'
 kill -0 "$wpid" 2>/dev/null && grep -q "^minimal pid" "$W/keep.calls" \
-  && ok "and the client goes minimal once the game has run RETROFORGE_STEAM_MINIMAL_DELAY s, the launch still on" || bad "keep: $(cat "$W/keep.calls" 2>&1)"
+  && ok "minimal RETROFORGE_STEAM_MINIMAL_DELAY s after it has, the launch still on" || bad "keep: $(cat "$W/keep.calls" 2>&1)"
 gone 4242
 finish
 [ "$WRC" = 0 ] && [ "$(tail -1 "$W/keep.calls")" = "minimal pid handed" ] && [ -e "$W/unit-active" ] \
   && ok "and stays minimal when the game ends" || bad "rc=$WRC keep: $(cat "$W/keep.calls" 2>&1)"
+
+CASE="keep: Steam's UI, woken first"
+# keep CLI stub: the client was minimal, so `full` wakes its UI.
+cat >"$W/bin/keepwoke" <<EOF
+#!/usr/bin/env bash
+case "\$1" in full) echo woke ;; status) echo on ;; esac
+EOF
+chmod +x "$W/bin/keepwoke"
+reset_keep; touch "$W/unit-active"; mkdir -p "${SLOG%/*}"; echo "[2026-10-25 03:40:00] an older line" >"$SLOG"
+bg_wrap RETROFORGE_STEAM_KEEP=on RETROFORGE_STEAM_KEEP_CLI="$W/bin/keepwoke" RETROFORGE_STEAM_UI_SETTLE=0 -- -gamepadui steam://open/bigpicture
+sleep 1.5
+[ ! -e "$W/call1" ] && ok "Steam's UI from a minimal client: not handed over while the UI starts again" || bad "handed over at once: $(cat "$W/call1" 2>&1)"
+echo "[2026-10-25 03:44:10] STARTUP SlowJSMethodCall Settings.RegisterForSettingsChanges took 9.4ms" >>"$SLOG"
+until_true '[ -e "$W/call1" ]'
+grep -qx "args: -gamepadui steam://open/bigpicture" "$W/call1" 2>/dev/null && ok "but once its first calls are in Steam's log" || bad "$(cat "$W/call1" 2>&1)"
+kill -TERM "$wpid"; wait "$wpid" 2>/dev/null
+reset_keep; touch "$W/unit-active"
+bg_wrap RETROFORGE_STEAM_KEEP=on RETROFORGE_STEAM_KEEP_CLI="$W/bin/keepwoke" RETROFORGE_STEAM_UI_WAIT=1 RETROFORGE_STEAM_UI_SETTLE=0 -- -gamepadui steam://open/bigpicture
+until_true '[ -e "$W/call1" ]'
+[ -e "$W/call1" ] && ok "or after RETROFORGE_STEAM_UI_WAIT s without them" || bad "never handed over"
+kill -TERM "$wpid"; wait "$wpid" 2>/dev/null
+reset_keep; touch "$W/unit-active"
+step 42 Completed; fakeproc 4242 1 reaper "$STEAM_REAPER" SteamLaunch AppId=42 -- game
+bg_wrap RETROFORGE_STEAM_KEEP=on RETROFORGE_STEAM_KEEP_CLI="$W/bin/keepwoke" -- steam://rungameid/42
+sleep 1
+[ -e "$W/call1" ] && ok "a game is handed over at once (Steam queues its launch until the UI is up)" || bad "a game waited"
+kill -TERM "$wpid"; wait "$wpid" 2>/dev/null
 
 CASE="keep: Steam's UI holds it"
 reset_keep; rm -f "$W/keep.calls"; touch "$W/unit-active"

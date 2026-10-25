@@ -246,12 +246,19 @@ times in 2 minutes). So `minimal` kills it and freezes (SIGSTOP) the one the cli
 later at ~7 MB, and anything it has started. The client waits for it indefinitely (6 minutes seen)
 without starting another, stays signed in, and costs ~240 MB in all while idle; under a game's memory
 pressure the kernel moves most of that into zram, and at Hades's peak it cost ~75 MB (the table
-below). `full` (SIGCONT) brings Steam's UI
-back. The launches that need the UI hold it (`full $$`, a file per launch in
-`$XDG_RUNTIME_DIR/retroforge-steam-full/`): Steam's own UI until OGUI closes it, and a game the client
-starts until it has run 15 s (`RETROFORGE_STEAM_MINIMAL_DELAY`), since Steam's launch dialogs, install
-scripts and shader prompt come before. A game started without the client (below) gets the kept client
-beside it, minimal.
+below). `full` (SIGCONT) brings Steam's UI back. Refrozen after Steam's UI has run, the helper the
+client starts again is born bigger, its files cached: ~110 MB private (~60 MB anonymous), which the
+kernel moves into zram when a game needs the memory. The launches that need the UI hold it (`full $$`,
+a file per launch in `$XDG_RUNTIME_DIR/retroforge-steam-full/`): Steam's own UI until OGUI closes it,
+and a game the client starts (Steam's launch dialogs, install scripts and shader prompt need the UI)
+until Steam has switched the controller to it (`OnFocusWindowChanged to game window type` in its
+`controller_ui.txt`) and 5 s more (`RETROFORGE_STEAM_MINIMAL_DELAY`). Frozen before that, Steam never
+switched it, and the game had no controls (2026-10-25). Steam's own UI opened from a minimal client
+(Main menu > Emulators > Steam Client) is handed over once the woken UI has made its first calls into
+the client (`SlowJSMethodCall` in `console_log.txt`, ~11 s) and 2 s more: sent at once,
+`steam://open/bigpicture` was lost, Steam's window stayed unmapped and OGUI on its loading screen. So
+Steam's UI takes ~14 s from a minimal client. A game started without the client (below) gets the kept
+client beside it, minimal; the client logs it with an empty command, which is not a launch to replay.
 
 A game's Steam API works with the minimal client, whoever started the game. Hades's first room, then
 quit from its menu, same launch option (Air X, MemTotal 3621 MiB, 2026-10-25):

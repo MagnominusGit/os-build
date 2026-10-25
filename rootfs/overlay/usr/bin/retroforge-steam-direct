@@ -236,7 +236,9 @@ def logged_launches():
                     if "Game process added" not in line:
                         continue
                     m = LAUNCH.match(line)
-                    if m:
+                    # Not a game the client did not start (one started without it, beside the kept
+                    # client): it logs that one too, with an empty command.
+                    if m and f" SteamLaunch AppId={m.group(2)} " in f" {m.group(3)} ":
                         found[int(m.group(2))] = (m.group(1), m.group(3))
         except OSError:
             continue
