@@ -26,6 +26,11 @@ extends RefCounted
 ## Leaving the menu (e.g. its Home entry) then showed a keyboard with no owner, whose popup layer took
 ## every tap on the screen -- cards and the search bar stopped responding. Any other popup taking
 ## over now dismisses the keyboard.
+##
+## And: a field's own dialog closing left its keyboard up. Submitting the Wi-Fi password in the
+## first-boot screen (or Settings) closes the password popup, and the keyboard stayed over the
+## screen with nothing to type into and no key that closes it. The keyboard now goes when the field
+## it types into is no longer shown.
 
 var state_machine := load("res://assets/state/state_machines/menu_state_machine.tres") as StateMachine
 var library_state := load("res://assets/state/states/library.tres") as State
@@ -44,7 +49,26 @@ func setup(tree: SceneTree) -> RefCounted:
 			_watch(node)
 	tree.node_added.connect(_watch)
 	popup_state_machine.state_changed.connect(_on_popup_changed)
+	keyboard.context_changed.connect(_on_context_changed)
 	return self
+
+
+var _target: Control  # the field the keyboard types into, watched for being hidden
+
+
+func _on_context_changed(ctx) -> void:
+	if is_instance_valid(_target) and _target.visibility_changed.is_connected(_on_target_hidden):
+		_target.visibility_changed.disconnect(_on_target_hidden)
+	_target = ctx.target as Control if ctx and ctx.target is Control else null
+	if _target:
+		_target.visibility_changed.connect(_on_target_hidden)
+
+
+## visibility_changed fires for a hidden ancestor too (the popup around the field).
+func _on_target_hidden() -> void:
+	if is_instance_valid(_target) and not _target.is_visible_in_tree() and keyboard.context \
+			and keyboard.context.target == _target:
+		_dismiss()
 
 
 ## Pointer bookkeeping, fed from the plugin's _input and its InputPlumber listener.
@@ -93,8 +117,12 @@ func _focus_first_result() -> void:
 func _on_popup_changed(_from: State, to: State) -> void:
 	if to == null or to == osk_state or keyboard.context == null:
 		return
-	# OGUI's KeyboardInstance.close() minus handing focus back to the text field: the popup that
-	# just opened owns the focus now.
+	_dismiss()
+
+
+## OGUI's KeyboardInstance.close() minus handing focus back to the text field: the popup that just
+## opened owns the focus now, or the field is gone.
+func _dismiss() -> void:
 	var target = keyboard.context.target
 	if target is LineEdit:
 		(target as LineEdit).caret_force_displayed = false
@@ -109,6 +137,10 @@ func detach() -> void:
 		_tree.node_added.disconnect(_watch)
 	if popup_state_machine.state_changed.is_connected(_on_popup_changed):
 		popup_state_machine.state_changed.disconnect(_on_popup_changed)
+	if keyboard.context_changed.is_connected(_on_context_changed):
+		keyboard.context_changed.disconnect(_on_context_changed)
+	if is_instance_valid(_target) and _target.visibility_changed.is_connected(_on_target_hidden):
+		_target.visibility_changed.disconnect(_on_target_hidden)
 
 
 func _watch(node: Node) -> void:
