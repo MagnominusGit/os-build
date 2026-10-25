@@ -345,6 +345,22 @@ if [ -f "$P34" ]; then
 else
   bad "0034: $P34 is missing"
 fi
+# 0037: a touch release InputManager never saw left current_touches above zero, and the library no longer
+# followed the D-pad (HW, MANGMI Air X, 2026-10-25).
+P37="$PKG/patches/0037-input-menus-follow-the-d-pad-again-after-a-touch.patch"
+if [ -f "$P37" ]; then
+  [ "$(grep -E '^\+\+\+ b/' "$P37" | sed 's#^+++ b/##' | sort -u | tr '\n' ' ')" = "core/systems/input/input_manager.gd core/ui/card_ui/home/cardui_home.gd core/ui/card_ui/library/library_menu.gd " ] \
+    && ok "0037: changes the input manager, home and the library only" || bad "0037 touches other files"
+  grep -qE '^\+func pointer_recent\(window_msec := 500\) -> bool:' "$P37" \
+    && ok "0037: InputManager.pointer_recent, from the last pointer event's time" || bad "0037: no pointer_recent"
+  [ "$(grep -cE '^-\s+if \(input_manager as InputManager\)\.current_touches > 0:' "$P37")" = 2 ] \
+    && [ "$(grep -cE '^\+\s+if \(input_manager as InputManager\)\.pointer_recent\(\):' "$P37")" = 2 ] \
+    && ok "0037: home and the library no longer trust the touch count" || bad "0037: a menu still skips scrolling on current_touches"
+  grep -q "0036-scripts-with-no-per-frame-work-stop-running-every-frame.patch 0037-input-menus-follow-the-d-pad-again-after-a-touch.patch" "$PKG/source.pin" \
+    && ok "0037: listed in source.pin, after 0036" || bad "0037: not in source.pin's patches"
+else
+  bad "0037: $P37 is missing"
+fi
 # One file of the tree as 0018 leaves it, hunk by hunk (context and added lines; a new file whole).
 newside() { python3 - "$P18" "$1" <<'PY'
 import sys

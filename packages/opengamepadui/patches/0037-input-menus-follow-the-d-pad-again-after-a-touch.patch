@@ -1,0 +1,88 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Sun, 25 Oct 2026 09:00:00 -0700
+Subject: [PATCH] input: menus follow the D-pad again after a touch
+
+Home and the library skip scrolling to the focused card while a touch or the mouse is in use,
+judged by InputManager.current_touches and the left button's state. A release that never reached
+InputManager (the window lost focus with a finger down) left the count above zero for good, and the
+library stopped scrolling with the D-pad. They now skip it only within half a second of the last
+touch, drag or mouse button (InputManager.pointer_recent), whatever the count says.
+---
+ core/systems/input/input_manager.gd     | 14 ++++++++++++++
+ core/ui/card_ui/home/cardui_home.gd     |  4 +---
+ core/ui/card_ui/library/library_menu.gd |  4 +---
+ 3 files changed, 16 insertions(+), 6 deletions(-)
+
+diff --git a/core/systems/input/input_manager.gd b/core/systems/input/input_manager.gd
+index b2d076f..b8c1c6a 100644
+--- a/core/systems/input/input_manager.gd
++++ b/core/systems/input/input_manager.gd
+@@ -39,6 +39,9 @@ var actions_pressed := {}
+ ## Number of currently pressed touches
+ var current_touches := 0
+ 
++## When a touch, a drag or a mouse button was last seen (Time.get_ticks_msec), for pointer_recent().
++var last_pointer_msec := -1000000
++
+ ## Will show logger events with the prefix InputManager
+ var logger := Log.get_logger("InputManager", Log.LEVEL.INFO)
+ 
+@@ -122,6 +125,14 @@ func _send_input(dbus_path: String, action: String, pressed: bool, strength: flo
+ 	Input.parse_input_event(input_action)
+ 
+ 
++## Whether a touch or the mouse was used in the last window_msec: a focus change then came from
++## it, and the menus leave the scroll where the finger put it. current_touches is not enough for
++## that: a release this node never saw (the window lost focus with a finger down) left it above
++## zero, and the library and home stopped following the D-pad for good.
++func pointer_recent(window_msec := 500) -> bool:
++	return Time.get_ticks_msec() - last_pointer_msec < window_msec
++
++
+ ## Process all window input. Window input is processed before all _input and
+ ## _gui_input node methods.
+ ## @tutorial https://docs.godotengine.org/en/latest/tutorials/inputs/inputevent.html#how-does-it-work
+@@ -134,6 +145,9 @@ func _input(event: InputEvent) -> void:
+ 			self.current_touches += 1
+ 		else:
+ 			self.current_touches -= 1
++	if event is InputEventScreenTouch or event is InputEventScreenDrag or event is InputEventMouseButton \
++			or (event is InputEventMouseMotion and (event as InputEventMouseMotion).button_mask != 0):
++		last_pointer_msec = Time.get_ticks_msec()
+ 
+ 	# Don't process Godot events if InputPlumber is running
+ 	if input_plumber.is_running() and not is_inputplumber_event(event):
+diff --git a/core/ui/card_ui/home/cardui_home.gd b/core/ui/card_ui/home/cardui_home.gd
+index 45aef3a..daaa830 100644
+--- a/core/ui/card_ui/home/cardui_home.gd
++++ b/core/ui/card_ui/home/cardui_home.gd
+@@ -222,9 +222,7 @@ func _on_card_focused(item: LibraryItem, card: Control) -> void:
+ 	# Don't scroll to the card if mouse or touch is being used
+ 	var input_manager := get_tree().get_first_node_in_group("input_manager")
+ 	if input_manager:
+-		if (input_manager as InputManager).current_touches > 0:
+-			return
+-		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
++		if (input_manager as InputManager).pointer_recent():
+ 			return
+ 
+ 	_scroll_to(card)
+diff --git a/core/ui/card_ui/library/library_menu.gd b/core/ui/card_ui/library/library_menu.gd
+index 70772fe..a187d56 100644
+--- a/core/ui/card_ui/library/library_menu.gd
++++ b/core/ui/card_ui/library/library_menu.gd
+@@ -268,9 +268,7 @@ func _on_focus_updated(card: Control, tab: int) -> void:
+ 	# Don't scroll to the card if mouse or touch is being used
+ 	var input_manager := get_tree().get_first_node_in_group("input_manager")
+ 	if input_manager:
+-		if (input_manager as InputManager).current_touches > 0:
+-			return
+-		if Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
++		if (input_manager as InputManager).pointer_recent():
+ 			return
+ 	
+ 	# Get the scroll container for this card
+-- 
+2.55.0
+
