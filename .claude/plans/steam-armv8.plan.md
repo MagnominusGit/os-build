@@ -202,6 +202,79 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
 - Direction (discussed 2026-10-24): RetroForge only opens Steam's sign-in and reads loginusers.vdf for
   the state ("Signed in as ..."); it never reads or copies Steam's session files, and takes no password.
 
+### Phase 6: Steam Cloud and achievements on low-RAM boards (2026-10-24)
+Keep Cloud saves and achievements on the 3.5 GB boards (Air X) without losing what the clientless launch
+saves. Test tools: `~player/.cache/rf-lite/rf-lite.sh` on the Air X (one command per step).
+- [x] Hades uses Auto-Cloud (`root="WinMyDocuments" path="Saved Games/Hades" pattern="Profile*.sav"`). The
+  client syncs it around its own launches only: `Starting sync (AC Launch,down,)` before the game,
+  `(up,AC Exit,)` after it (cloud_log.txt). Valve's docs say both mechanisms sync "before and after every
+  session" and say nothing about games started outside the client.
+- [x] SteamCMD (arm64, 1792617903) has no cloud command: `find cloud` lists only convars. Its
+  `app_run`/`app_launch` take Steam's launch path. Its first sign-in takes a password and Steam Guard, later
+  ones the cached credentials (`+@NoPromptForPassword 1`: "FAILED (No cached credentials ...)", exit 5;
+  `logout`/`logoff` revoke them). A game cannot use it as its client: with SteamCMD signed in, a
+  Steamworks connection (`CreateSteamPipe`) finds none. Its data folder is whatever `~/.steam/steam` names
+  (on a device, the client's): it wrote `config/config.vdf`, `logs/` and `appcache/` there, and keeps its
+  binaries in its own folder. 66-67 MiB RSS signed in.
+- [x] Earlier run (06:59, the client launching Hades with `-nofriendsui`, web helpers SIGSTOPped and paged
+  out 15 s after Hades.exe started): the helpers went from 917 to 31 MiB of RAM, but kept 892 MiB in zram
+  and 252 MiB of GPU buffers, and earlyoom killed Hades 40 s in (available 112 MiB, swap free 535). Capping
+  or reclaiming the helpers is not enough: their GPU memory cannot be swapped.
+- [x] E0, the client idle in the background (`-steamdeck -silent -nofriendsui`, user unit
+  `retroforge-steam`), RAM+swap in use (MiB): no client 2040; signed in after 20 s; idle 3180-3308. Core:
+  135-170 PSS + 21-24 swap + 28 GPU. Web helpers (8 processes): 710-1100 PSS + up to 300 swap + 12-32 GPU.
+  Without `-gamepadui` the helpers are as big, with less GPU.
+- [x] Killing the web helpers does not stick: the client starts them again at once (14 times in 120 s, no
+  limit seen) and stays signed in.
+- [x] Freezing them does: kill the helper, then SIGSTOP the one the client starts 0.3 s later (7 MB RSS;
+  0.2 s of CPU to catch it). The client waited 6 min without starting another or logging anything, and
+  stayed signed in. RAM+swap in use 2265-2307: the client then costs ~240 MiB (core 176-192 RSS, 23 swap,
+  28 GPU). SIGCONT brings its UI back (8 processes).
+- [x] A process the client did not start can use it (2026-10-25, the frozen-helper client): a Steamworks
+  probe as app 480 (ctypes on `linuxarm64/steamclient.so`, SDK 1.65 layouts) connected, signed in, cloud on
+  (4 KB quota), stats received. `SetAchievement` + `StoreStats` came back stored (EResult 1); cleared after.
+  The client logged `Game process added : AppID 480 ""`, tracked it, and on its exit ran
+  `Starting sync (up,AC Exit,)`: the file written with `ISteamRemoteStorage::FileWrite` was uploaded
+  (`Upload OK`). On connect it ran only an `init` sync, no `AC Launch,down`.
+- [x] E1, Hades started clientless (`retroforge-steam-direct`) beside the frozen-helper client: Hades.log
+  `Steam Input initialized`, `Steam initialized`. gameprocess_log: `PID ... was launched outside Steam,
+  using container PID ... as root`. controller_ui: `OnFocusWindowChanged to game window type: AppID
+  1145360`. Playtime +3 min. On exit Auto-Cloud logged `No launch record found. Skipping looking for files
+  added/removed while the game was running`, then still uploaded the new and changed saves (Profile4,
+  change number 1 -> 2). No sync down before the game.
+- [x] E2, the same client launching Hades itself (`-gamepadui ... -nofriendsui`, the kept-client path), its
+  helper frozen 15 s after Hades.exe started: launch option dialog, install script evaluator (9 s),
+  `AC Launch,down`, stats, shader prompt, then the game 14 s after the URI. Steam initialized, Steam Input
+  focus, playtime +4 min, the save uploaded on exit (change number 3). The helpers peaked at 1970 MiB
+  (1425 RSS, 356 swap, 189 GPU) during Steam's launch steps.
+- [x] Memory, Hades's first room then quit from its menu, same launch option, MemTotal 3621 MiB, no OOM in
+  any of them (peak RAM+swap in use / least swap free / least available, MiB):
+  | mode | peak | swap free | available | Steam features |
+  |---|---|---|---|---|
+  | clientless (baseline, same day) | 5735 | 1428 | 24 | none |
+  | E1: frozen-helper client beside a clientless launch | 5810 | 1311 | 47 | all but the sync down before play |
+  | E2: frozen-helper client launches the game | 6274 | 833 | 48 | all |
+  The swap the launch-time helpers push out stays out for the whole game, hence E2's cost.
+- [x] SteamCMD as the default download path, if it could use the client's sign-in: no. Run on the Air X
+  with the client's folder as its data folder (through an overlay, its writes thrown away), as uid 0 and as
+  uid 1000: "Cached credentials not found" (exit 5, no prompt). It would need a first sign-in of its own with
+  a password and Steam Guard, which RetroForge does not take (D8). Not a download path then. The
+  frozen-helper client can download instead (an app manifest with StateFlags 1026, as in Phase 0).
+- [x] The user's choice (2026-10-25): a minimal client for all background running, the full client
+  whenever Steam's UI is needed, "client off" still an option, and the background minimal client the
+  default on every device. So "Keep Steam running" (KEEP_RUNNING) is on by default, renamed "Steam: keep
+  running in the background", and the kept client is minimal while nothing holds its UI.
+- [x] Implemented: `retroforge-steam-keep full [PID]` / `minimal [PID]` (kill the web helper, freeze
+  the restarted one and what it started; holds per launch in `$XDG_RUNTIME_DIR/retroforge-steam-full`).
+  `/usr/bin/steam`: Steam's UI holds the client full until OGUI closes it; a game the client starts
+  holds it until it has run 15 s; a game started without the client gets the kept client beside it
+  (started with the launch's arguments minus the URI, signed in first, ~20 s once per boot, 45 s at
+  most; only with a remembered sign-in). `retroforge-steam-direct check` lets a game start without the
+  client while the kept one (cgroup `retroforge-steam.service`) runs. Plugin texts, docs, tests
+  (steam 117, steam-direct 106).
+- [ ] On the Air X: the image's own path end to end (first launch after boot waits for the sign-in,
+  later ones start at once; Steam's UI from Main menu thaws and refreezes).
+
 ## Validation
 - The LSE scan passes on every release. On the Air X, Hades shows about 0 kernel LSE emulations with the new tool.
 - The os-build suites pass (`test-steam*`, `test-plugin`, `test-steam-compat-tools`).
