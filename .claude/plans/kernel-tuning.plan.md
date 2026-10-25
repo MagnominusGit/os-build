@@ -334,9 +334,21 @@ OPP's peak-bandwidth tier changes the bimc bus clock, and that request does go o
 frequency path too would mean moving the vote to a work item (and letting `qcom-cpufreq-hw`
 fast-switch), or coarser peak tiers in the CPU OPP tables. Both are follow-ups, not needed for this round.
 
-Still to do on this kernel: the Hades governor A/B again (schedutil changed frequency 244 times a second
-on the little cluster and paid for every vote; that cost is now ~4x smaller), and a memory comparison
-under the same game.
+**Governor A/B on the new kernel (Hades, 2026-10-25 00:40, same method, 20 s windows ×3 each).** Hades
+was in a lighter scene this time (~58 fps at a 16.7 ms cadence, GPU 60% busy, against ~34 fps and 81% in
+the first A/B), so the two kernels' fps cannot be compared; the A/B within this run can:
+
+| governor | fps | p95 / p99 frame | frames > 40 ms | little / big avg MHz | battery | glink-rpm |
+|---|---|---|---|---|---|---|
+| ondemand | 57.9–59.0 (58.5) | 17.6 / 33.4 ms | 0.0% | 1501 / 2088 | 4.65 W | 30–41/s |
+| schedutil | 56.4–57.9 (56.9) | 28.0 / 33.6 ms | 0.2% | 1268 / 2110 | 4.60 W | 28–36/s |
+
+schedutil dropped ~5% of frames to 33 ms in two of its three windows (p95 33.2 ms), running the little
+cluster ~230 MHz lower on average. With the first A/B (schedutil +3.5% in a GPU-bound scene, old kernel)
+that is one win each, which is not a case for changing powerd: **ondemand stays the default**. In play
+the RPM traffic is now ~30 IRQs/s under either governor (400–1,130/s on the old kernel), so the vote
+cost no longer separates them. Memory in this scene: 351 MB available, 1.03 GB unevictable, zram 796 MB
+stored in 162 MB, PSI memory full 0.06% over 60 s, no OOM.
 
 ## Does it apply to the other SoCs?
 Fleet: SM8250 (Kryo 585 = A77 + A55, ARMv8.2), SM8550 / SM8650 (Cortex-X/A7xx/A5xx, ARMv9), SM8750
