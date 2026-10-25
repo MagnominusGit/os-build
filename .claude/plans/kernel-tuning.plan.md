@@ -371,10 +371,37 @@ work onto the A73s) hold every frame at the 60 Hz cadence; ondemand, schedutil a
 frames slip to 33 ms. EAS on no longer collapses the game (it did, 95% missed, with the synthetic loop on
 the old kernel) but does not help either. lavd still underclocks the big cluster and drops the most.
 
-Candidates for the SM6115 default, each to confirm on a CPU-bound title and a GPU-bound scene first:
-**conservative** (a governor change in power.conf's SM6115 profile, littles ~1.8 GHz rather than
-pinned) or **scx_bpfland** (needs `bpfland` in powerd's scheduler vocabulary and the Air X profile's
-`RETROFORGE_CPU_SCHEDULERS`). Not yet: one title, one scene.
+**Synthetic loads, same modes (2026-10-25, no game, `tools/perf/framesim.c`, 12 s windows × 2 rounds,
+plus `scx_bpfland --cpufreq`).** Calibrated on cpu7 at max clock: 40 work units = 3.96 ms, so load A =
+2 threads × 61 units (~6 ms per 60 fps frame, the October test) and load B = 4 threads × 101 units
+(~10 ms, emulator-like: each thread needs a full-speed A73).
+
+| mode | A: missed / worst p95 work | A: on A73 | A: power | B: missed (round 1 / 2) | B: on A73 |
+|---|---|---|---|---|---|
+| ondemand | 0.3% / 11.6 ms | 98% | 1.65 W | 17% (5.5 / 28.8) | 98% |
+| schedutil, EAS off | 0.2% / 12.3 ms | 98% | 1.78 W | 15% (12.7 / 16.2) | 99% |
+| schedutil, EAS on | **9.7%** / 30.3 ms | 98% | 1.78 W | 14% (2.7 / 26.0) | 98% |
+| conservative | **0.1% / 8.8 ms** | 98% | **1.45 W** | 20% (1.5 / 38.1) | 98% |
+| performance | 0.2% / 8.1 ms | 99% | 1.82 W | 12.5% (24.5 / 0.5) | 98% |
+| scx_lavd | **48%** / 82 ms | 50% | 1.62 W | **79%** | 73% |
+| scx_bpfland | **4.4%** / 39 ms | 94% | 1.77 W | **92%** | 87% |
+| scx_bpfland --cpufreq | **34%** / 50 ms | 65% | 1.82 W | **86%** | 86% |
+
+- The stock scheduler places deadline threads correctly on its own: 98–99% of frames ran on the A73s
+  under every governor. The governor then sets the tail: conservative and performance finish a 6 ms
+  frame in ~8–9 ms at p95, ondemand and schedutil in ~12 ms (they leave the A73s lower), and
+  conservative did it at the lowest power.
+- **Every sched_ext scheduler puts deadline threads on the A53s**, where a 6 ms frame takes ~39 ms and a
+  10 ms one ~150 ms. bpfland's Hades win was a light load: it ran the littles at max and left the game the
+  A73s. It does not survive per-thread work, so it is **not a candidate**. lavd fails both loads again.
+- EAS on still costs ~10% of frames on load A (95% in October on the old kernel and another frame loop).
+- Load B saturates the four A73s with the session running beside it: every stock mode misses 12–20%,
+  and the round-to-round spread (0.5–38%) is larger than the gaps between modes.
+
+**Conclusion:** conservative is the one candidate that won everywhere it could be told apart: Hades
+(60 fps held, p99 17 ms), load A (best tail at the lowest power), and no worse within noise on load B.
+Confirm it on one real CPU-bound title (an emulator) and, if it holds, set `governor=conservative` for
+the SM6115 boards in powerd's config. sched_ext stays `none` on this SoC; EAS stays off.
 
 ## Does it apply to the other SoCs?
 Fleet: SM8250 (Kryo 585 = A77 + A55, ARMv8.2), SM8550 / SM8650 (Cortex-X/A7xx/A5xx, ARMv9), SM8750
