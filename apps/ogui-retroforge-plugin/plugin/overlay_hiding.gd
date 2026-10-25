@@ -9,8 +9,10 @@ extends RefCounted
 ## it): the window is not painted and the pipe stays free.
 ##
 ## The window is shown again before anything is drawn in it: when the in-game state is left (a
-## menu, the quick bar, the keyboard, or the game ended), while an in-game toast is up, and while
-## the volume indicator is (gamescope sends the volume keys to the shell even in game).
+## menu, the quick bar, the keyboard, or the game ended), while an in-game toast is up, while
+## the volume indicator is (gamescope sends the volume keys to the shell even in game), and while
+## OGUI's launch screen is (GameLoading: drawn in this window, in the in-game state, from the
+## launch until the game's window appears; hidden with it, no launch showed one).
 ## xprop runs as a separate process so the main loop never waits on it. It takes 60-80 ms on an
 ## A53, so the window is shown already on the Guide PRESS (expect_ui): OGUI opens its menu on the
 ## release, by which time the window is back in the frame. If no menu follows, it hides again.
@@ -30,6 +32,9 @@ var _in_game := false
 var _hidden := false
 var _toast_showing := false
 var _expecting_ui := false
+var _loading: Control  # OGUI's GameLoading
+var _loading_showing := false
+var _update_queued := false
 
 
 func setup(tree: SceneTree) -> RefCounted:
@@ -49,7 +54,17 @@ func setup(tree: SceneTree) -> RefCounted:
 	audio_manager.volume_changed.connect(_on_volume_shown)
 	if _volume and _volume.get("timer"):
 		_volume.timer.timeout.connect(_on_volume_gone)
+	_loading = tree.root.find_child("GameLoading", true, false) as Control
+	if _loading:
+		_loading.visibility_changed.connect(_on_loading_changed)
+	else:
+		logger.warn("OGUI's launch screen not found; launches show no loading screen")
 	return self
+
+
+func _on_loading_changed() -> void:
+	_loading_showing = is_instance_valid(_loading) and _loading.visible
+	_update()
 
 
 func _on_volume_shown(_value: float) -> void:
@@ -94,13 +109,22 @@ func set_in_game(in_game: bool) -> void:
 
 func detach() -> void:
 	_in_game = false
-	_update()
+	if _window != 0:
+		_apply()  # now: the plugin is going, nothing may run deferred after it
 
 
+## Once per frame: entering the game and showing the launch screen come in the same frame, and two
+## xprop runs started together could land in either order and leave the window hidden.
 func _update() -> void:
-	if _window == 0:
+	if _window == 0 or _update_queued:
 		return
-	var hide := _in_game and not _toast_showing and not _volume_showing and not _expecting_ui
+	_update_queued = true
+	_apply.call_deferred()
+
+
+func _apply() -> void:
+	_update_queued = false
+	var hide := _in_game and not _toast_showing and not _volume_showing and not _expecting_ui and not _loading_showing
 	if hide == _hidden:
 		return
 	_hidden = hide
