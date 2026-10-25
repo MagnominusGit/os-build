@@ -7,9 +7,8 @@ extends RefCounted
 ## while Steam's UI is open still go through Steam. With Steam kept running in the background
 ## (steam_keep.gd) the game still gets achievements, playtime, Steam Input and the cloud upload when
 ## it ends, but no cloud download before it; with it off, none of those, and a game that needs Steam
-## closes. No overlay either way. Never set, it is on for the SM6115 and boards with under 4.5 GiB of
-## RAM. The command decides all of that, so the toggle only shows what `retroforge-steam-direct
-## status` says and runs `on` / `off`.
+## closes. No overlay either way. Never set, it is on, on every board. The command decides all of
+## that, so the toggle only shows what `retroforge-steam-direct status` says and runs `on` / `off`.
 
 const TOOL := "/usr/bin/retroforge-steam-direct"
 

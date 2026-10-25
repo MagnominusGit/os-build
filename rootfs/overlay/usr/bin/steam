@@ -31,10 +31,11 @@
 # (RunningApp.find_steam). That is the client: this script runs as `bash`, because env re-execs it.
 # A TERM/INT/HUP sent to this script is passed on to the client, so it is never left running
 # without its wrapper.
-# Unless the player keeps Steam running between games (Settings > Steam): then the client runs as a
-# user unit and outlives the launch, and this script hands launches to it ("Kept running between
-# games" below). And a game Steam has started here before may start without the client at all
-# (Settings > Steam, on by default on the SM6115 and 4 GB boards: "Without the client" below).
+# Unless the player keeps Steam running in the background (Settings > Steam, on by default): then the
+# client runs as a user unit, minimal, and outlives the launch, and this script hands launches to it
+# ("Kept running in the background" below). And a game Steam has started here before starts without
+# the client, beside the kept one (Settings > Steam, on by default: "Without the client" below), so
+# Steam's full client comes up only when the player opens Steam.
 #
 # First start: on 2026-10-15 the client updated itself from Valve's manifest (667 MB download) to
 # ~3 GB, because the linuxarm64 manifest also carries the x86 client and runtimes. steam-install runs
@@ -70,7 +71,7 @@ for link in steam root; do
   fi
 done
 
-# ---- Without the client (Settings > Steam; on by default on the SM6115 and 4 GB boards) -------------
+# ---- Without the client (Settings > Steam; on by default) -------------------------------------------
 # A game launch (steam://rungameid/<appid>) can start without the Steam client, which holds ~1 GB
 # beside the game: on the MANGMI Air X (3.5 GB) earlyoom killed Hades in its first room with the
 # client running, and Hades played without it (2026-10-22). /usr/bin/retroforge-steam-direct decides

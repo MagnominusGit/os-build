@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# retroforge-steam-direct — Steam games started without the Steam client, on boards where the client's
-# memory is what the game needs: the player's "Start Steam games without Steam" setting, and the launch.
+# retroforge-steam-direct — Steam games started without the Steam client (beside the kept one, minimal,
+# when Steam is kept running): the player's "Start Steam games without Steam" setting, and the launch.
 #
 #   retroforge-steam-direct status       print on or off (and on stderr, where that comes from)
 #   retroforge-steam-direct on|off       save the player's choice; print the result
@@ -85,16 +85,17 @@
 # THE SETTING is DIRECT_LAUNCH=on|off in ~/.config/retroforge/steam.conf, beside DXVK_SAREK and
 # KEEP_RUNNING (the last such line counts; saving rewrites that line and keeps the others). The
 # RetroForge plugin's Settings > Steam toggle "Steam: start games without Steam" runs this. Never
-# set, it is on for SoC class SM6115 (device-env: the client also runs on emulated LSE atomics there)
-# and on boards with under 4.5 GiB of RAM (MemTotal: the 4 GB boards), off elsewhere.
-# RETROFORGE_STEAM_DIRECT=on|off overrides both, for testing and debugging.
+# set, it is on, on every board: the kept client beside the game keeps Steam's features, and Steam's
+# full client comes up only when the player opens Steam (the user's choice, 2026-10-25; before, only
+# the SM6115 and the 4 GB boards). RETROFORGE_STEAM_DIRECT=on|off overrides the file, for testing and
+# debugging.
 #
 # Exit 0; 1 when the setting could not be saved, or (check, run) the game starts through Steam; 2 for a
 # bad invocation.
 #
 # TEST SEAMS (tests/test-steam-direct.sh): RETROFORGE_STEAM_ROOT (also set by /usr/bin/steam),
-# RETROFORGE_PROC (/proc), RETROFORGE_MEMINFO (/proc/meminfo), RETROFORGE_DEVICE_ENV,
-# RETROFORGE_STEAM_LIBRARY (the steam-library whose readers this uses), XDG_CONFIG_HOME, XDG_CACHE_HOME,
+# RETROFORGE_PROC (/proc), RETROFORGE_STEAM_LIBRARY (the steam-library whose readers this uses),
+# XDG_CONFIG_HOME, XDG_CACHE_HOME,
 # RETROFORGE_STEAM_XWAYLAND (a JSON file standing in for the game's X server), RETROFORGE_STEAM_DETACH
 # (what starts the restore-resolution watcher: systemd-run).
 import ctypes
@@ -117,12 +118,8 @@ STEAM_ROOT = (os.environ.get("RETROFORGE_STEAM_ROOT") or os.path.join(DATA, "Ste
 CONF = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config"), "retroforge", "steam.conf")
 CACHE = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.join(HOME, ".cache"), "retroforge", "steam-direct")
 PROC = os.environ.get("RETROFORGE_PROC", "/proc")
-MEMINFO = os.environ.get("RETROFORGE_MEMINFO", "/proc/meminfo")
-DEVICE_ENV = os.environ.get("RETROFORGE_DEVICE_ENV", "/usr/lib/retroforge/device-env")
 STEAM_LIBRARY = os.environ.get("RETROFORGE_STEAM_LIBRARY", "/usr/lib/retroforge/steam-library")
 KEY = "DIRECT_LAUNCH"
-# Under this much RAM (kB of MemTotal) the setting is on by default: the 4 GB boards report ~3.5-3.8 GiB.
-LOW_RAM_KB = 4718592
 # Steam's FEX tool and its x86 Steam Linux Runtimes (scout, soldier, sniper, 4.0).
 X86_TOOLS = (3127680, 1070560, 1391110, 1628350, 4183110)
 STEAMPLAY_MANIFESTS = 891390
@@ -174,27 +171,6 @@ def saved():
     return value if value in ("on", "off") else None
 
 
-def board():
-    """(SoC class, MemTotal in kB); "" and 0 for what cannot be read."""
-    soc, mem = "", 0
-    try:
-        out = subprocess.run([DEVICE_ENV], capture_output=True, text=True, timeout=10).stdout
-        for line in out.splitlines():
-            for word in shlex.split(line):
-                if word.startswith("RETROFORGE_SOC_CLASS="):
-                    soc = word.split("=", 1)[1]
-    except (OSError, ValueError, subprocess.SubprocessError):
-        pass
-    try:
-        with open(MEMINFO) as f:
-            for line in f:
-                if line.startswith("MemTotal:"):
-                    mem = int(line.split()[1])
-    except (OSError, ValueError, IndexError):
-        pass
-    return soc, mem
-
-
 def state():
     """(on|off, where that comes from)."""
     env = os.environ.get("RETROFORGE_STEAM_DIRECT", "")
@@ -203,10 +179,7 @@ def state():
     choice = saved()
     if choice:
         return choice, CONF
-    soc, mem = board()
-    ram = f"{mem / 1048576:.1f} GiB of RAM" if mem else "unknown RAM"
-    on = soc == "SM6115" or 0 < mem < LOW_RAM_KB
-    return ("on" if on else "off"), f"the default on {soc or 'an unknown board'} with {ram}"
+    return "on", "the default"
 
 
 def save(value):

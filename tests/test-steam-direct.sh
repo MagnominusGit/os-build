@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
 # Offline test for /usr/bin/retroforge-steam-direct and /usr/bin/steam's "Without the client" block:
-# Steam games started without the Steam client, on boards where the client's memory is what the game
-# needs (the MANGMI Air X, 3.5 GB: Hades was killed in its first room with the client, and played
-# without it, 2026-10-22).
+# Steam games started without the Steam client, on by default (first for the MANGMI Air X, 3.5 GB:
+# Hades was killed in its first room with the client, and played without it, 2026-10-22).
 #
 #   tests/test-steam-direct.sh
 #
 # WHY THIS EXISTS. Each rule below fails as a game that does not start, starts differently from how
 # Steam starts it, or a Steam that never comes back:
-#   the setting: on by default on SoC class SM6115 and under 4.5 GiB of RAM, off elsewhere; saved
+#   the setting: on by default, on every board; saved
 #     beside the other Steam settings (DXVK_SAREK, KEEP_RUNNING), which stay; an override for testing;
 #   what is replayed: Steam's own newest logged launch of that game ("Game process added"), from
 #     console_log.txt or console_log.previous.txt, kept in a cache so a rotated log does not lose it;
@@ -145,14 +144,10 @@ fresh_log() {  # the client's log as it was after Hades's launches, nothing kept
   echo "[2026-10-22 10:08:43] Game process removed: AppID 1145360 \"$HADES_CMD\", ProcID 8833" >>"$SLOG"
 }
 
-printf '#!/usr/bin/env bash\necho "RETROFORGE_SOC_CLASS=$(cat %s)"\n' "'$T/soc'" >"$T/device-env"; chmod +x "$T/device-env"
-board() {  # board <SoC class> <MemTotal kB>
-  echo "$1" >"$T/soc"; printf 'MemTotal:       %s kB\nMemFree:          1000 kB\n' "$2" >"$T/meminfo"
-}
 DENV=(env -u RETROFORGE_STEAM_ROOT -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u XDG_CACHE_HOME -u RETROFORGE_STEAM_DIRECT
       -u SteamAppId -u STEAM_COMPAT_CONFIG -u STEAM_COMPAT_DATA_PATH -u DISPLAY -u RETROFORGE_GAMESCOPE_NESTED_W
       -u RETROFORGE_GAMESCOPE_NESTED_H HOME="$H" RETROFORGE_PROC="$T/proc"
-      RETROFORGE_MEMINFO="$T/meminfo" RETROFORGE_DEVICE_ENV="$T/device-env" RETROFORGE_STEAM_LIBRARY="$LIBRARY")
+      RETROFORGE_STEAM_LIBRARY="$LIBRARY")
 direct() {  # direct [VAR=value...] -- args...
   local -a vars=()
   while [ "$1" != -- ]; do vars+=("$1"); shift; done; shift
@@ -164,26 +159,15 @@ reset_run() { rm -f "$T/ran.args" "$T/ran.cwd" "$T/ran.env" "$T/ran.oom" "$T/gam
 
 # ================================================================================================
 CASE="setting"
-board SM6115 3650556
 direct -- status
-[ "$OUT" = on ] && grep -q "SM6115 with 3.5 GiB" <<<"$ERR" && ok "on by default on the SM6115 (the Air X), and says why" || bad "out=$OUT err=$ERR"
-board SM6115 7864320
-direct -- status
-[ "$OUT" = on ] && ok "on for the SM6115 whatever its RAM (the client runs on emulated LSE atomics there)" || bad "out=$OUT err=$ERR"
-board SM8250 3900000
-direct -- status
-[ "$OUT" = on ] && ok "on under 4.5 GiB of RAM on another SoC (a 4 GB board)" || bad "out=$OUT err=$ERR"
-board SM8250 7864320
-direct -- status
-[ "$OUT" = off ] && grep -q "SM8250 with 7.5 GiB" <<<"$ERR" && ok "off on a board with more RAM" || bad "out=$OUT err=$ERR"
+[ "$OUT" = on ] && grep -q "the default" <<<"$ERR" && ok "on by default, on any board, and says so" || bad "out=$OUT err=$ERR"
 printf '# Steam settings, mine\nDXVK_SAREK=on\nKEEP_RUNNING=off\nDIRECT_LAUNCH=on\n' | { mkdir -p "${CONF%/*}"; cat >"$CONF"; }
 direct -- on
 [ "$OUT" = on ] && [ "$(grep -c '^DIRECT_LAUNCH=' "$CONF")" = 1 ] && grep -qx "DIRECT_LAUNCH=on" "$CONF" \
   && grep -qx "DXVK_SAREK=on" "$CONF" && grep -qx "KEEP_RUNNING=off" "$CONF" && grep -qx "# Steam settings, mine" "$CONF" \
   && ok "on is saved once, beside the DXVK-Sarek and keep-running settings, which stay" || bad "out=$OUT conf=$(cat "$CONF")"
-board SM6115 3650556
 direct -- off
-[ "$OUT" = off ] && grep -qx "DIRECT_LAUNCH=off" "$CONF" && ok "off is kept over the board's default" || bad "out=$OUT conf=$(cat "$CONF")"
+[ "$OUT" = off ] && grep -qx "DIRECT_LAUNCH=off" "$CONF" && ok "off is kept over the default" || bad "out=$OUT conf=$(cat "$CONF")"
 direct -- status
 [ "$OUT" = off ] && grep -q "steam.conf" <<<"$ERR" && ok "and read back, from the file" || bad "out=$OUT err=$ERR"
 direct RETROFORGE_STEAM_DIRECT=on -- status
@@ -200,7 +184,7 @@ direct -- check 1145360
 [ "$RC" = 1 ] && [ -z "$ERR" ] && ok "the setting off: exit 1, silently (Steam starts the game, as always)" || bad "rc=$RC err=$ERR"
 
 CASE="check"
-rm -f "$CONF"; board SM6115 3650556
+rm -f "$CONF"
 direct -- check 1145360
 [ "$RC" = 0 ] && [ -z "$ERR" ] && ok "a game Steam has started here: it starts without the client" || bad "rc=$RC err=$ERR"
 [ -f "$CACHE/1145360.json" ] && python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d["logged"] == "2026-10-22 10:07:35" and d["command"] == sys.argv[2] else 1)' "$CACHE/1145360.json" "$HADES_CMD" \
@@ -548,7 +532,7 @@ wrap() {  # wrap [VAR=value...] -- args...
   WOUT="$("${WENV[@]}" "${vars[@]}" bash "$WRAP" "$@" 2>"$W/err")"; WRC=$?
   WERR="$(cat "$W/err")"
 }
-fresh_log; rm -f "$CONF"; board SM6115 3650556
+fresh_log; rm -f "$CONF"
 
 CASE="wrapper: a game"
 wrap DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/0/bus" -- -gamepadui -steamos3 -steampal -steamdeck -silent steam://rungameid/1145360

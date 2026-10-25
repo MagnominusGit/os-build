@@ -244,7 +244,9 @@ enough: the paused helper kept 252 MB of GPU buffers, which cannot be swapped, a
 Hades with it (2026-10-24, 07:01). Killing it does not last: the client starts it again at once (14
 times in 2 minutes). So `minimal` kills it and freezes (SIGSTOP) the one the client starts next, 0.3 s
 later at ~7 MB, and anything it has started. The client waits for it indefinitely (6 minutes seen)
-without starting another, stays signed in, and costs ~240 MB in all. `full` (SIGCONT) brings Steam's UI
+without starting another, stays signed in, and costs ~240 MB in all while idle; under a game's memory
+pressure the kernel moves most of that into zram, and at Hades's peak it cost ~75 MB (the table
+below). `full` (SIGCONT) brings Steam's UI
 back. The launches that need the UI hold it (`full $$`, a file per launch in
 `$XDG_RUNTIME_DIR/retroforge-steam-full/`): Steam's own UI until OGUI closes it, and a game the client
 starts until it has run 15 s (`RETROFORGE_STEAM_MINIMAL_DELAY`), since Steam's launch dialogs, install
@@ -274,7 +276,7 @@ cloud-conflict check when the game ends. When the client launches the game, its 
 `systemctl --user status retroforge-steam` and `journalctl --user -u retroforge-steam` (as the
 player) show a kept client; the launches log to OGUI's journal as before.
 
-## Starting games without Steam (Settings > Steam, on by default on the SM6115 and 4 GB boards)
+## Starting games without Steam (Settings > Steam, on by default)
 
 **Why.** On the MANGMI Air X (SM6115, 3.5 GB, zram 3.5 GB) earlyoom killed Hades (Proton 11.0
 ARM64, Vulkan, 1280x720) every time it loaded, last as it entered its first room. It never crashed
@@ -378,11 +380,10 @@ then works ("Minimal in the background" above).
 
 **The setting.** `DIRECT_LAUNCH=on|off` in `~/.config/retroforge/steam.conf`, beside `DXVK_SAREK`
 and `KEEP_RUNNING`. The player changes it in Settings > Steam > "Steam: start games without Steam"
-(`steam_direct.gd`), or with `retroforge-steam-direct on|off|status` over SSH. Never set, it is on
-for SoC class SM6115 (`device-env`) and on boards with less than 4.5 GiB of `MemTotal` (the 4 GB
-boards report ~3.5-3.8 GiB), and off elsewhere. The SM6115 is on whatever its RAM, because its client
-also runs on emulated LSE atomics (`0025`). `RETROFORGE_STEAM_DIRECT=on|off` overrides it, for
-testing. A launch item stays `steam ... steam://rungameid/<appid>`, so the setting applies from the
+(`steam_direct.gd`), or with `retroforge-steam-direct on|off|status` over SSH. Never set, it is on, on
+every board: with the kept client beside the game, Steam's full client comes up only when the player
+opens Steam (2026-10-25; it was on only for the SM6115 and the 4 GB boards before).
+`RETROFORGE_STEAM_DIRECT=on|off` overrides it, for testing. A launch item stays `steam ... steam://rungameid/<appid>`, so the setting applies from the
 next launch without a library rescan. Keeping Steam running applies to all of them: a game started
 without the client gets the kept client beside it, and first launches and Steam's own UI go to it.
 

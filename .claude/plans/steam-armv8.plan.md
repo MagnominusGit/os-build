@@ -263,7 +263,11 @@ saves. Test tools: `~player/.cache/rf-lite/rf-lite.sh` on the Air X (one command
 - [x] The user's choice (2026-10-25): a minimal client for all background running, the full client
   whenever Steam's UI is needed, "client off" still an option, and the background minimal client the
   default on every device. So "Keep Steam running" (KEEP_RUNNING) is on by default, renamed "Steam: keep
-  running in the background", and the kept client is minimal while nothing holds its UI.
+  running in the background", and the kept client is minimal while nothing holds its UI. Refined the same
+  day: games start without the client by default on every device too (DIRECT_LAUNCH, was SM6115 and
+  4 GB boards only), so the full client comes up only when the player opens Steam, and for what only it
+  can start (a game's first launch on the device, x86 games, installs). With the toggle off, no Steam in
+  the background. The minimal client is ~240 MB idle, ~75 MB at Hades's peak (pushed to zram).
 - [x] Implemented: `retroforge-steam-keep full [PID]` / `minimal [PID]` (kill the web helper, freeze
   the restarted one and what it started; holds per launch in `$XDG_RUNTIME_DIR/retroforge-steam-full`).
   `/usr/bin/steam`: Steam's UI holds the client full until OGUI closes it; a game the client starts
@@ -271,7 +275,7 @@ saves. Test tools: `~player/.cache/rf-lite/rf-lite.sh` on the Air X (one command
   (started with the launch's arguments minus the URI, signed in first, ~20 s once per boot, 45 s at
   most; only with a remembered sign-in). `retroforge-steam-direct check` lets a game start without the
   client while the kept one (cgroup `retroforge-steam.service`) runs. Plugin texts, docs, tests
-  (steam 117, steam-direct 106).
+  (steam 117, steam-direct 103).
 - [ ] On the Air X: the image's own path end to end (first launch after boot waits for the sign-in,
   later ones start at once; Steam's UI from Main menu thaws and refreezes).
 
