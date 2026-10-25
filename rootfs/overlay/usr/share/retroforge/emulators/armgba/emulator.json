@@ -1,0 +1,45 @@
+{
+  "notes": [
+    "armGBA (Game Boy, Game Boy Color, Game Boy Advance): Jacob Cook's recompiler core with its own SDL2 frontend, upstream's aarch64 AppImage (type-2 runtime, SDL2 static; the system's libGL/EGL and libz). Replaces mGBA (2026-10-25): several times the speed on Cortex-A55 class cores, a pad-driven menu, and Game Boy games on Gambatte-Speedrun's core.",
+    "--fullscreen for a game and for Open (armGBA is fullscreen by itself only when XDG_CURRENT_DESKTOP is unset; the flag makes it so on every session). The game is the one non-option argument (a ROM from ~/roms never starts with '-'). A .zip or .7z loads its first game.",
+    "system_settings: armGBA has ONE save folder and ONE state folder, set only in ~/.config/armgba/frontend.cfg (no flag, no -C), so the launcher rewrites save_folder and state_folder to the card's system before every game: ~/saves/<system>, ~/states/<system>. frontend.cfg's seeded gba values serve Open (no system). Saves are <game>.srm (RetroArch's name); mGBA's .sav files hold the same bytes under another name.",
+    "Exit: SIGTERM becomes SDL's quit event and armGBA's normal exit (save, settings and options written), so OpenGamepadUI's Exit needs nothing special; no SDL_NO_SIGNAL_HANDLERS (that would make it die without writing the save). From the pad: Hotkey (Select, frontend.cfg) + Start pressed twice within 3 s.",
+    "Pad: SDL2 game-controller API, so InputPlumber's Xbox Elite pad maps by itself; Nintendo button layout (A east, B south) is armGBA's default. `armgba --controllers` lists what SDL sees (mapped/unmapped), for a HW check.",
+    "gui_args: armGBA's own menu (General: Load Game, settings; it is what opens with no game), pad-driven."
+  ],
+  "format": "appimage",
+  "binary": "usr/bin/armgba",
+  "args": [
+    "--fullscreen",
+    "{rom}"
+  ],
+  "gui_args": [
+    "--fullscreen"
+  ],
+  "env": {},
+  "seed": [
+    {
+      "file": "frontend.cfg",
+      "to": ".config/armgba/frontend.cfg"
+    }
+  ],
+  "system_settings": [
+    {
+      "file": ".config/armgba/frontend.cfg",
+      "format": "ini",
+      "separator": " = ",
+      "set": [
+        {
+          "section": "",
+          "key": "save_folder",
+          "value": "\"/home/player/saves/{system}\""
+        },
+        {
+          "section": "",
+          "key": "state_folder",
+          "value": "\"/home/player/states/{system}\""
+        }
+      ]
+    }
+  ]
+}

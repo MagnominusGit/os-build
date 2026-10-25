@@ -702,6 +702,7 @@ plus the ROM library that launches them)
   | Emulator | Pad found by | Way out from the pad | Notes |
   |---|---|---|---|
   | mGBA (gb/gbc/gba) | first joystick, raw idx | none: OGUI Exit (no combos; R3 quit dropped) | no exit state on SIGTERM; HW ✅ ACE buttons (Droopy's Tennis) |
+  | armGBA (gb/gbc/gba, replaces mGBA 2026-10-25) | SDL game-controller API | Hotkey (Select, seeded: Auto = Guide, OGUI's) + Start twice | one save/state folder in frontend.cfg -> launcher `system_settings` rewrites it per system; .srm saves (mGBA's .sav = same bytes, rename); SIGTERM = SDL quit event, save written; HW: pending |
   | Snes9x | joystick 1, raw idx | none: OGUI Exit (no combos; R3 quit dropped) | hat = axes 6/7; Sound Driver index 3 = PulseAudio; Vulkan |
   | PPSSPP | device 10, gamepad API | Select+Start = pause, Exit quits (--pause-menu-exit) | saves/states via tmpfiles links |
   | Flycast | mapping file by SDL NAME | Select+Start = menu, Exit quits | AutoSaveState on, AutoLoadState off |

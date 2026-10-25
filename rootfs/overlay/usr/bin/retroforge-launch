@@ -25,6 +25,10 @@
 #    "system_args": {"md": ["--system", "Mega Drive"]},  put before args when the card's system has
 #                                                  an entry (one emulator, several systems it must
 #                                                  be told about); "{system}" allowed
+#    "system_settings": [{"file": ".config/x/x.cfg",  settings written into the emulator's own file
+#                         "format": "ini", "separator": " = ",   before every GAME, "{system}" in the
+#                         "set": [{"section": "", "key": "save_folder",   file and the values = the
+#                                  "value": "/home/player/saves/{system}"}]}],  card's system (below)
 #    "env": {"NAME": "value"},                     added to the emulator's environment
 #    "core_dumps": false,                          no core file when it crashes (default true; below)
 #    "seed": [{"file": "x.ini", "to": ".config/x/x.ini"}],   first-run settings (below)
@@ -70,6 +74,15 @@
 # (single|dual); on a board of the other kind, only the settings the two variants disagree on are
 # rewritten to this board's, the player's other changes kept. A home seeded before that record
 # existed is judged by those settings: one variant's exactly, or left alone (the player's own).
+#
+# Per-system settings (system_settings): one emulator serving several systems that has ONE save or
+# state folder, set only in its config file -- no flag, no -C (armGBA: gb, gbc, gba). Before every
+# game, each entry's settings are written into its file (emuopts' patchers: ini/toml/yaml/xml/json,
+# a missing file is created) with "{system}" in the file path and the values replaced by the card's
+# system, so saves land in ~/saves/<system> as the shared layout says. Never for --gui (Open has no
+# system): the file keeps the last game's values, or the seed's. A setting the player changes in the
+# emulator's own menu is put back at the next game -- these are RetroForge's, as system_args are. A
+# file that cannot be written is a warning, not a blocked game (as with sync).
 #
 # Kept current (sync): files that are RetroForge's, not the player's, placed into the download's world --
 # PortMaster's mod_RetroForge.txt and libgl_RetroForge.txt, which every port sources from PortMaster's
@@ -278,8 +291,8 @@ PSN_LOCK = ENV.get("RETROFORGE_PSN_LOCK",
 MEDIA_DIR = ENV.get("RETROFORGE_MEDIA_DIR", os.path.join(HOME, ".local/share/retroforge/media"))
 SYSTEM_ID = re.compile(r"[a-z0-9_]+")
 EMU_ID = re.compile(r"[a-z0-9_-]+")
-DEFINITION_KEYS = {"format", "root", "binary", "args", "gui_args", "system_args", "env", "seed",
-                   "sync", "install", "setup_args", "stub", "core_dumps", "exit_resend", "notes"}
+DEFINITION_KEYS = {"format", "root", "binary", "args", "gui_args", "system_args", "system_settings", "env",
+                   "seed", "sync", "install", "setup_args", "stub", "core_dumps", "exit_resend", "notes"}
 EXIT_RESEND_MAX = 30  # s: an exit_resend longer than this is a typo, not a plan
 SCRIPT_SHELL = "/bin/bash"  # what a scripts-format game card's script runs with
 ROM = "{rom}"
@@ -410,6 +423,12 @@ def load_definition(emulator):
             and all(isinstance(k, str) and SYSTEM_ID.fullmatch(k) and str_list(v) and ROM not in v
                     for k, v in system_args.items())):
         raise bad(f'system_args must map system names to lists of strings without "{ROM}"')
+    system_settings = d.get("system_settings", [])
+    if not (isinstance(system_settings, list) and all(system_settings_entry_ok(s) for s in system_settings)):
+        raise bad('system_settings entries must be {"file": <path under $HOME>, "format": <one of '
+                  f'{", ".join(emuopts.FORMATS)}>[, "separator": "=" with optional spaces, ini/toml only], '
+                  '"set": [{"section", "key", "value": one-line strings, key not empty}, ...]}, '
+                  f'without "{ROM}"')
     env = d.get("env", {})
     if not (isinstance(env, dict)
             and all(isinstance(k, str) and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", k)
@@ -460,8 +479,35 @@ def load_definition(emulator):
                                         and 0 < exit_resend <= EXIT_RESEND_MAX):
         raise bad(f"exit_resend must be a number of seconds, more than 0 and at most {EXIT_RESEND_MAX}")
     return {"format": d["format"], "root": d.get("root"), "binary": d["binary"], "args": args, "gui_args": gui_args,
-            "system_args": system_args, "env": env, "seed": seed, "sync": sync, "install": install,
-            "setup_args": setup_args, "stub": stub, "core_dumps": core_dumps, "exit_resend": exit_resend}
+            "system_args": system_args, "system_settings": system_settings, "env": env, "seed": seed,
+            "sync": sync, "install": install, "setup_args": setup_args, "stub": stub, "core_dumps": core_dumps,
+            "exit_resend": exit_resend}
+
+
+def system_settings_entry_ok(s):
+    """One system_settings entry: a file under $HOME in a format emuopts patches, and the one-line
+    settings to write there. No "{rom}": a ROM path belongs on the command line only."""
+    if not (isinstance(s, dict) and {"file", "format", "set"} <= set(s) <= {"file", "format", "separator", "set"}):
+        return False
+    if not (safe_relative(s["file"]) and s["format"] in emuopts.FORMATS and isinstance(s["set"], list) and s["set"]):
+        return False
+    if "separator" in s and not (s["format"] in emuopts.LINE_FORMATS and clean_str(s["separator"])
+                                 and "\n" not in s["separator"] and s["separator"].strip() == "="):
+        return False
+    return all(isinstance(a, dict) and set(a) == {"section", "key", "value"}
+               and all(clean_str(a[k]) and "\n" not in a[k] and ROM not in a[k] for k in a)
+               and a["key"].strip() for a in s["set"])
+
+
+def apply_system_settings(emulator, entries, system):
+    """Write each entry's settings for this game's system ("{system}" in the file and the values)."""
+    for s in entries:
+        path = os.path.join(HOME, s["file"].replace(SYSTEM, system))
+        edits = [(a["section"], a["key"], a["value"].replace(SYSTEM, system)) for a in s["set"]]
+        try:
+            emuopts.patch_file(path, s["format"], edits, s.get("separator", "="))
+        except emuopts.FILE_ERRORS as err:
+            log(f"warning: {emulator}: could not write {system}'s settings to {path}: {err}")
 
 
 def device_field(name):
@@ -787,7 +833,7 @@ class AppImage:
 
 
 class SharunAppImage(AppImage):
-    """pkgforge-dev's "anylinux" AppImages (Dolphin, mGBA, Azahar, ...; PPSSPP's official one is
+    """pkgforge-dev's "anylinux" AppImages (Dolphin, Snes9x, Azahar, ...; PPSSPP's official one is
     built with the same tooling): a sharun bundle with its own loader, libraries and Mesa. Two
     things its AppRun would do, which we never run (one of its hooks is a self-updater that would
     replace the pinned AppImage):
@@ -1453,7 +1499,8 @@ def run(argv):
             if psn_lock is None:
                 fail("psn-installing", emulator,
                      "a PSN install is running; launch again when it finishes")
-    # One emulator can serve several systems (mGBA: gb, gbc, gba) with per-system folders.
+    # One emulator can serve several systems (ClownMDEmu: md, segacd; armGBA: gb, gbc, gba) with
+    # per-system folders, on its command line or in its settings file.
     # A stub ROM boots what its first line names (after the not-installed check: that message wins).
     boot = stub_boot_target(emulator, rom, definition["stub"]) if rom is not None else None
     args = ([boot if a == ROM else a.replace(SYSTEM, system)
@@ -1461,6 +1508,8 @@ def run(argv):
             if rom is not None else definition["gui_args"])
     seed_first_run(emulator, definition["seed"])
     sync_files(emulator, definition["sync"])
+    if rom is not None:
+        apply_system_settings(emulator, definition["system_settings"], system)
     todo = missing_installs(emulator, definition["install"], rom is not None)
     options = load_options(emulator, definition)
     confs = player_confs(emulator, system, rom)

@@ -1,0 +1,171 @@
+{
+  "files": {
+    "main": {
+      "path": ".config/armgba/frontend.cfg",
+      "format": "ini",
+      "separator": " = "
+    }
+  },
+  "options": [
+    {
+      "id": "aspect",
+      "label": "Aspect ratio",
+      "description": "Keep the console's own picture shape, or stretch it to fill the screen.",
+      "choices": [
+        {
+          "value": "auto",
+          "label": "Game's own",
+          "set": [
+            {
+              "file": "main",
+              "section": "",
+              "key": "stretch",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "stretch",
+          "label": "Stretch to screen",
+          "set": [
+            {
+              "file": "main",
+              "section": "",
+              "key": "stretch",
+              "value": "true"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "integer_scale",
+      "label": "Integer scaling",
+      "description": "Only enlarge the picture by whole steps, so every pixel has the same size. Leaves borders around it.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "",
+              "key": "integer_scale",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "",
+              "key": "integer_scale",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "smoothing",
+      "label": "Screen filter",
+      "description": "Sharp keeps crisp square pixels; Smooth blurs them slightly when the picture is enlarged.",
+      "choices": [
+        {
+          "value": "sharp",
+          "label": "Sharp",
+          "set": [
+            {
+              "file": "main",
+              "section": "",
+              "key": "filter",
+              "value": "0"
+            }
+          ]
+        },
+        {
+          "value": "smooth",
+          "label": "Smooth",
+          "set": [
+            {
+              "file": "main",
+              "section": "",
+              "key": "filter",
+              "value": "1"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vsync",
+      "label": "VSync",
+      "description": "Wait for the screen between frames: no tearing. Off paces the game by its sound instead.",
+      "choices": [
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "",
+              "key": "vsync",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "",
+              "key": "vsync",
+              "value": "false"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "show_fps",
+      "label": "Show frame rate",
+      "description": "armGBA draws the frames per second in a corner of the screen.",
+      "choices": [
+        {
+          "value": "off",
+          "label": "Off",
+          "set": [
+            {
+              "file": "main",
+              "section": "",
+              "key": "show_fps",
+              "value": "false"
+            }
+          ]
+        },
+        {
+          "value": "on",
+          "label": "On",
+          "set": [
+            {
+              "file": "main",
+              "section": "",
+              "key": "show_fps",
+              "value": "true"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "frontend.cfg is armGBA's own settings file: `key = value` lines, no sections (the launcher and these options address the root, section \"\"); # starts a comment. Read by settingsRead -> takeSetting (frontend/settings.c), written whole by settingsWrite whenever the menu changes a setting and on quit: unknown keys are dropped, known ones kept. Booleans are the words true/false (anything but \"true\" reads as false); strings may be quoted.",
+    "stretch (Stretch to fill, default false) and integer_scale (default false) size the picture in the window (frontend/main.c: applyWindowSize/present); filter is enum Filter: 0 FILTER_SHARP (nearest), 1 FILTER_SMOOTH (linear) via SDL_HINT_RENDER_SCALE_QUALITY; vsync (default true) is the renderer's VSync and the frame pacing (with it off the game is paced by the audio queue, settings.latency); show_fps (default false) draws the frame rate on screen (ACT_FPS toggles the same setting).",
+    "Left out: renderer (SDL_Renderer picks the GPU backend itself; no setting), resolution and widescreen_hack (no such setting for GB/GBA), frameskip (none). The LCD grid, ghosting and Game Boy screen palettes are core options in ~/.config/armgba/armgba.cfg (armgba_lcd_grid, armgba_lcd_ghosting, armgba_gb_screen...; frontend/settings.c optionsWrite), reachable in armGBA's own Core tab; a RetroForge option for them can come with the shader phase."
+  ]
+}

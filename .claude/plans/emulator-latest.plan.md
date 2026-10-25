@@ -133,8 +133,9 @@ tests/test-catalog.sh` gains a "latest resolves to exactly one asset" check):
 
 | Emulator | tag_pattern (verified live 2026-10-17) | note |
 |---|---|---|
+| armgba | `^v[0-9]+(\.[0-9]+)+$` | upstream's own AppImage (replaced mGBA 2026-10-25); v0.1 has no AppImage asset, so the asset pattern keeps it out |
 | armsx2 | `^nightly-[0-9]{8}$` | asset must stay the 4K-pages build |
-| azahar, clownmdemu, dolphin, flycast, melonds, mgba, snes9x | `^[0-9][0-9.]*(-[0-9]+)?@[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]+$` | pkgforge-dev `<ver>@<date>_<id>`; Azahar's repo also has a `nightly` (prerelease) tag, kept out by the pattern |
+| azahar, clownmdemu, dolphin, flycast, melonds, snes9x | `^[0-9][0-9.]*(-[0-9]+)?@[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]+$` | pkgforge-dev `<ver>@<date>_<id>`; Azahar's repo also has a `nightly` (prerelease) tag, kept out by the pattern |
 | cemu | `^nightly$` | replaces `channel` |
 | duckstation | `^v0\.1-[0-9]+$` | NEVER `latest` (asset replaced in place) |
 | ppsspp | `^v[0-9]+\.[0-9]+(\.[0-9]+)?$` | |

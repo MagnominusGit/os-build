@@ -358,18 +358,33 @@ CASE="controller mappings"
 # careless edit or a bad pin bump shows here, not on a handheld.
 has() { grep -qxF -- "$2" "$SEED_DIR/$1" && ok "$1: $3" || bad "$1 lacks '$2' ($3)"; }
 lacks() { grep -qE -- "$2" "$SEED_DIR/$1" && bad "$1: $3" || ok "$1: no $3"; }
-# mGBA: raw indices, [gba.input.SDLB]; GBA A (right) east, B south.
-has mgba/config.ini keyA=1 "GBA A on the east button (b1)"
-has mgba/config.ini keyB=0 "GBA B on the south button (b0)"
-has mgba/config.ini keySelect=6 "Select on b6"; has mgba/config.ini keyStart=7 "Start on b7"
-has mgba/config.ini keyL=4 "L on LB"; has mgba/config.ini keyR=5 "R on RB"
-lacks mgba/config.ini '^key[A-Za-z]+=8$' "binding on Guide (b8)"
-# No single-button quit (R3 was too easy to hit, user 2026-10-06): mGBA and Snes9x cannot bind
-# Select + Start, so OpenGamepadUI's Exit (Guide) is their way out.
-[ ! -e "$SEED_DIR/mgba/qt.ini" ] && ! grep -q qt.ini "$SEED_DIR/mgba/emulator.json" \
-  && ok "mgba: no pad quit shortcut seeded" || bad "mgba seeds a pad shortcut file (qt.ini)"
-grep -q 'saves/{system}' "$SEED_DIR/mgba/emulator.json" && grep -q 'states/{system}' "$SEED_DIR/mgba/emulator.json" \
-  && ok "mgba: per-system save and state folders from the card's system" || bad "mgba: saves/states not per system"
+# armGBA (gb, gbc, gba): SDL game-controller API, so the pad maps itself; its Nintendo layout (A east,
+# B south) is the default and is not seeded. Its Hotkey must be Select (4 = SDL_CONTROLLER_BUTTON_BACK):
+# on Auto it takes Home (Guide), which OpenGamepadUI owns. Select + Start pressed twice quits (a
+# combination: no single-button quit, user 2026-10-06), so the seed must not rebind the Quit action.
+has armgba/frontend.cfg 'hotkeypad = 4' "Hotkey on Select, not Guide"
+lacks armgba/frontend.cfg '^hotkeypad = 5$' "Hotkey on Guide (5), which OGUI owns"
+lacks armgba/frontend.cfg '^hotkeypad_12 =' "Quit rebound (the default Hotkey + Start, pressed twice, stays)"
+lacks armgba/frontend.cfg '^pad_[0-9]+ =' "pad buttons seeded by raw number (SDL maps the pad; Nintendo layout is the default)"
+has armgba/frontend.cfg 'bios_folder = "/home/player/bios"' "BIOS files in the flat ~/bios"
+has armgba/frontend.cfg 'save_folder = "/home/player/saves/gba"' "Open's saves in ~/saves/gba"
+has armgba/frontend.cfg 'state_folder = "/home/player/states/gba"' "Open's states in ~/states/gba"
+has armgba/frontend.cfg 'fullscreen = true' "fullscreen for Open too"
+AG_DEF="$SEED_DIR/armgba/emulator.json"
+[ "$(jget "$AG_DEF" format)" = '"appimage"' ] && [ "$(jget "$AG_DEF" binary)" = '"usr/bin/armgba"' ] \
+  && [ "$(jget "$AG_DEF" args)" = '["--fullscreen", "{rom}"]' ] && [ "$(jget "$AG_DEF" gui_args)" = '["--fullscreen"]' ] \
+  && ok "armgba: upstream's plain AppImage, its real binary, --fullscreen for a game and for Open" \
+  || bad "armgba emulator.json: $(jget "$AG_DEF" format) $(jget "$AG_DEF" binary) $(jget "$AG_DEF" args)"
+# armGBA has ONE save and ONE state folder, set only in frontend.cfg: the launcher writes the card's
+# system into both before every game (system_settings), so saves stay in ~/saves/<system>.
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["system_settings"]
+keys={(a["key"], a["value"]) for s in d for a in s["set"] if s["file"] == ".config/armgba/frontend.cfg" and s["format"] == "ini"}
+sys.exit(not keys >= {("save_folder", "\"/home/player/saves/{system}\""), ("state_folder", "\"/home/player/states/{system}\"")})' "$AG_DEF" \
+  && ok "armgba: save_folder and state_folder follow the card's system (system_settings on frontend.cfg)" \
+  || bad "armgba: per-system save/state folders are not written by system_settings"
+[ -z "$(jget "$AG_DEF" env | grep -o SDL_NO_SIGNAL_HANDLERS)" ] \
+  && ok "armgba: SDL's SIGTERM handler kept (its quit event writes the save; HW rule for mGBA's SIGTERM no longer applies)" \
+  || bad "armgba sets SDL_NO_SIGNAL_HANDLERS: a SIGTERM would end it without writing the save"
 # Snes9x: raw indices; SNES B south, A east, Y west, X north.
 has snes9x/snes9x.conf 'B = Joystick 1 Button 0' "SNES B on south"
 has snes9x/snes9x.conf 'A = Joystick 1 Button 1' "SNES A on east"
@@ -517,6 +532,17 @@ bad_def "system_args that are not an object" 'd["system_args"] = ["--system", "x
 bad_def "system_args with {rom}" 'd["system_args"] = {"psx": ["{rom}"]}'
 bad_def "system_args for a bad system name" 'd["system_args"] = {"../x": ["a"]}'
 bad_def "system_args that are not strings" 'd["system_args"] = {"psx": [1]}'
+bad_def "system_settings that are not a list" 'd["system_settings"] = {"file": ".config/x.ini"}'
+bad_def "a system_settings file that is absolute" 'd["system_settings"] = [{"file": "/etc/x.ini", "format": "ini", "set": [{"section": "", "key": "a", "value": "b"}]}]'
+bad_def "a system_settings file out of \$HOME (..)" 'd["system_settings"] = [{"file": "../x.ini", "format": "ini", "set": [{"section": "", "key": "a", "value": "b"}]}]'
+bad_def "a system_settings format emuopts has no patcher for" 'd["system_settings"] = [{"file": ".config/x.conf", "format": "conf", "set": [{"section": "", "key": "a", "value": "b"}]}]'
+bad_def "a system_settings separator that is not '='" 'd["system_settings"] = [{"file": ".config/x.ini", "format": "ini", "separator": ": ", "set": [{"section": "", "key": "a", "value": "b"}]}]'
+bad_def "a system_settings separator on yaml" 'd["system_settings"] = [{"file": ".config/x.yml", "format": "yaml", "separator": "=", "set": [{"section": "", "key": "a", "value": "b"}]}]'
+bad_def "system_settings with no settings" 'd["system_settings"] = [{"file": ".config/x.ini", "format": "ini", "set": []}]'
+bad_def "a system_settings value with {rom}" 'd["system_settings"] = [{"file": ".config/x.ini", "format": "ini", "set": [{"section": "", "key": "game", "value": "{rom}"}]}]'
+bad_def "a system_settings value over two lines" 'd["system_settings"] = [{"file": ".config/x.ini", "format": "ini", "set": [{"section": "", "key": "a", "value": "b\nc=d"}]}]'
+bad_def "a system_settings setting with an empty key" 'd["system_settings"] = [{"file": ".config/x.ini", "format": "ini", "set": [{"section": "", "key": " ", "value": "b"}]}]'
+bad_def "a system_settings setting with an extra field" 'd["system_settings"] = [{"file": ".config/x.ini", "format": "ini", "set": [{"section": "", "key": "a", "value": "b", "args": ["x"]}]}]'
 bad_def "a root on an AppImage format (only a folder of scripts has one)" 'd["root"] = "roms/ports/x"'
 bad_def "a scripts format with no root" 'd["format"] = "scripts"'
 bad_def "a scripts root outside \$HOME (..)" 'd["format"] = "scripts"; d["root"] = "../../usr"'
@@ -686,9 +712,46 @@ python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["args"] = ["-C", 
 d["install"] = []; json.dump(d, open(sys.argv[2], "w"))' "$DS_DEF" "$INST/duckstation/emulator.json"
 reset_logs; RETROFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
 [ "$(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' '|')" = "-C|saves=/home/player/saves/psx|$ROM|" ] \
-  && ok "{system} in args becomes the card's system (mGBA: one emulator, per-system folders)" \
+  && ok "{system} in args becomes the card's system (one emulator, per-system folders on its command line)" \
   || bad "{system} not substituted: $(sed -n 's/^arg=//p' "$T/emu.log" | tr '\n' '|')"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
+# system_settings: the same for an emulator whose folders live only in its settings file (armGBA):
+# written before every game with {system} in the path and the values, a missing file created, the
+# player's other lines kept, and never for --gui (no system).
+SS_CFG="$HOME/.config/fake/frontend.cfg"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["args"] = ["{rom}"]; d["install"] = []
+d["system_settings"] = [{"file": ".config/fake/frontend.cfg", "format": "ini", "separator": " = ",
+  "set": [{"section": "", "key": "save_folder", "value": "\"/home/player/saves/{system}\""},
+          {"section": "", "key": "state_folder", "value": "\"/home/player/states/{system}\""}]},
+  {"file": ".config/fake/{system}.ini", "format": "ini", "set": [{"section": "Paths", "key": "system", "value": "{system}"}]}]
+json.dump(d, open(sys.argv[2], "w"))' "$DS_DEF" "$INST/duckstation/emulator.json"
+rm -rf "$HOME/.config/fake"; reset_logs; RETROFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
+[ "$(cat "$SS_CFG" 2>/dev/null)" = "$(printf 'save_folder = "/home/player/saves/psx"\nstate_folder = "/home/player/states/psx"')" ] \
+  && ok "system_settings: written into a file that was not there, {system} = the card's system, the entry's separator" \
+  || bad "system_settings on a new file: $(cat "$SS_CFG" 2>/dev/null | tr '\n' '|')"
+[ "$(cat "$HOME/.config/fake/psx.ini" 2>/dev/null)" = "$(printf '[Paths]\nsystem=psx')" ] \
+  && ok "system_settings: {system} in the file name too, a section made, '=' by default" \
+  || bad "system_settings with {system} in the path: $(cat "$HOME/.config/fake/psx.ini" 2>/dev/null | tr '\n' '|')"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
+printf '# armgba rewrites me\nscale = 3\nsave_folder = "/home/player/saves/md"\nstate_folder = "/home/player/states/gb"\nvolume = 80\n' > "$SS_CFG"
+RETROFORGE_EMU_DATA_DIR="$INST" start_launcher; wait_for emu_up
+[ "$(cat "$SS_CFG")" = "$(printf '# armgba rewrites me\nscale = 3\nsave_folder = "/home/player/saves/psx"\nstate_folder = "/home/player/states/psx"\nvolume = 80')" ] \
+  && ok "system_settings: a value the player (or the last game) left is replaced in place, every other line kept" \
+  || bad "system_settings over an existing file: $(cat "$SS_CFG" | tr '\n' '|')"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
+printf 'save_folder = "/home/player/saves/gb"\n' > "$SS_CFG"
+RETROFORGE_EMU_DATA_DIR="$INST" "$LAUNCH" --gui duckstation 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up
+[ "$(cat "$SS_CFG")" = 'save_folder = "/home/player/saves/gb"' ] && ok "system_settings: --gui (no system) leaves the file alone" \
+  || bad "--gui rewrote the per-system settings: $(cat "$SS_CFG" | tr '\n' '|')"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
+# A file that cannot be written is a warning: the game still starts (as with sync).
+mkdir -p "$HOME/.config/fake/frontend.cfg.d"; rm -f "$SS_CFG"; ln -s frontend.cfg.d "$SS_CFG"
+RETROFORGE_EMU_DATA_DIR="$INST" start_launcher
+wait_for emu_up && grep -q "warning: duckstation: could not write psx's settings" "$T/launch.err" \
+  && ok "system_settings: an unwritable file is a warning and the game starts" \
+  || bad "system_settings on an unwritable file: emu up=$(emu_up && echo yes || echo no) err='$(cat "$T/launch.err")'"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs; rm -rf "$HOME/.config/fake"
 # system_args: one emulator, several systems it must be told about (e.g. --system "Mega Drive").
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["args"] = ["-f", "{rom}"]; d["install"] = []
 d["system_args"] = {"psx": ["--system", "Play Station", "--saves={system}"], "md": ["--system", "Mega Drive"]}

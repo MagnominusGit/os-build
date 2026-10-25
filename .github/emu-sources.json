@@ -1,4 +1,5 @@
 {
+  "armgba": {"repo": "Jacob-Matthew-Cook/armGBA", "tag": "(v[0-9.]+)", "ref": "{0}"},
   "armsx2": {"repo": "ARMSX2/ARMSX2", "tag": "(nightly-[0-9]{8})", "ref": "{0}"},
   "azahar": {"repo": "azahar-emu/azahar", "tag": "([^@]+)@.*", "ref": "{0}"},
   "cemu": {"repo": "cemu-project/Cemu", "tag": "nightly-([0-9a-f]+)", "ref": "{0}"},
@@ -7,7 +8,6 @@
   "duckstation": {"repo": "stenzek/duckstation", "tag": "(v0\\.1-[0-9]+)", "ref": "{0}"},
   "flycast": {"repo": "flyinghead/flycast", "tag": "([^@-]+)(?:-[0-9]+)?@.*", "ref": "v{0}"},
   "melonds": {"repo": "melonDS-emu/melonDS", "tag": "([^@-]+)(?:-[0-9]+)?@.*", "ref": "{0}"},
-  "mgba": {"repo": "mgba-emu/mgba", "tag": "([^@-]+)(?:-[0-9]+)?@.*", "ref": "{0}"},
   "ppsspp": {"repo": "hrydgard/ppsspp", "tag": "(v[0-9.]+)", "ref": "{0}"},
   "rmg": {"repo": "Rosalie241/RMG", "tag": "([^@-]+)(?:-[0-9]+)?@.*", "ref": "v{0}"},
   "rpcs3": {"repo": "RPCS3/rpcs3", "tag": "build-([0-9a-f]{40})", "ref": "{0}"},

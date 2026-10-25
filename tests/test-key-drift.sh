@@ -82,7 +82,8 @@ CASE="ref"
 ref() { python3 "$KD" ref "$SOURCES" "$1" "$2" 2>/dev/null; }
 [ "$(ref azahar "2126.1.2@2026-10-01_1790876552")" = "azahar-emu/azahar 2126.1.2" ] && ok "pkgforge <ver>@<date>_<id> -> upstream tag <ver>" || bad "azahar ref"
 [ "$(ref flycast "2.7@2026-10-01_1790875174")" = "flyinghead/flycast v2.7" ] && ok "flycast -> v<ver>" || bad "flycast ref"
-[ "$(ref mgba "0.10.5-5@2026-10-01_1790876690")" = "mgba-emu/mgba 0.10.5" ] && ok "pkgforge's -<rev> is dropped" || bad "mgba ref"
+[ "$(ref snes9x "1.63-1@2026-10-01_1790876690")" = "snes9xgit/snes9x 1.63" ] && ok "pkgforge's -<rev> is dropped" || bad "snes9x ref"
+[ "$(ref armgba "v1.0")" = "Jacob-Matthew-Cook/armGBA v1.0" ] && ok "an upstream's own release tag is its ref" || bad "armgba ref"
 [ "$(ref cemu "nightly-a53cf0ece")" = "cemu-project/Cemu a53cf0ece" ] && ok "a nightly-<commit> -> that commit" || bad "cemu ref"
 ref duckstation latest >/dev/null && bad "a tag the rule does not match passed" || ok "a tag the rule does not match is an error"
 

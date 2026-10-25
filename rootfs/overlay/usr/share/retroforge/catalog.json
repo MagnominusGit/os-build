@@ -1,6 +1,26 @@
 {
   "schema": 1,
   "emulators": {
+    "armgba": {
+      "name": "armGBA",
+      "author": "Jacob Cook",
+      "systems": [
+        "gba",
+        "gb",
+        "gbc"
+      ],
+      "github": "Jacob-Matthew-Cook/armGBA",
+      "tag": "v1.0",
+      "tag_pattern": "^v[0-9]+(\\.[0-9]+)+$",
+      "asset": "^armGBA-[0-9][0-9.]*-aarch64\\.AppImage$",
+      "sha256": "44bec304c7e4141bbdc85286ef1dd823ccbe671a4298440aa66c64f3cf1d44c2",
+      "size": 3017224,
+      "homepage": "https://github.com/Jacob-Matthew-Cook/armGBA",
+      "licence": {
+        "name": "GPL-2.0",
+        "url": "https://github.com/Jacob-Matthew-Cook/armGBA/blob/main/LICENSE"
+      }
+    },
     "armsx2": {
       "name": "ARMSX2",
       "author": "The ARMSX2 team (based on PCSX2)",
@@ -162,26 +182,6 @@
       "licence": {
         "name": "GPL-3.0",
         "url": "https://github.com/melonDS-emu/melonDS/blob/master/LICENSE"
-      }
-    },
-    "mgba": {
-      "name": "mGBA",
-      "author": "Vicki Pfau (endrift); AppImage by pkgforge-dev",
-      "systems": [
-        "gba",
-        "gb",
-        "gbc"
-      ],
-      "github": "pkgforge-dev/mGBA-AppImage-Enhanced",
-      "tag": "0.10.5-5@2026-10-01_1790876690",
-      "tag_pattern": "^[0-9][0-9.]*(-[0-9]+)?@[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]+$",
-      "asset": "^mGBA-[0-9][0-9.]*(-[0-9]+)?-anylinux-aarch64\\.AppImage$",
-      "sha256": "0e74d3e4163adf96d97de18ed5bc1bb5a43aa099bd63f142150a91c5faab4c2f",
-      "size": 61666625,
-      "homepage": "https://mgba.io/",
-      "licence": {
-        "name": "MPL-2.0",
-        "url": "https://github.com/mgba-emu/mgba/blob/master/LICENSE"
       }
     },
     "ppsspp": {
