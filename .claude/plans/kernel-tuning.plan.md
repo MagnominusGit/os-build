@@ -350,6 +350,32 @@ the RPM traffic is now ~30 IRQs/s under either governor (400–1,130/s on the ol
 cost no longer separates them. Memory in this scene: 351 MB available, 1.03 GB unevictable, zram 796 MB
 stored in 162 MB, PSI memory full 0.06% over 60 s, no OOM.
 
+**Every governor and scheduler again, on the new kernel (Hades, same scene, 2026-10-25 00:43-00:52).**
+Two interleaved runs, 20 s windows; ondemand, conservative and bpfland ran in both as anchors (4 windows
+each, and they agreed run to run: 58.5–59.2 / 59.5–59.6 / 59.9 fps). scx schedulers were started by
+hand as root (not through powerd, whose Air X profile allows only `none`) and stopped afterwards; they
+run on schedutil, which applies their cpuperf targets. scx_lavd takes ~8.5 s to load (BPF verifier).
+
+| mode | fps | p95 / p99 frame | little / big avg MHz | little / big busy |
+|---|---|---|---|---|
+| scx_bpfland | **59.9** | **16.9 / 17.0 ms** | 2016 / 2112 | **14% / 50%** |
+| performance | 59.8 | 16.9 / 17.0 ms | 2016 / 2112 | 25% / 40% |
+| conservative | **59.6** | **17.0 / 17.1 ms** | ~1800 / 2112 | 27% / 41% |
+| ondemand (default) | 58.5–59.2 | 17.5 / 33.4 ms | ~1490 / 2088 | 31% / 42% |
+| schedutil, EAS off / on | 56.9 / 57.1 | 24.5–25.4 / 33.5 ms | ~1270 / 2109 | 33% / 43% |
+| scx_lavd / `--performance` | 56.4 / 56.3 | 33.1 / 33.4 ms | ~1615 / ~2000 | 33% / 43% |
+
+Battery power was 3.4–4.9 W per window in every mode, too noisy to rank. What separates them is the
+little cluster: the modes that keep it fast (conservative, performance) or empty it (bpfland moves the
+work onto the A73s) hold every frame at the 60 Hz cadence; ondemand, schedutil and lavd let 1–5% of
+frames slip to 33 ms. EAS on no longer collapses the game (it did, 95% missed, with the synthetic loop on
+the old kernel) but does not help either. lavd still underclocks the big cluster and drops the most.
+
+Candidates for the SM6115 default, each to confirm on a CPU-bound title and a GPU-bound scene first:
+**conservative** (a governor change in power.conf's SM6115 profile, littles ~1.8 GHz rather than
+pinned) or **scx_bpfland** (needs `bpfland` in powerd's scheduler vocabulary and the Air X profile's
+`RETROFORGE_CPU_SCHEDULERS`). Not yet: one title, one scene.
+
 ## Does it apply to the other SoCs?
 Fleet: SM8250 (Kryo 585 = A77 + A55, ARMv8.2), SM8550 / SM8650 (Cortex-X/A7xx/A5xx, ARMv9), SM8750
 (Oryon), SM6115 (Kryo 260 = A73 + A53, ARMv8.0). Only the Air X was measured; "expected" below is
