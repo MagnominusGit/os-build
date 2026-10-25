@@ -434,9 +434,14 @@ func _build_card(item: LibraryItem, tab: ScrollContainer) -> Control:
 
 ## library_menu.gd's _on_focus_updated: a smooth scroll that puts the card a third of its height
 ## from the top, except while touch or the mouse is in use.
+## Within 500 ms of a touch only (OGUI patch 0037's InputManager.pointer_recent): the touch count
+## stayed above zero after a release it never saw, and the tab stopped following the D-pad for good.
 func _scroll_to_card(card: Control, tab: ScrollContainer) -> void:
 	var input_manager := get_tree().get_first_node_in_group("input_manager")
-	if input_manager and ((input_manager as InputManager).current_touches > 0 or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)):
+	if input_manager and input_manager.has_method("pointer_recent"):
+		if input_manager.pointer_recent():
+			return
+	elif input_manager and ((input_manager as InputManager).current_touches > 0 or Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)):
 		return
 	if _scroll_tween:
 		_scroll_tween.kill()
