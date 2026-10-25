@@ -4,10 +4,12 @@ extends RefCounted
 ## /usr/bin/steam asks at every game launch. On: a game Steam has started on this device before starts
 ## the way Steam started it, without the Steam client and its ~1 GB (the Air X's Hades was killed in
 ## its first room with the client, and played without it). Its first launch, an x86 game, or any game
-## while Steam is open still go through Steam. Without the client there are no cloud saves,
-## achievements, overlay or Steam Input, and a game that needs Steam closes. Never set, it is on for
-## the SM6115 and boards with under 4.5 GiB of RAM. The command decides all of that, so the toggle
-## only shows what `retroforge-steam-direct status` says and runs `on` / `off`.
+## while Steam's UI is open still go through Steam. With Steam kept running in the background
+## (steam_keep.gd) the game still gets achievements, playtime, Steam Input and the cloud upload when
+## it ends, but no cloud download before it; with it off, none of those, and a game that needs Steam
+## closes. No overlay either way. Never set, it is on for the SM6115 and boards with under 4.5 GiB of
+## RAM. The command decides all of that, so the toggle only shows what `retroforge-steam-direct
+## status` says and runs `on` / `off`.
 
 const TOOL := "/usr/bin/retroforge-steam-direct"
 
@@ -38,7 +40,7 @@ func attach(target: Node = null) -> bool:  # target: the Settings > Steam page (
 	_toggle = toggle_scene.instantiate()
 	_toggle.name = "RetroForgeSteamDirect"
 	_toggle.text = "Steam: start games without Steam"
-	_toggle.description = "Saves about 1 GB of memory. No cloud saves, achievements, overlay or Steam Input; games that need Steam will not start."
+	_toggle.description = "Saves memory and skips Steam's launch steps. Cloud saves are not downloaded before playing; no overlay. Without Steam kept running, no achievements or cloud saves either."
 	_toggle.separator_visible = false  # as the rows above it; read in _ready, so before add_child
 	box.add_child(_toggle)
 	if after:

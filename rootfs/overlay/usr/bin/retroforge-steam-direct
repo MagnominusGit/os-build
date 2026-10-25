@@ -61,8 +61,9 @@
 #
 # Left to the client (check says why, and /usr/bin/steam starts Steam as before):
 #   - the setting is off;
-#   - a client already runs (~/.steam/steam.pid names a live `steam`): it has the game's overlay,
-#     cloud saves and achievements, at no more memory;
+#   - a client already runs (~/.steam/steam.pid names a live `steam`), other than the kept one
+#     (retroforge-steam.service: "Keep Steam running", on by default), which stays minimal beside the
+#     game: Steam's UI is open, and the game goes to it;
 #   - Steam has not started the game on this device yet. Its first launch goes through Steam, which
 #     also runs the game's install scripts (DirectX, VC++ redistributables) and sets up its prefix;
 #   - the game is not fully installed, or its files are changing (StateFlags beyond fully installed,
@@ -75,9 +76,11 @@
 # Steam has started it again (Main menu > Emulators > Steam Client, then the game from there).
 # An update Steam has queued (StateFlags 2) does not stop a launch: Steam installs it once it runs
 # (Main menu > Emulators > Steam Client), and the game runs its installed version until then.
-# Not run without the client: the install scripts, cloud sync (saves stay on the device, and Steam
-# uploads them the next time it starts the game), achievements, playtime, the overlay, Steam Input
-# (the game reads the gamepad itself) and the Steam Linux Runtime's update.
+# Not run without the client: the install scripts, the Cloud download before the game, the overlay and
+# the Steam Linux Runtime's update. With the kept client beside the game (/usr/bin/steam), its Steam API
+# connects to it: achievements, stats, playtime, Steam Input, and the Cloud upload when the game ends
+# (Hades and a Steamworks probe on the MANGMI Air X, 2026-10-25). Without it, none of those either:
+# saves stay on the device until Steam next uploads them, and the game reads the gamepad itself.
 #
 # THE SETTING is DIRECT_LAUNCH=on|off in ~/.config/retroforge/steam.conf, beside DXVK_SAREK and
 # KEEP_RUNNING (the last such line counts; saving rewrites that line and keeps the others). The
@@ -228,17 +231,24 @@ def save(value):
 
 
 def client_running():
-    """True while Steam's client runs: ~/.steam/steam.pid names a live process called steam (the client
-    leaves the file behind when it is killed)."""
+    """True while a Steam client other than the kept one (retroforge-steam.service, in the background)
+    runs: ~/.steam/steam.pid names a live process called steam (the client leaves the file behind when
+    it is killed)."""
     try:
         with open(os.path.join(HOME, ".steam", "steam.pid")) as f:
             pid = f.read().strip()
         if not pid.isdigit():
             return False
         with open(os.path.join(PROC, pid, "comm")) as f:
-            return f.read().strip() == "steam"
+            if f.read().strip() != "steam":
+                return False
     except OSError:
         return False
+    try:
+        with open(os.path.join(PROC, pid, "cgroup")) as f:
+            return "/retroforge-steam.service" not in f.read()
+    except OSError:
+        return True
 
 
 def logged_launches():

@@ -187,15 +187,17 @@ instead, so signing into Steam Client is enough (`apps/ogui-retroforge-plugin`: 
 With the OGUI Steam plugin installed too, OGUI shows a game both list as one card with two launch
 items; the plugin is not needed, and its steamcmd (x86, downloaded by the plugin) cannot run here.
 
-## Keeping Steam running between games (Settings > Steam, off by default)
+## Keeping Steam running in the background (Settings > Steam, on by default)
 
-A game started from OGUI starts Steam first, and OGUI stops Steam when the game ends. Measured on the
-KONKR Pocket FIT (Hades, Proton 11 ARM64, 2026-10-21): the launch at 44.5 s of uptime, Steam ready at
-~62.5 s (its cold start, ~18 s), Proton at 70.6 s (Steam's own preparation), the game's processes at
-85.6 s, its first frame at 95 s. So ~30 s from the press to the game, more than half of it Steam's.
+Without it, a game started from OGUI starts Steam first, and OGUI stops Steam when the game ends.
+Measured on the KONKR Pocket FIT (Hades, Proton 11 ARM64, 2026-10-21): the launch at 44.5 s of uptime,
+Steam ready at ~62.5 s (its cold start, ~18 s), Proton at 70.6 s (Steam's own preparation), the game's
+processes at 85.6 s, its first frame at 95 s. So ~30 s from the press to the game, more than half of it
+Steam's.
 
-Settings > Steam > "Steam: keep running between games" (`retroforge-steam-keep`, `KEEP_RUNNING=` in
-`~/.config/retroforge/steam.conf`) leaves Steam running instead. `/usr/bin/steam` then:
+Settings > Steam > "Steam: keep running in the background" (`retroforge-steam-keep`, `KEEP_RUNNING=` in
+`~/.config/retroforge/steam.conf`, on unless the player turned it off) leaves Steam running instead,
+minimal while nothing needs its UI (below). `/usr/bin/steam` then:
 
 - starts the client, the first time, as the user unit `retroforge-steam.service` (`systemd-run
   --user`, with the launch's environment and arguments), outside OGUI's process tree: OGUI's "stop
@@ -230,12 +232,44 @@ the game's window (Steam's install scripts 5 s, its process at 7 s), against ~30
 
 Steam's windows belong to no OGUI launch between games, and OGUI checks for such orphan windows every
 second: its patch 0022 warns about them once per change, not on every check (two journal lines a
-second, idle, before it). Not covered while it is on:
+second, idle, before it). Not covered while it is on: what `/usr/bin/steam` sets when the client starts
+(DXVK-Sarek, the x86 guest after its first download, an OGUI per-game environment) reaches games from
+Steam's next start: turn the setting off and on, or restart.
 
-- What `/usr/bin/steam` sets when the client starts (DXVK-Sarek, the x86 guest after its first
-  download, an OGUI per-game environment) reaches games from Steam's next start: turn the setting off
-  and on, or restart.
-- Steam keeps its memory (the client and its web helpers) between games.
+**Minimal in the background** (`retroforge-steam-keep minimal|full`). Idle and signed in, the client
+held ~1.2 GB of RAM and swap on the MANGMI Air X (`-steamdeck -silent -nofriendsui`, 2026-10-24): the
+client itself 135-170 MB (PSS) plus ~25 MB of swap, its web helper (Chromium, 8 processes: Steam's
+UI) 710-1100 MB plus up to 300 MB of swap and its GPU buffers. Capping or paging out the helper is not
+enough: the paused helper kept 252 MB of GPU buffers, which cannot be swapped, and earlyoom killed
+Hades with it (2026-10-24, 07:01). Killing it does not last: the client starts it again at once (14
+times in 2 minutes). So `minimal` kills it and freezes (SIGSTOP) the one the client starts next, 0.3 s
+later at ~7 MB, and anything it has started. The client waits for it indefinitely (6 minutes seen)
+without starting another, stays signed in, and costs ~240 MB in all. `full` (SIGCONT) brings Steam's UI
+back. The launches that need the UI hold it (`full $$`, a file per launch in
+`$XDG_RUNTIME_DIR/retroforge-steam-full/`): Steam's own UI until OGUI closes it, and a game the client
+starts until it has run 15 s (`RETROFORGE_STEAM_MINIMAL_DELAY`), since Steam's launch dialogs, install
+scripts and shader prompt come before. A game started without the client (below) gets the kept client
+beside it, minimal.
+
+A game's Steam API works with the minimal client, whoever started the game. Hades's first room, then
+quit from its menu, same launch option (Air X, MemTotal 3621 MiB, 2026-10-25):
+
+| mode | RAM+swap in use, peak | swap free, least | Steam features |
+|---|---|---|---|
+| without the client, alone | 5735 MiB | 1428 MiB | none (`SteamAPI failed to initialize!`) |
+| without the client, the minimal client beside it | 5810 MiB | 1311 MiB | all but the Cloud download before play |
+| the client starts it, minimal 15 s in | 6274 MiB | 833 MiB | all |
+
+Beside a game started without it, the client logs `PID ... was launched outside Steam, using container
+PID ... as root`, Hades logs `Steam initialized`, playtime counts, Steam Input follows its window
+(`OnFocusWindowChanged to game window type: AppID 1145360`), and when it ends Steam uploads its new and
+changed saves (Auto-Cloud: `No launch record found. Skipping looking for files added/removed while the
+game was running`, then `Upload OK`). A Steamworks probe as app 480 (Spacewar) showed the Cloud API
+(`ISteamRemoteStorage::FileWrite`, uploaded when it let go) and achievements (`SetAchievement` +
+`StoreStats`, stored) work the same way. What only Steam's own launch does is the Cloud download before
+the game (`Starting sync (AC Launch,down,)`): saves changed on another device in between meet Steam's
+cloud-conflict check when the game ends. When the client launches the game, its web helper peaks at
+~2 GB during Steam's launch steps, and what it pushed into swap stays there for the game.
 
 `systemctl --user status retroforge-steam` and `journalctl --user -u retroforge-steam` (as the
 player) show a kept client; the launches log to OGUI's journal as before.
@@ -304,8 +338,8 @@ app id and OGUI's Steam handling (patch 0017) works as with the client.
 `/usr/bin/steam` starts Steam as before:
 - the setting is off (nothing is said);
 - a client already runs (`~/.steam/steam.pid` names a live `steam`; the client leaves a stale one
-  behind when OGUI stops it). That client gets the game, with the overlay, cloud and achievements,
-  at no more memory;
+  behind when OGUI stops it), other than the kept one in the background (its cgroup is
+  `retroforge-steam.service`). That client, Steam's UI opened from OGUI, gets the game;
 - Steam has not started the game on this device yet. Its first launch goes through Steam, which
   also runs the game's install scripts (DirectX, VC++ redistributables) and sets up its prefix;
 - the game is not fully installed, or its StateFlags have any bit other than fully installed (4),
@@ -323,15 +357,22 @@ A launch option or compat tool the player changes in Steam reaches a game starte
 once Steam has started it again. Open Main menu > Emulators > Steam Client and start the game from
 there once.
 
-**What goes without the client** (the setting's description says the first four):
-- **Steam Cloud.** Saves stay on the device, and Steam syncs them the next time it starts the
-  game. A game also played on another device in between gets Steam's cloud-conflict dialog then.
-- **Achievements and playtime.**
+**The kept client beside it.** With Steam kept running in the background (on by default),
+`/usr/bin/steam` makes sure the kept client runs beside the game, minimal, before it starts the game.
+When it has to start it (the first launch after boot), with the launch's arguments but the game's URI,
+it waits for it to sign in (`Logged On ... processing complete` in Steam's `connection_log.txt`, ~20 s;
+45 s at most, `RETROFORGE_STEAM_SIGNIN_WAIT`), since a game's `SteamAPI_Init` does not wait. Not when
+Steam has no remembered sign-in (`"RememberPassword" "1"` in `loginusers.vdf`). The game's Steam API
+then works ("Minimal in the background" above).
+
+**What goes without the client** (the setting's description says what):
+- **The Cloud download before the game**, which only Steam's own launch makes. Saves changed on
+  another device in between meet Steam's cloud-conflict check when the game ends. Without the kept
+  client, the upload goes too: saves stay on the device until Steam next syncs the game.
 - **The overlay.**
-- **Steam Input.** The game reads the gamepad itself (InputPlumber's virtual pad).
-- **Games that require Steam.** Steam DRM (SteamStub), an online license check, a game that quits
-  when `SteamAPI_Init` fails: such a game closes right after it starts. Turn the setting off for it.
-  The setting applies to every game.
+- **Without the kept client:** achievements, playtime and Steam Input too (the game reads the
+  gamepad itself: InputPlumber's virtual pad), and games that require Steam (Steam DRM (SteamStub), an
+  online license check, a game that quits when `SteamAPI_Init` fails) close right after they start.
 - **The install scripts** Steam runs before each launch (Hades: 19 s on the Air X), the Steam Linux
   Runtime's own update, and anything Steam would update before a launch.
 
@@ -342,8 +383,8 @@ for SoC class SM6115 (`device-env`) and on boards with less than 4.5 GiB of `Mem
 boards report ~3.5-3.8 GiB), and off elsewhere. The SM6115 is on whatever its RAM, because its client
 also runs on emulated LSE atomics (`0025`). `RETROFORGE_STEAM_DIRECT=on|off` overrides it, for
 testing. A launch item stays `steam ... steam://rungameid/<appid>`, so the setting applies from the
-next launch without a library rescan. Keeping Steam running between games does not apply to a game
-started without the client. It still applies to first launches and to Steam's own UI.
+next launch without a library rescan. Keeping Steam running applies to all of them: a game started
+without the client gets the kept client beside it, and first launches and Steam's own UI go to it.
 
 **Per game** (Game settings > RetroForge, `game_settings_page.gd`): a Steam game's own Proton (ARMv8.0
 stable or experimental, shown on ARMv8.0 CPUs only), DXVK-Sarek (on or off), FEX TSO (on or off),

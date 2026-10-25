@@ -26,13 +26,17 @@
 #   - points ~/.steam/steam and ~/.steam/root at the client, and the links Valve's steam.sh makes;
 #   - drops a D-Bus address that is not ours, and the STEAM_RUNTIME variables;
 #   - a failed bootstrap is exit 1 without running anything.
-#   kept running between games (retroforge-steam-keep, the wrapper's "Kept running" block): off by
-#   default, as before; on, the first launch starts the client as a user unit with the launch's
-#   environment (OGUI_ID=Steam, not the game's), later ones hand their arguments to it, and a game's
-#   launch lasts exactly as long as Steam's own reaper for that app id (never OGUI's reaper, which
-#   takes the same arguments), so OGUI neither returns to its menu early nor waits forever. Exit
-#   from OGUI's menu ends the game's processes, not Steam; a kept client turned off mid-game stops
-#   when the game ends; without a user manager Steam runs with the launch, as when off.
+#   kept running in the background (retroforge-steam-keep, the wrapper's "Kept running" block): on
+#   by default; the first launch starts the client as a user unit with the launch's environment
+#   (OGUI_ID=Steam, not the game's), later ones hand their arguments to it, and a game's launch lasts
+#   exactly as long as Steam's own reaper for that app id (never OGUI's reaper, which takes the same
+#   arguments), so OGUI neither returns to its menu early nor waits forever. Exit from OGUI's menu ends
+#   the game's processes, not Steam; a kept client turned off mid-game stops when the game ends;
+#   without a user manager Steam runs with the launch, as when off.
+#   minimal: the kept client's web helper is killed and the one the client starts again frozen, and
+#   nothing it had started yet lives; frozen already, nothing is killed; a launch that needs Steam's
+#   UI holds it running (Steam's UI until OGUI closes it, a game until it has run a while), a hold of a
+#   launch that is gone does not.
 # Valve's servers are replaced by file:// URLs: $CDN for the client.
 set -uo pipefail
 
@@ -279,7 +283,8 @@ chmod +x "$W/client" "$W/bootstrap"
 # has its own suite too (test-steam-direct.sh): RETROFORGE_STEAM_DIRECT_CLI names no such file, so every
 # launch here goes to the client.
 # Keeping Steam running: the real retroforge-steam-keep, over a fake /proc ($P: a process is its
-# folder there) and stub systemctl, systemd-run and kill in $W/bin. Off unless a case turns it on.
+# folder there) and stub systemctl, systemd-run and kill in $W/bin. Off for the wrapper unless a case
+# turns it on (it is on by default).
 KEEP="$ROOT/rootfs/overlay/usr/bin/retroforge-steam-keep"
 P="$W/proc"; mkdir -p "$P" "$W/bin"
 unset RETROFORGE_STEAM_KEEP RETROFORGE_STEAM_KEPT XDG_CONFIG_HOME OGUI_ID
@@ -312,11 +317,12 @@ gone() { rm -rf "${P:?}/${1:?}"; }
 until_true() { local _; for _ in $(seq 60); do eval "$1" && return 0; sleep 0.1; done; return 1; }
 WENV=(env -u RETROFORGE_STEAM_ROOT -u XDG_DATA_HOME -u LD_LIBRARY_PATH HOME="$W/home" RETROFORGE_STEAM_BOOTSTRAP="$W/bootstrap"
       RETROFORGE_CPUINFO="$W/cpuinfo" RETROFORGE_STEAM_X86_GUEST=0 RETROFORGE_STEAM_SAREK_CLI="$W/no-sarek-cli" RETROFORGE_STEAM_DIRECT_CLI="$W/no-direct-cli"
-      PATH="$W/bin:$PATH" RETROFORGE_STEAM_KEEP_CLI="$KEEP" RETROFORGE_PROC="$P" RETROFORGE_STEAM_KEEP_KILL="$W/bin/fakekill")
-KENV=(env HOME="$W/home" PATH="$W/bin:$PATH" RETROFORGE_PROC="$P" RETROFORGE_STEAM_KEEP_KILL="$W/bin/fakekill")
+      PATH="$W/bin:$PATH" RETROFORGE_STEAM_KEEP_CLI="$KEEP" RETROFORGE_PROC="$P" RETROFORGE_STEAM_KEEP_KILL="$W/bin/fakekill"
+      RETROFORGE_STEAM_KEEP=off XDG_RUNTIME_DIR="$W/run")
+KENV=(env HOME="$W/home" PATH="$W/bin:$PATH" RETROFORGE_PROC="$P" RETROFORGE_STEAM_KEEP_KILL="$W/bin/fakekill" XDG_RUNTIME_DIR="$W/run")
 wrap() {  # wrap <exit codes of successive runs> [args...]
   echo "$1" >"$W/codes"; shift; rm -f "$W/count" "$W"/call*
-  WOUT="$("${WENV[@]}" bash "$WRAP" "$@" 2>"$W/err")"; WRC=$?
+  WOUT="$("${WENV[@]}" RETROFORGE_STEAM_KEEP="${RETROFORGE_STEAM_KEEP:-off}" bash "$WRAP" "$@" 2>"$W/err")"; WRC=$?
   WERR="$(cat "$W/err")"
 }
 WROOT="$W/home/.local/share/Steam"
@@ -427,7 +433,7 @@ finish() { until_true '! kill -0 "$wpid" 2>/dev/null'; wait "$wpid"; WRC=$?; }
 CASE="keep: the setting"
 reset_keep
 out="$("${KENV[@]}" bash "$KEEP" status 2>"$W/kerr")"
-[ "$out" = off ] && grep -q "the default" "$W/kerr" && ok "off by default" || bad "out=$out $(cat "$W/kerr")"
+[ "$out" = on ] && grep -q "the default" "$W/kerr" && ok "on by default" || bad "out=$out $(cat "$W/kerr")"
 mkdir -p "${CONF%/*}"; printf '# mine\nDXVK_SAREK=on\n' >"$CONF"
 out="$("${KENV[@]}" bash "$KEEP" on 2>"$W/kerr")"
 [ "$out" = on ] && grep -qx "KEEP_RUNNING=on" "$CONF" && grep -qx "DXVK_SAREK=on" "$CONF" && grep -qx "# mine" "$CONF" \
@@ -593,6 +599,116 @@ reset_keep; touch "$W/unit-active"
 RETROFORGE_STEAM_KEEP=on RETROFORGE_STEAM_KEPT=1 wrap 0 -silent steam://rungameid/42
 [ "$WRC" = 0 ] && [ "$(cat "$W/count")" = 1 ] && ! grep -q "handing" <<<"$WERR" \
   && ok "the unit's own run is the client itself, not a hand-over to itself" || bad "rc=$WRC $WERR"
+
+# Minimal: a client (7000, named in ~/.steam/steam.pid) with its web helper (7100) and two of the
+# helper's children. parkkill stands in for kill: KILL takes a process away, and killing a helper
+# makes the client start another (pid + 100) that has already started a child of its own; STOP and
+# CONT set its state.
+cat >"$W/bin/parkkill" <<EOF
+#!/usr/bin/env bash
+sig=\$1; shift; echo "\$sig \$*" >>"$W/kills"
+for p in "\$@"; do
+  case "\$sig" in
+    -KILL)
+      if grep -qaF steamwebhelper "$P/\$p/cmdline" 2>/dev/null && [ "\$(cut -d' ' -f4 "$P/\$p/stat")" = 7000 ] \\
+         && [ ! -e "$W/no-restart" ]; then
+        n=\$((p + 100)); mkdir -p "$P/\$n" "$P/\$((n + 1))"
+        echo steamwebhelper >"$P/\$n/comm"; printf '%s\0' "$WROOT/steamrtarm64/steamwebhelper" >"$P/\$n/cmdline"
+        echo "\$n (steamwebhelper) S 7000 \$n \$n 0 -1" >"$P/\$n/stat"
+        echo steamwebhelper >"$P/\$((n + 1))/comm"; printf '%s\0' "$WROOT/steamrtarm64/steamwebhelper" --type=zygote >"$P/\$((n + 1))/cmdline"
+        echo "\$((n + 1)) (steamwebhelper) S \$n \$n \$n 0 -1" >"$P/\$((n + 1))/stat"
+      fi
+      rm -rf "$P/\${p:?}" ;;
+    -STOP) printf 'State:\tT (stopped)\n' >"$P/\$p/status" ;;
+    -CONT) printf 'State:\tS (sleeping)\n' >"$P/\$p/status" ;;
+  esac
+done
+EOF
+chmod +x "$W/bin/parkkill"
+MENV=("${KENV[@]}" RETROFORGE_STEAM_KEEP_KILL="$W/bin/parkkill" RETROFORGE_STEAM_PARK_WAIT=2)
+reset_minimal() {
+  reset_keep; rm -rf "$W/run" "$W/no-restart"
+  mkdir -p "$W/home/.steam"; echo 7000 >"$W/home/.steam/steam.pid"
+  fakeproc 7000 1 steam "$WROOT/steamrtarm64/steam" -gamepadui
+  fakeproc 7100 7000 steamwebhelper "$WROOT/steamrtarm64/steamwebhelper"
+  fakeproc 7101 7100 steamwebhelper "$WROOT/steamrtarm64/steamwebhelper" --type=zygote
+  fakeproc 7102 7101 steamwebhelper "$WROOT/steamrtarm64/steamwebhelper" --type=renderer
+  fakeproc 7050 7000 steam-launch-wrapper "$WROOT/linuxarm64/steam-launch-wrapper" -- game
+}
+state_of() { sed -n 's/^State:[[:space:]]*\(.\).*/\1/p' "$P/$1/status" 2>/dev/null; }
+
+CASE="keep: minimal"
+reset_minimal
+"${MENV[@]}" bash "$KEEP" minimal 2>"$W/kerr"; RC=$?
+[ "$RC" = 0 ] && [ "$(state_of 7200)" = T ] && grep -qx -- "-KILL 7100" "$W/kills" && grep -qx -- "-STOP 7200" "$W/kills" \
+  && ok "the web helper is killed, and the one the client starts again frozen" || bad "rc=$RC kills=$(cat "$W/kills" 2>&1) $(cat "$W/kerr")"
+grep -qx -- "-KILL 7201" "$W/kills" && [ ! -e "$P/7201" ] && ok "with what it had started already" || bad "kills=$(cat "$W/kills")"
+[ -e "$P/7050" ] && ! grep -q 7050 "$W/kills" && ok "the client's other children (a game) are left alone" || bad "kills=$(cat "$W/kills")"
+grep -q "client stays signed in" "$W/kerr" && ok "and it is said" || bad "$(cat "$W/kerr")"
+: >"$W/kills"
+"${MENV[@]}" bash "$KEEP" minimal 2>/dev/null; RC=$?
+[ "$RC" = 0 ] && [ ! -s "$W/kills" ] && ok "frozen already: nothing is killed" || bad "rc=$RC kills=$(cat "$W/kills")"
+"${MENV[@]}" bash "$KEEP" full 2>/dev/null
+[ "$(state_of 7200)" = S ] && grep -qx -- "-CONT 7200" "$W/kills" && ok "full: the frozen helper goes on (Steam's UI comes back)" || bad "kills=$(cat "$W/kills")"
+: >"$W/kills"
+"${MENV[@]}" bash "$KEEP" minimal 2>/dev/null
+[ "$(state_of 7300)" = T ] && grep -qx -- "-KILL 7200" "$W/kills" && ok "minimal again after it ran: killed and frozen anew" || bad "kills=$(cat "$W/kills")"
+
+CASE="keep: holds"
+reset_minimal; fakeproc 4444 1 bash /usr/bin/steam -gamepadui
+"${MENV[@]}" bash "$KEEP" full 4444 2>/dev/null
+"${MENV[@]}" bash "$KEEP" minimal 2>/dev/null
+[ ! -e "$W/kills" ] && [ -e "$P/7100" ] && ok "a live launch's hold keeps Steam's UI running" || bad "kills=$(cat "$W/kills")"
+"${MENV[@]}" bash "$KEEP" minimal 4444 2>/dev/null
+[ "$(state_of 7200)" = T ] && ok "until that launch lets go of it (minimal PID)" || bad "kills=$(cat "$W/kills" 2>&1)"
+reset_minimal; fakeproc 4444 1 bash /usr/bin/steam -gamepadui
+"${MENV[@]}" bash "$KEEP" full 4444 2>/dev/null; gone 4444
+"${MENV[@]}" bash "$KEEP" minimal 2>/dev/null
+[ "$(state_of 7200)" = T ] && [ ! -e "$W/run/retroforge-steam-full/4444" ] && ok "the hold of a launch that is gone counts for nothing, and goes" || bad "$(ls "$W/run/retroforge-steam-full" 2>&1)"
+"${MENV[@]}" bash "$KEEP" minimal 4a 2>/dev/null; [ $? = 2 ] && ok "a PID that is not a number is a bad invocation" || bad "minimal 4a"
+
+CASE="keep: minimal, no client"
+reset_minimal; rm -f "$W/home/.steam/steam.pid"
+"${MENV[@]}" bash "$KEEP" minimal 2>/dev/null; RC=$?
+[ "$RC" = 0 ] && [ ! -e "$W/kills" ] && ok "no client running: nothing to do" || bad "rc=$RC kills=$(cat "$W/kills" 2>&1)"
+reset_minimal; touch "$W/no-restart"
+"${MENV[@]}" bash "$KEEP" minimal 2>"$W/kerr"; RC=$?
+[ "$RC" = 1 ] && grep -q "did not start its web helper again within 2 s" "$W/kerr" \
+  && ok "a client that does not start its helper again: exit 1, and it is said" || bad "rc=$RC $(cat "$W/kerr")"
+
+# The wrapper's holds: retroforge-steam-keep through keeplog, which records how it is called and
+# whether the client had the launch yet ($W/call1).
+cat >"$W/bin/keeplog" <<EOF
+#!/usr/bin/env bash
+case "\$1" in full|minimal) echo "\$1\${2:+ pid} \$([ -e "$W/call1" ] && echo handed || echo first)" >>"$W/keep.calls" ;; esac
+exec bash "$KEEP" "\$@"
+EOF
+chmod +x "$W/bin/keeplog"
+
+CASE="keep: a game through the kept client"
+reset_keep; rm -f "$W/keep.calls"; touch "$W/unit-active"
+bg_wrap RETROFORGE_STEAM_KEEP=on RETROFORGE_STEAM_KEEP_CLI="$W/bin/keeplog" RETROFORGE_STEAM_MINIMAL_DELAY=1 -- steam://rungameid/42
+until_true '[ -e "$W/call1" ]'
+[ "$(head -1 "$W/keep.calls" 2>/dev/null)" = "full pid first" ] \
+  && ok "Steam's UI comes back before the launch is handed over (its dialogs, install scripts, shader prompt)" || bad "keep: $(cat "$W/keep.calls" 2>&1)"
+step 42 Completed; fakeproc 4242 1 reaper "$STEAM_REAPER" SteamLaunch AppId=42 -- game
+until_true 'grep -q "^minimal pid" "$W/keep.calls"'
+kill -0 "$wpid" 2>/dev/null && grep -q "^minimal pid" "$W/keep.calls" \
+  && ok "and the client goes minimal once the game has run RETROFORGE_STEAM_MINIMAL_DELAY s, the launch still on" || bad "keep: $(cat "$W/keep.calls" 2>&1)"
+gone 4242
+finish
+[ "$WRC" = 0 ] && [ "$(tail -1 "$W/keep.calls")" = "minimal pid handed" ] && [ -e "$W/unit-active" ] \
+  && ok "and stays minimal when the game ends" || bad "rc=$WRC keep: $(cat "$W/keep.calls" 2>&1)"
+
+CASE="keep: Steam's UI holds it"
+reset_keep; rm -f "$W/keep.calls"; touch "$W/unit-active"
+bg_wrap RETROFORGE_STEAM_KEEP=on RETROFORGE_STEAM_KEEP_CLI="$W/bin/keeplog" RETROFORGE_STEAM_MINIMAL_DELAY=0 -- -gamepadui -steamos3
+until_true '[ -e "$W/call1" ]'; sleep 1.2
+[ "$(cat "$W/keep.calls")" = "full pid first" ] && ls "$W/run/retroforge-steam-full/$wpid" >/dev/null 2>&1 \
+  && ok "Steam's UI, while OGUI shows it: running, held by the launch" || bad "keep: $(cat "$W/keep.calls" 2>&1) $(ls "$W/run/retroforge-steam-full" 2>&1)"
+kill -TERM "$wpid"; wait "$wpid"; WRC=$?
+[ "$WRC" = 143 ] && [ "$(tail -1 "$W/keep.calls")" = "minimal pid handed" ] && [ ! -e "$W/run/retroforge-steam-full/$wpid" ] \
+  && ok "OGUI closes it: minimal again, the hold gone" || bad "rc=$WRC keep: $(cat "$W/keep.calls" 2>&1)"
 reset_keep
 
 echo

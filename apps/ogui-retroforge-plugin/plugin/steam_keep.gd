@@ -1,11 +1,12 @@
 extends RefCounted
-## Settings > Steam > "Steam: keep running between games": the player's setting, kept by
+## Settings > Steam > "Steam: keep running in the background": the player's setting, kept by
 ## /usr/bin/retroforge-steam-keep (KEEP_RUNNING=on|off in ~/.config/retroforge/steam.conf), which
-## /usr/bin/steam reads at every launch. Off (the default), Steam starts with each game and OGUI stops
-## it when the game ends. On, the first launch leaves Steam running as a user unit and later games are
-## handed to it, so they start without Steam's cold start (~18 s of a ~30 s launch). Turning it off
-## stops a kept Steam that runs no game; one that does stops when the game ends. The command decides
-## all of that, so the toggle only shows what `retroforge-steam-keep status` says and runs `on` / `off`.
+## /usr/bin/steam reads at every launch. On (the default), the first launch leaves Steam running as a
+## user unit, signed in with its UI closed (~240 MB), and games use it: achievements, playtime and cloud
+## saves, also for games started without Steam, and no cold start (~18 s of a ~30 s launch). Off, Steam
+## starts with each game and OGUI stops it when the game ends. Turning it off stops a kept Steam that runs
+## no game; one that does stops when the game ends. The command decides all of that, so the toggle only
+## shows what `retroforge-steam-keep status` says and runs `on` / `off`.
 
 const TOOL := "/usr/bin/retroforge-steam-keep"
 
@@ -35,8 +36,8 @@ func attach(target: Node = null) -> bool:  # target: the Settings > Steam page (
 			break
 	_toggle = toggle_scene.instantiate()
 	_toggle.name = "RetroForgeSteamKeep"
-	_toggle.text = "Steam: keep running between games"
-	_toggle.description = "Steam games start faster after the first one. Steam stays in memory between games."
+	_toggle.text = "Steam: keep running in the background"
+	_toggle.description = "Achievements, playtime and cloud saves work, and games start faster. Steam stays signed in with its window closed, using little memory."
 	_toggle.separator_visible = false  # as the rows above it; read in _ready, so before add_child
 	box.add_child(_toggle)
 	if after:

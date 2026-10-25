@@ -15,12 +15,15 @@
 #     run as Steam ran it (/bin/sh -c, at oom_score_adj 900), word for word, from the launch entry's
 #     working folder, with Steam's compat variables (the game's library on an SD card too) and the
 #     launch's own environment;
-#   when it is not: the setting off (silently), a client running (a stale steam.pid is not one), a game
-#     Steam never started here, not installed or changing, an x86 game (Steam's FEX tool), a compat
-#     tool that is gone; each says why, and nothing runs;
+#   when it is not: the setting off (silently), a client running other than the kept one in the
+#     background (a stale steam.pid is not one), a game Steam never started here, not installed or
+#     changing, an x86 game (Steam's FEX tool), a compat tool that is gone; each says why, and nothing
+#     runs;
 #   the wrapper: execs the helper for a game it can start, with the D-Bus check and DXVK-Sarek done
-#     and none of the client's own set-up (the kept client); everything else (Steam's UI, a first
-#     launch, the kept client's own run) starts the client as before.
+#     and none of the client's own set-up; with keep-running on, the kept client beside it, minimal:
+#     started first (and signed in) when Steam has a remembered sign-in, without the game's URI; the
+#     game starts anyway when it does not sign in in time; everything else (Steam's UI, a first launch,
+#     the kept client's own run) starts the client as before.
 # Steam's programs are stubs that record how they were called; the client's binary caches are written
 # by a small encoder of Valve's binary KeyValues (as in test-steam-library.sh).
 set -uo pipefail
@@ -210,6 +213,13 @@ CASE="check: the client"
 mkdir -p "$H/.steam" "$T/proc/7780"; echo 7780 >"$H/.steam/steam.pid"; echo steam >"$T/proc/7780/comm"
 direct -- check 1145360
 [ "$RC" = 1 ] && grep -q "the Steam client is running" <<<"$ERR" && ok "a running client gets the game (overlay, cloud, achievements, no more memory)" || bad "rc=$RC err=$ERR"
+echo "0::/user.slice/user-1000.slice/user@1000.service/app.slice/retroforge-steam.service" >"$T/proc/7780/cgroup"
+direct -- check 1145360
+[ "$RC" = 0 ] && ok "the kept client in the background (retroforge-steam.service) does not take the game: it stays beside it" || bad "rc=$RC err=$ERR"
+echo "0::/user.slice/user-1000.slice/session-3.scope" >"$T/proc/7780/cgroup"
+direct -- check 1145360
+[ "$RC" = 1 ] && ok "a client of a launch of its own (Steam's UI open) does" || bad "rc=$RC err=$ERR"
+rm -f "$T/proc/7780/cgroup"
 echo bash >"$T/proc/7780/comm"
 direct -- check 1145360
 [ "$RC" = 0 ] && ok "a steam.pid left by a killed client, its pid now another program's, is not a client" || bad "rc=$RC err=$ERR"
@@ -496,14 +506,24 @@ cat >"$W/sarek" <<EOF
 #!/usr/bin/env bash
 echo "\$*" >>"$W/sarek.calls"; echo on
 EOF
+# The kept client: keep-running is on unless $W/keep.state says off; systemd-run fails unless
+# $W/sdrun-ok, and then starts the unit, which signs in (a line in Steam's connection log) unless
+# $W/no-signin; systemctl reports the unit active while $W/unit-active is there.
 cat >"$W/keep" <<EOF
 #!/usr/bin/env bash
-echo "\$*" >>"$W/keep.calls"; echo on
+echo "\$*" >>"$W/keep.calls"; [ "\$1" = status ] && cat "$W/keep.state" 2>/dev/null || echo on
 EOF
 cat >"$W/bin/systemd-run" <<EOF
 #!/usr/bin/env bash
-echo "\$*" >>"$W/sdrun.calls"; exit 1
+echo "\$*" >>"$W/sdrun.calls"; [ -e "$W/sdrun-ok" ] || exit 1
+touch "$W/unit-active"
+[ -e "$W/no-signin" ] || echo "[2026-10-25 01:35:03] [Logged On, 4, 7] [U:1:1] RecvMsgClientLogOnResponse() : processing complete" >>"$S/logs/connection_log.txt"
 EOF
+cat >"$W/bin/systemctl" <<EOF
+#!/usr/bin/env bash
+case "\$*" in *is-active*) [ -e "$W/unit-active" ] ;; esac
+EOF
+chmod +x "$W/bin/systemctl"
 cat >"$W/stub-direct" <<EOF
 #!/usr/bin/env bash
 echo "\$*" >>"$W/direct.calls"; exit 1
@@ -534,7 +554,8 @@ CASE="wrapper: a game"
 wrap DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/0/bus" -- -gamepadui -steamos3 -steampal -steamdeck -silent steam://rungameid/1145360
 [ "$WRC" = 0 ] && [ -f "$T/ran.args" ] && [ ! -e "$W/client.args" ] && ok "OGUI's launch of a game Steam started before: the game, and no client" \
   || bad "rc=$WRC client=$(cat "$W/client.args" 2>&1) err=$WERR"
-[ ! -e "$W/keep.calls" ] && [ ! -e "$W/sdrun.calls" ] && ok "the kept client is not asked, even with keep-running on" || bad "keep: $(cat "$W/keep.calls" 2>&1)"
+grep -qx status "$W/keep.calls" 2>/dev/null && [ ! -e "$W/sdrun.calls" ] \
+  && ok "keep-running on, but Steam has no remembered sign-in: no client beside it" || bad "keep: $(cat "$W/keep.calls" 2>&1) sdrun: $(cat "$W/sdrun.calls" 2>&1)"
 [ ! -e "$W/guest.calls" ] && ok "nor the x86 guest (no FEX game starts this way)" || bad "guest: $(cat "$W/guest.calls")"
 [ ! -e "$W/proton.calls" ] && [ ! -e "$W/fex.calls" ] && ok "nor our ARMv8.0 Proton and FEX (the client's, with updates in the background)" \
   || bad "proton: $(cat "$W/proton.calls" 2>&1) fex: $(cat "$W/fex.calls" 2>&1)"
@@ -544,6 +565,32 @@ wrap DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/0/bus" -- -gamepadui -steamos
 reset_run; echo 7 >"$T/game.rc"
 "${WENV[@]}" bash "$WRAP" -silent steam://rungameid/1145360 2>/dev/null; WRC=$?
 [ "$WRC" = 7 ] && ok "the game's exit status is the launch's" || bad "rc=$WRC"
+
+CASE="wrapper: beside the kept client"
+mkdir -p "$S/config"; printf '"users"\n{\n\t"1"\n\t{\n\t\t"RememberPassword"\t\t"1"\n\t}\n}\n' >"$S/config/loginusers.vdf"
+reset_beside() { rm -f "$W/unit-active" "$W/sdrun-ok" "$W/no-signin" "$W/keep.state" "$S/logs/connection_log.txt"; rm -rf "$CACHE"; }
+reset_beside; touch "$W/sdrun-ok"
+wrap -- -gamepadui -steamos3 -steampal -steamdeck -silent steam://rungameid/1145360
+grep -q -- "--unit=retroforge-steam" "$W/sdrun.calls" 2>/dev/null && grep -q -- "--setenv=OGUI_ID=Steam" "$W/sdrun.calls" \
+  && ok "Steam signed in from before: the kept client is started as the user unit" || bad "sdrun: $(cat "$W/sdrun.calls" 2>&1)"
+grep -q -- "$WRAP -gamepadui -steamos3 -steampal -steamdeck -silent$" "$W/sdrun.calls" \
+  && ok "with the launch's arguments but the game's URI: the client does not start the game" || bad "sdrun: $(cat "$W/sdrun.calls" 2>&1)"
+grep -qx minimal "$W/keep.calls" && [ -f "$T/ran.args" ] && [ ! -e "$W/client.args" ] \
+  && ok "it signs in, goes minimal, and the game starts without the client, beside it" || bad "keep: $(cat "$W/keep.calls") rc=$WRC err=$WERR"
+grep -q 'Stardew/x.exe' "$CACHE/413150.json" 2>/dev/null && ok "every game's last launch is kept before that client starts" || bad "kept: $(ls "$CACHE" 2>&1)"
+reset_beside; touch "$W/unit-active"
+wrap -- -silent steam://rungameid/1145360
+[ ! -e "$W/sdrun.calls" ] && grep -qx minimal "$W/keep.calls" && [ -f "$T/ran.args" ] \
+  && ok "the kept client already runs: it is only made minimal" || bad "sdrun: $(cat "$W/sdrun.calls" 2>&1) keep: $(cat "$W/keep.calls")"
+reset_beside; touch "$W/sdrun-ok" "$W/no-signin"
+wrap RETROFORGE_STEAM_SIGNIN_WAIT=1 -- -silent steam://rungameid/1145360
+grep -q "Steam did not sign in within 1 s: app 1145360 starts without it" <<<"$WERR" && grep -qx minimal "$W/keep.calls" && [ -f "$T/ran.args" ] \
+  && ok "no sign-in within RETROFORGE_STEAM_SIGNIN_WAIT s: the game starts anyway, and it is said" || bad "rc=$WRC err=$WERR"
+reset_beside; touch "$W/sdrun-ok"; echo off >"$W/keep.state"
+wrap -- -silent steam://rungameid/1145360
+[ ! -e "$W/sdrun.calls" ] && ! grep -qx minimal "$W/keep.calls" && [ -f "$T/ran.args" ] \
+  && ok "keep-running off: the game alone, as before" || bad "sdrun: $(cat "$W/sdrun.calls" 2>&1) keep: $(cat "$W/keep.calls")"
+reset_beside; rm -f "$S/config/loginusers.vdf"
 
 CASE="wrapper: through Steam"
 wrap -- -gamepadui -steamos3 -steampal -steamdeck -silent steam://rungameid/268910
