@@ -70,7 +70,7 @@ replies — lore was not reachable, so "never posted" means no patchwork hit). `
 trees (msm-next, qcom `clk-for-7.4` / `arm64-for-7.4`, pci `next`). Re-audit on
 every bump: this table is a snapshot, the `Drop when` column is what to re-check.
 
-Totals: 5 `mainline`, 19 `posted`, 22 `retroforge`, 116 `community`. (`0310` and `0430` were
+Totals: 5 `mainline`, 19 `posted`, 23 `retroforge`, 116 `community`. (`0310` and `0430` were
 deleted at the 7.2.8 bump: stable backported both, byte-identical; the `0430` slot is reused
 by the SM8750 DSI reparent-on-power-off patch, a different change.) Half the stack will
 never land upstream, which is why provenance is a table and not a number band.
@@ -118,6 +118,7 @@ taken for issue #122 — see the `0780`–`0796` rows.
 | `0385` | community | sunshineinabox, ROCKNIX PR #3377 (SM8250 `0201` + `0202` as of `566a53ef`, squashed), plus our no-rotator guard for inline-rotation SoCs and the 0330 `msm_framebuffer_cleanup()` / 0230 `msm_gem_new()` signatures. Never posted. Enabled per board by `dts/qcom/sm8250-sde-rotator.dtsi`. | never |
 | `0390` | community | armada `0078` (PR #629). Never posted. Command-mode only: the INTF TE path read the video timing engine's line counter, which does not run there; it now reads the tear-check counter, as the pingpong TE path already did. Video-mode panels are untouched. | when mainline fixes the INTF-TE scanout position |
 | `0395` | retroforge | Upstream issue #110: on a dual-interface video-mode panel, per-interface CTL flushes that straddle the programmable fetch start underrun the next frame (black blink). One wait per kickoff, on the master, keeps them on one side. Never posted; generic, worth sending once HW-proven. | when mainline guards the kickoff against the fetch start |
+| `0396` | retroforge | A command-mode frame is sent to the panel at kickoff and shown from the first TE after its transfer starts, but the page flip event went out after the transfer stamped with the PREVIOUS TE. gamescope schedules from that stamp, one refresh early, so a limited frame missed every second refresh (Pocket Max: 60 fps @ 120 Hz ran 40). The event is now armed from the CTL start irq for the next vblank, as on video mode. HW: Pocket FIT all caps solid; Pocket Max solid except where the `0385` rotator fence delays the kickoff (cap = refresh). Never posted; generic. | when mainline reports command-mode flips at the vblank they show at |
 | `0410` | retroforge | From ROCKNIX SM8250 `0001`. Partial revert of mainline `2d51cfb77daa` (bpc×3 for video mode). | when no shipped panel needs it, or upstream fixes it |
 | `0420` | retroforge | v1 was ROCKNIX SM8250 `0016`; the xfer/modeset race fix is ours. Never posted. | when upstreamed |
 | `0430` | community | Teguh Sobirin, ROCKNIX SM8750 `0048`, rebased to 7.2.11 (one struct context line drifted). Reparents the byte/pixel RCGs back to their original (XO) parent in `msm_dsi_host_power_off()` — the SM8750 dispcc stalls its RCG update when the selected source (the powered-down PHY PLL) is dead. NOT the same patch as the old `0430` (stable took that one, "round byte clock after reparenting"). | when upstream restores the RCG parent on disable |
