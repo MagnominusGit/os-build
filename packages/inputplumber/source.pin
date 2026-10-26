@@ -11,7 +11,12 @@
 #         (Guide+L1/R1/R2/Start), asked of ShadowApex 2026-10-18, answered with this PR.
 #         Drop when a release carries it. An older InputPlumber parses a profile with layers
 #         fine and silently ignores them (unknown fields are skipped).
+#   0002  ours, for PR #757 (agreed with ShadowApex 2026-10-26): a mapping that holds a layer
+#         down keeps its other outputs back until release, and sends them as a tap only if the
+#         layer produced nothing meanwhile. Guide -> [layer, dbus ui_guide] then opens the OGUI
+#         menu on a lone tap and stays silent after Guide+R1 (it used to send ui_guide on press,
+#         so every chord also opened the menu). Drop with 0001 once upstream carries it.
 name: inputplumber
 pkgbuild_local: PKGBUILD
-patches: 0001-feat-Input-Layers-add-input-layers-to-map-button-com.patch
+patches: 0001-feat-Input-Layers-add-input-layers-to-map-button-com.patch 0002-feat-Input-Layers-a-held-activator-taps-its-other-outputs.patch
 pkgrel_suffix: 1

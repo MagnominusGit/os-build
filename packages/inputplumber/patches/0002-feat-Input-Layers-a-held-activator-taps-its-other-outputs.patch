@@ -1,0 +1,374 @@
+From af0ec83caf5e2de031140e7faa505094d108b4dc Mon Sep 17 00:00:00 2001
+From: Philippe Simons <simons.philippe@gmail.com>
+Date: Mon, 26 Oct 2026 17:18:47 +0100
+Subject: [PATCH] feat(Input Layers): a held activator taps its other outputs
+ when unused
+
+A mapping that holds a layer down and also produces other outputs, e.g.
+Guide -> [layer guide, gamepad Guide], used to emit those outputs on
+press, so every Guide+X chord also pressed Guide. Hold them back
+instead: on release they go out as a press/release tap only if no
+mapping of a layer the activator holds produced anything meanwhile.
+One button then opens a layer when held with others and keeps its own
+meaning when tapped alone.
+
+Toggle activations and mappings without other outputs are unchanged.
+---
+ src/input/composite_device/layers.rs      |  94 +++++++++++
+ src/input/composite_device/layers_test.rs | 185 ++++++++++++++++++++++
+ src/input/composite_device/mod.rs         |  12 ++
+ 3 files changed, 291 insertions(+)
+
+diff --git a/src/input/composite_device/layers.rs b/src/input/composite_device/layers.rs
+index 0548e60..9a7070d 100644
+--- a/src/input/composite_device/layers.rs
++++ b/src/input/composite_device/layers.rs
+@@ -22,6 +22,18 @@ struct ActiveLayer {
+     mode: LayerActivationMode,
+ }
+ 
++/// The other outputs of a mapping that also holds a layer down, kept back until
++/// the activator is released. They go out as a tap only if none of the layers it
++/// activated produced anything in between, so one button can both open a layer
++/// (held with others) and keep its own meaning (tapped alone).
++#[derive(Debug, Clone)]
++struct DeferredTap {
++    /// The held-back press events, in emission order.
++    presses: Vec<NativeEvent>,
++    /// Set once a layer this activator holds produced an output.
++    chorded: bool,
++}
++
+ /// Owns all input layer state for a [super::CompositeDevice]: the layer lookup
+ /// tables from the loaded profile, the stack of active layers, and the inputs
+ /// those layers produced. Every layer decision lives here; the composite device
+@@ -42,6 +54,9 @@ pub struct LayerState {
+     /// the source is still held. Base-profile translations are deliberately not
+     /// tracked here.
+     active_inputs: HashMap<(Capability, String), Vec<Capability>>,
++    /// Activator source capability -> the outputs of its mapping held back
++    /// until it is released (see [DeferredTap]).
++    deferred_taps: HashMap<Capability, DeferredTap>,
+ }
+ 
+ impl LayerState {
+@@ -52,6 +67,7 @@ impl LayerState {
+         self.active_layers.clear();
+         self.pressed_activators.clear();
+         self.active_inputs.clear();
++        self.deferred_taps.clear();
+ 
+         let Some(profile) = profile else {
+             return;
+@@ -249,6 +265,82 @@ impl LayerState {
+ 
+         self.active_inputs
+             .insert((source.clone(), layer.to_string()), produced);
++
++        // The layer was used, so whatever holds it down is a chord, not a tap.
++        for (activator, activations) in self.pressed_activators.iter() {
++            if !activations.iter().any(|(name, _)| name == layer) {
++                continue;
++            }
++            if let Some(tap) = self.deferred_taps.get_mut(activator) {
++                tap.chorded = true;
++            }
++        }
++    }
++
++    /// Hold back the outputs a hold activation's mapping produces besides the
++    /// activation itself, until [LayerState::finish_tap]. Returns the events to
++    /// process now: the activation alone, or `events` untouched when they hold
++    /// no layer down or carry nothing else.
++    pub fn defer_tap(&mut self, source: &Capability, events: Vec<NativeEvent>) -> Vec<NativeEvent> {
++        let holds_layer = events.iter().any(|event| {
++            matches!(event.as_capability(),
++                Capability::Layer { name, mode: LayerActivationMode::Hold }
++                    if self.config_maps.contains_key(&name))
++        });
++        if !holds_layer {
++            return events;
++        }
++        let (activations, others): (Vec<NativeEvent>, Vec<NativeEvent>) = events
++            .into_iter()
++            .partition(|event| matches!(event.as_capability(), Capability::Layer { .. }));
++        if !others.is_empty() {
++            // A repeated press of a held activator keeps the first deferral.
++            self.deferred_taps
++                .entry(source.clone())
++                .or_insert(DeferredTap {
++                    presses: others,
++                    chorded: false,
++                });
++        }
++        activations
++    }
++
++    /// The release of an input whose outputs [LayerState::defer_tap] held back.
++    /// Returns the events to process now (the release minus the held-back
++    /// outputs, which never went out) and the tap to emit: the held-back
++    /// presses then their releases in reverse order, or nothing when a layer
++    /// was used while the input was held.
++    pub fn finish_tap(
++        &mut self,
++        source: &Capability,
++        events: Vec<NativeEvent>,
++    ) -> (Vec<NativeEvent>, Vec<NativeEvent>) {
++        let Some(tap) = self.deferred_taps.remove(source) else {
++            return (events, Vec::new());
++        };
++        let activations: Vec<NativeEvent> = events
++            .into_iter()
++            .filter(|event| matches!(event.as_capability(), Capability::Layer { .. }))
++            .collect();
++        if tap.chorded {
++            return (activations, Vec::new());
++        }
++
++        let releases: Vec<NativeEvent> = tap
++            .presses
++            .iter()
++            .rev()
++            .map(|press| {
++                NativeEvent::new_translated(
++                    source.clone(),
++                    press.as_capability(),
++                    InputValue::Bool(false),
++                )
++            })
++            .collect();
++        let mut sequence = tap.presses;
++        sequence.extend(releases);
++        (activations, sequence)
+     }
+ 
+     /// Remove a layer from anywhere in the stack and return the outputs it must
+@@ -269,6 +361,8 @@ impl LayerState {
+     /// Pop every active layer from the top of the stack down, returning one
+     /// combined set of releases so the caller emits a single signal.
+     pub fn clear(&mut self) -> Vec<NativeEvent> {
++        // A tap still held back never went out, so it needs no release.
++        self.deferred_taps.clear();
+         let mut releases = Vec::new();
+         while let Some(layer) = self.active_layers.last() {
+             let name = layer.name.clone();
+diff --git a/src/input/composite_device/layers_test.rs b/src/input/composite_device/layers_test.rs
+index 6841b53..427a358 100644
+--- a/src/input/composite_device/layers_test.rs
++++ b/src/input/composite_device/layers_test.rs
+@@ -324,4 +324,189 @@ layers:
+         assert!(!releases[0].pressed());
+         assert!(state.active_names().is_empty());
+     }
++
++    /// The events an activation mapping produces for a source: holding `layer`
++    /// down, plus the source's own button as a gamepad output.
++    fn activation_with_tap(
++        source: &Capability,
++        layer: &str,
++        mode: LayerActivationMode,
++        pressed: bool,
++    ) -> Vec<NativeEvent> {
++        vec![
++            NativeEvent::new_translated(
++                source.clone(),
++                Capability::Layer {
++                    name: layer.to_string(),
++                    mode,
++                },
++                InputValue::Bool(pressed),
++            ),
++            NativeEvent::new_translated(source.clone(), source.clone(), InputValue::Bool(pressed)),
++        ]
++    }
++
++    fn is_layer(event: &NativeEvent) -> bool {
++        matches!(event.as_capability(), Capability::Layer { .. })
++    }
++
++    #[test]
++    fn tapped_activator_emits_its_held_back_outputs_on_release() {
++        let mut state = state();
++        let guide = button("Guide");
++
++        // The press only holds the layer down, the Guide output waits.
++        let now = state.defer_tap(
++            &guide,
++            activation_with_tap(&guide, "guide", LayerActivationMode::Hold, true),
++        );
++        assert_eq!(now.len(), 1);
++        assert!(is_layer(&now[0]));
++        state.apply_activation(&guide, "guide", &LayerActivationMode::Hold, true);
++
++        // Released with no layer output in between: Guide goes out as a tap.
++        state.release_activation(&guide);
++        let (now, tap) = state.finish_tap(
++            &guide,
++            activation_with_tap(&guide, "guide", LayerActivationMode::Hold, false),
++        );
++        assert_eq!(now.len(), 1);
++        assert!(is_layer(&now[0]));
++        assert_eq!(tap.len(), 2);
++        assert_eq!(tap[0].as_capability(), guide);
++        assert!(tap[0].pressed());
++        assert_eq!(tap[1].as_capability(), guide);
++        assert!(!tap[1].pressed());
++    }
++
++    #[test]
++    fn used_layer_drops_the_held_back_outputs() {
++        let mut state = state();
++        let guide = button("Guide");
++        let south = button("South");
++
++        state.defer_tap(
++            &guide,
++            activation_with_tap(&guide, "guide", LayerActivationMode::Hold, true),
++        );
++        state.apply_activation(&guide, "guide", &LayerActivationMode::Hold, true);
++        state.record_outputs(&south, Some("guide"), true, &[output(&south, "Esc")]);
++
++        state.release_activation(&guide);
++        let (now, tap) = state.finish_tap(
++            &guide,
++            activation_with_tap(&guide, "guide", LayerActivationMode::Hold, false),
++        );
++        assert!(now.iter().all(is_layer));
++        assert!(tap.is_empty());
++
++        // The next tap starts clean.
++        state.defer_tap(
++            &guide,
++            activation_with_tap(&guide, "guide", LayerActivationMode::Hold, true),
++        );
++        state.apply_activation(&guide, "guide", &LayerActivationMode::Hold, true);
++        state.release_activation(&guide);
++        let (_, tap) = state.finish_tap(
++            &guide,
++            activation_with_tap(&guide, "guide", LayerActivationMode::Hold, false),
++        );
++        assert_eq!(tap.len(), 2);
++    }
++
++    #[test]
++    fn base_outputs_while_held_do_not_count_as_a_chord() {
++        let mut state = state();
++        let guide = button("Guide");
++        let quick_access = button("QuickAccess");
++
++        state.defer_tap(
++            &guide,
++            activation_with_tap(&guide, "guide", LayerActivationMode::Hold, true),
++        );
++        state.apply_activation(&guide, "guide", &LayerActivationMode::Hold, true);
++        // An input the layer does not map translates through the base profile.
++        state.record_outputs(&quick_access, None, true, &[output(&quick_access, "Esc")]);
++
++        state.release_activation(&guide);
++        let (_, tap) = state.finish_tap(
++            &guide,
++            activation_with_tap(&guide, "guide", LayerActivationMode::Hold, false),
++        );
++        assert_eq!(tap.len(), 2);
++    }
++
++    #[test]
++    fn repeated_press_keeps_one_deferral() {
++        let mut state = state();
++        let guide = button("Guide");
++
++        for _ in 0..3 {
++            state.defer_tap(
++                &guide,
++                activation_with_tap(&guide, "guide", LayerActivationMode::Hold, true),
++            );
++            state.apply_activation(&guide, "guide", &LayerActivationMode::Hold, true);
++        }
++        state.release_activation(&guide);
++        let (_, tap) = state.finish_tap(
++            &guide,
++            activation_with_tap(&guide, "guide", LayerActivationMode::Hold, false),
++        );
++        assert_eq!(tap.len(), 2);
++    }
++
++    #[test]
++    fn only_hold_activations_of_known_layers_defer() {
++        let mut state = state();
++        let guide = button("Guide");
++        let quick_access = button("QuickAccess");
++
++        // A toggle activation passes its outputs on at once.
++        let now = state.defer_tap(
++            &quick_access,
++            activation_with_tap(
++                &quick_access,
++                "mouse_mode",
++                LayerActivationMode::Toggle,
++                true,
++            ),
++        );
++        assert_eq!(now.len(), 2);
++
++        // So does an activation of a layer the profile does not define.
++        let now = state.defer_tap(
++            &guide,
++            activation_with_tap(&guide, "nope", LayerActivationMode::Hold, true),
++        );
++        assert_eq!(now.len(), 2);
++
++        // And a release with nothing held back is untouched.
++        let (now, tap) = state.finish_tap(
++            &guide,
++            activation_with_tap(&guide, "nope", LayerActivationMode::Hold, false),
++        );
++        assert_eq!(now.len(), 2);
++        assert!(tap.is_empty());
++    }
++
++    #[test]
++    fn clear_drops_a_pending_tap() {
++        let mut state = state();
++        let guide = button("Guide");
++
++        state.defer_tap(
++            &guide,
++            activation_with_tap(&guide, "guide", LayerActivationMode::Hold, true),
++        );
++        state.apply_activation(&guide, "guide", &LayerActivationMode::Hold, true);
++        state.clear();
++
++        let (now, tap) = state.finish_tap(
++            &guide,
++            activation_with_tap(&guide, "guide", LayerActivationMode::Hold, false),
++        );
++        assert_eq!(now.len(), 2);
++        assert!(tap.is_empty());
++    }
+ }
+diff --git a/src/input/composite_device/mod.rs b/src/input/composite_device/mod.rs
+index f7bf970..ac2efce 100644
+--- a/src/input/composite_device/mod.rs
++++ b/src/input/composite_device/mod.rs
+@@ -985,6 +985,18 @@ impl CompositeDevice {
+                 .filter_map(|event| self.filter_event(event))
+                 .collect();
+ 
++            // A mapping that holds a layer down keeps its other outputs back:
++            // they go out as a tap on release, unless the layer was used.
++            let events = if is_pressed {
++                self.layers.defer_tap(&source_cap, events)
++            } else {
++                let (events, tap) = self.layers.finish_tap(&source_cap, events);
++                if !tap.is_empty() {
++                    self.write_chord_events(tap).await?;
++                }
++                events
++            };
++
+             // Track what an active layer produced, so removing that layer can
+             // release it later while the input is still held.
+             self.layers
+-- 
+2.55.0
+
