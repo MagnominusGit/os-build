@@ -23,7 +23,7 @@ trap 'rm -rf "$T"' EXIT
 PASS=0; FAIL=0; SKIP=0
 
 (python3 - "$CHECK" "$ROOT" "$T" "$(command -v dtc || true)" <<'PYEOF'
-import importlib.util, os, subprocess, sys
+import importlib.util, os, re, subprocess, sys
 from pathlib import Path
 
 check_py, root, tmp, dtc = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3]), sys.argv[4]
@@ -306,11 +306,23 @@ ok("a new binding header is kept", "dt-bindings/x.h" in h, h)
 
 print("== the PANELS table against the panel drivers")
 patches = sorted((root / "kernel/patches").glob("*.patch"))
+pin = re.search(r"^version:\s*(\S+)", (root / "kernel/SOURCE.pin").read_text(), re.M).group(1)
+ktree = root / f"work/kernel/linux-{pin}"
 for compat, kind in sorted(chk.PANELS.items()):
     src = next((p.read_text(errors="replace") for p in patches if f'"{compat}"' in p.read_text(errors="replace")), None)
     if src is None:
         ok(f"{compat}: its driver is in kernel/patches", False, "not found")
         continue
+    if "backlight_device_register" not in src and "drm_panel_of_backlight" not in src:
+        # A patch to an upstream driver (0536 on panel-chipwealth-ch13726a.c) adds the compatible
+        # but not the backlight call, which is upstream context: read the patched file instead.
+        files = re.findall(r"^\+\+\+ b/(drivers/gpu/drm/panel/\S+\.c)", src, re.M)
+        built = [ktree / f for f in files if (ktree / f).exists()]
+        if not built:
+            print(f"  skip {compat}: its backlight call is upstream context, and {ktree} is not built")
+            skipped += 1
+            continue
+        src = "".join(p.read_text(errors="replace") for p in built)
     own = "backlight_device_register" in src
     borrows = "drm_panel_of_backlight" in src
     want = {"dcs": own and not borrows, "borrows": borrows and not own, "none": not own and not borrows}[kind]

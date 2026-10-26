@@ -58,7 +58,7 @@ pages.** Standardized across all five SoCs.
 - ✅ Patches are numbered by **subsystem**, in bands, so apply order reads off the name;
   `kernel/patches/README.md` carries the band map, the convention lint, and the mapping
   from the old ad-hoc numbering.
-- ✅ Boots on real hardware across the three SM8xxx SoC generations (SM6115 added 2026-10-09, not yet booted); display, input, and Turnip
+- ✅ Boots on real hardware across the three SM8xxx SoC generations (SM6115 added 2026-10-09; SM4450 added 2026-10-26, not yet booted); display, input, and Turnip
   Vulkan validated (Phase 1 gate cleared) — see `docs/archive/bringup.md`.
 
 ### Per-board HW gate

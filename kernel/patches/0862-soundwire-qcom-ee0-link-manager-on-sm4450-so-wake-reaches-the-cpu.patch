@@ -1,0 +1,78 @@
+From: sunshineinabox <aqemail@gmail.com>
+Subject: [PATCH] soundwire: qcom: use EE0 link manager so wake reaches the CPU
+
+[retroforge: scoped to SM4450. The original turned SWRM_EE_CPU 1 -> 0 for every
+controller (v1.7 and v2+), i.e. every SM8550/SM8650/SM8750 board of the combined kernel;
+here the EE is chosen per machine. The clock-stop wake handling stays generic.]
+---
+diff --git a/drivers/soundwire/qcom.c b/drivers/soundwire/qcom.c
+index 8629b256f..e9796b799 100644
+--- a/drivers/soundwire/qcom.c
++++ b/drivers/soundwire/qcom.c
+@@ -26,6 +26,8 @@
+ #define SWRM_COMP_STATUS					0x014
+ #define SWRM_LINK_MANAGER_EE					0x018
+ #define SWRM_EE_CPU						1
++/* SM4450's link manager only routes the clock-stop wake to the CPU from EE0 */
++#define SWRM_EE_CPU_SM4450					0
+ #define SWRM_FRM_GEN_ENABLED					BIT(0)
+ #define SWRM_VERSION_1_3_0					0x01030000
+ #define SWRM_VERSION_1_5_1					0x01050001
+@@ -192,6 +194,7 @@ struct qcom_swrm_ctrl {
+ 	struct regmap *regmap;
+ 	u32 max_reg;
+ 	const unsigned int *reg_layout;
++	u32 ee_cpu;
+ 	void __iomem *mmio;
+ 	struct reset_control *audio_cgcr;
+ #ifdef CONFIG_DEBUG_FS
+@@ -828,6 +831,10 @@ static irqreturn_t qcom_swrm_irq_handler(int irq, void *dev_id)
+ 			case SWRM_INTERRUPT_STATUS_CLK_STOP_FINISHED_V2:
+ 				break;
+ 			case SWRM_INTERRUPT_STATUS_EXT_CLK_STOP_WAKEUP:
++				/* Slave woke the bus during clock stop */
++				pm_runtime_get(ctrl->dev);
++				pm_runtime_mark_last_busy(ctrl->dev);
++				pm_runtime_put_autosuspend(ctrl->dev);
+ 				break;
+ 			case SWRM_INTERRUPT_STATUS_CMD_IGNORED_AND_EXEC_CONTINUED:
+ 				ctrl->reg_read(ctrl,
+@@ -906,11 +913,11 @@ static int qcom_swrm_init(struct qcom_swrm_ctrl *ctrl)
+ 	ctrl->reg_write(ctrl, SWRM_MCP_CFG_ADDR, val);
+ 
+ 	if (ctrl->version == SWRM_VERSION_1_7_0) {
+-		ctrl->reg_write(ctrl, SWRM_LINK_MANAGER_EE, SWRM_EE_CPU);
++		ctrl->reg_write(ctrl, SWRM_LINK_MANAGER_EE, ctrl->ee_cpu);
+ 		ctrl->reg_write(ctrl, SWRM_MCP_BUS_CTRL,
+-				SWRM_MCP_BUS_CLK_START << SWRM_EE_CPU);
++				SWRM_MCP_BUS_CLK_START << ctrl->ee_cpu);
+ 	} else if (ctrl->version >= SWRM_VERSION_2_0_0) {
+-		ctrl->reg_write(ctrl, SWRM_LINK_MANAGER_EE, SWRM_EE_CPU);
++		ctrl->reg_write(ctrl, SWRM_LINK_MANAGER_EE, ctrl->ee_cpu);
+ 		ctrl->reg_write(ctrl, SWRM_V2_0_CLK_CTRL,
+ 				SWRM_V2_0_CLK_CTRL_CLK_START);
+ 	} else {
+@@ -1575,6 +1582,8 @@ static int qcom_swrm_probe(struct platform_device *pdev)
+ 	data = of_device_get_match_data(dev);
+ 	ctrl->max_reg = data->max_reg;
+ 	ctrl->reg_layout = data->reg_layout;
++	ctrl->ee_cpu = of_machine_is_compatible("qcom,sm4450") ?
++		       SWRM_EE_CPU_SM4450 : SWRM_EE_CPU;
+ 	ctrl->rows_index = sdw_find_row_index(data->default_rows);
+ 	ctrl->cols_index = sdw_find_col_index(data->default_cols);
+ #if IS_REACHABLE(CONFIG_SLIMBUS)
+@@ -1761,11 +1770,11 @@ static int __maybe_unused swrm_runtime_resume(struct device *dev)
+ 		reset_control_reset(ctrl->audio_cgcr);
+ 
+ 		if (ctrl->version == SWRM_VERSION_1_7_0) {
+-			ctrl->reg_write(ctrl, SWRM_LINK_MANAGER_EE, SWRM_EE_CPU);
++			ctrl->reg_write(ctrl, SWRM_LINK_MANAGER_EE, ctrl->ee_cpu);
+ 			ctrl->reg_write(ctrl, SWRM_MCP_BUS_CTRL,
+-					SWRM_MCP_BUS_CLK_START << SWRM_EE_CPU);
++					SWRM_MCP_BUS_CLK_START << ctrl->ee_cpu);
+ 		} else if (ctrl->version >= SWRM_VERSION_2_0_0) {
+-			ctrl->reg_write(ctrl, SWRM_LINK_MANAGER_EE, SWRM_EE_CPU);
++			ctrl->reg_write(ctrl, SWRM_LINK_MANAGER_EE, ctrl->ee_cpu);
+ 			ctrl->reg_write(ctrl, SWRM_V2_0_CLK_CTRL,
+ 					SWRM_V2_0_CLK_CTRL_CLK_START);
+ 		} else {

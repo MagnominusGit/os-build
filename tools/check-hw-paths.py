@@ -62,6 +62,8 @@ PANELS = {
     "ch13726a,thor": "dcs",                 # 0535
     "vtdr6130,rp6": "dcs",                  # 0555
     "il97680a,rpnova": "dcs",               # 0560
+    "retroid,pocket-classic-panel": "dcs",  # upstream chipwealth-ch13726a + 0536
+    "retroid,pocket-classic-g1392-panel": "dcs",  # upstream chipwealth-ch13726a + 0536
     "ayaneo,pocket-ace-panel": "borrows",   # 0505
     "ayaneo,pocket-ds-secondary-panel": "borrows",  # 0515
     "syna,td4328": "borrows",               # 0520
@@ -74,6 +76,7 @@ PANELS = {
     "mangmi,td4310": "borrows",             # 0575
     "mangmi,air-y-pro-panel": "borrows",    # 0580
     "mangmi,gh7005": "borrows",             # 0585
+    "focaltech,ft7131m": "borrows",         # 0590
     "boe,xm91080g": "none",                 # 0525 (the Mini's backlight is ayn,odin2miniled)
 }
 

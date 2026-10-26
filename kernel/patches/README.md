@@ -75,6 +75,8 @@ deleted at the 7.2.8 bump: stable backported both, byte-identical; the `0430` sl
 by the SM8750 DSI reparent-on-power-off patch, a different change.) Half the stack will
 never land upstream, which is why provenance is a table and not a number band.
 
+SM4450 port (2026-10-26): 40 patches from ROCKNIX SM4450 (`ROCKNIX/distribution` next `c378e634`), audited against 7.2.11 — NOT taken because our stack already carries them: `0016` rsinput (`0745`), `0019` boot-scanout stop (`0370` is its v2), `0041` qmp v4 DP pre-emphasis, `0045` soc-serial (`1015`), `0046`-`0048` WCN3950 (`1021`-`1023`); NOT taken by policy: `0054` (renames `qcom-battmgr-bat` to `battery` on every battmgr board, which every SM8550+ profile pins) and `0034` (inverts aw88166 `PCM Playback Volume`, which would turn the Thor UCM's `0` from full scale into -127 dB). `0286` and `0862` are scoped here to SM4450.
+
 SM8750 port (2026-10-19, issue #121): 36 patches added from ROCKNIX SM8750 + armada, all
 audited against 7.2.11 — NOT taken because already upstream at this pin: ROCKNIX `0050`
 (gdsc_gx_disable), `0055` (aw99706 fixes), `0517` (typec-mux EPROBE_DEFER), the sgm3804
@@ -90,8 +92,12 @@ taken for issue #122 — see the `0780`–`0796` rows.
 | `0010` | community | Sergio Lopez, Asahi downstream (muvm/FEX); same as ROCKNIX `0504`. Never posted. | never — downstream prctl ABI |
 | `0020` | community | Billy Laws, FEX downstream handler. A cut-down RFC (André Almeida, v2 `<20251117160841.334224-2-andrealmeid@igalia.com>`) was opposed by Will Deacon: arm64 will not carry x86 unaligned-atomic emulation. We fixed a missing exception-table entry on `Load128`'s `stlxp` (kernel oops on SM8250, which lacks LSE2 and traps every unaligned atomic), and made backpatch cache maintenance fault-safe (`caches_clean_inval_user_pou()` instead of `flush_icache_range()` on user code; from Kettle Linux `1389`). | never |
 | `0110` | posted | Lucid Ole hunk = Esteban Urrutia "SM8450 QoL (dispcc)" v3 3/3 `<20260713-sm8450-qol-dispcc-v3-0-56fd05822270@proton.me>`, re-applied to qcom `clk-for-7.4` as `eb34e2804ce4` (2026-09-23; the earlier `2295d6a84179` never reached mainline), no Cc: stable. The sm8550 mdp-ops hunk is our retarget of v3 1/3 and was never sent — Dmitry asked for exactly this on other dispcc controllers. | guard: when `eb34e2804ce4` reaches our pin (v7.4); mdp ops: when sent and merged |
+| `0111` | community | ROCKNIX SM4450 `0011` (sunshineinabox): the sm4450 twin of mainline `73df1b79026d` (sm8450 dispcc mdp ops). Never posted. | when an sm4450 equivalent lands |
+| `0112` | community | ROCKNIX SM4450 `0012`: splash quiesce + DSI RCG parent enable on dispcc-sm4450. Never posted. | never |
 | `0120` | community | Body replaced 2026-10-19 with armada `0121` (was ROCKNIX `ef264a238d`, sunshineinabox): armada scopes presync_floor/skip_retention_level via private descriptors (`gfx_gmu` for sm8550+sm8750, `gmxc_sm8750`) instead of flagging the shared gfx/gmxc structs, which leaks onto every SoC sharing them in a combined kernel like ours; also adds the sm8750 rails. Never posted. | never |
+| `0121` | community | ROCKNIX SM4450 `0002`: LCX domain for SM4450 in rpmhpd. Never posted. | when upstreamed |
 | `0130` | community | map220v via ROCKNIX `0122`. Never posted. The same change for x1e80100 is being reverted in 7.3 (hard resets) — high-risk to post. | never |
+| `0131` | community | ROCKNIX SM4450 `0006`: SM4450 interconnect driver + binding header. Never posted. | when upstreamed |
 | `0142` | posted | Abel Vesa "clk: qcom: Tie CX power domains to GCCs" v5 24/42 + 25/42 `<20260924-qcom-tie-cx-to-gcc-v5-*-38732033e5b5@oss.qualcomm.com>`, applied to qcom `clk-for-7.4` (sm8550 `fe2a50974f4a`, sm8650 `e4e6177235c6`). `.use_rpm = true`: runtime PM on GCC, so CX can drop once every GCC consumer has released its clocks and GDSCs. Needs `1150`'s `power-domains` in DT. | v7.4 |
 | `0151` | community | Teguh Sobirin, ROCKNIX SM8750 `0044` (`Fixes: 3267c774f3ff`), upstream `0150` (our `0150` is the sm6115 USB-GDSC patch). Suspend-motivated upstream fix (PWRSTS_RET_ON so PCIe GDSCs survive gdsc_disable()); kept for GDSC-policy parity with sm8550/sm8650, whose upstream GCCs already use RET_ON — inert here without kernel sleep. | when 7.2.y/7.3 takes the fix |
 | `0210` | community | map220v via ROCKNIX `0004`. Never posted; reuses `a750_ifpc_reglist` (unverified for A740). | when A740 IFPC lands upstream |
@@ -161,6 +167,10 @@ taken for issue #122 — see the `0780`–`0796` rows.
 | `0580` `0736` `0990` `1175` | community | ROCKNIX SM8250 `0064` `0065` `0066` `0067` (Philippe Simons): MANGMI Air Y Pro panel, Hynitron CST66xx touch, pm8150l LCDB regulator + its dtsi node. Added 2026-10-09. | never |
 | `0030` `0040` `0050` | community | ROCKNIX SM6115 `0017` `0018` `0019` (cpuidle-psci late init, PSCI SYSTEM_SUSPEND fallback driver, MPM wake timer via genpd). Never posted. SM6115 port, 2026-10-09. | never |
 | `0135` | posted | ROCKNIX SM6115 `0010`, Xilin Wu: `clk-rcg2` set_duty_cycle() boundary overflow. | when merged |
+| `0155` | community | ROCKNIX SM4450 `0013`: gpucc-sm4450 hlos1_vote_gpu_smmu clock (+ binding id). Never posted. | when upstreamed |
+| `0156` | community | ROCKNIX SM4450 `0014`: let the kernel enable the SM4450 GX GDSC (the A613 has no GMU). Never posted. | when upstreamed |
+| `0157` | community | ROCKNIX SM4450 `0017`: gpucc-sm4450 gfx3d RCG for GMU-less use. Never posted. | when upstreamed |
+| `0158` | community | ROCKNIX SM4450 `0018`: gpucc-sm4450 retains GX GDSC regs across collapse. Never posted. | when upstreamed |
 | `0140` `0145` `0150` `0160` | community | ROCKNIX SM6115 `0006` `0007` `0008` `0035` (gcc-sm6115 GP clocks on rcg2_gp_ops, video GDSC HW_CTRL trigger, USB GDSC retention, LPASS LPI pinctrl functions). `0006` is Xilin Wu's sc7280 pattern applied to sm6115. | never |
 | `0387` `0388` | community | ROCKNIX SM6115 `0207` `0211` (sunshineinabox): SmartDMA on the sm6115 catalog, VBIF AXI non-shareable. The rest of ROCKNIX's SM6115 DPU set is already here: `0205`/`0208`/`0210` are `0350`/`0351`/`0352`, `0200`-`0202` are `0385`. | never |
 | `0565` `0566` `0567` | community | ROCKNIX SM6115 `0001` (Philippe Simons), `0060` (Noxwell), `0065` (sunshineinabox): ROCKNIX's own `panel-hx83112a.c` for the Air X MQ66 — created, then given per-panel data with Air X and Retroid Duo Lite variants, then the Air X's staged power sequence. The upstream `panel-himax-hx83112a.c` is a different driver and stays off, as in ROCKNIX's config. | never |
@@ -172,6 +182,14 @@ taken for issue #122 — see the `0780`–`0796` rows.
 | `0841` `0842` `0843` `0861` | community | ROCKNIX SM6115 `0051` `0053` `0054` `0052`: ES8326 sysclk from MCLK / vdd supply / stereo controls; MI2S jack detection in qcom common. | never |
 | `0855` | community | ROCKNIX SM6115 `0080`: let the LPASS rx/tx/va/wsa macros and the SoundWire controller idle -- runtime-PM references in the clock-gate paths, autosuspend after probe, system-sleep handlers that run the runtime paths for a device still active at suspend. Power only, not a boot requirement; the Air X instantiates the rx/tx/va macros (`qcom,sm6115-lpass-*-macro`) and wires the VA macro into `VA_CODEC_DMA_TX_0`. Found by the 2026-10-09 audit after the first port skipped it. | never |
 | `0215` | community | ROCKNIX SM6115 `0004` (Philippe Simons): the Adreno 610 **speed-bin 221** in the a6xx catalog, with the stock sm6115 GPU OPP table (bin masks widened, the 1050 MHz point and the rpmpd turbo_high level it needs, gpucc). Without it the Air X boots with `missing support for speed-bin: 221` followed by `_opp_is_supported: Invalid opp-supported-hw property (-22)`: no valid GPU OPP, and turnip finds no usable device. Deferred as perf on the first port, promoted by the first boot (2026-10-10). | never |
+| `0285` | community | ROCKNIX SM4450 `0001`: Adreno 613 a6xx catalog entry. Never posted. | when the A613 catalog lands upstream |
+| `0286` | community | ROCKNIX SM4450 `0015`, SCOPED HERE to the A613: the original skipped the SPTPRAC read on every GPU but A630/A615, which reaches every a6xx/a7xx board of the combined kernel through devcoredump. | with `0285` |
+| `0398` | community | ROCKNIX SM4450 `0009`: SM4450 DPU catalog + MDSS + UBWC. Rebased on `0340`, which already carries the identical `rotation_v201_formats`. Never posted. | when upstreamed |
+| `0536` | community | ROCKNIX SM4450 `0010`: per-board init tables and the RP Classic (Rev Q, G1392) modes in the upstream chipwealth-ch13726a driver (not `0535`'s DDIC driver). Never posted. | never |
+| `0590` | community | ROCKNIX SM4450 `0050`: FocalTech FT7131M panel (Anbernic RG 55G1). Kconfig/Makefile re-placed. Never posted. | never |
+| `0690` | community | ROCKNIX SM4450 `0023`: PM6450 PWM in leds-qcom-lpg; of_match row re-placed after `0685`. Never posted. | when upstreamed |
+| `0691` | community | ROCKNIX SM4450 `0060` (sunshineinabox): inversed PWM polarity in leds-qcom-lpg (the RG 55G1 backlight). Opt-in by polarity: was -EINVAL. Never posted. | when upstreamed |
+| `0711` | community | ROCKNIX SM4450 `0061`: edt-ft5x06 follows the panel power state, engaged only when the touch node names a `panel` (no other board of ours does). Never posted. | never |
 | `0871` | retroforge | Replaces ROCKNIX SM6115 `0037` (strict S16_LE on every stream), scoped to the `qcom,qrb4210-rb2-sndcard` compatible so it coexists with `0870`. | never |
 | `0872` `0873` `0874` | community | ROCKNIX SM6115 `0042` `0044` `0045` (Val Packett; sm8250 machine driver: codec_fmt on all codec DAIs, QUATERNARY MI2S startup, MI2S AFE port clock shutdown). Apply verbatim on `0870`/`0871`. | never |
 | `0896` | posted | ROCKNIX SM6115 `0041`, Val Packett: q6afe clk vote response type mismatch. Applies after `0895`. | when merged |
@@ -183,6 +201,9 @@ taken for issue #122 — see the `0780`–`0796` rows.
 | `1090` | community | ROCKNIX SM6115 `0034`: GENI UART IRQ masked over system suspend. | never |
 | `1165` `1170` | posted / community | ROCKNIX SM6115 `0015` `0016`: sm6115.dtsi venus node (posted upstream), MPM wake controller. ROCKNIX dropped its thermal-labels patch on 2026-10-05 and so did we. | `1165` when merged; `1170` never |
 | `0761` | community | ROCKNIX SM8750 `0058`, upstream `0760` (our `0760` is the MANGMI Air X serdev joypad): clean-room reimplementation of the stock `tc_mcu_joystick.ko` — the AYANEO-family SPI register-map MCU gamepad (regs 0x8080-0x8088, ASCII "AYANEO" magic) on the KONKR Pocket FIT Elite. Protocol unrelated to the Mangmi SPI joypad (`0755`), reuse investigated and rejected 2026-10-19. | never |
+| `0762` | community | ROCKNIX SM4450 `0053`: singleadc-joypad for the RG 55G1 (GPIO buttons + SPI stick MCU). Makefile re-placed. Never posted. | never |
+| `0763` | community | ROCKNIX SM4450 `0055` (batocera): singleadc-joypad stick RGB LEDs. | never |
+| `0764` | community | ROCKNIX SM4450 `0058` (batocera): stick LEDs parked across suspend. | never |
 | `0765` | community | ROCKNIX SM8750 `0069`, STRIPPED of its RGB-LED half (multicolor LED, `effect` sysfs, LED PM notifier + `tx_inhibited`): retroforge has no stick-ring LED surface and no kernel sleep. Buttons + key-remap sysfs only. Armada `0069a` (same driver also binds the SM8650 Pocket FIT MCU, whose Menu/Equals/K + LC/RC may be dead on our KPF today) is NOT taken — pending the KPF hardware check; it also carries a `gamepad_mode` attr because it displaces `0980` on that board. | never |
 | `0770` | posted | Caleb Connolly v7 `<20221015172915.1436236-3-caleb@connolly.tech>`, stalled since 2022. Fenglin Wu's PMIH driver (v7, 2026-08-28) uses the same file and the generic `qcom,spmi-haptics` compatible. | when David Heidelberg's pmi8998 haptics lands |
 | `0775` | community | spycat88, ROCKNIX SM8250 `0013`. | never |
@@ -194,24 +215,31 @@ taken for issue #122 — see the `0780`–`0796` rows.
 | `0791` | retroforge | Written here for `0745`, after Kettle Linux `1100` (armada `0515`) and `1380`; resyncs a byte on a bad checksum instead of skipping the claimed frame length. Never posted. | with `0745` |
 | `0795` | community | armada `1003`, rsinput struct + suspend hunks regenerated: fixes the reproduced "scheduling while atomic" hard-lock on rumble stop (issue #128; ROCKNIX still carries the bug). Bridge is mutex-serialized process context; rsinput playback defers to a work item. The original's rsinput dev-PM suspend hunk is dropped — our rsinput has no PM ops and sleep is a userspace cgroup freeze. Supersedes gh123man's deferral (ROCKNIX PR #3116) this slot used to carry. | with `0780` |
 | `0796` | community | armada `1004` (virtudude), byte-identical. A zero-amplitude update erases the effect at once instead of braking 5 s later; balances the V5 driver's transient runtime-PM reference on in-place gain updates. | with `0780` |
+| `0797` | community | ROCKNIX SM4450 `0059` (Jacob Cook): rsinput `digital-triggers`, opt-in per DT. Rebased on `0745`/`0790`/`0791` and after `0795`/`0796`, which touch the same file. | never |
 | `0800` | mainline | Kumar Anurag v1 `<20260616151252.3599089-2-kumar.singh@oss.qualcomm.com>` → `d858770e86e7` (v7.3-rc1). No `Fixes:`/stable tag, so 7.2.y will not get it. Also in ROCKNIX PR #3396. | v7.3 |
 | `0805` | retroforge | Written here, after the downstream DP codec's startup cable check (msm-4.19 techpack/audio `msm_ext_disp_audio_codec_rx_dai_startup`). Adds the `dp_audio_startup` msm_dp never implemented, so on SM8250 only (`qcom,sm8250-dp`) an unplugged DP open fails before q6afe starts port 0x6020 (a 3 s no-reply timeout there). Never posted. | when upstream msm_dp refuses an unplugged DP audio open itself |
 | `0810` | community | KancyJoe via ROCKNIX SM8650 `0007`. Superseded by mainline `62dc2554d36d` (WSA2 channel map + `ayaneo,pocket-s2-sndcard`); will not apply on 7.3. | v7.3 — S2 moves to the new compatible; FIT needs its own card entry |
 | `0820` | retroforge | Also ROCKNIX SM8550 `0036`. Superseded by mainline `088c4404b3d7` + `cc8495c1d45a` (MI2S clock control). | v7.3 — clocks move to `dai@PRIMARY_MI2S_RX` (`mclk`/`bclk`) |
 | `0825` | community | Teguh Sobirin, ROCKNIX SM8750 `0060`, rebased as a delta on our `0820` (which already carries the clk handle + optional get + ops wiring): the MI2S bit-clock enable widens from PRIMARY-only to every MI2S BE, refcounted — the Odin 3 amps sit on SECONDARY, the Elite's aw88261 on QUATERNARY ("check pll lock fail" without BCLK). | v7.3, with `0820` |
+| `0826` | retroforge | Our side of ROCKNIX SM4450 `0030` (Philippe Simons): SENARY MI2S joins `0820`/`0825`'s clock refcount and format, all codec DAIs on that bus get the format, RP Classic mono fixup by card name. Other ports unchanged. | with `0820` |
 | `0830` | retroforge | Teguh Sobirin's AYN series; its firmware-name part went upstream as `fc1fbafc18a0` (v7.1). Remainder never posted. | never |
+| `0831` | community | ROCKNIX SM4450 `0031` (sunshineinabox), adapted from Val Packett's aw88261 series: PLL from hw_params/set_fmt. Applies to every aw88166 board (Odin 2 family, Thor, Thor Lite, Odin 3) — HW check owed there. | when the aw88261 series lands and is ported |
+| `0832` | community | ROCKNIX SM4450 `0032`: aw88166 log spam to dev_dbg. | with `0831` |
+| `0833` | community | ROCKNIX SM4450 `0033`: aw88166 fade in/out removed. | with `0831` |
 | `0835` | community | ROCKNIX SM8750 `0059`: aw88395-lib skips monitor sections in V1 ACF parse — the Elite's aw88261 calibration blob carries them. | when upstreamed |
 | `0840` | community | Luke Johnson, ROCKNIX `0200`. Never posted; generic, worth sending. | when upstreamed |
 | `0845` | community | seilent, Kettle Linux `1230`, body byte-identical. Never posted; generic, worth sending. | when upstreamed |
 | `0846` | retroforge | The `0845` fix for `wcd939x`, whose ramp error has the same shape (and a right ramp that inherits the left value). Never posted; generic, worth sending. | when upstreamed |
 | `0847` | retroforge | The `wcd939x` HPH and ADC volume dB scales were wrong (`line_gain` 0 dB + 0.07 dB steps, i.e. 1.4 dB over 21 steps); declared as `wcd938x` does: -30..0 dB in 1.5 dB steps, ADC 0..30 dB. Never posted; generic, worth sending. | when upstreamed |
 | `0848` | community | ROCKNIX SM8750 `0063`: wcd939x routes the USBSS analog-audio switch on integrated-jack insert. | when upstreamed |
+| `0849` | community | ROCKNIX SM4450 `0056` (batocera): wcd937x HPHL/HPHR Volume dB scale (TLV only, raw values unchanged). | when upstreamed |
 | `0850` | retroforge | Also ROCKNIX `0612`. Related RFC: Jorijn van der Graaf `<20260705033830.305907-1-jorijnvdgraaf@catcrafts.net>`; Srinivas reproduced the missing clock but no fix yet. 2026-10-19: folded in armada `0613`'s scoping — the prepare-time start now applies to playback MI2S DAIs only, so it cannot change prepare/trigger ordering for unrelated LPASS DAIs (ours started every playback DAI early). | when upstream fixes MI2S clocking before graph start |
 | `0856` | community | ROCKNIX SM8750 `0072`: lpass-rx-macro HPH PCM mode. First of the HPH PCM HiFi trio (here `0856`/`0858`/`0859`; upstream `0856`-`0858` — our `0857` is the Kettle stale-jack patch); benefits every wcd939x board, not just SM8750. | when upstreamed |
 | `0857` | community | Kettle Linux `1240` (written for the KONKR Pocket FIT), body byte-identical. Never posted. Preventive: no stale-jack report on record here. | when upstreamed |
 | `0858` | community | ROCKNIX SM8750 `0073`, upstream `0857`: wcd939x HPH PCM HiFi mode. | with `0856` |
 | `0859` | community | ROCKNIX SM8750 `0074`, upstream `0858`: soundwire qcom PCM data-port format enable. | with `0856` |
 | `0860` | community | ROCKNIX SM8250 `0062`. Mainline removed this flag (`d01fbee5c0d3`) in favour of `GPIO_SHARED`. | if a HW test without it passes |
+| `0862` | community | ROCKNIX SM4450 `0039`, SCOPED HERE to SM4450: link manager EE0 so the clock-stop wake reaches the CPU. The original flipped SWRM_EE_CPU for every v1.7/v2+ controller, i.e. every SM8550+ board; here the EE is chosen per machine. | never |
 | `0870` | community | ROCKNIX. Effectively reverts `89be3c15a58b`. | never |
 | `0880` | community | Teguh Sobirin, ROCKNIX `0012`. | never |
 | `0890` | community | Daniel Martin (Batocera), ROCKNIX `0300`. Never posted; generic, worth sending. | when upstreamed |
@@ -222,9 +250,17 @@ taken for issue #122 — see the `0780`–`0796` rows.
 | `0920` | community | ROCKNIX `0063` (sunshineinabox). Never posted. | never |
 | `0930` | posted | Jan-Michael Brummer `<20260829054546.86210-2-jan.brummer@tabos.org>`. Konrad asked for `CHARGE_EMPTY` gating; v2 expected. | when merged |
 | `0940` | posted | Same series, `-3-`. | when merged |
+| `0941` | community | ROCKNIX SM4450 `0051`: battmgr USB input current limit (writable). | when upstreamed |
+| `0942` | community | ROCKNIX SM4450 `0052`: battmgr reports the USB adapter type. | when upstreamed |
 | `0970` | community | ROCKNIX `0500`. A hack. | never |
 | `0980` | retroforge | Never posted. | never |
+| `0985` | community | ROCKNIX SM4450 `0003`: SM4450 ADSP + WPSS in qcom_q6v5_pas. Never posted. | when upstreamed |
+| `0986` | community | ROCKNIX SM4450 `0008`: SM4450 in arm-smmu-qcom. Never posted. | when upstreamed |
 | `0991` | community | ROCKNIX SM8750 `0026` + `0027` squashed (Teguh Sobirin), upstream `0990` (our `0990` is the pm8150l LCDB regulator): the CQ8725S SoC-ID (SM8750 gaming SKU, AYN Odin 3) in dt-bindings + socinfo. | when the ID lands upstream |
+| `0992` | community | ROCKNIX SM4450 `0005`: SM4450 domains in qcom_pd_mapper. Never posted. | when upstreamed |
+| `0993` | community | ROCKNIX SM4450 `0004`: PM6450 RPMh regulators. Never posted. | when upstreamed |
+| `0994` | community | ROCKNIX SM4450 `0022`: RPMh PBS trigger resource type. Never posted. | with `0995` |
+| `0995` | community | ROCKNIX SM4450 `0060`: PM6450 SD LDOs switched through PBS. | never |
 | `1000` | posted | Gael Blivet "ksmbd: exempt FSCTL_PIPE_TRANSCEIVE from the generic file-id lookup" (linux-cifs 2026-07-31; Reviewed/Tested-by ChenXiaoSong), applied by Namjae Jeon to ksmbd-for-next-next. Fixes `0726814421c2` (SMB3 request replay): RPC over IPC$ (share listing) always failed. | when in mainline or 7.2 stable |
 | `1002` | community | ROCKNIX SM8750 `0039`: ath12k WCN7860 hardware definition. The chip is not in upstream ath12k (nor its firmware in linux-firmware — blobs live in qcom-firmwares). | when WCN7860 lands upstream |
 | `1003` | community | ROCKNIX SM8750 `0040`: send the QDSS config when the firmware signals CNSS_QDSS_CFG_MISS (`qdss.cfg` ships with the WCN7860 firmware set). | with `1002` |
@@ -238,12 +274,15 @@ taken for issue #122 — see the `0780`–`0796` rows.
 | `1030` | community | spycat88, ROCKNIX `0071`. A hack. | never |
 | `1040` | community | Kars Mulder's Linux-Pollrate-Patch via ROCKNIX `0506`. | never |
 | `1042` | community | Anze, ROCKNIX SM8750 `0509`: restore the pre-`0c8ee850572` ucsi behaviour — clear the USB role when the partner advertises no USB data — on ports without the USB4_IMPLIES_USB quirk (our pmic_glink UCSI ports on every SoC). Peer motivation is a suspend hard-hang we cannot hit; the stale role on charger-only partners is wrong regardless. | when the upstream regression is fixed |
+| `1043` | community | ROCKNIX SM4450 `0049`: ucsi_glink UCSI_DELAY_DEVICE_PDOS quirk for SM4450. | when upstreamed |
 | `1044` | community | armada `0509` (was the ungated ROCKNIX SM8750 `0509` (soc), 2026-10-19): pmic_glink_altmode defers until the typec mux/switch is ready — gated to SM8750, whose wcd_usbss supplier registers late. Ungated it black-screens every board whose DT declares no mode-switch (the AYANEO SM8550 family): the permanent defer blocks the DP aux bridges and the msm DRM aggregate never binds. | when upstreamed |
 | `1050` | community | Jacob Cook, ROCKNIX `5e52df2b9fba` (SM8250 `0018`, merged with PR #3382), written from the vendor smb5 `smblib_set_prop_pr_swap_in_progress` sequence. Never posted. | when mainline `qcom_pmic_typec_port` handles PR swap termination |
 | `1057` | community | ROCKNIX SM8750 `0043`, upstream `1052` (our `1052`-`1056` are the fusb302/tcpm set): power-sequencing qcom-wcn entry for WCN7860. | when WCN7860 lands upstream |
 | `1058` | community | ROCKNIX SM8750 `0042`, upstream `1053`: PCI pwrctrl-pwrseq match for WCN7860. | with `1057` |
 | `1059` | community | ROCKNIX SM8750 `0606`, upstream `1056`: the 7.2 merge window rewrote `clk_regmap_phy_mux_ops` (enable/disable -> rate ops) and no caller was added, so the PCIe pipe-clk mux never leaves XO; qmp-pcie now does `clk_set_rate(ULONG_MAX)` to select the PHY source. Without it the WCN7860 LTSSM parks in Poll.Active ("Device found, but not active"). Generic — our other SoCs' PCIe presumably survives via a different mux path; re-check on the next bump. | when upstream adds the set_rate call |
 | `1060` | posted | Manivannan Sadhasivam `<20260907143349.317495-1-mani@kernel.org>`, applied to the PCI tree as `626acf6efc69`, in pci `next` (not `for-linus`), so v7.4-rc1. Not in v7.3-rc7 or 7.2.y, no Cc: stable — yet 7.2.6+ needs it. | when we pin ≥ v7.4 |
+| `1062` | community | ROCKNIX SM4450 `0040`: qmp-combo SM4450 USB3/DP configuration. | when upstreamed |
+| `1063` | posted | Loic Poulain, applied to phy `next` as `729e0af3c2b9` (ROCKNIX SM4450 `0042`): runtime-PM usage ref across qmp-combo PHY creation. Every qmp-combo board. | when it reaches the pin |
 | `1065` | community | gennro, Kettle Linux `1390`, body byte-identical: `1060` read the first iommu-map entry before checking the property holds one. | with `1060` (check the applied `626acf6efc69` has the bound) |
 | `1066` | community | armada `0514a`: `parse_iommu_maps()` in of/property walks `iommu-map` with a fixed four-cell stride, wrong for the SM8750 PCIe's `#iommu-cells = <2>` (five-cell entries since 7.2.6's `366a540432a3`) — fw_devlink then links the controller to garbage phandles. Complements our `1060`/`1065`, which fixed the same stride bug inside pcie-qcom. | when upstream honours `#iommu-cells` there |
 | `1070` | community | gennro, Kettle Linux `1160`, body byte-identical: the lane clocks were enabled twice per runtime resume (hibern8 setup + resume) and disabled once, so the UFS clocks never gate. | when mainline guards `ufs_qcom_enable_lane_clks()` |
@@ -257,6 +296,8 @@ taken for issue #122 — see the `0780`–`0796` rows.
 | `1086` | community | gh123man, Kettle Linux `1401`, body byte-identical: recover a failed clock-gating hibern8 enter inline instead of leaving the link unusable. Kettle's `1400` (clock-gating hold across system PM) is NOT taken: we never enter system suspend. | when upstreamed |
 | `1087` | community | gennro, Kettle Linux `40-kettle/1402`, body byte-identical: gives the SM8550 UFS PHY a `vdda-qref` supply at downstream's 30 mA, so LDO L1E (the QREF reference-clock buffer) stays in HPM with the screen off. Wired to `vreg_l1e_0p88` in `qcs8550-ayaneo-pocket-common.dtsi` and `qcs8550-ayn-common.dtsi`. Kettle's trigger is a PHY recalibration on resume from s2idle, which we never reach; ours is the fake suspend, which blanks the DSI PHY (L1E's only declared load) while `1083` keeps the UFS PHY powered in HIBERN8 parking. Untested on hardware by Kettle or us; needs a UFS-booted SM8550 board. | when upstreamed |
 | `1088` | community | ROCKNIX SM8750 `0066`: ufs-qcom `sm8750` compatible. | when upstreamed |
+| `1089` | community | ROCKNIX SM4450 `0043`: qmp-ufs SM4450 UFS PHY (the RG 55G1's UFS). | when upstreamed |
+| `1091` | community | ROCKNIX SM4450 `0024` (sunshineinabox): geni UART restarts RX DMA after the read command terminates itself. Every geni-UART DMA user (BT, rsinput) — HW check owed on an rsinput board. | when upstreamed |
 | `1105` | posted | Krishna Chaitanya Chundru root_port v2 15/15 `<20260917-root_port_v2-v2-15-6272b7caae9a@oss.qualcomm.com>`, applied to qcom `arm64-for-7.4` as `bbc442a64823`. 7.3 renames `pcieport0` → `pcie0_port0`. | v7.4; rework at 7.3 either way |
 | `1110` | posted | Same series, 12/15 `<20260917-root_port_v2-v2-12-6272b7caae9a@oss.qualcomm.com>`, applied to qcom `arm64-for-7.4` as `c51818ded215`. | v7.4 |
 | `1115` | community | ROCKNIX SM8250 `0005`. Never posted. | never |
@@ -275,6 +316,7 @@ taken for issue #122 — see the `0780`–`0796` rows.
 | `1167` | posted | ROCKNIX SM8750 `0034`, upstream `1170` (our `1170` is the sm6115 MPM node); upstream posting `<20260605-sm8750-uart15-v1-1-93e660722e61@gmail.com>`. UART15 is the Odin 3 rsinput link. | when merged |
 | `1168` | community | ROCKNIX SM8750 `0076`, upstream `1175` (our `1175` is the pm8150l LCDB node): sm8750 CPU `capacity-dmips-mhz`. | when upstreamed |
 | `1178` | community | ROCKNIX SM8750 `0075`: sm8750 CPU thermal cooling maps. | when upstreamed |
+| `1180` | community | ROCKNIX SM4450 `0057` (batocera): sm4450.dtsi CPU capacity + power coefficients. | when upstreamed |
 
 ## Mapping from the old numbering
 
