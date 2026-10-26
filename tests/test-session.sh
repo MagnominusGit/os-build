@@ -102,6 +102,30 @@ grep -Fq 'secondary-output' "$ROOT/packages/gamescope/patches/0040-drm-drive-a-s
   && ok "the gamescope build carries the flag (patch 0040 in source.pin)" \
   || bad "--secondary-output is passed but patch 0040 is not in packages/gamescope/source.pin"
 
+CASE="no-r-by-default"
+# gamescope keeps -r as g_nNestedRefresh, which overrides the scanning mode's rate in its limiter
+# and vblank pacing. The session used to pass the panel's first declared rate: on a 60,120 panel
+# scanning at 120, "60 fps (120Hz)" then ran 120 fps (HW, Odin 3, 2026-10-23). The GS_ARGS block
+# is extracted from the shipped script and run.
+GSARGS="$(mktemp)"
+sed -n '/^GS_ARGS="--backend drm/,/^fi$/p' "$SESSION" > "$GSARGS"
+gsargs() { env -i "$@" /bin/sh -c '. "$1"; printf "%s" "$GS_ARGS"' sh "$GSARGS"; }
+out="$(gsargs RETROFORGE_GAMESCOPE_W=1920 RETROFORGE_GAMESCOPE_H=1080 RETROFORGE_PANEL_REFRESH_RATES=60,120)"
+case " $out " in
+  *" -r "*) bad "the default command line passes -r: '$out'" ;;
+  *"--backend drm -W 1920 -H 1080"*) ok "the default command line carries no -r" ;;
+  *) bad "could not read GS_ARGS from the shipped script: '${out:-<nothing>}'" ;;
+esac
+out="$(gsargs RETROFORGE_GAMESCOPE_W=1920 RETROFORGE_GAMESCOPE_H=1080 RETROFORGE_GAMESCOPE_REFRESH=120)"
+case " $out " in
+  *" -r 120 "*) ok "RETROFORGE_GAMESCOPE_REFRESH still reaches gamescope as an operator override" ;;
+  *) bad "the override was dropped: '${out:-<nothing>}'" ;;
+esac
+grep -qE '^[[:space:]]*(: "\$\{)?RETROFORGE_GAMESCOPE_REFRESH[:=]' "$SESSION" \
+  && bad "the script assigns RETROFORGE_GAMESCOPE_REFRESH itself, so the override is a default again" \
+  || ok "nothing in the script defaults RETROFORGE_GAMESCOPE_REFRESH"
+rm -f "$GSARGS"
+
 # =================================================================================================
 CASE="environment for what gamescope hosts"
 for kv in QT_QPA_PLATFORM=xcb SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS=0 vk_xwayland_wait_ready=false; do
