@@ -100,9 +100,9 @@ which its self-updates would overwrite. The overlay-ownership stage resets it to
   layout needs no edit. `interactive` (the services a game talks to: InputPlumber, PowerStation,
   `retroforge-powerbuttond`) = every CPU outside the prime cluster; `background`
   (`retroforge-powerd`, `-pairingd`, `-power-led`) = the little cluster. Today: SM8250 0-6 / 0-3,
-  SM8550 0-6 / 0-2, SM8650 0-6 / 0-1, SM6115 0-3 / 0-3 (its gold four share one level, so there is
-  no prime core to keep free). Both always contain cpu0, the one CPU the suspend engine never
-  offlines; uniform cores get no drop-in at all. The generator writes
+  SM8550 0-6 / 0-2, SM8650 0-6 / 0-1, SM6115 0-3 / 0-3 and SM4450 0-5 / 0-5 (their big cores
+  share one level, so there is no prime core to keep free). Both always contain cpu0, the one CPU
+  the suspend engine never offlines; uniform cores get no drop-in at all. The generator writes
   `/run/systemd/generator/<unit>.d/50-retroforge-cpus.conf` (`systemctl cat <unit>` shows it).
   Affinity is inherited by a service's whole process tree. `tests/test-cpu-affinity.sh` drives it
   against fabricated topologies.

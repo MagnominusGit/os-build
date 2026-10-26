@@ -1,0 +1,102 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/capability_map_v2.json
+#
+# The Retroid Pocket Classic and Classic Rev Q pad: the `gamepad,rsinput` MCU (kernel/patches/0745
+# + 0797) with `digital-triggers` in both DTS. Upstream's rsinput1 (the Odin 2's map) plus the two
+# trigger rows: with digital-triggers the driver reports L2/R2 as BTN_TL2/BTN_TR2 keys instead of
+# ABS_Z/ABS_RZ, and InputPlumber's default translation turns those into trigger BUTTONS, which the
+# xbox-elite target has no slot for. Claimed here as triggers, as ROCKNIX's ayn_mcu does.
+#
+# The North/West swap is rsinput1's and ROCKNIX's: this MCU reports the face buttons the AYN way.
+# ROCKNIX's ayn_mcu also maps BTN_BACK to keyboard F1; here it is QuickAccess, as in rsinput1,
+# because nothing in our composites has a keyboard target. The id is namespaced (see
+# sm8550-ayaneo_evo_keys.yaml for why).
+version: 2
+kind: CapabilityMap
+name: Retroid Pocket Classic MCU
+id: sm4450_rp_classic_mcu
+
+mapping:
+  - name: D-Pad Up
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_DPAD_UP
+          value_type: button
+    target_event:
+      gamepad:
+        button: DPadUp
+  - name: D-Pad Down
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_DPAD_DOWN
+          value_type: button
+    target_event:
+      gamepad:
+        button: DPadDown
+  - name: D-Pad Left
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_DPAD_LEFT
+          value_type: button
+    target_event:
+      gamepad:
+        button: DPadLeft
+  - name: D-Pad Right
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_DPAD_RIGHT
+          value_type: button
+    target_event:
+      gamepad:
+        button: DPadRight
+  - name: Back Button
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_BACK
+          value_type: button
+    target_event:
+      gamepad:
+        button: QuickAccess
+  - name: Left Trigger
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_TL2
+          value_type: trigger
+    target_event:
+      gamepad:
+        trigger:
+          name: LeftTrigger
+  - name: Right Trigger
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_TR2
+          value_type: trigger
+    target_event:
+      gamepad:
+        trigger:
+          name: RightTrigger
+  - name: West Button
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_NORTH
+          value_type: button
+    target_event:
+      gamepad:
+        button: West
+  - name: North Button
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_WEST
+          value_type: button
+    target_event:
+      gamepad:
+        button: North
+filtered_events: []

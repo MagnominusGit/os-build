@@ -25,6 +25,7 @@ if [[ -z "$model" ]]; then
     model=$(tr -d '\0' </sys/firmware/devicetree/base/model 2>/dev/null || true)
 fi
 case "$model" in
+    "Anbernic RG 55G1")          profile=anbernic-rg55g1 ;;
     "AYANEO Pocket ACE")         profile=ayaneo-pocket-ace ;;
     "AYANEO Pocket DMG")         profile=ayaneo-pocket-dmg ;;
     "AYANEO Pocket DS")          profile=ayaneo-pocket-ds ;;
@@ -49,6 +50,9 @@ case "$model" in
     "Retroid Pocket 5")          profile=retroid-pocket-5 ;;
     "Retroid Pocket 6")          profile=retroid-pocket-6 ;;
     "Retroid Pocket 6 TOP-DPAD") profile=retroid-pocket-6 ;;
+    "Retroid Pocket Classic")    profile=retroid-pocket-classic ;;
+    "Retroid Pocket Classic Rev Q") profile=retroid-pocket-classic-revq ;;
+    "Retroid Pocket Classic 6 Rev Q") profile=retroid-pocket-classic-6-revq ;;
     "Retroid Pocket Flip2")      profile=retroid-pocket-flip2 ;;
     "Retroid Pocket Mini")       profile=retroid-pocket-mini ;;
     "Retroid Pocket Mini V2")    profile=retroid-pocket-mini-v2 ;;

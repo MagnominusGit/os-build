@@ -1,0 +1,115 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/capability_map_v2.json
+#
+# The Retroid Pocket Classic 6 Rev Q pad: the same rsinput MCU and DTS as the Classic Rev Q
+# (sm4450-retroid-pocket-classic-6-revq.dts only renames the model), but a different face-button
+# and stick-click wiring, which ROCKNIX found on hardware (its retroid_classic_6 map): East/South
+# arrive swapped, North and West arrive where they belong (no AYN swap), and the stick clicks
+# arrive crossed. Everything else as sm4450-rp_classic_mcu.yaml.
+version: 2
+kind: CapabilityMap
+name: Retroid Pocket Classic 6 MCU
+id: sm4450_rp_classic_6_mcu
+
+mapping:
+  - name: D-Pad Up
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_DPAD_UP
+          value_type: button
+    target_event:
+      gamepad:
+        button: DPadUp
+  - name: D-Pad Down
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_DPAD_DOWN
+          value_type: button
+    target_event:
+      gamepad:
+        button: DPadDown
+  - name: D-Pad Left
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_DPAD_LEFT
+          value_type: button
+    target_event:
+      gamepad:
+        button: DPadLeft
+  - name: D-Pad Right
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_DPAD_RIGHT
+          value_type: button
+    target_event:
+      gamepad:
+        button: DPadRight
+  - name: Back Button
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_BACK
+          value_type: button
+    target_event:
+      gamepad:
+        button: QuickAccess
+  - name: Left Trigger
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_TL2
+          value_type: trigger
+    target_event:
+      gamepad:
+        trigger:
+          name: LeftTrigger
+  - name: Right Trigger
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_TR2
+          value_type: trigger
+    target_event:
+      gamepad:
+        trigger:
+          name: RightTrigger
+  - name: South Button
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_EAST
+          value_type: button
+    target_event:
+      gamepad:
+        button: South
+  - name: East Button
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_SOUTH
+          value_type: button
+    target_event:
+      gamepad:
+        button: East
+  - name: Left Stick Click
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_THUMBR
+          value_type: button
+    target_event:
+      gamepad:
+        button: LeftStick
+  - name: Right Stick Click
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: BTN_THUMBL
+          value_type: button
+    target_event:
+      gamepad:
+        button: RightStick
+filtered_events: []

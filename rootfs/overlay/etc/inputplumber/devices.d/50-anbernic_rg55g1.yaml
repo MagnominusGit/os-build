@@ -1,0 +1,40 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/composite_device_v1.json
+#
+# Anbernic RG 55G1 (sm4450-anbernic-rg55g1.dts). The pad is the singleadc-joypad (kernel/patches/
+# 0762-0764): sixteen GPIO buttons and the D-pad, plus the analog sticks from the MCU on spi3, as
+# one "Anbernic RG 55G1 Gamepad" device with standard codes. capability_maps.d/sm4450-rg55g1_keys.yaml
+# claims the two keys beside the screen (F10 -> Guide, Back -> QuickAccess); the rest passes through.
+#
+# Taken from ROCKNIX's SM4450 02-anbernic-rg55g1.yaml, reshaped to our conventions
+# (50-mangmi_pocket_max.yaml has the argument): match on devicetree `model`, xbox-elite instead of
+# ds5 + keyboard, and the gpio-keys volume key left to the system as on every other board.
+version: 1
+kind: CompositeDevice
+name: Anbernic RG 55G1
+
+maximum_sources: 0
+
+options:
+    auto_manage: true
+
+matches:
+    - udev:
+          sys_path: /sys/firmware/devicetree/base
+          attributes:
+              - name: model
+                value: Anbernic RG 55G1
+
+# The joypad plus the pm7250b vibrator (pm8xxx-vib), so rumble routes through the same composite.
+source_devices:
+    - group: gamepad
+      capability_map_id: sm4450_rg55g1_keys
+      evdev:
+          name: Anbernic RG 55G1 Gamepad
+          handler: event*
+    - group: gamepad
+      evdev:
+          name: pm8xxx_vib_ffmemless
+          handler: event*
+
+target_devices:
+    - xbox-elite

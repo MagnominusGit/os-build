@@ -58,6 +58,7 @@ journal line above is how a wrong name will show.
 | SM8650 | `qcom-battmgr-bat` / `qcom-battmgr-usb` | `cpu7-top-thermal` / `gpuss0-thermal` | — | `pwmfan`, tach | `3d00000.gpu` |
 | SM8250 | `battery` / `pm8150b-charger` | `cpu7-top-thermal` / `gpu-top-thermal` | `skin-msm-thermal` | `pwmfan`, no tach | `3d00000.gpu` |
 | SM6115 | `battery` / `bq256xx-charger` | `cpu67-thermal` / `gpu-thermal` (+ `battery-thermal`) | — | `pwmfan`, no tach | `5900000.gpu` |
+| SM4450 | `qcom-battmgr-bat` / `qcom-battmgr-usb` | `cpu6-0-thermal` / `gpu-thermal` | — | `pwmfan`, tach | `3d00000.gpu` |
 
 - **Battery, charger.** SM8550/SM8650 report through pmic_glink's battmgr; its USB supply has
   `online` but no `status`. (ROCKNIX's scripts read `power_supply/battery` there only because a
@@ -72,7 +73,8 @@ journal line above is how a wrong name will show.
   board has a battery thermistor zone (the battery's own `temp` is in `battery/`); the SM8250
   boards' `skin-msm-thermal` is a PM8150L ADC thermistor. hw-map's unpinned pattern would take
   `cpu0-thermal` (a little core) on SM8250. SM6115 has a zone per core and per cluster; the A73
-  pair's `cpu67-thermal` runs hottest (measured on the Air X).
+  pair's `cpu67-thermal` runs hottest (measured on the Air X). SM4450's zones live in the board DTS,
+  not sm4450.dtsi; `cpu6-0` is one of the two A78s, picked, not measured.
 - **Fan.** A pwm-fan everywhere, hwmon `pwmfan`. The SM8250 and SM6115 nodes have no tachometer
   (`interrupts`), so `pwm1` without `fan1_input`; on SM6115 the PWM itself is a GPIO.
 
@@ -93,6 +95,8 @@ journal line above is how a wrong name will show.
 | MANGMI Air Y Pro (SM8250) | `backlight` (PM8150L WLED) | as the Pocket Max |
 | MANGMI Air X MQ65, MQ66, MQ66B (SM6115) | `backlight` (pwm) | `ring-left`/`ring-right` = `rgb:l*` / `rgb:r*` (9 pixels each) |
 | MANGMI Air Y (SM6115) | `backlight` (pwm) | `ring` = `rgb:l*` (10 pixels) |
+| Retroid Pocket Classic, Rev Q, Classic 6 Rev Q (SM4450) | `ae94000.dsi.0` | — |
+| Anbernic RG 55G1 (SM4450) | `backlight` (pwm, inverted) | `power` = `*:indicator` (red/green/blue gpio-leds) |
 
 `power` is the PM8550 LPG's multicolor `power-led`. A panel that drives its own brightness over
 DCS registers its backlight under its DSI device, `<host>.dsi.0`, so the name follows the DSI

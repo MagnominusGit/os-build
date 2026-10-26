@@ -61,6 +61,10 @@ install.
 | MANGMI Air X MQ66 | SM6115 | `mangmi-air-x-mq66` |
 | MANGMI Air X MQ66B | SM6115 | `mangmi-air-x-mq66b` |
 | MANGMI Air Y | SM6115 | `mangmi-air-y` |
+| Anbernic RG 55G1 | SM4450 | `anbernic-rg55g1` |
+| Retroid Pocket Classic | SM4450 | `retroid-pocket-classic` |
+| Retroid Pocket Classic 6 Rev Q | SM4450 | `retroid-pocket-classic-6-revq` |
+| Retroid Pocket Classic Rev Q | SM4450 | `retroid-pocket-classic-revq` |
 
 <!-- END AUTO-GENERATED -->
 
@@ -75,6 +79,9 @@ layer supports, not a claim about RetroForge builds.
 > ROCKNIX's trees on 2026-10-09 and not yet booted on RetroForge. Its Steam story is also different: Valve's arm64 client
 > builds after 2026-04-15 need ARMv8.1 LSE atomics, which the Air X's Cortex-A73/A53 cores lack.
 
+> **SM4450 (Anbernic RG 55G1, Retroid Pocket Classic) is a port in progress** — brought over from
+> ROCKNIX's SM4450 device on 2026-10-26 and not yet booted on RetroForge.
+
 One image serves every device: the running system identifies the board and configures itself.
 
 ## For developers
@@ -82,7 +89,7 @@ One image serves every device: the running system identifies the board and confi
 ### What it is
 
 An immutable, A/B-updatable aarch64 Linux distribution built on SteamOS 3 "Holo" packages, on
-Qualcomm mobile silicon (**SM6115 / SM8250 / SM8550 / SM8650 / SM8750**). The root is read-only, bootstrapped from
+Qualcomm mobile silicon (**SM4450 / SM6115 / SM8250 / SM8550 / SM8650 / SM8750**). The root is read-only, bootstrapped from
 packages into a sealed Btrfs image; updates are RAUC bundles installed to the inactive slot behind a
 custom `retroforge-bootctl` bootloader backend. No Steam client, no x86 emulation, no Android container.
 

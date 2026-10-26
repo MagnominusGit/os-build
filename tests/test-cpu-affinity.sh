@@ -67,6 +67,14 @@ run sm6115
 check "SM6115 background = the four silver"        "$(aff sm6115 retroforge-powerd.service)" "0 1 2 3"
 check "SM6115 interactive = the four silver too"   "$(aff sm6115 inputplumber.service)"      "0 1 2 3"
 
+# SM4450: six A55 + two A78 at one level (kernel/patches/1180's dmips/MHz, 1024 and 1894; the
+# capacities below are estimated from the published 2.0 / 2.2 GHz clocks, cpufreq-hw gives the
+# real ones at boot). Like SM6115, no prime core: interactive is the little six.
+topo sm4450 0-7 0:505 1:505 2:505 3:505 4:505 5:505 6:1024 7:1024
+run sm4450
+check "SM4450 background = the six A55"            "$(aff sm4450 retroforge-powerd.service)" "0 1 2 3 4 5"
+check "SM4450 interactive = the six A55 too"       "$(aff sm4450 inputplumber.service)"      "0 1 2 3 4 5"
+
 echo "== every listed unit gets a drop-in, with its class named"
 n_conf=$(grep -cE '^[a-z].*\.service[[:space:]]+(interactive|background)' "$CONF")
 n_out=$(find "$TMP/sm8650/out" -name 50-retroforge-cpus.conf | wc -l)

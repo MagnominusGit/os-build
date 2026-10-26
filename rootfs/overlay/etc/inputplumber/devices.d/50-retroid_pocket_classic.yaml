@@ -1,0 +1,47 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/composite_device_v1.json
+#
+# Retroid Pocket Classic and Classic Rev Q (sm4450-retroid-pocket-classic{,-revq}.dts). The pad is
+# the `gamepad,rsinput` MCU, "Retroid Pocket Classic Gamepad" on rsinput-gamepad/input0, with
+# digital triggers; capability_maps.d/sm4450-rp_classic_mcu.yaml says what it claims. The Classic 6
+# Rev Q runs the same MCU with different wiring and has its own file, 50-retroid_pocket_classic_6.yaml.
+#
+# Taken from ROCKNIX's SM4450 01-retroid-classic-controller.yaml, reshaped to our conventions
+# (50-mangmi_pocket_max.yaml has the argument): match on devicetree `model`, xbox-elite instead of
+# ds5 + keyboard. ROCKNIX also takes gpio-keys (volume) and a gpio-keys-paddles device; neither DTS
+# declares paddles, and the volume keys are left to the system as on every other board.
+version: 1
+kind: CompositeDevice
+name: Retroid Pocket Classic
+
+maximum_sources: 0
+
+options:
+    auto_manage: true
+
+matches:
+    - udev:
+          sys_path: /sys/firmware/devicetree/base
+          attributes:
+              - name: model
+                value: Retroid Pocket Classic
+    - udev:
+          sys_path: /sys/firmware/devicetree/base
+          attributes:
+              - name: model
+                value: Retroid Pocket Classic Rev Q
+
+# The MCU plus the pm7250b vibrator (pm8xxx-vib), so rumble routes through the same composite.
+source_devices:
+    - group: gamepad
+      capability_map_id: sm4450_rp_classic_mcu
+      evdev:
+          name: Retroid Pocket Classic Gamepad
+          phys_path: rsinput-gamepad/input0
+          handler: event*
+    - group: gamepad
+      evdev:
+          name: pm8xxx_vib_ffmemless
+          handler: event*
+
+target_devices:
+    - xbox-elite
