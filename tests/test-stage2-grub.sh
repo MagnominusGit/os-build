@@ -367,16 +367,17 @@ for slot in A B; do
   [ -n "$ln_rot" ] && [ -n "$ln_term" ] && [ "$ln_rot" -lt "$ln_term" ] \
     && ok "grub-$lc.cfg sets rotation before terminal_output gfxterm" \
     || bad "grub-$lc.cfg sets rotation after the terminal is up, where it is a no-op"
-  # Per-SoC overrides: an SM6115 board gets `set rotation=90` keyed on its saved entry, between the
+  # Per-SoC overrides: an SM6115 or SM4450 board gets `set rotation=90` keyed on its saved entry, between the
   # default and terminal_output (boot/gen-grub-cfg.sh soc_grub_rotation); every other board gets none.
   ln_term=$(grep -n '^terminal_output gfxterm$' "$cfg" | cut -d: -f1)
   while IFS=$'\t' read -r id name dtb ba; do
     [ -n "$id" ] && [[ $id != \#* ]] && [ -n "$dtb" ] || continue
-    # Mirror of boot/gen-grub-cfg.sh soc_grub_rotation: SM6115 -> 90, the landscape Air Y Pro -> 0.
+    # Mirror of boot/gen-grub-cfg.sh soc_grub_rotation: SM6115/SM4450 -> 90, the landscape Air Y Pro -> 0.
     case "$dtb" in
       sm6115-mangmi-air-y)     want=0 ;;
       sm8250-mangmi-air-y-pro) want=0 ;;
       sm6115-*)                want=90 ;;
+      sm4450-*)                want=90 ;;
       *)                       want="" ;;
     esac
     ln_any=$(grep -n "^if \[ \"\${saved_entry}\" = \"$id\" \]; then set rotation=" "$cfg" | cut -d: -f1)

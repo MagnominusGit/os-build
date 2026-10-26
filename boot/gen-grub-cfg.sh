@@ -138,6 +138,7 @@ soc_grub_rotation() {  # <dtb basename> -> GRUB rotation for a non-default board
     sm6115-mangmi-air-y)     echo 0 ;;
     sm8250-mangmi-air-y-pro) echo 0 ;;
     sm6115-*)                echo 90 ;;
+    sm4450-*)                echo 90 ;;
     *)                       echo "" ;;
   esac
 }
@@ -304,10 +305,10 @@ fi
 # The colours are read by the normal module each time it paints the menu, so their placement does
 # not matter the way rotation's does; they are here to keep the whole console block in one place.
 set rotation=270
-# SoCs whose panels sit the other way round for GRUB (SM6115 — the MANGMI Air X — wants 90, as in
-# ROCKNIX). Only a board that has been chosen once can be honoured here: on a fresh card nothing
-# says which board this is, so the first menu paints upside-down on them; every boot after the
-# choice is right.
+# SoCs whose panels sit the other way round for GRUB (SM6115 — the MANGMI Air X — and SM4450 — the
+# RP Classic and RG 55G1 — want 90, as in ROCKNIX). Only a board that has been chosen once can be
+# honoured here: on a fresh card nothing says which board this is, so the first menu paints
+# upside-down on them; every boot after the choice is right.
 $ROT_OVERRIDES
 set menu_color_normal=cyan/blue
 set menu_color_highlight=white/blue
