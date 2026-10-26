@@ -32,6 +32,7 @@ root (the `gamescope/` checkout inside makepkg's `$srcdir`) by
 0030-composite-blit-keeps-the-dpu-colour-management.patch   (ours: 0027 under 0014/0018)
 0031-composite-blit-build-under-werror-format-security.patch   (ours: one-line build fix for 0027)
 0047-drm-offer-an-edid-less-internal-panels-native-modes-as-refresh-rates.patch   (Kettle Linux 0019, via Nova-Deck 0026)
+0048-steamcompmgr-refresh-only-request-takes-the-exact-mode.patch   (Nova-Deck 0027)
 ```
 
 `0008`-`0013` are **retired** (see below), and so are `0022`-`0024`, which is why the pre-rotation
@@ -568,6 +569,17 @@ Steam's Quick Access slider kept showing its own stored request (144), so the sc
 while the panel ran another. With no game open, gamescope ignores Steam's request anyway
 (`GAMESCOPE_DISPLAY_DYNAMIC_REFRESH_BASED_ON_GAME_PRESENCE`) and runs the panel's highest mode.
 Applied last, after the secondary-output series, at fuzz 0.
+
+`0048` — **a refresh-only request switches to that exact mode** (Nova-Deck's `0027`, body
+unchanged, renumbered because our `0027` is ROCKNIX's composite blit). With the frame limiter off,
+a refresh-rate pick arrives as `set_app_target_refresh_cycle( N, ONLY_CHANGE_REFRESH_RATE )`, and
+stock gamescope runs it through the cap's refresh-doubling search: the HIGHEST valid rate N
+divides. On a 60/120 panel a 60 Hz pick therefore ran at 120 and the panel never left its top mode
+(HW upstream, Odin 3, 2026-10-23: `set display refresh rate: 60` / `refresh cycle: 60 - 0x7`, CRTC
+still 120); the Pocket Max went 144 → 120 on "60". `0048` takes the exact rate when the panel
+offers it, and only for refresh-only requests — caps keep the doubling, which is what holds a
+30 fps game at the panel's top rate for latency. Needs `0047` for an EDID-less panel to have a
+rate list at all. Applied after `0047`, at fuzz 0.
 
 Drop the patch files here with those exact names (or rename and update `source.pin`'s
 `patches:` line). **Until a declared patch is present, `make overlay` / `make base` fail fast**
