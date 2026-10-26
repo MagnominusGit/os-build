@@ -66,3 +66,12 @@ qcom/sm8250/a650_zap.mbn
 # other SoCs.
 qcom/a630_sqe.fw
 qcom/sm6115/mangmi/a610_zap.mbn
+
+# --- sm4450: Adreno 613 zap shader + AudioReach topologies ---
+# The A613 runs the A630 SQE firmware, already listed for the SM6115 above, and has no GMU. Its
+# zap shader (shared by both boards' DTS) and the two sm8450-named topologies (the card driver
+# reports sm8450) come from the qcom-firmwares repo (firmware/QCOM_FW.pin); embedded for the same
+# reason as the other SoCs.
+qcom/sm4450/a613_zap.mbn
+qcom/sm8450/RetroidPocketClassic-tplg.bin
+qcom/sm8450/AnbernicRG55G1-tplg.bin

@@ -160,3 +160,14 @@ qcom/qrb4210/adsp.mbn      qcom/qrb4210/adsp.mbn      10949c8c18e3afa99d33440fab
 # loads it at probe. Qualcomm-signed for QCM2290: whether MANGMI's loader accepts it is a dmesg line on
 # the first boot, not yet seen. If it is refused, the vendor's venus.mbn goes in qcom-firmwares.
 qcom/venus-6.0/venus.mbn   qcom/venus-6.0/venus.mbn   602d18992dbc11c7141472d4c68778d49277491ca7452ebf6115be0e6119572a
+# ---------------------------------------------------------------------------------------
+# SM4450 (Snapdragon G1 Gen 2) — Retroid Pocket Classic (all revisions) and Anbernic RG 55G1.
+# Added 2026-10-26. The A613 runs the A630 SQE (the SM6115 row above, already embedded); its zap,
+# the aDSP and the WPSS are vendor-signed and in QCOM_FW.pin. Open here: the generic WCN3990
+# ath10k pair. Neither board's wifi node names a firmware-name, so ath10k_snoc asks for these
+# default paths (the SM6115 boards use per-board copies from qcom-firmwares instead). No
+# wlanmdsp.mbn: on SM4450 the WLAN firmware is inside wpss.mbn, not served to a modem by tqftpserv.
+# Every sha below was taken from the file downloaded at the commit above.
+# ---------------------------------------------------------------------------------------
+ath10k/WCN3990/hw1.0/board-2.bin     ath10k/WCN3990/hw1.0/board-2.bin     c49d2f1894de6edc0ab0c8c9a17ca0328703747c49b6e9428f1de501c2c02c1d
+ath10k/WCN3990/hw1.0/firmware-5.bin  ath10k/WCN3990/hw1.0/firmware-5.bin  fef6539e0127579536bc977be57a90d018b83f2931fedc3a8870fbe38d6c4127
