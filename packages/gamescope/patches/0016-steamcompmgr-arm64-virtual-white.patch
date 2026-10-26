@@ -33,10 +33,10 @@ half where a large positive stack value builds an adaptation to a nonsense white
 point. Requiring a plausible daylight y covers both.
 
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index 8672ae7..e237630 100644
+index ca1d686..d19764c 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
-@@ -6819,6 +6819,33 @@ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
+@@ -7593,6 +7593,33 @@ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
  		{
  			g_ColorMgmt.pending.outputVirtualWhite.x = santitize_float( bit_cast<float>( user_vec[0] ) );
  			g_ColorMgmt.pending.outputVirtualWhite.y = santitize_float( bit_cast<float>( user_vec[1] ) );

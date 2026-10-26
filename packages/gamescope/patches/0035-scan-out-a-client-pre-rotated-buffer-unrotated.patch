@@ -24,12 +24,16 @@ copied back unrotated first (once per
 commit, cached per slot) and restored afterwards for the caller.
 
 (retroforge: perf, MANGMI Air X, 2026-10-10.)
+
+RE-ROLLED 2026-10-26 for 3.17.0 (context only): ResListEntry_t's present_id/desired_present_time
+became present_timing and gained damageExtents/damage; uBufferTransform follows them.
+
 ---
 diff --git a/src/commit.cpp b/src/commit.cpp
-index c9d0001..de6c254 100644
+index 456bae7..36d481d 100644
 --- a/src/commit.cpp
 +++ b/src/commit.cpp
-@@ -141,6 +141,10 @@ bool commit_t::ShouldPreemptivelyUpscale( GamescopeUpscaleFilter eFilter, Gamesc
+@@ -151,6 +151,10 @@ bool commit_t::ShouldPreemptivelyUpscale( GamescopeUpscaleFilter eFilter, Gamesc
      if ( !vulkanTex )
          return false;
  
@@ -41,10 +45,10 @@ index c9d0001..de6c254 100644
      float flScaleY = 1.0f;
      // I wish this function was more programatic with its inputs, but it does do exactly what we want right now...
 diff --git a/src/commit.h b/src/commit.h
-index 20f881d..c650752 100644
+index be9c05a..5ed5dd6 100644
 --- a/src/commit.h
 +++ b/src/commit.h
-@@ -40,6 +40,9 @@ struct commit_t final : public gamescope::RcObject, public gamescope::IWaitable,
+@@ -42,6 +42,9 @@ struct commit_t final : public gamescope::RcObject, public gamescope::IWaitable,
  
  	struct wlr_buffer *buf = nullptr;
  	gamescope::Rc<CVulkanTexture> vulkanTex;
@@ -55,10 +59,10 @@ index 20f881d..c650752 100644
  
  	gamescope::Rc<CVulkanTexture> GetTexture( GamescopeUpscaleFilter eFilter, GamescopeUpscaleScaler eScaler, GamescopeAppTextureColorspace &colorspace )
 diff --git a/src/rendervulkan.cpp b/src/rendervulkan.cpp
-index 951a5e9..6578024 100644
+index 7aacc76..7304281 100644
 --- a/src/rendervulkan.cpp
 +++ b/src/rendervulkan.cpp
-@@ -4560,8 +4560,96 @@ void bind_all_layers(CVulkanCmdBuffer* cmdBuffer, const struct FrameInfo_t *fram
+@@ -4677,8 +4677,96 @@ void bind_all_layers(CVulkanCmdBuffer* cmdBuffer, const struct FrameInfo_t *fram
  	}
  }
  
@@ -155,7 +159,7 @@ index 951a5e9..6578024 100644
  	EOTF outputTF = frameInfo->outputEncodingEOTF;
  	if (!frameInfo->applyOutputColorMgmt)
  		outputTF = EOTF_Count; //Disable blending stuff.
-@@ -4867,6 +4955,8 @@ static bool vulkan_composite_blit( CVulkanCmdBuffer *cmdBuffer, const struct Fra
+@@ -4984,6 +5072,8 @@ static bool vulkan_composite_blit( CVulkanCmdBuffer *cmdBuffer, const struct Fra
  
  std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamescope::Rc<CVulkanTexture> pPipewireTexture, bool partial, gamescope::Rc<CVulkanTexture> pOutputOverride, bool increment, std::unique_ptr<CVulkanCmdBuffer> pInCommandBuffer, bool bAllowGfxBlit )
  {
@@ -165,10 +169,10 @@ index 951a5e9..6578024 100644
  	if (!frameInfo->applyOutputColorMgmt)
  		outputTF = EOTF_Count; //Disable blending stuff.
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index af18249..29b84ad 100644
+index 23efff8..32c92d0 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
-@@ -2520,6 +2520,17 @@ void MouseCursor::updateCursorFeedback( bool bForce )
+@@ -2514,6 +2514,17 @@ void MouseCursor::updateCursorFeedback( bool bForce )
  	m_needs_server_flush = true;
  }
  
@@ -186,7 +190,7 @@ index af18249..29b84ad 100644
  static void
  paint_cached_base_layer(const gamescope::Rc<commit_t>& commit, const BaseLayerInfo_t& base, struct FrameInfo_t *frameInfo, float flOpacityScale, bool bOverrideOpacity )
  {
-@@ -2532,6 +2543,10 @@ paint_cached_base_layer(const gamescope::Rc<commit_t>& commit, const BaseLayerIn
+@@ -2526,6 +2537,10 @@ paint_cached_base_layer(const gamescope::Rc<commit_t>& commit, const BaseLayerIn
  	layer->tex = commit->GetTexture( base.eUpscaleFilter, base.eUpscaleScaler, layer->colorspace );
  	layer->filter = base.filter;
  	layer->ulContentID = layer->tex == commit->vulkanTex ? commit->commitID : 0;
@@ -197,7 +201,7 @@ index af18249..29b84ad 100644
  	if ( layer->tex == commit->vulkanTex )
  	{
  		if ( base.uOutputWidth == currentOutputWidth && base.uOutputHeight == currentOutputHeight )
-@@ -2546,11 +2561,11 @@ paint_cached_base_layer(const gamescope::Rc<commit_t>& commit, const BaseLayerIn
+@@ -2540,11 +2555,11 @@ paint_cached_base_layer(const gamescope::Rc<commit_t>& commit, const BaseLayerIn
  			// The output changed size since this transform was cached, so refit
  			// the texture to it rather than replaying the stale mapping.
  			float flScaleX = 1.0f, flScaleY = 1.0f;
@@ -212,7 +216,7 @@ index af18249..29b84ad 100644
  		}
  		frameInfo->focusedWindowScale = { layer->scale.x, layer->scale.y };
  		frameInfo->focusedWindowOffset = { layer->offset.x, layer->offset.y };
-@@ -2644,6 +2659,8 @@ paint_window_commit( const gamescope::Rc<commit_t> &lastCommit, steamcompmgr_win
+@@ -2639,6 +2654,8 @@ paint_window_commit( const gamescope::Rc<commit_t> &lastCommit, steamcompmgr_win
  
  	layer->tex = lastCommit->GetTexture( layer->filter, frameInfo->eUpscaleScaler, layer->colorspace );
  	layer->ulContentID = layer->tex == lastCommit->vulkanTex ? lastCommit->commitID : 0;
@@ -221,7 +225,7 @@ index af18249..29b84ad 100644
  
  	if ( flags & PaintWindowFlag::NoScale )
  	{
-@@ -2662,11 +2679,11 @@ paint_window_commit( const gamescope::Rc<commit_t> &lastCommit, steamcompmgr_win
+@@ -2657,11 +2674,11 @@ paint_window_commit( const gamescope::Rc<commit_t> &lastCommit, steamcompmgr_win
  		// are using the bypass layer, we don't get that, so we need to handle
  		// this case explicitly.
  		if (w == scaleW) {
@@ -237,34 +241,34 @@ index af18249..29b84ad 100644
  		} else {
  			sourceWidth = scaleW->GetGeometry().nWidth;
  			sourceHeight = scaleW->GetGeometry().nHeight;
-@@ -8571,6 +8588,7 @@ void update_wayland_res(CommitDoneList_t *doneCommits, steamcompmgr_win_t *w, Re
+@@ -8739,6 +8756,7 @@ void update_wayland_res(const std::shared_ptr<CommitDoneList_t> &doneCommits, st
  		// Import failed to import, early exit.
  		return;
  	}
 +	newCommit->uBufferTransform = reslistentry.uBufferTransform;
  
- 	int fence = -1;
- 	global_focus_t *pCurrentFocus = GetCurrentFocus();
+ 	newCommit->bOverrideContent = reslistentry.surf == w->override_surface();
+ 	newCommit->pAcquirePoint = reslistentry.pAcquirePoint;
 diff --git a/src/wlserver.cpp b/src/wlserver.cpp
-index 3dccb47..0ceaa1e 100644
+index ce7c1a8..d3e67d5 100644
 --- a/src/wlserver.cpp
 +++ b/src/wlserver.cpp
-@@ -167,6 +167,7 @@ ResListEntry_t PrepareCommit( struct wlr_surface *surf, struct wlr_buffer *buf )
+@@ -177,6 +177,7 @@ ResListEntry_t PrepareCommit( struct wlr_surface *surf, struct wlr_buffer *buf )
  		std::move( pAcquirePoint ),
- 		std::move( pReleasePoint )
+ 		std::move( pReleasePoint ),
  	};
 +	newEntry.uBufferTransform = surf->current.transform;
- 	wl_surf->present_id = std::nullopt;
- 	wl_surf->desired_present_time = 0;
- 	wl_surf->pending_presentation_feedbacks.clear();
+ 	newEntry.damageExtents = *pixman_region32_extents( &surf->buffer_damage );
+ 	if ( wl_surf->x11_surface && wl_surf->x11_surface->override_surface && wl_surf->x11_surface->override_surface != surf )
+ 	{
 diff --git a/src/wlserver.hpp b/src/wlserver.hpp
-index 79a0723..64132f1 100644
+index 2817d97..5cb2561 100644
 --- a/src/wlserver.hpp
 +++ b/src/wlserver.hpp
-@@ -50,6 +50,7 @@ struct ResListEntry_t {
- 	uint64_t desired_present_time;
- 	std::shared_ptr<gamescope::CAcquireTimelinePoint> pAcquirePoint;
+@@ -51,6 +51,7 @@ struct ResListEntry_t {
  	std::shared_ptr<gamescope::CReleaseTimelinePoint> pReleasePoint;
+ 	pixman_box32_t damageExtents;
+ 	std::vector<pixman_box32_t> damage;
 +	uint32_t uBufferTransform = 0; // wl_output_transform the client drew the buffer in
  };
  

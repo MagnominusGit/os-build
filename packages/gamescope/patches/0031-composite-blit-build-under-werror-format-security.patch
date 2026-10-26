@@ -13,10 +13,10 @@ ROCKNIX builds without that flag. Route the argument-less
 instantiations through "%s"; the others are unchanged.
 ---
 diff --git a/src/rendervulkan.cpp b/src/rendervulkan.cpp
-index 3740a92..a6b4eb9 100644
+index cb9b188..86e967b 100644
 --- a/src/rendervulkan.cpp
 +++ b/src/rendervulkan.cpp
-@@ -4761,7 +4761,11 @@ static bool vulkan_composite_blit( CVulkanCmdBuffer *cmdBuffer, const struct Fra
+@@ -4878,7 +4878,11 @@ static bool vulkan_composite_blit( CVulkanCmdBuffer *cmdBuffer, const struct Fra
  		if ( !( s_uLoggedReasons & ( 1u << uBit ) ) )
  		{
  			s_uLoggedReasons |= 1u << uBit;

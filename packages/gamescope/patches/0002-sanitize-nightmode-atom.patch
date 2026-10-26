@@ -55,10 +55,10 @@ the workaround. A broken client's vec[2] garbage is never consulted.
  1 file changed, 43 insertions(+)
 
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index 18b799e0..05e961db 100644
+index 0c2a768..c0c3f9d 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
-@@ -7520,6 +7520,49 @@ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
+@@ -7580,6 +7580,49 @@ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
  		nightmode.hue = vec[1];
  		nightmode.saturation = vec[2];
  
@@ -108,5 +108,3 @@ index 18b799e0..05e961db 100644
  		if ( set_color_nightmode( nightmode ) )
  			hasRepaint = true;
  	}
---
-2.54.0

@@ -61,12 +61,13 @@ carrying regardless of that, since the failure mode it removes is a device that
 looks bricked during a routine update.
 
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
+index fefad9e..6a9a5ac 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
-@@ -3595,6 +3595,32 @@
+@@ -4425,6 +4425,32 @@ found:;
  		}
  	}
-
+ 
 +	// retroforge: last-resort global focus for Steam's own windows under SteamControlled.
 +	//
 +	// The fallback above is deliberately withheld from the global pass while focus is controlled, so
@@ -96,5 +97,3 @@ diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
  	auto resolveTransientOverrides = [&](bool maybe)
  	{
  		if ( !focus || focus->type != steamcompmgr_win_type_t::XWAYLAND )
---
-2.54.0

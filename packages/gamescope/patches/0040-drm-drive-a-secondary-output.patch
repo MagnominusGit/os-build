@@ -38,7 +38,7 @@ HW spike: separate commits on the two CRTCs of the msm DPU flip
 independently, DSI-1 at 120 Hz and DSI-2 at 60 Hz, no EBUSY.)
 ---
 diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
-index 4bd74fd..116d2ab 100644
+index f169ffa..9f9b760 100644
 --- a/src/Backends/DRMBackend.cpp
 +++ b/src/Backends/DRMBackend.cpp
 @@ -4,12 +4,14 @@
@@ -56,7 +56,7 @@ index 4bd74fd..116d2ab 100644
  #include <atomic>
  #include <cassert>
  #include <cinttypes>
-@@ -182,6 +184,40 @@ using namespace std::literals;
+@@ -181,6 +183,40 @@ using namespace std::literals;
  
  struct drm_t g_DRM = {};
  
@@ -97,7 +97,7 @@ index 4bd74fd..116d2ab 100644
  // Flip handler thread control. Keep the thread object global so we
  // can join it during shutdown instead of detaching and risking the
  // thread still using the DRM fd while we clean up.
-@@ -670,6 +706,9 @@ static gamescope::CDRMCRTC *find_crtc_for_connector( struct drm_t *drm, gamescop
+@@ -669,6 +705,9 @@ static gamescope::CDRMCRTC *find_crtc_for_connector( struct drm_t *drm, gamescop
  {
  	for ( std::unique_ptr< gamescope::CDRMCRTC > &pCRTC : drm->crtcs )
  	{
@@ -107,7 +107,7 @@ index 4bd74fd..116d2ab 100644
  		if ( pConnector->GetPossibleCRTCMask() & pCRTC->GetCRTCMask() )
  			return pCRTC.get();
  	}
-@@ -744,6 +783,9 @@ static gamescope::CDRMPlane *find_primary_plane(struct drm_t *drm)
+@@ -743,6 +782,9 @@ static gamescope::CDRMPlane *find_primary_plane(struct drm_t *drm)
  
  	for ( std::unique_ptr< gamescope::CDRMPlane > &pPlane : drm->planes )
  	{
@@ -117,7 +117,7 @@ index 4bd74fd..116d2ab 100644
  		if ( pPlane->GetModePlane()->possible_crtcs & drm->pCRTC->GetCRTCMask() )
  		{
  			if ( pPlane->GetProperties().type->GetCurrentValue() == DRM_PLANE_TYPE_PRIMARY )
-@@ -759,6 +801,9 @@ static gamescope::CDRMPlane *find_any_primary_plane(struct drm_t *drm)
+@@ -758,6 +800,9 @@ static gamescope::CDRMPlane *find_any_primary_plane(struct drm_t *drm)
  {
  	for ( std::unique_ptr< gamescope::CDRMPlane > &pPlane : drm->planes )
  	{
@@ -127,7 +127,7 @@ index 4bd74fd..116d2ab 100644
  		if ( pPlane->GetProperties().type->GetCurrentValue() == DRM_PLANE_TYPE_PRIMARY )
  			return pPlane.get();
  	}
-@@ -783,9 +828,300 @@ static bool have_overlay_planes(struct drm_t *drm)
+@@ -782,10 +827,301 @@ static bool have_overlay_planes(struct drm_t *drm)
  	return false;
  }
  
@@ -416,6 +416,7 @@ index 4bd74fd..116d2ab 100644
 +}
 +
  extern void mangoapp_output_update( uint64_t vblanktime );
+ extern std::atomic<uint32_t> g_uScanoutRefreshmHz;
  static void page_flip_handler(int fd, unsigned int frame, unsigned int sec, unsigned int usec, unsigned int crtc_id, void *data)
  {
 +	// The secondary output's flips carry its own state, not a DRMPresentCtx.
@@ -428,7 +429,7 @@ index 4bd74fd..116d2ab 100644
  	DRMPresentCtx *pCtx = reinterpret_cast<DRMPresentCtx *>( data );
  
  	// Make this const when we move into CDRMBackend.
-@@ -930,6 +1266,13 @@ static bool refresh_state( drm_t *drm )
+@@ -946,6 +1282,13 @@ static bool refresh_state( drm_t *drm )
  				drm->pConnector = nullptr;
  			}
  
@@ -442,7 +443,7 @@ index 4bd74fd..116d2ab 100644
  			iter = drm->connectors.erase( iter );
  		}
  		else
-@@ -1334,6 +1677,9 @@ static bool setup_best_connector(struct drm_t *drm, bool force, bool initial)
+@@ -1350,6 +1693,9 @@ static bool setup_best_connector(struct drm_t *drm, bool force, bool initial)
  		if ( pConnector->GetModeConnector()->connection != DRM_MODE_CONNECTED )
  			continue;
  
@@ -452,7 +453,7 @@ index 4bd74fd..116d2ab 100644
  		if ( g_bForceInternal && pConnector->GetScreenType() == gamescope::GAMESCOPE_SCREEN_TYPE_EXTERNAL )
  			continue;
  
-@@ -1603,11 +1949,21 @@ bool init_drm(struct drm_t *drm, int width, int height, int refresh)
+@@ -1619,11 +1965,21 @@ bool init_drm(struct drm_t *drm, int width, int height, int refresh)
  		return false;
  	}
  
@@ -476,7 +477,7 @@ index 4bd74fd..116d2ab 100644
  	
  	drm_log.infof("Connectors:");
  	for ( auto &iter : drm->connectors )
-@@ -1882,6 +2238,14 @@ void finish_drm(struct drm_t *drm)
+@@ -1898,6 +2254,14 @@ void finish_drm(struct drm_t *drm)
  	drm->sdr_static_metadata = nullptr;
  	drm->current = drm_t::drm_state_t{};
  	drm->pending = drm_t::drm_state_t{};
@@ -491,7 +492,7 @@ index 4bd74fd..116d2ab 100644
  	drm->planes.clear();
  	drm->crtcs.clear();
  	drm->connectors.clear();
-@@ -3276,6 +3640,9 @@ static void drm_unlink_foreign_planes( struct drm_t *drm )
+@@ -3265,6 +3629,9 @@ static void drm_unlink_foreign_planes( struct drm_t *drm )
  		if ( uCRTCId == 0 || uCRTCId == uOurCRTCId )
  			continue;
  
@@ -501,7 +502,7 @@ index 4bd74fd..116d2ab 100644
  		// A CRTC that still has a mode is either disabled by the modeset below, or
  		// would have amdgpu reject us for taking its primary plane away.
  		drmModeCrtc *pKernelCRTC = drmModeGetCrtc( drm->fd, uCRTCId );
-@@ -3436,6 +3803,10 @@ int drm_prepare( struct drm_t *drm, bool async, const struct FrameInfo_t *frameI
+@@ -3425,6 +3792,10 @@ int drm_prepare( struct drm_t *drm, bool async, const struct FrameInfo_t *frameI
  			if ( pConnector->GetProperties().CRTC_ID->GetCurrentValue() == 0 )
  				continue;
  
@@ -512,7 +513,7 @@ index 4bd74fd..116d2ab 100644
  			pConnector->GetProperties().CRTC_ID->SetPendingValue( drm->req, 0, bForceInRequest );
  
  			if ( pConnector->GetProperties().Colorspace )
-@@ -3458,6 +3829,9 @@ int drm_prepare( struct drm_t *drm, bool async, const struct FrameInfo_t *frameI
+@@ -3447,6 +3818,9 @@ int drm_prepare( struct drm_t *drm, bool async, const struct FrameInfo_t *frameI
  			if ( pCRTC->GetProperties().ACTIVE->GetCurrentValue() == 0 )
  				continue;
  
@@ -522,7 +523,7 @@ index 4bd74fd..116d2ab 100644
  			pCRTC->GetProperties().ACTIVE->SetPendingValue( drm->req, 0, bForceInRequest );
  			pCRTC->GetProperties().MODE_ID->SetPendingValue( drm->req, 0, bForceInRequest );
  
-@@ -3596,6 +3970,8 @@ bool drm_poll_state( struct drm_t *drm )
+@@ -3585,6 +3959,8 @@ bool drm_poll_state( struct drm_t *drm )
  
  	setup_best_connector(drm, out_of_date >= 2, false);
  
@@ -531,7 +532,7 @@ index 4bd74fd..116d2ab 100644
  	return true;
  }
  
-@@ -4224,6 +4600,11 @@ namespace gamescope
+@@ -4213,6 +4589,11 @@ namespace gamescope
  				WritePatchedEdid( g_DRM.pConnector->GetRawEDID(), g_DRM.pConnector->GetHDRInfo(), g_bRotated );
  				WriteModeListFile( g_DRM.pConnector->GetModes() );
  			}
@@ -543,7 +544,7 @@ index 4bd74fd..116d2ab 100644
  			return true;
  		}
  
-@@ -4701,6 +5082,8 @@ namespace gamescope
+@@ -4697,6 +5078,8 @@ namespace gamescope
  				g_DRM.needs_modeset = true;
  			g_DRM.out_of_date = std::max<int>( g_DRM.out_of_date, bForce ? 2 : 1 );
  			g_DRM.paused = !wlsession_active();

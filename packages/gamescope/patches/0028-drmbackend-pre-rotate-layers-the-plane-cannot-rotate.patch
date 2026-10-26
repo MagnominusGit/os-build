@@ -35,10 +35,10 @@ expected. Merged by hand, keeping retroforge's additions in place:
 Source: ROCKNIX fork, next:projects/ROCKNIX/packages/apps/gamescope/patches
 ---
 diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
-index e0a1754..11670a5 100644
+index b9d27be..ba817c0 100644
 --- a/src/Backends/DRMBackend.cpp
 +++ b/src/Backends/DRMBackend.cpp
-@@ -2067,6 +2067,7 @@ struct LiftoffStateCacheEntry
+@@ -2083,6 +2083,7 @@ struct LiftoffStateCacheEntry
  	struct LiftoffLayerState_t
  	{
  		bool ycbcr;
@@ -46,7 +46,7 @@ index e0a1754..11670a5 100644
  		uint32_t zpos;
  		uint32_t srcW, srcH;
  		uint32_t crtcX, crtcY, crtcW, crtcH;
-@@ -2092,6 +2093,7 @@ struct LiftoffStateCacheEntryKasher
+@@ -2108,6 +2109,7 @@ struct LiftoffStateCacheEntryKasher
  		for ( int i = 0; i < k.nLayerCount; i++ )
  		{
  			hash_combine(hash, k.layerState[i].ycbcr);
@@ -54,7 +54,7 @@ index e0a1754..11670a5 100644
  			hash_combine(hash, k.layerState[i].zpos);
  			hash_combine(hash, k.layerState[i].srcW);
  			hash_combine(hash, k.layerState[i].srcH);
-@@ -2250,17 +2252,21 @@ LiftoffStateCacheEntry FrameInfoToLiftoffStateCacheEntry( struct drm_t *drm, con
+@@ -2266,17 +2268,21 @@ LiftoffStateCacheEntry FrameInfoToLiftoffStateCacheEntry( struct drm_t *drm, con
  	entry.nLayerCount = frameInfo->layers.count();
  	for ( int i = 0; i < entry.nLayerCount; i++ )
  	{
@@ -80,7 +80,7 @@ index e0a1754..11670a5 100644
  
  			const int32_t x = crtcX;
  			const uint64_t w = crtcW;
-@@ -2281,9 +2287,12 @@ LiftoffStateCacheEntry FrameInfoToLiftoffStateCacheEntry( struct drm_t *drm, con
+@@ -2297,9 +2303,12 @@ LiftoffStateCacheEntry FrameInfoToLiftoffStateCacheEntry( struct drm_t *drm, con
  			crtcH = (uint64_t) ( ( (uint64_t) crtcH * g_nOutputScaleNum ) / g_nOutputScaleDen );
  		}
  
@@ -95,7 +95,7 @@ index e0a1754..11670a5 100644
  		entry.layerState[i].crtcX = crtcX;
  		entry.layerState[i].crtcY = crtcY;
  		entry.layerState[i].crtcW = crtcW;
-@@ -2986,7 +2995,8 @@ drm_prepare_liftoff( struct drm_t *drm, const struct FrameInfo_t *frameInfo, boo
+@@ -2975,7 +2984,8 @@ drm_prepare_liftoff( struct drm_t *drm, const struct FrameInfo_t *frameInfo, boo
  		if ( i < frameInfo->layers.count() )
  		{
  			const FrameInfo_t::Layer_t *pLayer = &frameInfo->layers.get( i );
@@ -105,7 +105,7 @@ index e0a1754..11670a5 100644
  
  			if ( pDrmFb == nullptr )
  			{
-@@ -3035,6 +3045,8 @@ drm_prepare_liftoff( struct drm_t *drm, const struct FrameInfo_t *frameInfo, boo
+@@ -3024,6 +3034,8 @@ drm_prepare_liftoff( struct drm_t *drm, const struct FrameInfo_t *frameInfo, boo
  				ulOrientation = DRM_MODE_ROTATE_180;
  				break;
  			}
@@ -114,7 +114,7 @@ index e0a1754..11670a5 100644
  			liftoff_layer_set_property( drm->lo_layers[ i ], "rotation", ulOrientation );
  
  			liftoff_layer_set_property( drm->lo_layers[ i ], "CRTC_X", entry.layerState[i].crtcX);
-@@ -3792,6 +3804,7 @@ static void drm_unset_mode( struct drm_t *drm, bool force )
+@@ -3781,6 +3793,7 @@ static void drm_unset_mode( struct drm_t *drm, bool force )
  
  	g_bRotated = false;
  	g_uOutputRotation = 0;
@@ -122,7 +122,7 @@ index e0a1754..11670a5 100644
  }
  
  // Bitmask of DRM_MODE_ROTATE_* the plane can do at scanout (just ROTATE_0 if it can't rotate).
-@@ -3905,6 +3918,10 @@ bool drm_set_mode( struct drm_t *drm, const drmModeModeInfo *mode )
+@@ -3894,6 +3907,10 @@ bool drm_set_mode( struct drm_t *drm, const drmModeModeInfo *mode )
  			g_uOutputRotation = uStep;
  	}
  
@@ -133,7 +133,7 @@ index e0a1754..11670a5 100644
  	return true;
  }
  
-@@ -4274,6 +4291,7 @@ namespace gamescope
+@@ -4263,6 +4280,7 @@ namespace gamescope
  			                                   eLayer0Filter == GamescopeUpscaleFilter::PIXEL ) && !bLayer0ScreenSize;
  
  			bool bNeedsFullComposite = false;
@@ -141,7 +141,7 @@ index e0a1754..11670a5 100644
  			bNeedsFullComposite |= cv_composite_force;
  			bNeedsFullComposite |= bWasFirstFrame;
  			bNeedsFullComposite |= pFrameInfo->useFSRLayer0;
-@@ -4303,7 +4321,7 @@ namespace gamescope
+@@ -4292,7 +4310,7 @@ namespace gamescope
  			}
  
  			bNeedsFullComposite |= !!(g_uCompositeDebug & CompositeDebugFlag::Heatmap);
@@ -150,7 +150,7 @@ index e0a1754..11670a5 100644
  			// ...and can't colour manage at scanout either, unless the display
  			// controller can be made to do it. Nothing above keys off the colour
  			// state, so before this line a scanned-out frame silently skipped night
-@@ -4312,6 +4330,7 @@ namespace gamescope
+@@ -4301,6 +4319,7 @@ namespace gamescope
  			bNeedsFullComposite |= !drm_scanout_is_color_managed( &g_DRM, pFrameInfo->outputLuts );
  
  			bool bDoComposite = true;
@@ -158,7 +158,7 @@ index e0a1754..11670a5 100644
  			if ( !bNeedsFullComposite && !bWantsPartialComposite )
  			{
  				// Save the pending mode so it can be restored after drm_rollback() and carried
-@@ -4324,7 +4343,8 @@ namespace gamescope
+@@ -4313,7 +4332,8 @@ namespace gamescope
  				// frame gets the transform twice.
  				drm_update_crtc_ctm( &g_DRM, !pFrameInfo->outputLuts );
  
@@ -168,7 +168,7 @@ index e0a1754..11670a5 100644
  				if ( ret == 0 )
  					bDoComposite = false;
  				else if ( ret == -EACCES )
-@@ -4334,7 +4354,11 @@ namespace gamescope
+@@ -4323,7 +4343,11 @@ namespace gamescope
  			}
  
  			// Update to let the vblank manager know we are currently compositing.
@@ -181,7 +181,7 @@ index e0a1754..11670a5 100644
  
  			if ( !bDoComposite )
  			{
-@@ -4344,11 +4368,13 @@ namespace gamescope
+@@ -4333,11 +4357,13 @@ namespace gamescope
  				if ( pFrameInfo->layers.count() == 2 )
  					m_nLastSingleOverlayZPos = pFrameInfo->layers.get( 1 ).zpos;
  
@@ -197,7 +197,7 @@ index e0a1754..11670a5 100644
  				bNeedsFullComposite = true;
  
  			// Same reason as the bWantsPartialComposite guard above, and it has to be
-@@ -4360,6 +4386,33 @@ namespace gamescope
+@@ -4349,6 +4375,33 @@ namespace gamescope
  			if ( drm_scanout_ctm_is_active( &g_DRM, pFrameInfo->outputLuts ) )
  				bNeedsFullComposite = true;
  
@@ -231,7 +231,7 @@ index e0a1754..11670a5 100644
  			FrameInfo_t compositeFrameInfo = *pFrameInfo;
  
  			if ( compositeFrameInfo.layers.count() == 1 )
-@@ -4394,12 +4447,24 @@ namespace gamescope
+@@ -4383,12 +4436,24 @@ namespace gamescope
  				}
  			}
  
@@ -257,7 +257,7 @@ index e0a1754..11670a5 100644
  
  			// If doing a partial composition then remove the baseplane
  			// from our frameinfo to composite.
-@@ -4453,6 +4518,7 @@ namespace gamescope
+@@ -4449,6 +4514,7 @@ namespace gamescope
  				baseLayer->zpos = g_zposBase;
  
  				baseLayer->tex = vulkan_get_last_output_image( false, false );
@@ -265,7 +265,7 @@ index e0a1754..11670a5 100644
  				baseLayer->applyColorMgmt = false;
  
  				baseLayer->filter = GamescopeUpscaleFilter::NEAREST;
-@@ -4465,27 +4531,7 @@ namespace gamescope
+@@ -4461,27 +4527,7 @@ namespace gamescope
  			{
  				if ( m_bWasPartialCompositing || !bDefer )
  				{
@@ -294,7 +294,7 @@ index e0a1754..11670a5 100644
  				}
  				else
  				{
-@@ -4523,12 +4569,21 @@ namespace gamescope
+@@ -4519,12 +4565,21 @@ namespace gamescope
  			// the DPU must not apply it again.
  			drm_update_crtc_ctm( &g_DRM, false );
  
@@ -317,7 +317,7 @@ index e0a1754..11670a5 100644
  			if ( ret != 0 )
  			{
  				if ( g_DRM.current.mode_id == 0 )
-@@ -4566,6 +4621,70 @@ namespace gamescope
+@@ -4562,6 +4617,70 @@ namespace gamescope
  			return Commit( &compositeFrameInfo );
  		}
  
@@ -388,7 +388,7 @@ index e0a1754..11670a5 100644
  		virtual void DirtyState( bool bForce, bool bForceModeset ) override
  		{
  			if ( bForceModeset )
-@@ -4729,6 +4848,7 @@ namespace gamescope
+@@ -4725,6 +4844,7 @@ namespace gamescope
  	private:
  		bool m_bWasCompositing = false;
  		bool m_bWasPartialCompositing = false;
@@ -396,7 +396,7 @@ index e0a1754..11670a5 100644
  		int m_nLastSingleOverlayZPos = 0;
  
  		uint32_t m_uNextPresentCtx = 0;
-@@ -4739,6 +4859,11 @@ namespace gamescope
+@@ -4735,6 +4855,11 @@ namespace gamescope
  			return drm_supports_color_mgmt( &g_DRM );
  		}
  
@@ -409,7 +409,7 @@ index e0a1754..11670a5 100644
  		// frame before the backend rebuilds it, as the AMD plane LUTs are.
  		virtual bool OutputLUTsReady() const override
 diff --git a/src/backend.h b/src/backend.h
-index 6c23005..69a2b6f 100644
+index d14ea31..29c39d2 100644
 --- a/src/backend.h
 +++ b/src/backend.h
 @@ -369,6 +369,8 @@ namespace gamescope
@@ -448,10 +448,10 @@ index 9ab3263..a29f52f 100644
  extern bool g_bCompositeGraphics;
  extern bool g_bCompositeBlit;
 diff --git a/src/rendervulkan.cpp b/src/rendervulkan.cpp
-index 7ade9b5..412dd79 100644
+index 219f948..fb6c0e5 100644
 --- a/src/rendervulkan.cpp
 +++ b/src/rendervulkan.cpp
-@@ -3500,6 +3500,64 @@ void vulkan_update_luts(const gamescope::Rc<CVulkanTexture>& lut1d, const gamesc
+@@ -3594,6 +3594,64 @@ void vulkan_update_luts(const gamescope::Rc<CVulkanTexture>& lut1d, const gamesc
  	g_device.waitIdle(); // TODO: Sync this better
  }
  
@@ -516,7 +516,7 @@ index 7ade9b5..412dd79 100644
  gamescope::Rc<CVulkanTexture> vulkan_get_hacky_blank_texture()
  {
  	return g_output.temporaryHackyBlankImage.get();
-@@ -3757,12 +3815,19 @@ static bool vulkan_make_output_images( VulkanOutput_t *pOutput )
+@@ -3844,12 +3902,19 @@ static bool vulkan_make_output_images( VulkanOutput_t *pOutput )
  	// Oh no.
  	pOutput->temporaryHackyBlankImage = vulkan_create_debug_blank_texture();
  
@@ -538,7 +538,7 @@ index 7ade9b5..412dd79 100644
  		if ( bSuccess != true )
  		{
  			vk_log.errorf( "failed to allocate buffer for KMS" );
-@@ -3770,7 +3835,7 @@ static bool vulkan_make_output_images( VulkanOutput_t *pOutput )
+@@ -3857,7 +3922,7 @@ static bool vulkan_make_output_images( VulkanOutput_t *pOutput )
  		}
  
  		pOutput->outputImagesPartialOverlay[1] = new CVulkanTexture();
@@ -547,7 +547,7 @@ index 7ade9b5..412dd79 100644
  		if ( bSuccess != true )
  		{
  			vk_log.errorf( "failed to allocate buffer for KMS" );
-@@ -3778,7 +3843,7 @@ static bool vulkan_make_output_images( VulkanOutput_t *pOutput )
+@@ -3865,7 +3930,7 @@ static bool vulkan_make_output_images( VulkanOutput_t *pOutput )
  		}
  
  		pOutput->outputImagesPartialOverlay[2] = new CVulkanTexture();
@@ -556,7 +556,7 @@ index 7ade9b5..412dd79 100644
  		if ( bSuccess != true )
  		{
  			vk_log.errorf( "failed to allocate buffer for KMS" );
-@@ -4789,7 +4854,9 @@ std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamesco
+@@ -4906,7 +4971,9 @@ std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamesco
  		compositeImage = partial ? g_output.outputImagesPartialOverlay[ g_output.nOutImage ] : g_output.outputImages[ g_output.nOutImage ];
  
  	// Overrides (screenshots, upscale cache) are logical-sized, so never rotated.
@@ -568,10 +568,10 @@ index 7ade9b5..412dd79 100644
  
  	// The pre-emptive upscale is the only caller that brings its own command buffer.
 diff --git a/src/rendervulkan.hpp b/src/rendervulkan.hpp
-index 14af83d..9a4a908 100644
+index 4cdff9b..eb6d5e2 100644
 --- a/src/rendervulkan.hpp
 +++ b/src/rendervulkan.hpp
-@@ -323,6 +323,8 @@ struct FrameInfo_t
+@@ -328,6 +328,8 @@ struct FrameInfo_t
  
  		bool blackBorder;
  		bool applyColorMgmt; // drm only
@@ -580,7 +580,7 @@ index 14af83d..9a4a908 100644
  
  		AlphaBlendingMode_t eAlphaBlendingMode = ALPHA_BLENDING_MODE_PREMULTIPLIED;
  
-@@ -469,6 +471,8 @@ gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_wlr_buffer( struc
+@@ -474,6 +476,8 @@ gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_wlr_buffer( struc
  std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamescope::Rc<CVulkanTexture> pScreenshotTexture, bool partial, gamescope::Rc<CVulkanTexture> pOutputOverride = nullptr, bool increment = true, std::unique_ptr<CVulkanCmdBuffer> pInCommandBuffer = nullptr, bool bAllowGfxBlit = false );
  void vulkan_wait( uint64_t ulSeqNo, bool bReset );
  gamescope::Rc<CVulkanTexture> vulkan_get_last_output_image( bool partial, bool defer );
@@ -590,10 +590,10 @@ index 14af83d..9a4a908 100644
  gamescope::Rc<CVulkanTexture> vulkan_acquire_capture_texture(uint32_t width, uint32_t height, bool exportable, uint32_t drmFormat, EStreamColorspace colorspace = k_EStreamColorspace_Unknown);
  uint32_t vulkan_get_rgb10_capture_format( void );
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index ecc730f..6c37d97 100644
+index f22e552..2375a2f 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
-@@ -1132,6 +1132,7 @@ global_focus_t *GetFocusForWindow( steamcompmgr_win_t *w )
+@@ -1130,6 +1130,7 @@ global_focus_t *GetFocusForWindow( steamcompmgr_win_t *w )
  uint32_t		currentOutputWidth, currentOutputHeight;
  int 			currentOutputRefresh;
  uint32_t		currentOutputRotation = 0;
@@ -601,7 +601,7 @@ index ecc730f..6c37d97 100644
  bool			currentHDROutput = false;
  bool			currentHDRCapable = false;
  bool			currentHDRForce = false;
-@@ -3307,7 +3308,7 @@ paint_all( global_focus_t *pFocus, bool async )
+@@ -3311,7 +3312,7 @@ paint_all( global_focus_t *pFocus, bool async, bool bRepeatFrame )
  		nReservedLayers++;
  	if ( cv_paint_steam_overlay_plane &&
  		 ( ( overlay && overlay->opacity ) ||
@@ -610,7 +610,7 @@ index ecc730f..6c37d97 100644
  		nReservedLayers++;
  	if ( notification && notification->opacity )
  		nReservedLayers++;
-@@ -3365,7 +3366,7 @@ paint_all( global_focus_t *pFocus, bool async )
+@@ -3369,7 +3370,7 @@ paint_all( global_focus_t *pFocus, bool async, bool bRepeatFrame )
  			if ( overlay == pFocus->inputFocusWindow && pFocus == GetCurrentMouseFocus() )
  				update_touch_scaling( &frameInfo );
  		}
@@ -619,7 +619,7 @@ index ecc730f..6c37d97 100644
  		{
  			auto tex = vulkan_get_hacky_blank_texture();
  			if ( tex != nullptr && frameInfo.layers.count() < k_nMaxLayers )
-@@ -10432,6 +10433,7 @@ steamcompmgr_main(int argc, char **argv)
+@@ -10642,6 +10643,7 @@ steamcompmgr_main(int argc, char **argv)
  			 currentOutputHeight != g_nOutputHeight ||
  			 currentOutputRefresh != g_nOutputRefresh ||
  			 currentOutputRotation != g_uOutputRotation ||
@@ -627,7 +627,7 @@ index ecc730f..6c37d97 100644
  			 currentHDROutput != g_bOutputHDREnabled ||
  			 currentHDRCapable != bOutputHDRCapable ||
  			 currentHDRForce != g_bForceHDRSupportDebug )
-@@ -10484,6 +10486,7 @@ steamcompmgr_main(int argc, char **argv)
+@@ -10694,6 +10696,7 @@ steamcompmgr_main(int argc, char **argv)
  			currentOutputHeight = g_nOutputHeight;
  			currentOutputRefresh = g_nOutputRefresh;
  			currentOutputRotation = g_uOutputRotation;

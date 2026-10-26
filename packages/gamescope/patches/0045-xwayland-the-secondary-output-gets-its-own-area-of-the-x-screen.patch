@@ -23,10 +23,10 @@ windows are composited regardless of their X origin.
 (retroforge: dual-screen boards, 2026-10-12.)
 ---
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index af0f7e7..e8565de 100644
+index 7792d2a..bb760a6 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
-@@ -1104,6 +1104,25 @@ static std::optional<std::regex> g_SecondaryWindowTitle;
+@@ -1102,6 +1102,25 @@ static std::optional<std::regex> g_SecondaryWindowTitle;
  static global_focus_t g_SecondaryFocus;
  // melonDS prefixes "[w2] " to its second window's title, Azahar ends its with "| Secondary Window".
  static constexpr const char *k_pszDefaultSecondaryWindowTitle = R"(^\[w2\] |\| Secondary Window$)";
@@ -52,7 +52,7 @@ index af0f7e7..e8565de 100644
  global_focus_t *GetCurrentFocus()
  {
  	uint64_t ulKey = GetBackend()->GetCurrentConnector() ? GetBackend()->GetCurrentConnector()->GetVirtualConnectorKey() : 0;
-@@ -5823,10 +5842,13 @@ static void determine_and_apply_secondary_focus()
+@@ -5854,10 +5873,13 @@ static void determine_and_apply_secondary_focus()
  	g_SecondaryFocus.focusWindow = pFocusWindow;
  
  	if ( pFocusWindow && ( (uint32_t)pFocusWindow->GetGeometry().nWidth != g_uSecondaryOutputWidth ||
@@ -68,7 +68,7 @@ index af0f7e7..e8565de 100644
  	}
  
  	g_SecondaryFocus.ulCurrentFocusSerial = GetFocusSerial();
-@@ -6449,6 +6471,7 @@ configure_win(xwayland_ctx_t *ctx, XConfigureEvent *ce)
+@@ -6480,6 +6502,7 @@ configure_win(xwayland_ctx_t *ctx, XConfigureEvent *ce)
  		{
  			ctx->root_width = ce->width;
  			ctx->root_height = ce->height;
@@ -76,7 +76,7 @@ index af0f7e7..e8565de 100644
  			MakeFocusDirty();
  
  			// Screen-sized is relative to the screen, re-arm every placement.
-@@ -6517,10 +6540,10 @@ static void configure_request(xwayland_ctx_t *ctx, XConfigureRequestEvent *confi
+@@ -6548,10 +6571,10 @@ static void configure_request(xwayland_ctx_t *ctx, XConfigureRequestEvent *confi
  	// Take a client's own drag out of the pointer position so it does not chase itself.
  	steamcompmgr_win_t *w = find_win( ctx, configureRequest->window, false );
  
@@ -89,7 +89,7 @@ index af0f7e7..e8565de 100644
  		changes.y = 0;
  		changes.width = g_uSecondaryOutputWidth;
  		changes.height = g_uSecondaryOutputHeight;
-@@ -9486,6 +9509,7 @@ void init_xwayland_ctx(uint32_t serverId, gamescope_xwayland_server_t *xwayland_
+@@ -9681,6 +9704,7 @@ void init_xwayland_ctx(uint32_t serverId, gamescope_xwayland_server_t *xwayland_
  
  	ctx->root_width = DisplayWidth(ctx->dpy, ctx->scr);
  	ctx->root_height = DisplayHeight(ctx->dpy, ctx->scr);
@@ -98,10 +98,10 @@ index af0f7e7..e8565de 100644
  	ctx->allDamage = None;
  	ctx->clipChanged = true;
 diff --git a/src/wlserver.cpp b/src/wlserver.cpp
-index cb9cfca..4b5a34b 100644
+index 3631673..6541a41 100644
 --- a/src/wlserver.cpp
 +++ b/src/wlserver.cpp
-@@ -1854,7 +1854,7 @@ static bool filter_global(const struct wl_client *client, const struct wl_global
+@@ -1947,7 +1947,7 @@ static bool filter_global(const struct wl_client *client, const struct wl_global
  	for (size_t i = 0; i < wlserver.wlr.xwayland_servers.size(); i++) {
  		gamescope_xwayland_server_t *server = wlserver.wlr.xwayland_servers[i].get();
  		if (server && server->get_client() == client)
@@ -110,7 +110,7 @@ index cb9cfca..4b5a34b 100644
  	}
  
  	if (wlserver.wlr.xwayland_servers.empty())
-@@ -2007,6 +2007,61 @@ gamescope_xwayland_server_t::gamescope_xwayland_server_t(wl_display *display, in
+@@ -2100,6 +2100,61 @@ gamescope_xwayland_server_t::gamescope_xwayland_server_t(wl_display *display, in
  	update_output_info();
  
  	wlr_output_create_global(output, wlserver.display);
@@ -172,7 +172,7 @@ index cb9cfca..4b5a34b 100644
  }
  
  gamescope_xwayland_server_t::~gamescope_xwayland_server_t()
-@@ -2024,6 +2079,13 @@ gamescope_xwayland_server_t::~gamescope_xwayland_server_t()
+@@ -2120,6 +2175,13 @@ gamescope_xwayland_server_t::~gamescope_xwayland_server_t()
  	wlr_xwayland_server_destroy(xwayland_server);
  	xwayland_server = nullptr;
  
@@ -186,7 +186,7 @@ index cb9cfca..4b5a34b 100644
  	wlr_output_destroy(output);
  	delete output_state;	
  }
-@@ -3682,6 +3744,8 @@ void wlserver_set_xwayland_server_mode( size_t idx, int w, int h, int nRefreshmH
+@@ -3805,6 +3867,8 @@ void wlserver_set_xwayland_server_mode( size_t idx, int w, int h, int nRefreshmH
  		abort();
  	}
  
@@ -196,10 +196,10 @@ index cb9cfca..4b5a34b 100644
  }
  
 diff --git a/src/wlserver.hpp b/src/wlserver.hpp
-index bc39744..a652c2d 100644
+index 10a6e82..544bc8b 100644
 --- a/src/wlserver.hpp
 +++ b/src/wlserver.hpp
-@@ -91,6 +91,16 @@ public:
+@@ -92,6 +92,16 @@ public:
  
  	void update_output_info();
  
@@ -216,7 +216,7 @@ index bc39744..a652c2d 100644
  	int get_index() const { return m_nIndex; }
  
  private:
-@@ -100,6 +110,14 @@ private:
+@@ -101,6 +111,14 @@ private:
  	struct wlr_output *output = nullptr;
  	struct wlr_output_state *output_state = nullptr;
  

@@ -29,10 +29,10 @@ Window shapes read with xprop on the Thor Lite: melonDS 1.1 with
 Window1 enabled, Azahar 2126.1.2 with layout_option=4.)
 ---
 diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
-index 116d2ab..71f4bf2 100644
+index 9f9b760..780c3a9 100644
 --- a/src/Backends/DRMBackend.cpp
 +++ b/src/Backends/DRMBackend.cpp
-@@ -1097,6 +1097,8 @@ static void setup_secondary_output( struct drm_t *drm )
+@@ -1096,6 +1096,8 @@ static void setup_secondary_output( struct drm_t *drm )
  	if ( !pMode )
  		return fail( "no mode" );
  	sec.mode = *pMode;
@@ -41,7 +41,7 @@ index 116d2ab..71f4bf2 100644
  
  	if ( drmModeCreatePropertyBlob( drm->fd, &sec.mode, sizeof( sec.mode ), &sec.uModeBlobId ) != 0 )
  		return fail( "cannot create its mode blob" );
-@@ -5141,6 +5143,19 @@ namespace gamescope
+@@ -5137,6 +5139,19 @@ namespace gamescope
  			return &s_HeadlessConnector;
  		}
  
@@ -62,7 +62,7 @@ index 116d2ab..71f4bf2 100644
  		{
  			if ( g_DRM.pConnector && g_DRM.pConnector->GetScreenType() == eScreenType )
 diff --git a/src/backend.h b/src/backend.h
-index 69a2b6f..095061b 100644
+index 29c39d2..0419014 100644
 --- a/src/backend.h
 +++ b/src/backend.h
 @@ -364,6 +364,10 @@ namespace gamescope
@@ -127,7 +127,7 @@ index 2de1d36..c4837af 100644
  enum class GamescopeUpscaleFilter : uint32_t
  {
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index 29b84ad..383237e 100644
+index 32c92d0..14842f0 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
 @@ -32,6 +32,7 @@
@@ -138,7 +138,7 @@ index 29b84ad..383237e 100644
  #include <X11/X.h>
  #include <X11/Xlib.h>
  #include <X11/Xcursor/Xcursor.h>
-@@ -1091,6 +1092,18 @@ struct global_focus_t : public focus_t
+@@ -1089,6 +1090,18 @@ struct global_focus_t : public focus_t
  };
  
  std::unordered_map<gamescope::VirtualConnectorKey_t, global_focus_t> g_VirtualConnectorFocuses;
@@ -157,7 +157,7 @@ index 29b84ad..383237e 100644
  global_focus_t *GetCurrentFocus()
  {
  	uint64_t ulKey = GetBackend()->GetCurrentConnector() ? GetBackend()->GetCurrentConnector()->GetVirtualConnectorKey() : 0;
-@@ -1580,6 +1593,7 @@ bool steamcompmgr_window_should_refresh_switch( steamcompmgr_win_t *w )
+@@ -1579,6 +1592,7 @@ bool steamcompmgr_window_should_refresh_switch( steamcompmgr_win_t *w )
  #define STEAM_PROP			"STEAM_BIGPICTURE"
  #define OVERLAY_PROP		"STEAM_OVERLAY"
  #define EXTERNAL_OVERLAY_PROP		"GAMESCOPE_EXTERNAL_OVERLAY"
@@ -165,7 +165,7 @@ index 29b84ad..383237e 100644
  #define MANGOAPP_MSG_TYPE_PROP		"GAMESCOPE_MANGOAPP_MSG_TYPE"
  #define GAMES_RUNNING_PROP 	"STEAM_GAMES_RUNNING"
  #define SCREEN_SCALE_PROP	"STEAM_SCREEN_SCALE"
-@@ -4665,6 +4679,13 @@ found:;
+@@ -4693,6 +4707,13 @@ found:;
  			continue;
  		}
  
@@ -179,7 +179,7 @@ index 29b84ad..383237e 100644
  		// Skip overlay targets
  		if ( w->oulTargetVROverlay && !cv_vr_show_forwarded_overlays )
  		{
-@@ -5670,6 +5691,41 @@ determine_and_apply_focus( global_focus_t *pFocus )
+@@ -5701,6 +5722,41 @@ determine_and_apply_focus( global_focus_t *pFocus )
  	pFocus->ulCurrentFocusSerial = GetFocusSerial();
  }
  
@@ -221,7 +221,7 @@ index 29b84ad..383237e 100644
  static void
  get_win_type(xwayland_ctx_t *ctx, steamcompmgr_win_t *w)
  {
-@@ -5838,12 +5894,37 @@ get_win_icon(xwayland_ctx_t* ctx, steamcompmgr_win_t* w)
+@@ -5869,12 +5925,37 @@ get_win_icon(xwayland_ctx_t* ctx, steamcompmgr_win_t* w)
  	get_prop(ctx, w->xwayland().id, ctx->atoms.netWMIcon, *w->icon.get());
  }
  
@@ -259,7 +259,7 @@ index 29b84ad..383237e 100644
  	if ( win_has_game_id( w ) || w->bIsSteamPid || w->bIsSteamWebHelperPid || w->bIsVRWebHelperPid )
  		return;
  
-@@ -5934,6 +6015,8 @@ map_win(xwayland_ctx_t* ctx, Window id, unsigned long sequence)
+@@ -5965,6 +6046,8 @@ map_win(xwayland_ctx_t* ctx, Window id, unsigned long sequence)
  	w->isOverlay = get_prop(ctx, w->xwayland().id, ctx->atoms.overlayAtom, 0);
  	w->isExternalOverlay = get_prop(ctx, w->xwayland().id, ctx->atoms.externalOverlayAtom, 0, &w->bHasExternalOverlayProp);
  	w->uMangoappMsgType = get_prop(ctx, w->xwayland().id, ctx->atoms.mangoappMsgTypeAtom, 0);
@@ -268,7 +268,7 @@ index 29b84ad..383237e 100644
  
  	// misyl: Disable appID for overlay types, as parts of the code don't expect that focus-wise.
  	// Fixes mangoapp usage when nested, and not in SteamOS.
-@@ -6327,6 +6410,15 @@ static void configure_request(xwayland_ctx_t *ctx, XConfigureRequestEvent *confi
+@@ -6358,6 +6441,15 @@ static void configure_request(xwayland_ctx_t *ctx, XConfigureRequestEvent *confi
  
  	// Take a client's own drag out of the pointer position so it does not chase itself.
  	steamcompmgr_win_t *w = find_win( ctx, configureRequest->window, false );
@@ -284,7 +284,7 @@ index 29b84ad..383237e 100644
  	if ( w && ( configureRequest->value_mask & ( CWX | CWY ) ) && w->xwayland().a.map_state == IsViewable )
  	{
  		// Any window moved during a press may be the drag target, the anchor only applies under the pointer.
-@@ -6447,6 +6539,9 @@ destroy_win(xwayland_ctx_t *ctx, Window id, bool gone, bool fade)
+@@ -6478,6 +6570,9 @@ destroy_win(xwayland_ctx_t *ctx, Window id, bool gone, bool fade)
  		std::erase_if(pFocus->decorationWindows, [id](steamcompmgr_win_t *w) { return x11_win(w) == id; });
  	}
  
@@ -294,7 +294,7 @@ index 29b84ad..383237e 100644
  #if HAVE_PIPEWIRE
  	// The pipewire repick can retain the old focus when no candidates remain.
  	if (x11_win(s_PipewireFocus.focusWindow) == id)
-@@ -7154,6 +7249,15 @@ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
+@@ -7181,6 +7276,15 @@ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
  			MakeFocusDirty();
  		}
  	}
@@ -310,7 +310,7 @@ index 29b84ad..383237e 100644
  	if (ev->atom == ctx->atoms.externalOverlayAtom)
  	{
  		steamcompmgr_win_t * w = find_win(ctx, ev->window);
-@@ -7269,6 +7373,7 @@ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
+@@ -7296,6 +7400,7 @@ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
  		if (w)
  		{
  			get_win_title(ctx, w, ev->atom);
@@ -318,7 +318,7 @@ index 29b84ad..383237e 100644
  
  			for ( auto &iter : g_VirtualConnectorFocuses )
  			{
-@@ -9116,6 +9221,7 @@ void init_xwayland_ctx(uint32_t serverId, gamescope_xwayland_server_t *xwayland_
+@@ -9311,6 +9416,7 @@ void init_xwayland_ctx(uint32_t serverId, gamescope_xwayland_server_t *xwayland_
  	ctx->atoms.gameAtom = XInternAtom(ctx->dpy, GAME_PROP, false);
  	ctx->atoms.overlayAtom = XInternAtom(ctx->dpy, OVERLAY_PROP, false);
  	ctx->atoms.externalOverlayAtom = XInternAtom(ctx->dpy, EXTERNAL_OVERLAY_PROP, false);
@@ -326,7 +326,7 @@ index 29b84ad..383237e 100644
  	ctx->atoms.mangoappMsgTypeAtom = XInternAtom(ctx->dpy, MANGOAPP_MSG_TYPE_PROP, false);
  	ctx->atoms.opacityAtom = XInternAtom(ctx->dpy, OPACITY_PROP, false);
  	ctx->atoms.gamesRunningAtom = XInternAtom(ctx->dpy, GAMES_RUNNING_PROP, false);
-@@ -10192,6 +10298,23 @@ steamcompmgr_main(int argc, char **argv)
+@@ -10389,6 +10495,23 @@ steamcompmgr_main(int argc, char **argv)
  		set_string_prop( root_ctx, root_ctx->atoms.gamescopeMainSteamVROverlay, *g_pVROverlayKey );
  	}
  
@@ -350,7 +350,7 @@ index 29b84ad..383237e 100644
  	update_edid_prop();
  
  	update_screenshot_color_mgmt();
-@@ -10715,6 +10838,9 @@ steamcompmgr_main(int argc, char **argv)
+@@ -10941,6 +11064,9 @@ steamcompmgr_main(int argc, char **argv)
  			}
  		}
  
@@ -361,10 +361,10 @@ index 29b84ad..383237e 100644
  			DumpFocusInfo();
  
 diff --git a/src/steamcompmgr_shared.hpp b/src/steamcompmgr_shared.hpp
-index c344d10..43df0d0 100644
+index 9951393..33c5b90 100644
 --- a/src/steamcompmgr_shared.hpp
 +++ b/src/steamcompmgr_shared.hpp
-@@ -121,6 +121,11 @@ struct steamcompmgr_win_t {
+@@ -131,6 +131,11 @@ struct steamcompmgr_win_t {
  	bool bHasExternalOverlayProp = false;
  	// Set by per-connector mangoapp instances.
  	uint32_t uMangoappMsgType = 0;
@@ -377,10 +377,10 @@ index c344d10..43df0d0 100644
  	bool bIsSteamPid = false;
  	bool bIsSteamWebHelperPid = false;
 diff --git a/src/xwayland_ctx.hpp b/src/xwayland_ctx.hpp
-index 7b39ecb..201ea6a 100644
+index 2bb4531..993e51e 100644
 --- a/src/xwayland_ctx.hpp
 +++ b/src/xwayland_ctx.hpp
-@@ -109,6 +109,7 @@ struct xwayland_ctx_t final : public gamescope::IWaitable
+@@ -114,6 +114,7 @@ struct xwayland_ctx_t final : public gamescope::IWaitable
  		Atom gameAtom;
  		Atom overlayAtom;
  		Atom externalOverlayAtom;

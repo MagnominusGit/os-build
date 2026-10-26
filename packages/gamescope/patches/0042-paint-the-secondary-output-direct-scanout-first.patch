@@ -30,10 +30,10 @@ debug pattern takes the output back while it is on.
 (retroforge: dual-screen boards, step 4 of the dual-output plan, 2026-10-12.)
 ---
 diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
-index 71f4bf2..a94948a 100644
+index 780c3a9..1fdd34b 100644
 --- a/src/Backends/DRMBackend.cpp
 +++ b/src/Backends/DRMBackend.cpp
-@@ -198,6 +198,11 @@ struct drm_secondary_t
+@@ -197,6 +197,11 @@ struct drm_secondary_t
  	gamescope::CDRMPlane *pPlane = nullptr;
  	drmModeModeInfo mode = {};
  	uint32_t uModeBlobId = 0;
@@ -45,7 +45,7 @@ index 71f4bf2..a94948a 100644
  
  	// Commits come from more than one thread (the debug pattern flips from the
  	// flip handler thread), so everything below is guarded by this.
-@@ -211,6 +216,16 @@ struct drm_secondary_t
+@@ -210,6 +215,16 @@ struct drm_secondary_t
  	uint32_t uDebugFbIds[3] = {};
  	uint32_t uDebugFb = 0;
  
@@ -62,7 +62,7 @@ index 71f4bf2..a94948a 100644
  	uint64_t ulPatternFlips = 0;
  	uint64_t ulPatternStart = 0;
  	uint64_t ulLastVBlank = 0;
-@@ -834,10 +849,10 @@ gamescope::ConVar<bool> cv_drm_debug_secondary_pattern( "drm_debug_secondary_pat
+@@ -833,10 +848,10 @@ gamescope::ConVar<bool> cv_drm_debug_secondary_pattern( "drm_debug_secondary_pat
  // Puts uFbId on the secondary output with a non-blocking flip; the first one also modesets
  // it. Fails while the previous flip is pending: never waits, so a slow panel cannot hold up
  // the main output. Caller holds g_DRMSecondary.mutCommit.
@@ -75,7 +75,7 @@ index 71f4bf2..a94948a 100644
  		return false;
  
  	drmModeAtomicReq *req = drmModeAtomicAlloc();
-@@ -849,7 +864,7 @@ static bool drm_secondary_commit_locked( struct drm_t *drm, uint32_t uFbId )
+@@ -848,7 +863,7 @@ static bool drm_secondary_commit_locked( struct drm_t *drm, uint32_t uFbId )
  			drmModeAtomicAddProperty( req, uObjectId, oProperty->GetPropertyId(), ulValue );
  	};
  
@@ -84,7 +84,7 @@ index 71f4bf2..a94948a 100644
  	const uint32_t uCRTCId = sec.pCRTC->GetObjectId();
  	const auto &crtcProps = sec.pCRTC->GetProperties();
  	if ( !sec.bModeSet )
-@@ -872,16 +887,18 @@ static bool drm_secondary_commit_locked( struct drm_t *drm, uint32_t uFbId )
+@@ -871,16 +886,18 @@ static bool drm_secondary_commit_locked( struct drm_t *drm, uint32_t uFbId )
  	add( uPlaneId, planeProps.CRTC_ID, uCRTCId );
  	add( uPlaneId, planeProps.SRC_X, 0 );
  	add( uPlaneId, planeProps.SRC_Y, 0 );
@@ -106,7 +106,7 @@ index 71f4bf2..a94948a 100644
  	if ( ret != 0 )
  	{
  		// -EACCES: VT-switched away. Log the first failure and then every 600th, a
-@@ -908,8 +925,12 @@ static void drm_secondary_show_debug_fb_locked( struct drm_t *drm )
+@@ -907,8 +924,12 @@ static void drm_secondary_show_debug_fb_locked( struct drm_t *drm )
  	if ( sec.bModeSet && uNext == sec.uDebugFb )
  		return;
  
@@ -120,7 +120,7 @@ index 71f4bf2..a94948a 100644
  }
  
  // After a VT switch (another DRM master may have changed everything) or a forced modeset, the
-@@ -919,6 +940,7 @@ static void drm_secondary_needs_modeset()
+@@ -918,6 +939,7 @@ static void drm_secondary_needs_modeset()
  	std::scoped_lock lock{ g_DRMSecondary.mutCommit };
  	g_DRMSecondary.bModeSet = false;
  	g_DRMSecondary.bFlipPending = false;
@@ -128,7 +128,7 @@ index 71f4bf2..a94948a 100644
  }
  
  // Called with the main output's state polls: (re)shows the output after a modeset request or a
-@@ -926,7 +948,8 @@ static void drm_secondary_needs_modeset()
+@@ -925,7 +947,8 @@ static void drm_secondary_needs_modeset()
  static void drm_secondary_refresh( struct drm_t *drm )
  {
  	std::scoped_lock lock{ g_DRMSecondary.mutCommit };
@@ -138,7 +138,7 @@ index 71f4bf2..a94948a 100644
  }
  
  static void OnSecondaryPatternChanged( gamescope::ConVar<bool> & )
-@@ -934,14 +957,22 @@ static void OnSecondaryPatternChanged( gamescope::ConVar<bool> & )
+@@ -933,14 +956,22 @@ static void OnSecondaryPatternChanged( gamescope::ConVar<bool> & )
  	std::scoped_lock lock{ g_DRMSecondary.mutCommit };
  	g_DRMSecondary.ulPatternFlips = 0;
  	g_DRMSecondary.ulMaxInterval = 0;
@@ -162,7 +162,7 @@ index 71f4bf2..a94948a 100644
  
  	if ( cv_drm_debug_secondary_pattern )
  	{
-@@ -959,7 +990,8 @@ static void drm_secondary_page_flip( uint64_t ulVBlankTime )
+@@ -958,7 +989,8 @@ static void drm_secondary_page_flip( uint64_t ulVBlankTime )
  	}
  	sec.ulLastVBlank = ulVBlankTime;
  
@@ -172,7 +172,7 @@ index 71f4bf2..a94948a 100644
  }
  
  static bool drm_secondary_create_debug_fb( struct drm_t *drm, uint32_t uColor, uint32_t *pFbId )
-@@ -1099,6 +1131,20 @@ static void setup_secondary_output( struct drm_t *drm )
+@@ -1098,6 +1130,20 @@ static void setup_secondary_output( struct drm_t *drm )
  	sec.mode = *pMode;
  	// The panel's orientation property (a rotated panel reports which side is up).
  	sec.pConnector->UpdateEffectiveOrientation( &sec.mode );
@@ -193,7 +193,7 @@ index 71f4bf2..a94948a 100644
  
  	if ( drmModeCreatePropertyBlob( drm->fd, &sec.mode, sizeof( sec.mode ), &sec.uModeBlobId ) != 0 )
  		return fail( "cannot create its mode blob" );
-@@ -5156,6 +5202,58 @@ namespace gamescope
+@@ -5152,6 +5198,58 @@ namespace gamescope
  			return true;
  		}
  
@@ -253,7 +253,7 @@ index 71f4bf2..a94948a 100644
  		{
  			if ( g_DRM.pConnector && g_DRM.pConnector->GetScreenType() == eScreenType )
 diff --git a/src/backend.h b/src/backend.h
-index 095061b..8edc8d2 100644
+index 0419014..34f5690 100644
 --- a/src/backend.h
 +++ b/src/backend.h
 @@ -290,6 +290,13 @@ namespace gamescope
@@ -286,10 +286,10 @@ index 095061b..8edc8d2 100644
          virtual bool SupportsPlaneHardwareCursor() const = 0;
          virtual bool SupportsTearing() const = 0;
 diff --git a/src/rendervulkan.cpp b/src/rendervulkan.cpp
-index 6578024..33bf42a 100644
+index 7304281..006aa58 100644
 --- a/src/rendervulkan.cpp
 +++ b/src/rendervulkan.cpp
-@@ -3797,6 +3797,43 @@ bool vulkan_remake_swapchain( void )
+@@ -3884,6 +3884,43 @@ bool vulkan_remake_swapchain( void )
  	return bRet;
  }
  
@@ -333,7 +333,7 @@ index 6578024..33bf42a 100644
  static bool vulkan_make_output_images( VulkanOutput_t *pOutput )
  {
  	if ( g_bCompositeGraphics )
-@@ -4953,7 +4990,7 @@ static bool vulkan_composite_blit( CVulkanCmdBuffer *cmdBuffer, const struct Fra
+@@ -5070,7 +5107,7 @@ static bool vulkan_composite_blit( CVulkanCmdBuffer *cmdBuffer, const struct Fra
  	return true;
  }
  
@@ -342,7 +342,7 @@ index 6578024..33bf42a 100644
  {
  	UnrotatedFrameScope_t unrotated( frameInfo );
  
-@@ -5000,8 +5037,9 @@ std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamesco
+@@ -5117,8 +5154,9 @@ std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamesco
  	else
  		compositeImage = partial ? g_output.outputImagesPartialOverlay[ g_output.nOutImage ] : g_output.outputImages[ g_output.nOutImage ];
  
@@ -354,7 +354,7 @@ index 6578024..33bf42a 100644
  	if ( !pOutputOverride && partial && g_uPreRotation )
  		uOutputRotation = g_uPreRotation;
  	const bool bWantGfxBlit = g_bCompositeGraphics && ( !pOutputOverride || bAllowGfxBlit );
-@@ -5045,7 +5083,9 @@ std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamesco
+@@ -5162,7 +5200,9 @@ std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamesco
  		cmdBuffer->bindColorMgmtLuts(i, frameInfo->shaperLut[i], frameInfo->lut3D[i]);
  
  	frameInfo->compositeBlitted = false;
@@ -366,10 +366,10 @@ index 6578024..33bf42a 100644
  		// copied by the transfer engine, nothing applied: the display colour manages it
  		frameInfo->compositeBlitted = true;
 diff --git a/src/rendervulkan.hpp b/src/rendervulkan.hpp
-index 7ef27e9..e4155a2 100644
+index 81b1879..f24c323 100644
 --- a/src/rendervulkan.hpp
 +++ b/src/rendervulkan.hpp
-@@ -477,7 +477,9 @@ gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_dmabuf( struct wl
+@@ -482,7 +482,9 @@ gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_dmabuf( struct wl
  gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_bits( uint32_t width, uint32_t height, uint32_t contentWidth, uint32_t contentHeight, uint32_t drmFormat, CVulkanTexture::createFlags texCreateFlags, void *bits );
  gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_wlr_buffer( struct wlr_buffer *buf, gamescope::OwningRc<gamescope::IBackendFb> pBackendFb );
  
@@ -381,10 +381,10 @@ index 7ef27e9..e4155a2 100644
  gamescope::Rc<CVulkanTexture> vulkan_get_last_output_image( bool partial, bool defer );
  gamescope::Rc<CVulkanTexture> vulkan_blit_rotate_target( gamescope::Rc<CVulkanTexture> pTex, uint32_t uRotation, uint32_t uSlot, bool bAdvance, uint64_t ulContentID = 0, bool *pbNeedsBlit = nullptr );
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index 383237e..88007b4 100644
+index 14842f0..33212e6 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
-@@ -5691,6 +5691,96 @@ determine_and_apply_focus( global_focus_t *pFocus )
+@@ -5722,6 +5722,96 @@ determine_and_apply_focus( global_focus_t *pFocus )
  	pFocus->ulCurrentFocusSerial = GetFocusSerial();
  }
  
@@ -481,7 +481,7 @@ index 383237e..88007b4 100644
  // The secondary output shows the newest viewable window tagged for it, at the panel's size.
  static void determine_and_apply_secondary_focus()
  {
-@@ -11017,6 +11107,11 @@ steamcompmgr_main(int argc, char **argv)
+@@ -11264,6 +11354,11 @@ steamcompmgr_main(int argc, char **argv)
  			}
  		}
  

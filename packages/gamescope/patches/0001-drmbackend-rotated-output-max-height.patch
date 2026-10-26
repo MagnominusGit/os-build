@@ -30,10 +30,10 @@ otherwise fall through to generating a timing the panel cannot display.
  3 files changed, 99 insertions(+)
 
 diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
-index 2d84ed45..797c63c6 100644
+index c9034b7..1873388 100644
 --- a/src/Backends/DRMBackend.cpp
 +++ b/src/Backends/DRMBackend.cpp
-@@ -1927,6 +1927,46 @@ static inline uint32_t ColorSpaceToEOTFIndex( GamescopeAppTextureColorspace colo
+@@ -2175,6 +2175,46 @@ static inline uint32_t ColorSpaceToEOTFIndex( GamescopeAppTextureColorspace colo
  }
  
  
@@ -80,7 +80,7 @@ index 2d84ed45..797c63c6 100644
  LiftoffStateCacheEntry FrameInfoToLiftoffStateCacheEntry( struct drm_t *drm, const FrameInfo_t *frameInfo )
  {
  	LiftoffStateCacheEntry entry{};
-@@ -1954,6 +1994,17 @@ LiftoffStateCacheEntry FrameInfoToLiftoffStateCacheEntry( struct drm_t *drm, con
+@@ -2202,6 +2242,17 @@ LiftoffStateCacheEntry FrameInfoToLiftoffStateCacheEntry( struct drm_t *drm, con
  			crtcH = w;
  		}
  
@@ -98,7 +98,7 @@ index 2d84ed45..797c63c6 100644
  		entry.layerState[i].zpos  = frameInfo->layers.get( i ).zpos;
  		entry.layerState[i].srcW  = srcWidth  << 16;
  		entry.layerState[i].srcH  = srcHeight << 16;
-@@ -3411,6 +3462,37 @@ bool drm_set_mode( struct drm_t *drm, const drmModeModeInfo *mode )
+@@ -3667,6 +3718,37 @@ bool drm_set_mode( struct drm_t *drm, const drmModeModeInfo *mode )
  		break;
  	}
  
@@ -136,7 +136,7 @@ index 2d84ed45..797c63c6 100644
  	// Rotate in the compositor when the scanout plane can't do the panel's orientation.
  	g_uOutputRotation = 0;
  	if ( uStep )
-@@ -3433,6 +3515,15 @@ bool drm_set_refresh( struct drm_t *drm, int refresh )
+@@ -3689,6 +3771,15 @@ bool drm_set_refresh( struct drm_t *drm, int refresh )
  		width = height;
  		height = tmp;
  	}
@@ -153,7 +153,7 @@ index 2d84ed45..797c63c6 100644
  		return false;
  
 diff --git a/src/main.cpp b/src/main.cpp
-index 0bd0cb45..143a76cb 100644
+index 6a0fdb1..fd90208 100644
 --- a/src/main.cpp
 +++ b/src/main.cpp
 @@ -139,6 +139,7 @@ const struct option *gamescope_options = (struct option[]){
@@ -164,7 +164,7 @@ index 0bd0cb45..143a76cb 100644
  	{ "force-windows-fullscreen", no_argument, nullptr, 0 },
  
  	{ "disable-color-management", no_argument, nullptr, 0 },
-@@ -205,6 +206,9 @@ const char usage[] =
+@@ -206,6 +207,9 @@ const char usage[] =
  	"  --prefer-vk-device             prefer Vulkan device for compositing (ex: 1002:7300)\n"
  	"  --force-composition-rotation   always rotate the output in the compositor instead of at scanout (autodetected otherwise)\n"
  	"  --force-orientation            rotate the internal display (left, right, normal, upsidedown)\n"
@@ -174,7 +174,7 @@ index 0bd0cb45..143a76cb 100644
  	"  --force-windows-fullscreen     force windows inside of gamescope to be the size of the nested display (fullscreen)\n"
  	"  --cursor-scale-height          if specified, sets a base output height to linearly scale the cursor against.\n"
  	"  --virtual-connector-strategy   Specifies how we should make virtual connectors.\n"
-@@ -371,6 +375,7 @@ static gamescope::GamescopeModeGeneration parse_gamescope_mode_generation( const
+@@ -369,6 +373,7 @@ static gamescope::GamescopeModeGeneration parse_gamescope_mode_generation( const
  
  bool g_bForceCompositionRotation = false;
  uint32_t g_uOutputRotation = 0;
@@ -182,7 +182,7 @@ index 0bd0cb45..143a76cb 100644
  
  GamescopePanelOrientation g_DesiredInternalOrientation = GAMESCOPE_PANEL_ORIENTATION_AUTO;
  static GamescopePanelOrientation force_orientation(const char *str)
-@@ -821,6 +826,8 @@ int main(int argc, char **argv)
+@@ -817,6 +822,8 @@ int main(int argc, char **argv)
  					g_bForceCompositionRotation = true;
  				} else if (strcmp(opt_name, "force-orientation") == 0) {
  					g_DesiredInternalOrientation = force_orientation( optarg );
@@ -192,10 +192,10 @@ index 0bd0cb45..143a76cb 100644
  						   strcmp(opt_name, "fsr-sharpness") == 0) {
  					g_upscaleFilterSharpness = parse_integer( optarg, opt_name );
 diff --git a/src/main.hpp b/src/main.hpp
-index b4fc9027..2a831da5 100644
+index b2a169f..6d19935 100644
 --- a/src/main.hpp
 +++ b/src/main.hpp
-@@ -24,6 +24,7 @@ extern bool g_bForceInternal;
+@@ -29,6 +29,7 @@ extern bool g_bForceInternal;
  
  extern bool g_bForceCompositionRotation;
  extern uint32_t g_uOutputRotation;

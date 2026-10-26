@@ -16,10 +16,10 @@ on) keeps the panel on instead.
 (retroforge: dual-screen boards, 2026-10-12.)
 ---
 diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
-index 4ab8282..e87c080 100644
+index b7fce32..69ffb39 100644
 --- a/src/Backends/DRMBackend.cpp
 +++ b/src/Backends/DRMBackend.cpp
-@@ -207,6 +207,10 @@ struct drm_secondary_t
+@@ -206,6 +206,10 @@ struct drm_secondary_t
  	// Commits come from more than one thread (the debug pattern flips from the
  	// flip handler thread), so everything below is guarded by this.
  	std::mutex mutCommit;
@@ -30,7 +30,7 @@ index 4ab8282..e87c080 100644
  	bool bModeSet = false;
  	bool bFlipPending = false;
  	uint32_t uFailedCommits = 0;
-@@ -857,7 +861,7 @@ gamescope::ConVar<bool> cv_drm_debug_secondary_pattern( "drm_debug_secondary_pat
+@@ -856,7 +860,7 @@ gamescope::ConVar<bool> cv_drm_debug_secondary_pattern( "drm_debug_secondary_pat
  static bool drm_secondary_commit_locked( struct drm_t *drm, uint32_t uFbId, uint32_t uSrcWidth, uint32_t uSrcHeight, uint64_t ulRotation, bool bTestOnly = false )
  {
  	drm_secondary_t &sec = g_DRMSecondary;
@@ -39,7 +39,7 @@ index 4ab8282..e87c080 100644
  		return false;
  
  	drmModeAtomicReq *req = drmModeAtomicAlloc();
-@@ -922,10 +926,54 @@ static bool drm_secondary_commit_locked( struct drm_t *drm, uint32_t uFbId, uint
+@@ -921,10 +925,54 @@ static bool drm_secondary_commit_locked( struct drm_t *drm, uint32_t uFbId, uint
  	return true;
  }
  
@@ -94,7 +94,7 @@ index 4ab8282..e87c080 100644
  	uint32_t uNext = cv_drm_debug_secondary_pattern ? ( sec.uDebugFb == 1 ? 2 : 1 ) : 0;
  	if ( sec.bModeSet && uNext == sec.uDebugFb )
  		return;
-@@ -964,6 +1012,12 @@ static void OnSecondaryPatternChanged( gamescope::ConVar<bool> & )
+@@ -963,6 +1011,12 @@ static void OnSecondaryPatternChanged( gamescope::ConVar<bool> & )
  	g_DRMSecondary.ulMaxInterval = 0;
  	// Back from the pattern, the compositor repaints.
  	g_DRMSecondary.bNeedsFrame = true;
@@ -107,7 +107,7 @@ index 4ab8282..e87c080 100644
  	if ( cv_drm_debug_secondary_pattern || !g_DRMSecondary.bCompositorOwned )
  		drm_secondary_show_debug_fb_locked( &g_DRM );
  }
-@@ -5217,7 +5271,33 @@ namespace gamescope
+@@ -5213,7 +5267,33 @@ namespace gamescope
  			drm_secondary_t &sec = g_DRMSecondary;
  			std::scoped_lock lock{ sec.mutCommit };
  			*pbNeedsFrame = sec.bNeedsFrame || !sec.bModeSet;
@@ -143,7 +143,7 @@ index 4ab8282..e87c080 100644
  
  		virtual bool SecondaryPlaneMayRotate() override
 diff --git a/src/backend.h b/src/backend.h
-index 9e31f83..1006cfe 100644
+index b5f395c..2632869 100644
 --- a/src/backend.h
 +++ b/src/backend.h
 @@ -379,6 +379,9 @@ namespace gamescope
@@ -157,10 +157,10 @@ index 9e31f83..1006cfe 100644
          // (ConVar drm_secondary_plane_rotation), so a rotated panel can take direct scanout.
          virtual bool SecondaryPlaneMayRotate() { return false; }
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index e8565de..3fd104c 100644
+index bb760a6..4a72c09 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
-@@ -5710,6 +5710,29 @@ determine_and_apply_focus( global_focus_t *pFocus )
+@@ -5741,6 +5741,29 @@ determine_and_apply_focus( global_focus_t *pFocus )
  	pFocus->ulCurrentFocusSerial = GetFocusSerial();
  }
  
@@ -190,7 +190,7 @@ index e8565de..3fd104c 100644
  // Paints the secondary focus onto the secondary output when it has new content and the output can
  // take a frame. Direct scanout first: on an unrotated panel, a buffer the size of the output goes
  // on the plane as is. Otherwise (a rotated panel, other sizes, or a buffer the plane refuses) the
-@@ -11168,7 +11191,10 @@ steamcompmgr_main(int argc, char **argv)
+@@ -11415,7 +11438,10 @@ steamcompmgr_main(int argc, char **argv)
  		// The secondary output paints on its own: it never sets bPainted, so the main output's
  		// repaint state and frame pacing do not see it.
  		if ( vblank && g_bSecondaryOutput )

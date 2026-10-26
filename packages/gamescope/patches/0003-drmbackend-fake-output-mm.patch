@@ -9,10 +9,10 @@ Subject: [PATCH] DRMBackend: Add GAMESCOPE_FAKE_OUTPUT_MM env to set custom
  1 file changed, 28 insertions(+), 2 deletions(-)
 
 diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
-index 8c1c551c..ed7654ce 100644
+index 1873388..03f26c8 100644
 --- a/src/Backends/DRMBackend.cpp
 +++ b/src/Backends/DRMBackend.cpp
-@@ -1077,6 +1077,26 @@ static bool get_saved_mode(const char *description, saved_mode &mode_info)
+@@ -1093,6 +1093,26 @@ static bool get_saved_mode(const char *description, saved_mode &mode_info)
  	return false;
  }
  
@@ -39,7 +39,7 @@ index 8c1c551c..ed7654ce 100644
  /* Same identity extraction as CDRMConnector::ParseEDID. */
  static void parse_edid_identity(const di_edid *pEdid, char (&szMakePNP)[4], char (&szModel)[16])
  {
-@@ -1333,9 +1353,13 @@ static bool setup_best_connector(struct drm_t *drm, bool force, bool initial)
+@@ -1349,9 +1369,13 @@ static bool setup_best_connector(struct drm_t *drm, bool force, bool initial)
  		drm_unset_mode(drm, force);
  		s_HeadlessConnector.RebuildModes();
  
@@ -53,7 +53,7 @@ index 8c1c551c..ed7654ce 100644
  		};
  		wlserver_lock();
  		wlserver_set_output_info(&wlserver_output_info);
-@@ -1392,10 +1416,12 @@ static bool setup_best_connector(struct drm_t *drm, bool force, bool initial)
+@@ -1408,10 +1432,12 @@ static bool setup_best_connector(struct drm_t *drm, bool force, bool initial)
  	// Don't allow rollback of mode_id after connector change
  	drm->current.mode_id = drm->pending.mode_id;
  
@@ -68,6 +68,3 @@ index 8c1c551c..ed7654ce 100644
  	};
  	wlserver_lock();
  	wlserver_set_output_info(&wlserver_output_info);
--- 
-2.43.0
-

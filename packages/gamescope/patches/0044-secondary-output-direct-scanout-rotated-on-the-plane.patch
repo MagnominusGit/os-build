@@ -25,10 +25,10 @@ a 90 s watch, play clean.
 (retroforge: dual-screen boards, 2026-10-12.)
 ---
 diff --git a/src/Backends/DRMBackend.cpp b/src/Backends/DRMBackend.cpp
-index a94948a..4ab8282 100644
+index 1fdd34b..b7fce32 100644
 --- a/src/Backends/DRMBackend.cpp
 +++ b/src/Backends/DRMBackend.cpp
-@@ -223,8 +223,8 @@ struct drm_secondary_t
+@@ -222,8 +222,8 @@ struct drm_secondary_t
  	// What the compositor put on screen: holding the FB keeps a client's buffer locked.
  	gamescope::Rc<gamescope::IBackendFb> pQueuedFb;
  	gamescope::Rc<gamescope::IBackendFb> pVisibleFb;
@@ -39,7 +39,7 @@ index a94948a..4ab8282 100644
  
  	uint64_t ulPatternFlips = 0;
  	uint64_t ulPatternStart = 0;
-@@ -844,6 +844,11 @@ static bool have_overlay_planes(struct drm_t *drm)
+@@ -843,6 +843,11 @@ static bool have_overlay_planes(struct drm_t *drm)
  }
  
  static void OnSecondaryPatternChanged( gamescope::ConVar<bool> & );
@@ -51,7 +51,7 @@ index a94948a..4ab8282 100644
  gamescope::ConVar<bool> cv_drm_debug_secondary_pattern( "drm_debug_secondary_pattern", false, "Flip the secondary output between two greys every vblank and log its flip rate.", OnSecondaryPatternChanged );
  
  // Puts uFbId on the secondary output with a non-blocking flip; the first one also modesets
-@@ -5215,7 +5220,12 @@ namespace gamescope
+@@ -5211,7 +5216,12 @@ namespace gamescope
  			return sec.pConnector && !sec.bFlipPending && !g_DRM.paused && !cv_drm_debug_secondary_pattern;
  		}
  
@@ -65,7 +65,7 @@ index a94948a..4ab8282 100644
  		{
  			drm_secondary_t &sec = g_DRMSecondary;
  			CDRMFb *pDrmFb = pFb ? static_cast<CDRMFb *>( pFb->EnsureImported() ) : nullptr;
-@@ -5226,25 +5236,29 @@ namespace gamescope
+@@ -5222,25 +5232,29 @@ namespace gamescope
  			if ( !sec.pConnector || sec.bFlipPending || g_DRM.paused || cv_drm_debug_secondary_pattern )
  				return SecondaryPresentResult::Busy;
  
@@ -101,7 +101,7 @@ index a94948a..4ab8282 100644
  			}
  
 diff --git a/src/backend.h b/src/backend.h
-index 8edc8d2..9e31f83 100644
+index 34f5690..b5f395c 100644
 --- a/src/backend.h
 +++ b/src/backend.h
 @@ -379,9 +379,13 @@ namespace gamescope
@@ -122,10 +122,10 @@ index 8edc8d2..9e31f83 100644
          virtual bool SupportsPlaneHardwareCursor() const = 0;
          virtual bool SupportsTearing() const = 0;
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index 2366281..af0f7e7 100644
+index a46fe4a..7792d2a 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
-@@ -5733,7 +5733,7 @@ static void paint_secondary_output()
+@@ -5764,7 +5764,7 @@ static void paint_secondary_output()
  	if ( w )
  		paint_window( &g_SecondaryFocus, w, w, &frameInfo, nullptr, 0, 1.0f, nullptr );
  
@@ -134,7 +134,7 @@ index 2366281..af0f7e7 100644
  	static SecondaryPath s_eLastPath = SecondaryPath::Unset;
  	SecondaryPath ePath = SecondaryPath::DirectScanout;
  
-@@ -5749,6 +5749,21 @@ static void paint_secondary_output()
+@@ -5780,6 +5780,21 @@ static void paint_secondary_output()
  			eResult = GetBackend()->PresentSecondary( layer.tex->GetBackendFb(), layer.tex->width(), layer.tex->height(), true );
  		}
  	}
@@ -156,7 +156,7 @@ index 2366281..af0f7e7 100644
  
  	if ( eResult == gamescope::SecondaryPresentResult::Refused )
  	{
-@@ -5774,7 +5789,8 @@ static void paint_secondary_output()
+@@ -5805,7 +5820,8 @@ static void paint_secondary_output()
  
  	if ( ePath != s_eLastPath )
  	{

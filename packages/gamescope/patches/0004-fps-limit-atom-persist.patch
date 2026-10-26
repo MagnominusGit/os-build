@@ -38,9 +38,11 @@ Validated on HW before rebuild by bridging the atom to
 SteamUI itself wrote, 30 -> 29 fps, 20 -> 20 fps, 0 -> 59 fps.
 
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
+index c0c3f9d..fefad9e 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
-@@ -6083,7 +6083,18 @@
+@@ -7300,8 +7300,19 @@ handle_property_notify(xwayland_ctx_t *ctx, XPropertyEvent *ev)
+ 	}
  	if ( ev->atom == ctx->atoms.gamescopeFPSLimit )
  	{
 -		g_nSteamCompMgrTargetFPS = get_prop( ctx, ctx->root, ctx->atoms.gamescopeFPSLimit, 0 );
@@ -61,5 +63,3 @@ diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
  	}
  	for (int i = 0; i < gamescope::GAMESCOPE_SCREEN_TYPE_COUNT; i++)
  	{
---
-2.54.0

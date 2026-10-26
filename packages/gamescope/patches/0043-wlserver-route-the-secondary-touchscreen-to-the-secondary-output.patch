@@ -69,10 +69,10 @@ index c4837af..8d1beeb 100644
  enum class GamescopeUpscaleFilter : uint32_t
  {
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index 88007b4..2366281 100644
+index 33212e6..a46fe4a 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
-@@ -10931,6 +10931,24 @@ steamcompmgr_main(int argc, char **argv)
+@@ -11157,6 +11157,24 @@ steamcompmgr_main(int argc, char **argv)
  		if ( g_bSecondaryOutput && g_SecondaryFocus.IsDirty() )
  			determine_and_apply_secondary_focus();
  
@@ -98,10 +98,10 @@ index 88007b4..2366281 100644
  			DumpFocusInfo();
  
 diff --git a/src/wlserver.cpp b/src/wlserver.cpp
-index df0c7c5..cb9cfca 100644
+index 52de9cc..3631673 100644
 --- a/src/wlserver.cpp
 +++ b/src/wlserver.cpp
-@@ -459,11 +459,74 @@ static void wlserver_touch_associate_connector(struct wlserver_touch *touch)
+@@ -478,11 +478,74 @@ static void wlserver_touch_associate_connector(struct wlserver_touch *touch)
  	}
  }
  
@@ -176,7 +176,7 @@ index df0c7c5..cb9cfca 100644
  	wlserver_touch_associate_connector( touch );
  	wlserver_touchdown( event->x, event->y, event->touch_id, event->time_msec, touch->connector );
  }
-@@ -473,6 +536,9 @@ static void wlserver_handle_touch_up(struct wl_listener *listener, void *data)
+@@ -492,6 +555,9 @@ static void wlserver_handle_touch_up(struct wl_listener *listener, void *data)
  	struct wlserver_touch *touch = wl_container_of( listener, touch, up );
  	struct wlr_touch_up_event *event = (struct wlr_touch_up_event *) data;
  
@@ -186,7 +186,7 @@ index df0c7c5..cb9cfca 100644
  	wlserver_touchup( event->touch_id, event->time_msec );
  }
  
-@@ -481,6 +547,9 @@ static void wlserver_handle_touch_motion(struct wl_listener *listener, void *dat
+@@ -500,6 +566,9 @@ static void wlserver_handle_touch_motion(struct wl_listener *listener, void *dat
  	struct wlserver_touch *touch = wl_container_of( listener, touch, motion );
  	struct wlr_touch_motion_event *event = (struct wlr_touch_motion_event *) data;
  
@@ -196,7 +196,7 @@ index df0c7c5..cb9cfca 100644
  	wlserver_touch_associate_connector( touch );
  	wlserver_touchmotion( event->x, event->y, event->touch_id, event->time_msec, false, touch->connector );
  }
-@@ -591,7 +660,12 @@ static void wlserver_new_input(struct wl_listener *listener, void *data)
+@@ -610,7 +679,12 @@ static void wlserver_new_input(struct wl_listener *listener, void *data)
  			touch->destroy.notify = wlserver_handle_touch_destroy;
  			wl_signal_add( &device->events.destroy, &touch->destroy);
  
@@ -210,7 +210,7 @@ index df0c7c5..cb9cfca 100644
  		}
  		break;
  		default:
-@@ -659,6 +733,9 @@ static void handle_wl_surface_destroy( struct wl_listener *l, void *data )
+@@ -678,6 +752,9 @@ static void handle_wl_surface_destroy( struct wl_listener *l, void *data )
  	if ( surf->wlr == wlserver.mouse_focus_surface )
  		wlserver.mouse_focus_surface = nullptr;
  
@@ -220,7 +220,7 @@ index df0c7c5..cb9cfca 100644
  	wlserver_drag_anchor_forget( surf->wlr );
  
  	if ( surf->wlr == wlserver.kb_focus_surface )
-@@ -1995,6 +2072,8 @@ static void waylandy_surface_destroy(struct wl_listener *listener, void *data) {
+@@ -2091,6 +2168,8 @@ static void waylandy_surface_destroy(struct wl_listener *listener, void *data) {
  			wlserver.kb_focus_surface = nullptr;
  		if (wlserver.mouse_focus_surface == info->main_surface)
  			wlserver.mouse_focus_surface = nullptr;
@@ -230,10 +230,10 @@ index df0c7c5..cb9cfca 100644
  		wlserver_surface = get_wl_surface_info(info->main_surface);
  	}
 diff --git a/src/wlserver.hpp b/src/wlserver.hpp
-index 64132f1..bc39744 100644
+index 5cb2561..10a6e82 100644
 --- a/src/wlserver.hpp
 +++ b/src/wlserver.hpp
-@@ -136,6 +136,15 @@ struct wlserver_t {
+@@ -137,6 +137,15 @@ struct wlserver_t {
  	} wlr;
  	
  	struct wlr_surface *mouse_focus_surface;
@@ -249,7 +249,7 @@ index 64132f1..bc39744 100644
  	struct wlr_surface *kb_focus_surface;
  	std::unordered_map<struct wlr_surface *, std::pair<int, int>> current_dropdown_surfaces;
  	double mouse_surface_cursorx = 0.0f;
-@@ -247,6 +256,8 @@ struct wlserver_touch {
+@@ -248,6 +257,8 @@ struct wlserver_touch {
  	struct wl_listener destroy;
  
      gamescope::IBackendConnector* connector;
@@ -258,7 +258,7 @@ index 64132f1..bc39744 100644
  };
  
  void xwayland_surface_commit(struct wlr_surface *wlr_surface);
-@@ -281,6 +292,9 @@ void wlserver_drag_anchor_move( struct wlr_surface *surface, int x, int y, int b
+@@ -284,6 +295,9 @@ void wlserver_drag_anchor_move( struct wlr_surface *surface, int x, int y, int b
  void wlserver_touchmotion( double x, double y, int touch_id, uint32_t time, bool bAlwaysWarpCursor = false, gamescope::IBackendConnector* connector = nullptr );
  void wlserver_touchdown( double x, double y, int touch_id, uint32_t time, gamescope::IBackendConnector* connector = nullptr );
  void wlserver_touchup( int touch_id, uint32_t time );
