@@ -1,0 +1,69 @@
+From: Philippe Simons <simons.philippe@gmail.com>
+Subject: [PATCH] Bluetooth: qca: a WCN3950 NVM stem keeps the s/t flavour
+
+firmware-name's first entry, without an extension, is a stem the NVM name
+is built from: qca_get_nvm_name_by_board() makes it "qca/<stem>.bin", or
+"qca/<stem>.bNN" when the chip reports a board id. For the WCN3950 that
+drops what its default name carries: the "s" or "t" flavour chosen by
+the SoC id (cmnv13s.bin / cmnv13t.bin), and it adds a board id suffix
+the default name never had. A board can only name one exact file instead,
+which pins one flavour before anyone has seen which chip it carries.
+
+Build a WCN3950 stem the way the default name is built: stem, flavour,
+".bin". Two boards with the same chip but different firmware builds can
+then live side by side, e.g. firmware-name = "sm4450/cmnv13",
+"sm4450/cmbtfw13.tlv" loads qca/sm4450/cmnv13{,s,t}.bin. The flavour
+choice moves to a helper shared by both paths; the default name is
+unchanged.
+---
+diff --git a/drivers/bluetooth/btqca.c b/drivers/bluetooth/btqca.c
+index 80e1517ff..5462824d7 100644
+--- a/drivers/bluetooth/btqca.c
++++ b/drivers/bluetooth/btqca.c
+@@ -833,6 +833,16 @@ static int __maybe_unused qca_check_bdaddr(struct hci_dev *hdev, const struct qc
+ 	return 0;
+ }
+ 
++/* The WCN3950 NVM comes in a base, an "s" and a "t" flavour, picked by the SoC id */
++static const char *qca_wcn3950_nvm_variant(struct qca_btsoc_version ver)
++{
++	if (le32_to_cpu(ver.soc_id) == QCA_WCN3950_SOC_ID_T)
++		return "t";
++	if (le32_to_cpu(ver.soc_id) == QCA_WCN3950_SOC_ID_S)
++		return "s";
++	return "";
++}
++
+ static void qca_get_nvm_name_by_board(char *fwname, size_t max_size,
+ 		const char *stem, enum qca_btsoc_type soc_type,
+ 		struct qca_btsoc_version ver, u8 rom_ver, u16 bid)
+@@ -994,6 +1004,13 @@ int qca_uart_setup(struct hci_dev *hdev, uint8_t baudrate,
+ 		/* The firmware name has an extension, use it directly */
+ 		if (qca_filename_has_extension(firmware_name)) {
+ 			snprintf(config.fwname, sizeof(config.fwname), "qca/%s", firmware_name);
++		} else if (soc_type == QCA_WCN3950) {
++			/*
++			 * A stem keeps the default name's flavour choice and, like it, no
++			 * board id, so a board can move its NVM set to its own directory.
++			 */
++			snprintf(config.fwname, sizeof(config.fwname), "qca/%s%s.bin",
++				 firmware_name, qca_wcn3950_nvm_variant(ver));
+ 		} else {
+ 			qca_read_fw_board_id(hdev, &boardid);
+ 			qca_get_nvm_name_by_board(config.fwname, sizeof(config.fwname),
+@@ -1012,13 +1029,9 @@ int qca_uart_setup(struct hci_dev *hdev, uint8_t baudrate,
+ 				 "qca/htnv%02x.bin", rom_ver);
+ 			break;
+ 		case QCA_WCN3950:
+-			if (le32_to_cpu(ver.soc_id) == QCA_WCN3950_SOC_ID_T)
+-				variant = "t";
+-			else if (le32_to_cpu(ver.soc_id) == QCA_WCN3950_SOC_ID_S)
+-				variant = "s";
+-
+ 			snprintf(config.fwname, sizeof(config.fwname),
+-				 "qca/cmnv%02x%s.bin", rom_ver, variant);
++				 "qca/cmnv%02x%s.bin", rom_ver,
++				 qca_wcn3950_nvm_variant(ver));
+ 			break;
+ 		case QCA_WCN3990:
+ 		case QCA_WCN3991:

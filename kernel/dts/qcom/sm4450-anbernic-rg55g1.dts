@@ -2000,6 +2000,12 @@
 			bluetooth: bluetooth {
 				compatible = "qcom,wcn3950-bt";
 
+				/*
+				 * This SoC's Bluetooth build, beside the SM6115 one at the
+				 * default qca/ names; the NVM keeps its s/t flavour (patch 1027).
+				 */
+				firmware-name = "sm4450/cmnv13", "sm4450/cmbtfw13.tlv";
+
 				vddio-supply = <&vreg_pmu_io>;
 				vddxo-supply = <&vreg_pmu_xo>;
 				vddrf-supply = <&vreg_pmu_rf>;

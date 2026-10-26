@@ -21,10 +21,12 @@ repo:   https://github.com/retroforge-linux/qcom-firmwares
 # the Retroid Pocket Classic and Anbernic RG 55G1, both sm8450 AudioReach tplg, and
 # qca/cmnv13t.bin, from ROCKNIX/extra-firmware 2486a41. Everything at c849966 is contained
 # unchanged: the 90 earlier sha256sums rows are byte-identical, the commit only appends 10.
-# The WCN3950 Bluetooth rampatch stays the SM6115 one (see that repo's README).
-# edd576b is on that repo's `sm4450` BRANCH, not main, until the SM4450 boards are validated on
+# 785196e adds ROCKNIX's SM4450 WCN3950 Bluetooth set (BTFM 00125) under qca/sm4450/, where the
+# SM4450 DTS firmware-name points (kernel patch 1027), and moves cmnv13t.bin there; the SM6115
+# set (00116) at the default qca/ names is unchanged.
+# 785196e is on that repo's `sm4450` BRANCH, not main, until the SM4450 boards are validated on
 # hardware; GitHub serves its archive by SHA either way. Re-pin to the main merge commit then.
-commit: edd576ba6e2ca70fb7598b44cda478d5243f2576
+commit: 785196eda05de7832b128bdd5bf1df741f1a8311
 
 # --- SM8250: OPEN, with one exception, and one still-open gap ----------------------------
 # The six SM8250 boards need almost nothing from this repo. Their GPU microcode, zap shader,

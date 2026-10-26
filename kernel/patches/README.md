@@ -271,6 +271,7 @@ taken for issue #122 — see the `0780`–`0796` rows.
 | `1024` | community | armada `1021`, upstream `1021` (our `1021`-`1023` are the WCN3950 Bluetooth set): ath12k single-pdev frequency-range fix, under our `1010`/`1011` scan stack. | when upstreamed |
 | `1025` | community | armada `1022`, upstream `1022`: split WCN7860 scans by firmware-reported ranges. | with `1002` |
 | `1026` | community | armada `1023`, upstream `1023`: protect TX during associated-range scans. | when upstreamed |
+| `1027` | retroforge | Written here for the SM4450 port: a WCN3950 `firmware-name` NVM stem keeps the default name's s/t flavour and no board-id suffix, so the SM4450 boards load their own Bluetooth build from `qca/sm4450/` beside the SM6115 one. Only WCN3950 + a stem changes; default names unchanged. Never posted. | if upstream gives stems the flavour |
 | `1030` | community | spycat88, ROCKNIX `0071`. A hack. | never |
 | `1040` | community | Kars Mulder's Linux-Pollrate-Patch via ROCKNIX `0506`. | never |
 | `1042` | community | Anze, ROCKNIX SM8750 `0509`: restore the pre-`0c8ee850572` ucsi behaviour — clear the USB role when the partner advertises no USB data — on ports without the USB4_IMPLIES_USB quirk (our pmic_glink UCSI ports on every SoC). Peer motivation is a suspend hard-hang we cannot hit; the stale role on charger-only partners is wrong regardless. | when the upstream regression is fixed |
