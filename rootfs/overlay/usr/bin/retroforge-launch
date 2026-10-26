@@ -31,9 +31,8 @@
 #                                  "value": "/home/player/saves/{system}"}]}],  card's system (below)
 #    "env": {"NAME": "value"},                     added to the emulator's environment
 #    "gamepad_profile": "guide-hotkeys.yaml",      an InputPlumber device profile next to this
-#                                                  file, loaded into every composite device for
-#                                                  the run; whatever was loaded before is put
-#                                                  back on exit (below)
+#                                                  file, declared to OpenGamepadUI for the run:
+#                                                  it loads it while the game has focus (below)
 #    "core_dumps": false,                          no core file when it crashes (default true; below)
 #    "seed": [{"file": "x.ini", "to": ".config/x/x.ini"}],   first-run settings (below)
 #    "sync": [{"file": "x.txt", "to": "roms/x/x.txt"}],      RetroForge's own files, kept current (below)
@@ -298,13 +297,10 @@ EMU_ID = re.compile(r"[a-z0-9_-]+")
 DEFINITION_KEYS = {"format", "root", "binary", "args", "gui_args", "system_args", "system_settings", "env",
                    "seed", "sync", "install", "setup_args", "stub", "core_dumps", "exit_resend",
                    "gamepad_profile", "notes"}
-# InputPlumber's bus name and composite-device interface (gamepad_profile, below). The daemon is
-# system-bus; busctl comes from PATH so the offline tests can stand in for it.
-IP_BUS_NAME = "org.shadowblip.InputPlumber"
-IP_DEVICE_IFACE = "org.shadowblip.Input.CompositeDevice"
-IP_DEVICE_PATH = re.compile(r"/org/shadowblip/InputPlumber/CompositeDevice\d+")
-IP_DEFAULT_PROFILE = "/usr/share/inputplumber/profiles/default.yaml"
-IP_TIMEOUT = 10  # s per busctl call: input must never hold a launch hostage
+# Where OpenGamepadUI (its patch 0024) reads the running game's gamepad profile (gamepad_profile,
+# below): the profile's path, then the pid owning the declaration. Same env knob for the tests.
+GAME_PROFILE_DECL = ENV.get("RETROFORGE_GAME_PROFILE",
+                            os.path.join(ENV.get("XDG_RUNTIME_DIR") or "/tmp", "opengamepadui", "game_profile"))
 EXIT_RESEND_MAX = 30  # s: an exit_resend longer than this is a typo, not a plan
 SCRIPT_SHELL = "/bin/bash"  # what a scripts-format game card's script runs with
 ROM = "{rom}"
@@ -1103,71 +1099,46 @@ def no_core_dumps():
 
 
 # ------------------------------------------------------------ gamepad profile (gamepad_profile) --
-# The definition's InputPlumber device profile (the Guide-modifier hotkey layer), loaded into
-# every composite device for the run and put back afterwards. ALL OF IT IS BEST-EFFORT: no
-# InputPlumber (offline tests, a dev box), no busctl, a refused profile — the game still starts,
-# only without hotkeys, and one line says so. OpenGamepadUI's own per-game profile machinery
-# (settings_manager "gamepad_profile") is not used: it expects OGUI-made JSON profiles, and its
-# reset-to-global on focus change has never been seen to fire on these boards.
+# The definition's InputPlumber device profile (the Guide-modifier hotkey layer) is DECLARED to
+# OpenGamepadUI, which owns every profile load: its focus profile while it has focus, this one
+# while the game has, so the two never race over a device. The declaration names our pid, and a
+# launcher that dies leaves one OpenGamepadUI ignores. ALL OF IT IS BEST-EFFORT: a declaration
+# that cannot be written means a game without hotkeys and one log line, never no game.
 
-def busctl(*args):
-    """busctl --system <args>: stdout on success, None on any failure (and a log line)."""
-    try:
-        out = subprocess.run(["busctl", "--system", *args],
-                             capture_output=True, text=True, timeout=IP_TIMEOUT)
-    except (OSError, subprocess.SubprocessError) as err:
-        log(f"gamepad profile: busctl {args[0]} failed: {err}")
-        return None
-    if out.returncode != 0:
-        log(f"gamepad profile: busctl {' '.join(args)}: {out.stderr.strip() or out.returncode}")
-        return None
-    return out.stdout
-
-
-def composite_devices():
-    """InputPlumber's composite devices (DBus object paths); [] when the daemon is not there."""
-    out = busctl("tree", "--list", IP_BUS_NAME)
-    if out is None:
-        return []
-    return [line for line in map(str.strip, out.splitlines()) if IP_DEVICE_PATH.fullmatch(line)]
-
-
-def device_profile(device):
-    """The profile path a composite device has loaded ('' for none), or None when unreadable."""
-    out = busctl("get-property", IP_BUS_NAME, device, IP_DEVICE_IFACE, "ProfilePath")
-    if out is None:
-        return None
-    found = re.fullmatch(r'\s*s\s+"(.*)"\s*', out)
-    return found.group(1) if found else None
-
-
-def apply_gamepad_profile(emulator, name):
-    """Load the definition's profile everywhere. Returns what the restore must put back:
-    (device, previous profile) pairs — the device's own previous profile, except when that is
-    already OURS (a launcher killed between load and restore left it behind): then the shipped
-    default, or restoring would make the leftover permanent."""
+def declare_gamepad_profile(emulator, name):
+    """Declare the definition's profile for this run. True when declared (withdraw it on exit)."""
     if name is None:
-        return []
+        return False
     profile = os.path.join(EMU_DATA_DIR, emulator, name)
     if not os.path.isfile(profile):
         log(f"gamepad profile: {profile} is not in the image; no hotkeys")
-        return []
-    restore = []
-    for device in composite_devices():
-        previous = device_profile(device)
-        if not previous or os.path.realpath(previous) == os.path.realpath(profile):
-            previous = IP_DEFAULT_PROFILE
-        if busctl("call", IP_BUS_NAME, device, IP_DEVICE_IFACE,
-                  "LoadProfilePath", "s", profile) is not None:
-            restore.append((device, previous))
-    if restore:
-        log(f"gamepad profile {name}: loaded on {len(restore)} composite device(s)")
-    return restore
+        return False
+    try:
+        os.makedirs(os.path.dirname(GAME_PROFILE_DECL), exist_ok=True)
+        partial = GAME_PROFILE_DECL + ".partial"
+        with open(partial, "w") as f:
+            f.write(f"{profile}\n{os.getpid()}\n")
+        os.replace(partial, GAME_PROFILE_DECL)
+    except OSError as err:
+        log(f"gamepad profile: could not declare {profile}: {err}; no hotkeys")
+        return False
+    log(f"gamepad profile {name}: declared to OpenGamepadUI")
+    return True
 
 
-def restore_gamepad_profiles(restore):
-    for device, previous in restore:
-        busctl("call", IP_BUS_NAME, device, IP_DEVICE_IFACE, "LoadProfilePath", "s", previous)
+def withdraw_gamepad_profile(declared):
+    """Remove our declaration, unless another launcher's has replaced it since."""
+    if not declared:
+        return
+    try:
+        with open(GAME_PROFILE_DECL) as f:
+            owner = f.read().split("\n")[1:2]
+        if owner == [str(os.getpid())]:
+            os.remove(GAME_PROFILE_DECL)
+    except FileNotFoundError:
+        pass
+    except OSError as err:
+        log(f"gamepad profile: could not withdraw the declaration: {err}")
 
 
 # --------------------------------------------------------------------- PSN inbox (--psn-install) --
@@ -1604,7 +1575,7 @@ def run(argv):
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(sig, lambda signum, _: interrupted.append(signum))
     package = FORMATS[definition["format"]](emulator, image)
-    profile_restore = []
+    profile_declared = False
     try:
         # Before the mount: the restore in `finally` must cover every way out from here on.
         opt_args, opt_env = apply_options(emulator, options, confs, system)
@@ -1619,9 +1590,9 @@ def run(argv):
                **opt_env}
         run_installs(emulator, binary, env, todo, interrupted)
         run_setup(emulator, binary, env, definition["setup_args"], interrupted)
-        # Last before the start: nothing below but the start itself can fail, so the hotkey
-        # layer is never left loaded over a launch that said no.
-        profile_restore = apply_gamepad_profile(emulator, definition["gamepad_profile"])
+        # Last before the start: nothing below but the start itself can fail, so no declaration
+        # outlives a launch that said no.
+        profile_declared = declare_gamepad_profile(emulator, definition["gamepad_profile"])
         program = SCRIPT_SHELL if package.runs_rom and rom is not None else binary
         log(f"{system or 'gui'} -> {emulator}: {program} {' '.join(args)}")
         try:
@@ -1636,7 +1607,7 @@ def run(argv):
         rc = wait_emulator(emu, definition["exit_resend"], interrupted)
         return 128 - rc if rc < 0 else rc
     finally:
-        restore_gamepad_profiles(profile_restore)
+        withdraw_gamepad_profile(profile_declared)
         package.release()
         emuopts.restore(HOME, STATE_DIR, emulator, options_warning(emulator))
 

@@ -1,0 +1,1063 @@
+From bfbaf6296c4c60e825f316c89b20f97c3b0a23c5 Mon Sep 17 00:00:00 2001
+From: Philippe Simons <simons.philippe@gmail.com>
+Date: Mon, 26 Oct 2026 17:24:48 +0100
+Subject: [PATCH] feat(Input): focus profile instead of InputPlumber's
+ intercept mode
+
+OpenGamepadUI no longer sets an intercept mode. While it has focus every
+gamepad gets assets/gamepad/profiles/ogui_focus.json, which sends each
+input to DBus as the UI action the intercept used to produce and lets
+none reach the game. While a game has focus, its profile is loaded, in
+priority order: the game's own profile from the settings, a profile the
+launcher declared in $XDG_RUNTIME_DIR/opengamepadui/game_profile (path,
+then the owning pid), the global profile.
+
+The game's profile now carries what the intercept did for Guide: a JSON
+profile that does not map Guide gets Guide -> [layer, ui_guide], and the
+layer Guide holds gets OpenGamepadUI's combos where the profile leaves
+them free (Guide+South -> ui_quick, the quick bar; Guide+North ->
+ui_osk). With InputPlumber's deferred activation outputs, a lone Guide
+tap opens the main menu and a combo does not. The JSON is edited
+directly, after the target modification, because InputPlumberProfile
+drops `layers` (save_target_modified_profile split out for that).
+
+A combo that opens a menu while Guide is held loads the focus profile,
+so the Guide release can arrive without its press; it is ignored
+instead of opening the main menu over the quick bar.
+
+The single-capability intercept flipped to Always on the Guide press,
+so a profile's input layer (Guide held + R1) never reached the game.
+
+Also fixes set_gamepad_profile(): it broke out of the device loop as
+soon as a device had a gamepad target, before loading anything.
+---
+ assets/gamepad/profiles/ogui_focus.json     | 566 ++++++++++++++++++++
+ core/global/launch_manager.gd               | 221 +++++++-
+ core/systems/input/input_manager.gd         |  15 +-
+ core/systems/input/input_plumber.gd         |  17 +-
+ core/ui/card_ui/card_ui.gd                  |  24 +-
+ core/ui/card_ui/gamepad/gamepad_settings.gd |   5 +-
+ 6 files changed, 795 insertions(+), 53 deletions(-)
+ create mode 100644 assets/gamepad/profiles/ogui_focus.json
+
+diff --git a/assets/gamepad/profiles/ogui_focus.json b/assets/gamepad/profiles/ogui_focus.json
+new file mode 100644
+index 0000000..6317b4e
+--- /dev/null
++++ b/assets/gamepad/profiles/ogui_focus.json
+@@ -0,0 +1,566 @@
++{
++	"version": 1,
++	"kind": "DeviceProfile",
++	"name": "OpenGamepadUI Focus",
++	"description": "Loaded while OpenGamepadUI has focus: every gamepad input goes to DBus as the UI action InputPlumber's intercept mode used to produce, and none reaches the game behind it.",
++	"mapping": [
++		{
++			"name": "South",
++			"source_event": {
++				"gamepad": {
++					"button": "South"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_accept"
++				}
++			]
++		},
++		{
++			"name": "East",
++			"source_event": {
++				"gamepad": {
++					"button": "East"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_back"
++				}
++			]
++		},
++		{
++			"name": "North",
++			"source_event": {
++				"gamepad": {
++					"button": "North"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_context"
++				}
++			]
++		},
++		{
++			"name": "West",
++			"source_event": {
++				"gamepad": {
++					"button": "West"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_action"
++				}
++			]
++		},
++		{
++			"name": "Start",
++			"source_event": {
++				"gamepad": {
++					"button": "Start"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_option"
++				}
++			]
++		},
++		{
++			"name": "Select",
++			"source_event": {
++				"gamepad": {
++					"button": "Select"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_select"
++				}
++			]
++		},
++		{
++			"name": "Guide",
++			"source_event": {
++				"gamepad": {
++					"button": "Guide"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_guide"
++				}
++			]
++		},
++		{
++			"name": "QuickAccess",
++			"source_event": {
++				"gamepad": {
++					"button": "QuickAccess"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_quick"
++				}
++			]
++		},
++		{
++			"name": "QuickAccess2",
++			"source_event": {
++				"gamepad": {
++					"button": "QuickAccess2"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_quick2"
++				}
++			]
++		},
++		{
++			"name": "Keyboard",
++			"source_event": {
++				"gamepad": {
++					"button": "Keyboard"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_osk"
++				}
++			]
++		},
++		{
++			"name": "Screenshot",
++			"source_event": {
++				"gamepad": {
++					"button": "Screenshot"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_screenshot"
++				}
++			]
++		},
++		{
++			"name": "Mute",
++			"source_event": {
++				"gamepad": {
++					"button": "Mute"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_volume_mute"
++				}
++			]
++		},
++		{
++			"name": "DPadUp",
++			"source_event": {
++				"gamepad": {
++					"button": "DPadUp"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_up"
++				}
++			]
++		},
++		{
++			"name": "DPadDown",
++			"source_event": {
++				"gamepad": {
++					"button": "DPadDown"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_down"
++				}
++			]
++		},
++		{
++			"name": "DPadLeft",
++			"source_event": {
++				"gamepad": {
++					"button": "DPadLeft"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_left"
++				}
++			]
++		},
++		{
++			"name": "DPadRight",
++			"source_event": {
++				"gamepad": {
++					"button": "DPadRight"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_right"
++				}
++			]
++		},
++		{
++			"name": "LeftBumper",
++			"source_event": {
++				"gamepad": {
++					"button": "LeftBumper"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_l1"
++				}
++			]
++		},
++		{
++			"name": "LeftTrigger",
++			"source_event": {
++				"gamepad": {
++					"button": "LeftTrigger"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_l2"
++				}
++			]
++		},
++		{
++			"name": "LeftStick",
++			"source_event": {
++				"gamepad": {
++					"button": "LeftStick"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_l3"
++				}
++			]
++		},
++		{
++			"name": "RightBumper",
++			"source_event": {
++				"gamepad": {
++					"button": "RightBumper"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_r1"
++				}
++			]
++		},
++		{
++			"name": "RightTrigger",
++			"source_event": {
++				"gamepad": {
++					"button": "RightTrigger"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_r2"
++				}
++			]
++		},
++		{
++			"name": "RightStick",
++			"source_event": {
++				"gamepad": {
++					"button": "RightStick"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_r3"
++				}
++			]
++		},
++		{
++			"name": "LeftTop",
++			"source_event": {
++				"gamepad": {
++					"button": "LeftTop"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "none"
++				}
++			]
++		},
++		{
++			"name": "RightTop",
++			"source_event": {
++				"gamepad": {
++					"button": "RightTop"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "none"
++				}
++			]
++		},
++		{
++			"name": "LeftPaddle1",
++			"source_event": {
++				"gamepad": {
++					"button": "LeftPaddle1"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "none"
++				}
++			]
++		},
++		{
++			"name": "LeftPaddle2",
++			"source_event": {
++				"gamepad": {
++					"button": "LeftPaddle2"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "none"
++				}
++			]
++		},
++		{
++			"name": "LeftPaddle3",
++			"source_event": {
++				"gamepad": {
++					"button": "LeftPaddle3"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "none"
++				}
++			]
++		},
++		{
++			"name": "RightPaddle1",
++			"source_event": {
++				"gamepad": {
++					"button": "RightPaddle1"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "none"
++				}
++			]
++		},
++		{
++			"name": "RightPaddle2",
++			"source_event": {
++				"gamepad": {
++					"button": "RightPaddle2"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "none"
++				}
++			]
++		},
++		{
++			"name": "RightPaddle3",
++			"source_event": {
++				"gamepad": {
++					"button": "RightPaddle3"
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "none"
++				}
++			]
++		},
++		{
++			"name": "Left Stick Left",
++			"source_event": {
++				"gamepad": {
++					"axis": {
++						"name": "LeftStick",
++						"direction": "left",
++						"deadzone": 0.5
++					}
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_left"
++				}
++			]
++		},
++		{
++			"name": "Right Stick Left",
++			"source_event": {
++				"gamepad": {
++					"axis": {
++						"name": "RightStick",
++						"direction": "left",
++						"deadzone": 0.5
++					}
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "none"
++				}
++			]
++		},
++		{
++			"name": "Left Stick Right",
++			"source_event": {
++				"gamepad": {
++					"axis": {
++						"name": "LeftStick",
++						"direction": "right",
++						"deadzone": 0.5
++					}
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_right"
++				}
++			]
++		},
++		{
++			"name": "Right Stick Right",
++			"source_event": {
++				"gamepad": {
++					"axis": {
++						"name": "RightStick",
++						"direction": "right",
++						"deadzone": 0.5
++					}
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "none"
++				}
++			]
++		},
++		{
++			"name": "Left Stick Up",
++			"source_event": {
++				"gamepad": {
++					"axis": {
++						"name": "LeftStick",
++						"direction": "up",
++						"deadzone": 0.5
++					}
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_up"
++				}
++			]
++		},
++		{
++			"name": "Right Stick Up",
++			"source_event": {
++				"gamepad": {
++					"axis": {
++						"name": "RightStick",
++						"direction": "up",
++						"deadzone": 0.5
++					}
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "none"
++				}
++			]
++		},
++		{
++			"name": "Left Stick Down",
++			"source_event": {
++				"gamepad": {
++					"axis": {
++						"name": "LeftStick",
++						"direction": "down",
++						"deadzone": 0.5
++					}
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_down"
++				}
++			]
++		},
++		{
++			"name": "Right Stick Down",
++			"source_event": {
++				"gamepad": {
++					"axis": {
++						"name": "RightStick",
++						"direction": "down",
++						"deadzone": 0.5
++					}
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "none"
++				}
++			]
++		},
++		{
++			"name": "Left Trigger (analog)",
++			"source_event": {
++				"gamepad": {
++					"trigger": {
++						"name": "LeftTrigger",
++						"deadzone": 0.5
++					}
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_l2"
++				}
++			]
++		},
++		{
++			"name": "Right Trigger (analog)",
++			"source_event": {
++				"gamepad": {
++					"trigger": {
++						"name": "RightTrigger",
++						"deadzone": 0.5
++					}
++				}
++			},
++			"target_events": [
++				{
++					"dbus": "ui_r2"
++				}
++			]
++		}
++	]
++}
+diff --git a/core/global/launch_manager.gd b/core/global/launch_manager.gd
+index 2e8b5ee..aaa692c 100644
+--- a/core/global/launch_manager.gd
++++ b/core/global/launch_manager.gd
+@@ -72,6 +72,18 @@ var _focused_app_id := 0
+ var _orphan_windows := PackedInt64Array()
+ var _input_manager: InputManager
+ 
++## OpenGamepadUI does not use InputPlumber's intercept mode. While it has focus every gamepad gets
++## FOCUS_PROFILE, which sends each input to DBus as the UI action the intercept used to produce and
++## lets none reach the game behind it. While a game has focus the game's profile is loaded instead,
++## and it has to carry OpenGamepadUI's Guide handling itself (see _with_guide_layer).
++const FOCUS_PROFILE_SOURCE := "res://assets/gamepad/profiles/ogui_focus.json"
++const FOCUS_PROFILE := "user://data/gamepad/profiles/ogui_focus.json"
++## A launcher may declare the profile of the game it runs here: the profile's path on the first
++## line, the pid that owns the declaration on the second. A pid that no longer runs (a launcher that
++## died) voids it. Used when the game has no gamepad profile of its own in the settings.
++var _declared_profile := "/".join([OS.get_environment("XDG_RUNTIME_DIR"), "opengamepadui", "game_profile"])
++var _ogui_focused := true
++
+ # Connect to Gamescope signals
+ func _init() -> void:
+ 	_load_persist_data()
+@@ -99,9 +111,9 @@ func _init() -> void:
+ 			logger.debug("Focused app changed from " + str(_focused_app_id) + " to " + str(to))
+ 			_focused_app_id = to
+ 
+-			# If OGUI was focused, set the global gamepad profile
++			# If OGUI was focused, set the focus profile
+ 			if to in [gamescope.OVERLAY_GAME_ID, 0, 1]:
+-				set_gamepad_profile("")
++				set_focus_profile()
+ 				return
+ 
+ 			# Find the running app for the given app id
+@@ -119,9 +131,12 @@ func _init() -> void:
+ 			logger.debug("Last app: " + str(last_app) + " current_app: " + str(self._current_app))
+ 			app_switched.emit(last_app, self._current_app)
+ 
+-			# If the app has a gamepad profile, set it
+-			if self._current_app:
+-				set_app_gamepad_profile(self._current_app)
++			# A game window has focus: its profile, once OpenGamepadUI is in the in-game state. A
++			# launch passes through app 0 and OpenGamepadUI's own id before the game's window shows
++			# up, and those load the focus profile.
++			if state_machine.current_state() == in_game_state:
++				_ogui_focused = false
++			set_app_gamepad_profile(self._current_app)
+ 		_xwayland_primary.focused_app_updated.connect(on_focused_app_changed)
+ 
+ 		# Listen for when focusable apps change
+@@ -169,8 +184,8 @@ func _init() -> void:
+ 
+ 	# Whenever the in-game state is entered, set the gamepad profile
+ 	var on_game_state_entered := func(_from: State):
+-		if _current_app:
+-			set_app_gamepad_profile(_current_app)
++		_ogui_focused = false
++		set_app_gamepad_profile(_current_app)
+ 
+ 		# If we don't want LaunchManager to manage overlay (I.E. overlay mode), return false always.
+ 		if not should_manage_overlay:
+@@ -181,8 +196,8 @@ func _init() -> void:
+ 			_xwayland_ogui.set_overlay(_ogui_window_id, 1)
+ 
+ 	var on_game_state_exited := func(_to: State):
+-		# Set the gamepad profile to the global profile
+-		set_gamepad_profile("")
++		# Every input goes to OpenGamepadUI until a game has focus again
++		set_focus_profile()
+ 
+ 		# If we don't want LaunchManager to manage overlay (I.E. overlay mode), return false always.
+ 		if not should_manage_overlay:
+@@ -230,7 +245,8 @@ func setup(input_manager: InputManager):
+ 		return
+ 
+ 	_input_manager = input_manager
+-	set_gamepad_profile("")
++	_install_focus_profile()
++	set_focus_profile()
+ 
+ 
+ ## Launches the given application and switches to the in-game state. Returns a
+@@ -496,26 +512,46 @@ func get_current_app_library_item() -> LibraryItem:
+ 
+ ## Sets the gamepad profile for the running app with the given profile
+ func set_app_gamepad_profile(app: RunningApp) -> void:
+-	# If no app was specified, unset the current gamepad profile
+-	if not app or not app.launch_item:
+-		logger.debug("No app available to set gamepad profile")
+-		set_gamepad_profile("")
++	# The game's profile waits until the game has focus
++	if _ogui_focused:
++		set_focus_profile()
+ 		return
+ 
+ 	# Check to see if this game has any gamepad profiles. If so, set our 
+ 	# gamepads to use them.
+-	var section := ".".join(["game", app.launch_item.name.to_lower()])
+-	var profile_path := settings_manager.get_value(section, "gamepad_profile", "") as String
+-	var profile_gamepad := settings_manager.get_value(section, "gamepad_profile_target", "") as String
+-	if profile_path.is_empty():
+-		logger.debug("Using global gamepad profile")
++	var profile_path := ""
++	var profile_gamepad := ""
++	if app and app.launch_item:
++		var section := ".".join(["game", app.launch_item.name.to_lower()])
++		profile_path = settings_manager.get_value(section, "gamepad_profile", "") as String
++		profile_gamepad = settings_manager.get_value(section, "gamepad_profile_target", "") as String
+ 	else:
++		logger.debug("No app available to set gamepad profile")
++	if not profile_path.is_empty():
+ 		logger.debug("Using profile '" + profile_path + "' with gamepad type '" + profile_gamepad + "'")
+-	set_gamepad_profile(profile_path, profile_gamepad)
++		set_gamepad_profile(profile_path, profile_gamepad)
++		return
++
++	# Then the profile the game's launcher declared, which also covers an app OpenGamepadUI did
++	# not launch itself
++	var declared := _get_declared_profile()
++	if not declared.is_empty():
++		logger.info("Loading the gamepad profile the launcher declared: " + declared)
++		for device: CompositeDevice in input_plumber.get_composite_devices():
++			device.load_profile_path(declared)
++		return
++
++	logger.debug("Using global gamepad profile")
++	set_gamepad_profile("")
+ 
+ 
+ ## Sets the gamepad profile for the running app with the given profile
+ func set_gamepad_profile(profile_path: String, target_gamepad: String = "") -> void:
++	# A game's profile waits until the game has focus
++	if _ogui_focused:
++		set_focus_profile()
++		return
++
+ 	# Discover the currently set target for each gamepad to properly add additional
+ 	# capabilities based on that target
+ 	for device: CompositeDevice in input_plumber.get_composite_devices():
+@@ -528,11 +564,12 @@ func set_gamepad_profile(profile_path: String, target_gamepad: String = "") -> v
+ 					continue
+ 				target_gamepad = target.get("device_type")
+ 				break
+-			if not target_gamepad.is_empty():
+-				break
+-			# Then, if overriden by settings, use that instead
++			# Then, if overriden by settings, use that instead (only when the device has no
++			# gamepad target: this used to `break` out of the device loop there, so a device
++			# with one never got a profile loaded at all)
+ 			#TODO: This is a global setting, refactor settings to permit individual gamepads to have different targets
+-			target_gamepad = settings_manager.get_value("input", "gamepad_profile_target", target_gamepad) as String
++			if target_gamepad.is_empty():
++				target_gamepad = settings_manager.get_value("input", "gamepad_profile_target", target_gamepad) as String
+ 
+ 		# If no profile was specified, unset the gamepad profiles
+ 		if profile_path == "":
+@@ -556,7 +593,9 @@ func set_gamepad_profile(profile_path: String, target_gamepad: String = "") -> v
+ 				logger.warn("Failed to load gamepad profile: " + profile_path)
+ 				return
+ 
+-		InputPlumber.load_target_modified_profile(device, profile_path, target_gamepad)
++		var modified := InputPlumber.save_target_modified_profile(profile_path, target_gamepad)
++		if not modified.is_empty():
++			device.load_profile_path(_with_guide_layer(modified))
+ 
+ 		# Set the target gamepad if one was specified
+ 		if not target_gamepad.is_empty():
+@@ -573,6 +612,138 @@ func set_gamepad_profile(profile_path: String, target_gamepad: String = "") -> v
+ 	#notification_manager.show(notify)
+ 
+ 
++## Loads the focus profile on every gamepad: from now until a game has focus again, every input
++## goes to OpenGamepadUI over DBus.
++func set_focus_profile() -> void:
++	_ogui_focused = true
++	if not FileAccess.file_exists(FOCUS_PROFILE):
++		logger.error("Focus profile missing, OpenGamepadUI will not see gamepad input: " + FOCUS_PROFILE)
++		return
++	for device: CompositeDevice in input_plumber.get_composite_devices():
++		device.load_profile_path(FOCUS_PROFILE)
++
++
++## Loads the profile of whoever has focus now, e.g. on a gamepad that was just added.
++func refresh_gamepad_profile() -> void:
++	if _ogui_focused:
++		set_focus_profile()
++	else:
++		set_app_gamepad_profile(_current_app)
++
++
++## Copies the focus profile out of the pack: InputPlumber reads profiles from the filesystem.
++func _install_focus_profile() -> void:
++	var source := FileAccess.get_file_as_string(FOCUS_PROFILE_SOURCE)
++	if source.is_empty():
++		logger.error("Unable to read the focus profile: " + FOCUS_PROFILE_SOURCE)
++		return
++	DirAccess.make_dir_recursive_absolute(FOCUS_PROFILE.get_base_dir())
++	var file := FileAccess.open(FOCUS_PROFILE, FileAccess.WRITE)
++	if not file:
++		logger.error("Unable to write the focus profile: " + FOCUS_PROFILE)
++		return
++	file.store_string(source)
++
++
++## The profile a launcher declared for the running game, or "" when there is none or its owner
++## is gone.
++func _get_declared_profile() -> String:
++	if not FileAccess.file_exists(_declared_profile):
++		return ""
++	var lines := FileAccess.get_file_as_string(_declared_profile).split("\n", false)
++	if lines.size() < 2 or not lines[1].is_valid_int():
++		logger.warn("Ignoring a malformed profile declaration: " + _declared_profile)
++		return ""
++	if not DirAccess.dir_exists_absolute("/proc/" + lines[1]):
++		logger.debug("Ignoring the profile declaration of a launcher that is gone: " + lines[1])
++		return ""
++	if not FileAccess.file_exists(lines[0]):
++		logger.warn("Declared gamepad profile does not exist: " + lines[0])
++		return ""
++	return lines[0]
++
++
++## OpenGamepadUI's Guide combos, mapped inside the layer Guide holds in a game's profile: the
++## source button and the DBus action it sends instead while Guide is held.
++const GUIDE_COMBOS := [["South", "ui_quick"], ["North", "ui_osk"]]
++
++
++## Returns a profile that carries OpenGamepadUI's Guide handling, which intercept mode used to do:
++## Guide holds a layer and sends ui_guide (InputPlumber taps it on release only when nothing in the
++## layer was used), and the layer maps GUIDE_COMBOS (Guide+A quick bar, Guide+Y keyboard). Rows the
++## profile maps itself win; a profile that maps Guide without a layer is left alone. Works on the
++## JSON directly, after the target modification, since InputPlumberProfile drops `layers`.
++func _with_guide_layer(profile_path: String) -> String:
++	var profile = JSON.parse_string(FileAccess.get_file_as_string(profile_path))
++	if not profile is Dictionary:
++		logger.warn("Unable to parse " + profile_path + ", Guide may not reach OpenGamepadUI in game")
++		return profile_path
++	if not profile.get("mapping") is Array:
++		profile["mapping"] = []
++	if not profile.get("layers") is Array:
++		profile["layers"] = []
++
++	# The layer Guide holds: the profile's own, or a new one
++	var layer_name := ""
++	var guide_mapping = _find_button_mapping(profile["mapping"], "Guide")
++	if guide_mapping:
++		for target in guide_mapping.get("target_events", []):
++			if target is Dictionary and target.get("layer") is Dictionary:
++				layer_name = target["layer"].get("name", "")
++		if layer_name.is_empty():
++			return profile_path
++	else:
++		layer_name = "ogui_guide"
++		profile["mapping"].append({
++			"name": "Guide (OpenGamepadUI)",
++			"source_event": {"gamepad": {"button": "Guide"}},
++			"target_events": [{"layer": {"name": layer_name}}, {"dbus": "ui_guide"}],
++		})
++
++	var layer = null
++	for candidate in profile["layers"]:
++		if candidate is Dictionary and candidate.get("name") == layer_name:
++			layer = candidate
++	if layer == null:
++		layer = {"name": layer_name, "mapping": []}
++		profile["layers"].append(layer)
++	if not layer.get("mapping") is Array:
++		layer["mapping"] = []
++
++	var changed := guide_mapping == null
++	for combo in GUIDE_COMBOS:
++		if _find_button_mapping(layer["mapping"], combo[0]):
++			continue
++		layer["mapping"].append({
++			"name": "Guide+" + combo[0] + " (OpenGamepadUI)",
++			"source_event": {"gamepad": {"button": combo[0]}},
++			"target_events": [{"dbus": combo[1]}],
++		})
++		changed = true
++	if not changed:
++		return profile_path
++
++	var guided := profile_path.trim_suffix(".json") + "_guide.json"
++	var file := FileAccess.open(guided, FileAccess.WRITE)
++	if not file:
++		logger.error("Unable to save " + guided + ", Guide will not reach OpenGamepadUI in game")
++		return profile_path
++	file.store_string(JSON.stringify(profile, "\t"))
++	return guided
++
++
++## The first mapping in the list whose source is the given gamepad button, or null.
++func _find_button_mapping(mappings: Array, button: String):
++	for mapping in mappings:
++		if not mapping is Dictionary:
++			continue
++		var source = mapping.get("source_event")
++		if source is Dictionary and source.get("gamepad") is Dictionary \
++				and source["gamepad"].get("button") == button:
++			return mapping
++	return null
++
++
+ ## Sets the given running app as the current app
+ func set_current_app(app: RunningApp, _switch_baselayer: bool = true) -> void:
+ 	if app == null:
+diff --git a/core/systems/input/input_manager.gd b/core/systems/input/input_manager.gd
+index b2d076f..b3aa89e 100644
+--- a/core/systems/input/input_manager.gd
++++ b/core/systems/input/input_manager.gd
+@@ -35,6 +35,10 @@ var popup_state := preload("res://assets/state/states/popup.tres") as State
+ 
+ ## Map of pressed actions to prevent double inputs
+ var actions_pressed := {}
++## Whether a Guide press arrived since the last Guide release. A profile change while Guide is held
++## (Guide+A opens the quick bar, which loads the focus profile) can deliver the release alone, and
++## that must not open the main menu over the quick bar.
++var _guide_held := false
+ 
+ ## Number of currently pressed touches
+ var current_touches := 0
+@@ -263,11 +267,14 @@ func _guide_input(event: InputEvent) -> void:
+ 	# Only act on release events
+ 	if event.is_pressed():
+ 		logger.debug("Guide pressed. Waiting for additional events.")
+-		# Set the gamepad profile to the global default so we can capture button events.
+-		# This ensures that we use the global profile and not the game's input profile for
+-		# processing guide button combos and navigating the menu.
+-		launch_manager.set_gamepad_profile("")
++		# No profile swap here: OpenGamepadUI loads its focus profile once it has focus, and in
++		# game the game's profile decides what Guide combos do (InputPlumber input layers).
++		_guide_held = true
+ 		return
++	if not _guide_held:
++		logger.debug("Guide released without a press (the profile changed while it was held), ignoring.")
++		return
++	_guide_held = false
+ 
+ 	# If a guide action combo was pressed and we released the guide button,
+ 	# end the guide action and do nothing else.
+diff --git a/core/systems/input/input_plumber.gd b/core/systems/input/input_plumber.gd
+index afd8c61..dc4d249 100644
+--- a/core/systems/input/input_plumber.gd
++++ b/core/systems/input/input_plumber.gd
+@@ -49,15 +49,22 @@ func _process(_delta: float) -> void:
+ ## defaults, like mapping left/right pads to the DualSense center pad if no
+ ## other mappings are defined.
+ static func load_target_modified_profile(device: CompositeDevice, path: String, profile_modifier: String = "") -> void:
++	var modified := save_target_modified_profile(path, profile_modifier)
++	if not modified.is_empty():
++		device.load_profile_path(modified)
++
++
++## The target-modified profile [method load_target_modified_profile] loads: the path of a
++## modified copy, the given path when the target needs nothing, or "" when the profile is invalid.
++static func save_target_modified_profile(path: String, profile_modifier: String = "") -> String:
+ 	var logger := Log.get_logger("InputPlumber", Log.LEVEL.DEBUG)
+ 	logger.debug("Loading Profile:", path)
+ 	if path == "" or not path.ends_with(".json") or not FileAccess.file_exists(path):
+ 		logger.error("Profile path:", path," is not a valid profile path.")
+-		return
++		return ""
+ 
+ 	if profile_modifier.is_empty():
+-		device.load_profile_path(path)
+-		return
++		return path
+ 
+ 	var profile := InputPlumberProfile.load(path)
+ 
+@@ -102,5 +109,5 @@ static func load_target_modified_profile(device: CompositeDevice, path: String,
+ 
+ 	if profile.save(path) != OK:
+ 		logger.error("Failed to save", profile.name, "to", path)
+-		return
+-	device.load_profile_path(path)
++		return ""
++	return path
+diff --git a/core/ui/card_ui/card_ui.gd b/core/ui/card_ui/card_ui.gd
+index 0ec4e4c..09a2a8a 100644
+--- a/core/ui/card_ui/card_ui.gd
++++ b/core/ui/card_ui/card_ui.gd
+@@ -151,16 +151,15 @@ func _ready() -> void:
+ 	# Enable InputPlumber management of all supported input devices
+ 	input_plumber.manage_all_devices = true
+ 
+-	# Setup inputplumber to receive guide presses.
+-	input_plumber.set_intercept_mode(InputPlumberInstance.INTERCEPT_MODE_ALL)
+-	input_plumber.set_intercept_activation(PackedStringArray(["Gamepad:Button:Guide"]), "Gamepad:Button:Guide")
++	# No intercept mode: input reaches OpenGamepadUI through the profiles LaunchManager loads
++	# (its focus profile while it has focus, the game's own with Guide sent to DBus in game).
++	# Clear an intercept a previous session may have left on the devices.
++	input_plumber.set_intercept_mode(InputPlumberInstance.INTERCEPT_MODE_NONE)
+ 
+-	# Sets the intercept mode and intercept activation keys to what overlay_mode expects.
++	# A new device gets no intercept either, and the profile of whoever has focus.
+ 	var on_device_changed := func(device: CompositeDevice):
+-		var intercept_mode := input_plumber.intercept_mode
+-		logger.debug("Setting intercept mode to: " + str(intercept_mode))
+-		device.intercept_mode = intercept_mode
+-		device.set_intercept_activation(PackedStringArray(["Gamepad:Button:Guide"]), "Gamepad:Button:Guide")
++		device.intercept_mode = InputPlumberInstance.INTERCEPT_MODE_NONE
++		launch_manager.refresh_gamepad_profile()
+ 	input_plumber.composite_device_added.connect(on_device_changed, CONNECT_DEFERRED)
+ 
+ 	# Set the theme if one was set
+@@ -181,9 +180,6 @@ func _on_focus_changed(control: Control) -> void:
+ 
+ ## Invoked when the in-game state was entered
+ func _on_game_state_entered(_from: State) -> void:
+-	# Pass all gamepad input to the game
+-	input_plumber.set_intercept_mode(InputPlumberInstance.INTERCEPT_MODE_PASS)
+-
+ 	# Turn off gamescope blur effect
+ 	_set_blur(GamescopeXWayland.BLUR_MODE_OFF)
+ 
+@@ -204,12 +200,6 @@ func _on_game_state_entered(_from: State) -> void:
+ 
+ ## Invoked when the in-game state is exited
+ func _on_game_state_exited(to: State) -> void:
+-	# Intercept all gamepad input when not in-game
+-	input_plumber.set_intercept_mode(InputPlumberInstance.INTERCEPT_MODE_ALL)
+-
+-	# Revert back to the default gamepad profile
+-	#gamepad_manager.set_gamepads_profile(null)
+-
+ 	# Set gamescope input focus to on so the user can interact with the UI
+ 	if to == popup_state:
+ 		var current_popup := popup_state_machine.current_state()
+diff --git a/core/ui/card_ui/gamepad/gamepad_settings.gd b/core/ui/card_ui/gamepad/gamepad_settings.gd
+index 8641df2..d1cfc18 100644
+--- a/core/ui/card_ui/gamepad/gamepad_settings.gd
++++ b/core/ui/card_ui/gamepad/gamepad_settings.gd
+@@ -634,8 +634,9 @@ func _set_gamepad_profile(device: CompositeDevice, profile_path: String = "") ->
+ 		else:
+ 			profile_path = settings_manager.get_library_value(library_item, "gamepad_profile", "")
+ 
+-	logger.debug("Setting " + device.name + " to profile: " + profile_path)
+-	InputPlumber.load_target_modified_profile(device, profile_path, self.profile_gamepad)
++	# Not loaded here: these settings are only open while OpenGamepadUI has focus, when every
++	# gamepad has its focus profile. LaunchManager loads the profile once a game has focus.
++	logger.debug("Profile for " + device.name + " when a game has focus: " + profile_path)
+ 
+ 	# Set the target gamepad if one was specified
+ 	if not self.profile_gamepad.is_empty():
+-- 
+2.55.0
+

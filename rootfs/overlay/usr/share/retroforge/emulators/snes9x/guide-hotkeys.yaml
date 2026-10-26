@@ -1,9 +1,9 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/device_profile_v1.json
 #
 # Guide-modifier hotkeys for Snes9x — the HW testbed for input layers (InputPlumber 0.82.0 +
-# upstream PR #757, packages/inputplumber). retroforge-launch loads this profile into every
-# composite device when the definition names it (emulator.json "gamepad_profile") and restores
-# the profile that was loaded before once the emulator exits.
+# upstream PR #757 + our 0002, packages/inputplumber). retroforge-launch declares this profile to
+# OpenGamepadUI when the definition names it (emulator.json "gamepad_profile"), and OGUI loads it
+# whenever the game has focus (its own focus profile otherwise; OGUI patch 0024).
 #
 # Hold Guide and the layer below overrides the base mappings: L1 quick load, R1 quick save,
 # R2 fast-forward (held), Start quits. Released, everything is the plain pad again. The layer
@@ -11,27 +11,24 @@
 # QuickSave000, EmuTurbo and GTK_quit (names from gtk_control.cpp b_links). F-keys because no
 # game binds them and the handhelds have no physical keyboard to collide with.
 #
-# GUIDE GOES STRAIGHT TO DBUS (ui_guide), the way OpenGamepadUI's own mouse_keyboard_wasd profile
-# maps it, and NOT back to gamepad:Guide. Translation runs BEFORE the intercept check
-# (composite_device/mod.rs handle_event), and a translated DBus event skips that check and goes to
-# the DBus target directly (write_event). So OGUI's single-cap intercept ([Guide]) never fires and
-# never switches InterceptMode to Always — which is what killed the chords on the first HW run
-# (2026-10-21, MANGMI Air X: on the Guide press every later event, the layer's F-keys too, went to
-# DBus only; with the intercept forced off, Guide+R1 quick-saved). OGUI still gets the same
-# ui_guide press/release it gets from the intercept and opens the menu on release.
+# GUIDE -> [layer guide, dbus ui_guide]. OGUI has no intercept mode any more (patch 0024), so this
+# profile is the only way it learns Guide was pressed in game. InputPlumber patch 0002 holds the
+# ui_guide back while Guide is down: released alone, OGUI gets a ui_guide tap and opens its menu;
+# released after Guide+R1 (anything the layer mapped), nothing goes out and the menu stays shut.
+# The layer also maps OGUI's Guide+A (quick bar) and Guide+Y (keyboard) to DBus, at the end.
 #
-# HW 2026-10-22, MANGMI Air X: Guide+R1 quick-saves, and the profile survives OGUI's
-# set_gamepad_profile("") on the Guide press (ProfilePath unchanged). STILL OPEN: OGUI never sees
-# the chord buttons, so it cannot tell Guide+R1 from a plain Guide tap and opens the menu when
-# Guide is released after a chord. Asked upstream; .claude/plans/guide-hotkeys.plan.md.
+# History: with OGUI's single-cap intercept ([Guide]) the first HW run (2026-10-21, MANGMI Air X)
+# lost every chord: the Guide press flipped InterceptMode to Always and the layer's F-keys went to
+# DBus only. Sending ui_guide on press (2026-10-22) fixed the chords but opened the menu after each
+# one. Agreed with ShadowApex 2026-10-26: drop the intercept, defer the tap.
 #
 # TARGET_DEVICES IS EXPLICIT, not omitted: omitting keeps the composite's current targets, which
 # on every board but one is already exactly this triple — but the MANGMI Pocket Max ships without
 # a keyboard target (its devices.d header: nothing in that composite produces a keyboard
 # capability), and the layer's F-keys would be dropped there. Loading this profile replaces the
-# target list, so the Max gains keyboard/mouse while the profile is live; the restore afterwards
-# loads a profile without target_devices, which leaves targets as they are — a residue on the Max
-# only, gone at reboot, harmless (an idle keyboard target).
+# target list, so the Max gains keyboard/mouse while the profile is live; OGUI's focus profile has
+# no target_devices, which leaves targets as they are — a residue on the Max only, gone at reboot,
+# harmless (an idle keyboard target).
 #
 # R2 appears twice (trigger AND button): the boards' capability maps disagree on what the right
 # trigger is post-translation — ret1 claims ABS_HAT2Y as an analog trigger, others emit a button.
@@ -94,3 +91,20 @@ layers:
             button: Start
         target_events:
           - keyboard: KeyF4
+
+      # OpenGamepadUI's own Guide combos, which its intercept used to catch: every gamepad_profile
+      # carries them in the layer Guide holds (tests/test-launch.sh checks), so emulators keep A
+      # and Y free for them. Using them counts as using the layer: no ui_guide tap on release.
+      - name: Guide+A -> ui_quick (OpenGamepadUI quick bar)
+        source_event:
+          gamepad:
+            button: South
+        target_events:
+          - dbus: ui_quick
+
+      - name: Guide+Y -> ui_osk (OpenGamepadUI on-screen keyboard)
+        source_event:
+          gamepad:
+            button: North
+        target_events:
+          - dbus: ui_osk

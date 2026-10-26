@@ -333,6 +333,34 @@ python3 -c 'import json,os,sys; d=json.load(open(sys.argv[1])); sys.exit(any(not
 
 # =================================================================================================
 CASE="every emulator definition"
+# A gamepad_profile replaces what OGUI's intercept did for Guide (OGUI patch 0024 adds the same to
+# its own JSON profiles): Guide holds a layer AND sends dbus ui_guide (InputPlumber 0002 taps it on
+# release when the layer went unused), and that layer maps South -> ui_quick (quick bar) and
+# North -> ui_osk (keyboard). CPAN::Meta::YAML (core perl) reads our block-style profiles.
+guide_layer_ok() {
+  perl -MCPAN::Meta::YAML -e '
+    my $p = CPAN::Meta::YAML->read($ARGV[0]) or exit 1; $p = $p->[0];
+    my ($layer, $tap);
+    for my $m (@{ $p->{mapping} || [] }) {
+      next unless ((($m->{source_event} || {})->{gamepad} || {})->{button} // "") eq "Guide";
+      for my $t (@{ $m->{target_events} || [] }) {
+        $layer = $t->{layer}{name} if ref $t->{layer};
+        $tap = 1 if ($t->{dbus} // "") eq "ui_guide";
+      }
+    }
+    exit 1 unless defined $layer && $tap;
+    my %row;
+    for my $l (@{ $p->{layers} || [] }) {
+      next unless $l->{name} eq $layer;
+      for my $m (@{ $l->{mapping} || [] }) {
+        my $b = (($m->{source_event} || {})->{gamepad} || {})->{button} // next;
+        $row{$b} = join ",", map { $_->{dbus} // "-" } @{ $m->{target_events} || [] };
+      }
+    }
+    exit !(($row{South} // "") eq "ui_quick" && ($row{North} // "") eq "ui_osk");
+  ' "$1"
+}
+
 # Each emulator.json must load (a refused definition only shows when a player starts a game) and
 # seed only files the image has. With no download, --gui stops at "not installed" (exit 3) AFTER
 # the definition was validated; a bad one is exit 2.
@@ -345,6 +373,10 @@ for def in "$SEED_DIR"/*/emulator.json; do
   python3 -c 'import json,os,sys; d=json.load(open(sys.argv[1])); p=d.get("gamepad_profile"); sys.exit(0 if p is None else 0 if os.path.isfile(os.path.join(sys.argv[2], p)) else 1)' \
     "$def" "$(dirname "$def")" && ok "$emu: the gamepad profile, if named, is in the image" \
     || bad "$emu names a gamepad_profile that is not in the image"
+  profile="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("gamepad_profile") or "")' "$def")"
+  [ -z "$profile" ] || { guide_layer_ok "$(dirname "$def")/$profile" \
+    && ok "$emu: its gamepad profile carries OGUI's Guide (layer + ui_guide tap, Guide+A/Y)" \
+    || bad "$emu: $profile lacks Guide -> [layer, dbus ui_guide] or the layer's South -> ui_quick / North -> ui_osk"; }
 done
 for emu in $(sed -n 's/^[a-z0-9_]*=\([a-z0-9_-]*\)$/\1/p' "$LAUNCH_CONF" | sort -u); do
   [ -f "$SEED_DIR/$emu/emulator.json" ] && ok "launch.conf's $emu has a definition" || bad "launch.conf names $emu, which has no emulator.json"
@@ -1407,10 +1439,10 @@ EOF
   && ok 'setup_args holding "{rom}" is refused (a setup run has no game)' || bad 'accepted {rom} in setup_args'
 
 # =================================================================================================
-CASE="gamepad profile (emulator.json gamepad_profile -> InputPlumber)"
-# The definition's InputPlumber profile (the Guide hotkey layer) is loaded into every composite
-# device before the game starts, and whatever each device had is put back when it exits — through
-# busctl, best-effort end to end: no InputPlumber (a dev box, these tests) must still mean a game.
+CASE="gamepad profile (emulator.json gamepad_profile -> OpenGamepadUI declaration)"
+# The definition's InputPlumber profile (the Guide hotkey layer) is declared to OpenGamepadUI, which
+# loads it while the game has focus: the profile's path and the launcher's pid, written before the
+# game starts and removed when it exits. Best-effort: a declaration that fails still means a game.
 mkdir -p "$BD/fakepad"
 cat > "$BD/fakepad/emulator.json" <<'EOF'
 {"format": "binary", "binary": "current", "args": ["{rom}"], "gamepad_profile": "guide.yaml"}
@@ -1419,61 +1451,50 @@ printf 'version: 1\n' > "$BD/fakepad/guide.yaml"
 echo "n64=fakepad" > "$T/launch-pad.conf"
 mkdir -p "$T/emus/fakepad"; cp "$T/fake-emu" "$T/emus/fakepad/v1.0.0.AppImage"
 ln -s v1.0.0.AppImage "$T/emus/fakepad/current"
-# The fake busctl: two composite devices, every call recorded, the "previous" profile settable.
-cat > "$T/bin/busctl" <<EOF
-#!/bin/bash
-echo "\$*" >> "$T/busctl.log"
-[ -f "$T/busctl-fails" ] && exit 1
-case "\$2" in
-  tree) printf '/org/shadowblip/InputPlumber/CompositeDevice0\n/org/shadowblip/InputPlumber/CompositeDevice1\n' ;;
-  get-property) printf 's "%s"\n' "\$(cat "$T/busctl-prev" 2>/dev/null)" ;;
-esac
-exit 0
-EOF
-chmod +x "$T/bin/busctl"
-pl() { RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-pad.conf" "$LAUNCH" "$@"; }
+DECL="$T/ogui/game_profile"
+pl() { RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-pad.conf" \
+         RETROFORGE_GAME_PROFILE="$DECL" "$LAUNCH" "$@"; }
 
-rm -f "$T/busctl.log"; echo "/etc/inputplumber/previous.yaml" > "$T/busctl-prev"; reset_logs
+rm -rf "$T/ogui"; reset_logs
 pl n64 "$NROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
 wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
-loads="$(grep -c "LoadProfilePath s $BD/fakepad/guide.yaml" "$T/busctl.log" 2>/dev/null)"
-[ "$loads" = 2 ] && ok "the profile is loaded on every composite device before the game" \
-  || bad "expected 2 loads, saw ${loads:-0}: $(cat "$T/busctl.log" 2>/dev/null)"
-restores="$(grep -c "LoadProfilePath s /etc/inputplumber/previous.yaml" "$T/busctl.log" 2>/dev/null)"
-[ "$restores" = 0 ] && ok "nothing is restored while the game runs" || bad "restored mid-game"
+[ "$(sed -n 1p "$DECL" 2>/dev/null)" = "$BD/fakepad/guide.yaml" ] \
+  && ok "the profile is declared (its directory created) before the game starts" \
+  || bad "declaration: $(cat "$DECL" 2>&1)"
+owner="$(sed -n 2p "$DECL" 2>/dev/null)"
+grep -q retroforge-launch "/proc/${owner:-0}/cmdline" 2>/dev/null && ok "the declaration names the launcher's pid" \
+  || bad "declared pid ${owner:-none} is not a running launcher"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
-restores="$(grep -c "LoadProfilePath s /etc/inputplumber/previous.yaml" "$T/busctl.log" 2>/dev/null)"
-[ "$restores" = 2 ] && ok "each device gets its previous profile back on exit" \
-  || bad "expected 2 restores, saw ${restores:-0}: $(cat "$T/busctl.log" 2>/dev/null)"
+[ ! -e "$DECL" ] && ok "the declaration is withdrawn when the game exits" || bad "declaration left: $(cat "$DECL")"
 
-# A launcher killed between load and restore leaves OUR profile as "previous" for the next run:
-# restoring that would make the leftover permanent, so the default goes back instead.
-rm -f "$T/busctl.log"; echo "$BD/fakepad/guide.yaml" > "$T/busctl-prev"; reset_logs
+# Another launcher's declaration (a newer game) is not ours to withdraw.
+reset_logs
 pl n64 "$NROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
 wait_for emu_up || bad "the emulator never started: $(cat "$T/launch.err")"
+printf '/elsewhere.yaml\n1\n' > "$DECL"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
-restores="$(grep -c "LoadProfilePath s /usr/share/inputplumber/profiles/default.yaml" "$T/busctl.log" 2>/dev/null)"
-[ "$restores" = 2 ] && ok "a leftover of our own profile restores the default, not itself" \
-  || bad "expected 2 default restores, saw ${restores:-0}: $(cat "$T/busctl.log" 2>/dev/null)"
+[ "$(sed -n 1p "$DECL" 2>/dev/null)" = /elsewhere.yaml ] && ok "a declaration that is not ours stays" \
+  || bad "withdrew another launcher's declaration"
+rm -f "$DECL"
 
-# No InputPlumber (busctl fails): the game must start exactly as before, one line in the log.
-rm -f "$T/busctl.log"; : > "$T/busctl-fails"; reset_logs
+# Cannot write the declaration (its directory is a file): the game starts as before, one log line.
+rm -rf "$T/ogui"; : > "$T/ogui"; reset_logs
 pl n64 "$NROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
-wait_for emu_up && ok "no InputPlumber: the game still starts" \
-  || bad "a failing busctl stopped the launch: $(cat "$T/launch.err")"
+wait_for emu_up && grep -q "could not declare" "$T/launch.err" && ok "an undeclarable profile: the game still starts" \
+  || bad "a failed declaration stopped the launch: $(cat "$T/launch.err")"
 touch "$T/stop-emu"; reap_launcher "$lpid"; rc=$?
 [ "$rc" = 7 ] && ok "and the exit path is untouched" || bad "exit was $rc, the emulator 7"
-rm -f "$T/busctl-fails"
+rm -f "$T/ogui"
 
-# A profile the image lacks: hotkeys off, game on, no busctl traffic.
+# A profile the image lacks: hotkeys off, game on, nothing declared.
 cat > "$BD/fakepad/emulator.json" <<'EOF'
 {"format": "binary", "binary": "current", "args": ["{rom}"], "gamepad_profile": "missing.yaml"}
 EOF
-rm -f "$T/busctl.log"; reset_logs
+reset_logs
 pl n64 "$NROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
-wait_for emu_up && grep -q "gamepad profile" "$T/launch.err" && [ ! -e "$T/busctl.log" ] \
-  && ok "a profile the image lacks: a log line, no busctl call, the game starts" \
-  || bad "missing profile: up=$(emu_up && echo yes || echo no), busctl=$(cat "$T/busctl.log" 2>/dev/null), err=$(tail -1 "$T/launch.err" 2>/dev/null)"
+wait_for emu_up && grep -q "gamepad profile" "$T/launch.err" && [ ! -e "$DECL" ] \
+  && ok "a profile the image lacks: a log line, no declaration, the game starts" \
+  || bad "missing profile: up=$(emu_up && echo yes || echo no), decl=$(cat "$DECL" 2>/dev/null), err=$(tail -1 "$T/launch.err" 2>/dev/null)"
 touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null
 
 # =================================================================================================

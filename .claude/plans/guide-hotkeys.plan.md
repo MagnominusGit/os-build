@@ -110,24 +110,59 @@ Gaps:
 - NOT A PROBLEM on the Air X: OGUI's set_gamepad_profile("") on every Guide press left our
   profile loaded.
 
+## Agreed with ShadowApex 2026-10-26: no intercept, deferred Guide tap
+
+Both halves of the problem, fixed where they live:
+- **InputPlumber patch 0002** (ours, for PR #757; packages/inputplumber/patches/0002-*):
+  a mapping that holds a layer down (mode hold) keeps its OTHER outputs back. On release they go
+  out as a press/release tap only if no mapping of a layer the activator holds produced anything
+  in between; otherwise nothing. Base-profile outputs while held do not count. Toggle mode and
+  mappings without other outputs unchanged. LayerState::defer_tap / finish_tap, chorded flag set
+  in record_outputs; handle_event emits the tap through write_chord_events. 6 new layers_test
+  cases, full cargo test green (x86 rust:1 container, 2026-10-26).
+- **OGUI patch 0024** (packages/opengamepadui/patches/0024-*): no intercept mode (card_ui sets
+  NONE). LaunchManager is the ONE profile writer: ogui_focus.json (every pad input -> its DBus UI
+  action, right stick/paddles -> none) whenever OGUI has focus (setup, game state exited, OGUI
+  focused app); in game: OGUI per-game setting > launcher declaration
+  ($XDG_RUNTIME_DIR/opengamepadui/game_profile: path, pid; dead pid = void) > global profile.
+  In game OGUI's own Guide combos live in the layer Guide holds: Guide+A -> dbus ui_quick (quick
+  bar), Guide+Y -> dbus ui_osk. A JSON profile gets Guide -> [layer ogui_guide, ui_guide] and
+  those rows where free (*_guide.json, edited as JSON after the target modification because
+  InputPlumberProfile drops `layers`); our YAML profiles carry them (test-launch
+  guide_layer_ok). A Guide release with no press seen is ignored (Guide+A opens the quick bar,
+  which loads the focus profile while Guide is still held). _guide_input
+  no longer swaps profiles on press; gamepad_settings no longer loads profiles (OGUI has focus
+  whenever it is open). Fixes upstream set_gamepad_profile's early `break` that never loaded a
+  profile on a device with a gamepad target (why the 2026-10-22 profile "survived").
+- **retroforge-launch**: no busctl. "gamepad_profile" is declared (atomic write, our pid) before
+  Popen and withdrawn on exit unless another launcher's declaration replaced it.
+
+In the library (focus profile) OGUI's combos work the old way (ogui_guide_action).
+
 ## HW checklist (Pocket ACE or FIT; also once on a Pocket Max for the keyboard-target case)
 
-1. `busctl --system get-property org.shadowblip.InputPlumber \
+1. Library: d-pad/stick/A/B/L1/R1/triggers navigate as before (focus profile replaces intercept);
+   `busctl --system get-property org.shadowblip.InputPlumber \
    /org/shadowblip/InputPlumber/CompositeDevice0 org.shadowblip.Input.CompositeDevice ProfilePath`
-   before a game, during (must be .../snes9x/guide-hotkeys.yaml), after (back to previous).
-   journalctl -u inputplumber: no profile parse error (first real validation of the YAML).
-2. In a SNES game: Guide tap alone still opens the OGUI in-game panel (on release), and closes it.
-3. Guide+R1 saves (toast/sound), Guide+L1 loads, Guide+R2 held fast-forwards and releases clean,
-   Guide+Start exits to the library with SRAM intact. No stuck keys after releasing Guide mid-chord.
-4. The combo does NOT open the OGUI panel (the chord must cancel the intercept release) — THE open
-   question; if it opens anyway, the Guide self-mapping needs rethinking (e.g. drop it and send the
-   menu another way).
-5. In the card UI after exit: L1/R1/R2/Start behave normally (restore worked; a stale layer
-   profile would turn them into keyboard events OGUI ignores).
-6. Existing homes: the [Shortcuts] seed only lands on first run — an installed Snes9x needs
+   = .../user data/gamepad/profiles/ogui_focus.json; InterceptMode = 0.
+   journalctl -u inputplumber: no parse error for ogui_focus.json.
+2. SNES game: ProfilePath = .../snes9x/guide-hotkeys.yaml once the window has focus;
+   cat $XDG_RUNTIME_DIR/opengamepadui/game_profile shows it + the launcher pid.
+3. Guide tap alone opens the OGUI menu (on release); the menu navigates (focus profile); closing
+   it puts guide-hotkeys.yaml back and the game gets input.
+4. Guide+R1 saves, Guide+L1 loads, Guide+R2 held fast-forwards, Guide+Start quits — and NONE of
+   them opens the menu on Guide release. No stuck keys when Guide is released mid-chord.
+4b. In game: Guide+A opens the quick bar, Guide+Y the keyboard; neither opens the main menu on
+   Guide release, the game gets no A/Y, and the quick bar stays open after Guide is released.
+   Watch for a stray ui_accept release activating the focused quick-bar item.
+5. After exit: library input normal (focus profile), declaration file gone.
+6. A game WITHOUT a profile (e.g. PPSSPP): ProfilePath = global_default_guide.json (or the
+   target-modified variant), Guide tap opens the menu, the game gets every other button.
+7. Hotplug a pad (BT) in the library and in game: it gets the profile of whoever has focus.
+8. Existing homes: the [Shortcuts] seed only lands on first run — an installed Snes9x needs
    ~/.config/snes9x/snes9x.conf [Shortcuts] added by hand (or delete the file).
-7. OGUI's own interference: does set_gamepad_profile("") fire on focus change and stomp the
-   profile mid-game? (Suspected no-op: launch_manager.gd:500-501, profile_path must end .json.)
+9. Gamepad settings screen: open, change a global mapping, save; library still navigates; the
+   change applies in the next game without a profile.
 
 ## Rollout after a green testbed
 
