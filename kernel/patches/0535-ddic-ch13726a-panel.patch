@@ -375,7 +375,7 @@ index 000000000..692f2bcd6
 +	.probe = ch13726a_probe,
 +	.remove = ch13726a_remove,
 +	.driver = {
-+		.name = "panel-ch13726a-amoled",
++		.name = "panel-ddic-ch13726a",
 +		.of_match_table = ch13726a_of_match,
 +	},
 +};
