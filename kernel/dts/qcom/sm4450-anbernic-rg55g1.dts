@@ -381,20 +381,13 @@
 		serial0 = &uart7;
 	};
 
+	/*
+	 * No simple-framebuffer, as on every other board: simpledrm would take DRM
+	 * minor 0 with no panel orientation, leaving msm on card1 and the splash
+	 * (which opens card0, else fbdev) drawing unrotated.
+	 */
 	chosen {
-		#address-cells = <2>;
-		#size-cells = <2>;
-		ranges;
 		stdout-path = "serial0:115200n8";
-
-		framebuffer: framebuffer@b8000000 {
-			compatible = "simple-framebuffer";
-			reg = <0x0 0xb8000000 0x0 0x7e9000>;
-			width = <1080>;
-			height = <1920>;
-			stride = <4320>;
-			format = "x8r8g8b8";
-		};
 	};
 
 	/* TODO: Display rails */
