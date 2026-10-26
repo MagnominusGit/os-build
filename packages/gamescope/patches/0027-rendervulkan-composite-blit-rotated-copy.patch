@@ -281,10 +281,10 @@ index ef74a06..4cdff9b 100644
  	void clearImage(gamescope::Rc<CVulkanTexture> dst, const VkClearColorValue &color);
  
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index 5b099f0..f22e552 100644
+index 1e606ad..366a29b 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
-@@ -8511,6 +8511,7 @@ static PooledImage_t *GetTempUpscaleImage( global_focus_t *pFocus, uint32_t uWid
+@@ -8524,6 +8524,7 @@ static PooledImage_t *GetTempUpscaleImage( global_focus_t *pFocus, uint32_t uWid
  	imageFlags.bSampled = true;
  	imageFlags.bStorage = !g_bCompositeGraphics;
  	imageFlags.bColorAttachment = g_bCompositeGraphics;

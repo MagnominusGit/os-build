@@ -69,10 +69,10 @@ index c4837af..8d1beeb 100644
  enum class GamescopeUpscaleFilter : uint32_t
  {
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index 33212e6..a46fe4a 100644
+index 33ba610..9382654 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
-@@ -11157,6 +11157,24 @@ steamcompmgr_main(int argc, char **argv)
+@@ -11170,6 +11170,24 @@ steamcompmgr_main(int argc, char **argv)
  		if ( g_bSecondaryOutput && g_SecondaryFocus.IsDirty() )
  			determine_and_apply_secondary_focus();
  

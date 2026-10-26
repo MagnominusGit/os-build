@@ -140,7 +140,7 @@ index 216e36e..81b1879 100644
  gamescope::Rc<CVulkanTexture> vulkan_acquire_screenshot_texture(uint32_t width, uint32_t height, bool exportable, uint32_t drmFormat, EStreamColorspace colorspace = k_EStreamColorspace_Unknown);
  gamescope::Rc<CVulkanTexture> vulkan_acquire_capture_texture(uint32_t width, uint32_t height, bool exportable, uint32_t drmFormat, EStreamColorspace colorspace = k_EStreamColorspace_Unknown);
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index 722f288..23efff8 100644
+index c329681..68cd720 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
 @@ -2525,6 +2525,7 @@ paint_cached_base_layer(const gamescope::Rc<commit_t>& commit, const BaseLayerIn

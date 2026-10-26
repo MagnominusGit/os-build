@@ -20,7 +20,7 @@ keep the doubling for caps and for rates the panel does not offer.
  1 file changed, 9 insertions(+)
 
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index 4a72c09..a3b05e9 100644
+index 49813ad..b3b66fb 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
 @@ -1319,6 +1319,15 @@ static void _update_app_target_refresh_cycle()

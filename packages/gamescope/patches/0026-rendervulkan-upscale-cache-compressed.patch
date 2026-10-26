@@ -44,10 +44,10 @@ index 2d4a917..ef74a06 100644
  gamescope::Rc<CVulkanTexture> vulkan_get_last_output_image( bool partial, bool defer );
  gamescope::Rc<CVulkanTexture> vulkan_acquire_screenshot_texture(uint32_t width, uint32_t height, bool exportable, uint32_t drmFormat, EStreamColorspace colorspace = k_EStreamColorspace_Unknown);
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index ba91a79..5b099f0 100644
+index ee4aa5c..1e606ad 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
-@@ -8509,7 +8509,8 @@ static PooledImage_t *GetTempUpscaleImage( global_focus_t *pFocus, uint32_t uWid
+@@ -8522,7 +8522,8 @@ static PooledImage_t *GetTempUpscaleImage( global_focus_t *pFocus, uint32_t uWid
  {
  	CVulkanTexture::createFlags imageFlags;
  	imageFlags.bSampled = true;
@@ -57,7 +57,7 @@ index ba91a79..5b099f0 100644
  	imageFlags.bFlippable = true;
  	return GetPooledImage( pFocus->UpscaleImages, pFocus->uNextUpscaleImage, uWidth, uHeight, uDrmFormat, imageFlags, "upscale" );
  }
-@@ -8830,7 +8831,7 @@ void update_wayland_res(const std::shared_ptr<CommitDoneList_t> &doneCommits, st
+@@ -8843,7 +8844,7 @@ void update_wayland_res(const std::shared_ptr<CommitDoneList_t> &doneCommits, st
  				vulkan_wait( *pUpscaleFocus->oLastPreemptiveUpscaleSeqNo, true );
  			}
  

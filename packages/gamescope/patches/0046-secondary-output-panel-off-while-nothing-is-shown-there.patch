@@ -157,7 +157,7 @@ index b5f395c..2632869 100644
          // (ConVar drm_secondary_plane_rotation), so a rotated panel can take direct scanout.
          virtual bool SecondaryPlaneMayRotate() { return false; }
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index bb760a6..4a72c09 100644
+index 9bb25c8..49813ad 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
 @@ -5741,6 +5741,29 @@ determine_and_apply_focus( global_focus_t *pFocus )
@@ -190,7 +190,7 @@ index bb760a6..4a72c09 100644
  // Paints the secondary focus onto the secondary output when it has new content and the output can
  // take a frame. Direct scanout first: on an unrotated panel, a buffer the size of the output goes
  // on the plane as is. Otherwise (a rotated panel, other sizes, or a buffer the plane refuses) the
-@@ -11415,7 +11438,10 @@ steamcompmgr_main(int argc, char **argv)
+@@ -11428,7 +11451,10 @@ steamcompmgr_main(int argc, char **argv)
  		// The secondary output paints on its own: it never sets bPainted, so the main output's
  		// repaint state and frame pacing do not see it.
  		if ( vblank && g_bSecondaryOutput )

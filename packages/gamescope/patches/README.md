@@ -23,6 +23,7 @@ root (the `gamescope/` checkout inside makepkg's `$srcdir`) by
 0019-rendervulkan-fragment-shader-composite.patch   (--composite-graphics, passed by default from etc/retroforge/session.conf)
 0020-libliftoff-treat-enodev-as-no-fit.patch        (patches the libliftoff SUBMODULE; only with 0021)
 0021-libliftoff-give-planes-the-layer-zpos.patch    (patches the libliftoff SUBMODULE)
+0025-steamcompmgr-elapsed-time-fps-limiter.patch     (ConVar limiter_use_elapsed_time, default on)
 0026-rendervulkan-upscale-cache-compressed.patch        (ROCKNIX fork 0018)
 0027-rendervulkan-composite-blit-rotated-copy.patch     (ROCKNIX fork 0019; --composite-blit, passed by default from etc/retroforge/session.conf)
 0028-drmbackend-pre-rotate-layers-the-plane-cannot-rotate.patch   (ROCKNIX fork 0021, re-rolled by hand on 0014/0018)
@@ -355,17 +356,23 @@ interfaces' CTL flushes straddling the DPU's programmable fetch start (upstream 
 `kernel/patches/0395`. The lead cost ~1.25 ms of latency on every board, and on SM8250 its reserve
 ratcheted up on the offline rotator's late flips and took games from 60 to 40 fps (upstream, Pocket Max).
 
-`0025` — **RETIRED 2026-10-26 with the 3.17.0 bump.** It released limited frames on fixed-refresh
-panels by elapsed time (`last_commit_first_latch_time` + the limited period, half a refresh period
-of slack; ConVar `limiter_use_elapsed_time`) instead of stock gamescope's
-`vblank_idx % (refresh / cap)` divisor gate (virtudude, body unchanged; armada PR #629, ported
-from upstream 4caee07). 3.17.0 rewrote that exact branch in 62707e1e: the gate now opens when the
-display vblank count crosses a limiter boundary, so a stalled or repeated pass no longer shifts the
-limiter's phase against the display. That is not the same fix: upstream still releases only on
-boundary vblanks, so a frame that misses one waits for the next, which is the short/double-length
-alternation 0025 targeted. Whether that stutter survives on stock 3.17.0 is the thing to check
-before reviving it. `kernel/patches/0390` (real vblank timestamps on command-mode panels) is
-independent and stays.
+`0025` — **the fixed-refresh frame limiter releases by elapsed time, not by vblank count**
+(virtudude; armada PR #629, ported from upstream 4caee07; retired with the 3.17.0 bump, then back
+the same day as Nova-Deck's `0036`, rebased onto 62707e1e's boundary-crossing gate with the gate
+body unchanged — we keep our number). With a frame cap below the refresh rate and no VRR — every
+board we ship, DSI has no VRR — 3.17.0 releases a limited frame only when the display vblank count
+crosses a limiter boundary, so a frame that misses its boundary vblank is shown one vblank late and
+a game that cannot quite hold its cap alternates short and long frames. `0025` gates on
+`last_commit_first_latch_time` + the limited period with half a refresh period of slack, the same
+scheme gamescope already uses for VRR. ConVar `limiter_use_elapsed_time` (default on); `0` restores
+stock 3.17.0's gate live. A/B'd upstream on 3.17.0, 2026-10-26:
+- Pocket Max, PGRC loaded to ~67 fps uncapped, 144 Hz cap 72: stock left 15-53% of commits at
+  20.8 ms (3 vblanks); `0025` held 99% at 13.9 ms.
+- Pocket FIT, PGRC light (~140 uncapped), 72 @144, 60 @120, 30 @120: indistinguishable from stock
+  (98.7-99.4% on cadence, no extra early frames), so releasing up to half a refresh early does not
+  make a light game alternate short/long frames.
+`kernel/patches/0390` (real vblank timestamps on command-mode panels) is independent: that one fixed
+the cap running fast, this one the stutter when a game cannot hold it.
 
 **The 3.17.0 bump (2026-10-26, ported from Nova-Deck 09b8a3c4).** Every patch was restacked on the
 tag as a git series and regenerated with `git diff`, headers kept apart from dated notes. `0014`,

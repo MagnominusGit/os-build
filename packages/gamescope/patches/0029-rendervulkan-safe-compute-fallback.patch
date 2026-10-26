@@ -159,10 +159,10 @@ index eb6d5e2..6461e60 100644
  	// NIS
  	gamescope::OwningRc<CVulkanTexture> nisScalerImage;
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index 2375a2f..722f288 100644
+index 60ed746..c329681 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
-@@ -8512,6 +8512,7 @@ static PooledImage_t *GetTempUpscaleImage( global_focus_t *pFocus, uint32_t uWid
+@@ -8525,6 +8525,7 @@ static PooledImage_t *GetTempUpscaleImage( global_focus_t *pFocus, uint32_t uWid
  	imageFlags.bSampled = true;
  	imageFlags.bStorage = !g_bCompositeGraphics;
  	imageFlags.bColorAttachment = g_bCompositeGraphics;
@@ -170,7 +170,7 @@ index 2375a2f..722f288 100644
  	imageFlags.bTransferSrc = g_bCompositeBlit;
  	imageFlags.bFlippable = true;
  	return GetPooledImage( pFocus->UpscaleImages, pFocus->uNextUpscaleImage, uWidth, uHeight, uDrmFormat, imageFlags, "upscale" );
-@@ -8835,27 +8836,35 @@ void update_wayland_res(const std::shared_ptr<CommitDoneList_t> &doneCommits, st
+@@ -8848,27 +8849,35 @@ void update_wayland_res(const std::shared_ptr<CommitDoneList_t> &doneCommits, st
  
  			std::optional<uint64_t> seqNo = vulkan_composite( &upscaledFrameInfo, nullptr, false, pTempImage->pTexture, false, std::move( pCommandBuffer ), true );
  

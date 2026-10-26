@@ -122,7 +122,7 @@ index 34f5690..b5f395c 100644
          virtual bool SupportsPlaneHardwareCursor() const = 0;
          virtual bool SupportsTearing() const = 0;
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index a46fe4a..7792d2a 100644
+index 9382654..fa29d46 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
 @@ -5764,7 +5764,7 @@ static void paint_secondary_output()

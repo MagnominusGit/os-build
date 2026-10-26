@@ -590,7 +590,7 @@ index 4cdff9b..eb6d5e2 100644
  gamescope::Rc<CVulkanTexture> vulkan_acquire_capture_texture(uint32_t width, uint32_t height, bool exportable, uint32_t drmFormat, EStreamColorspace colorspace = k_EStreamColorspace_Unknown);
  uint32_t vulkan_get_rgb10_capture_format( void );
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index f22e552..2375a2f 100644
+index 366a29b..60ed746 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
 @@ -1130,6 +1130,7 @@ global_focus_t *GetFocusForWindow( steamcompmgr_win_t *w )
@@ -619,7 +619,7 @@ index f22e552..2375a2f 100644
  		{
  			auto tex = vulkan_get_hacky_blank_texture();
  			if ( tex != nullptr && frameInfo.layers.count() < k_nMaxLayers )
-@@ -10642,6 +10643,7 @@ steamcompmgr_main(int argc, char **argv)
+@@ -10655,6 +10656,7 @@ steamcompmgr_main(int argc, char **argv)
  			 currentOutputHeight != g_nOutputHeight ||
  			 currentOutputRefresh != g_nOutputRefresh ||
  			 currentOutputRotation != g_uOutputRotation ||
@@ -627,7 +627,7 @@ index f22e552..2375a2f 100644
  			 currentHDROutput != g_bOutputHDREnabled ||
  			 currentHDRCapable != bOutputHDRCapable ||
  			 currentHDRForce != g_bForceHDRSupportDebug )
-@@ -10694,6 +10696,7 @@ steamcompmgr_main(int argc, char **argv)
+@@ -10707,6 +10709,7 @@ steamcompmgr_main(int argc, char **argv)
  			currentOutputHeight = g_nOutputHeight;
  			currentOutputRefresh = g_nOutputRefresh;
  			currentOutputRotation = g_uOutputRotation;

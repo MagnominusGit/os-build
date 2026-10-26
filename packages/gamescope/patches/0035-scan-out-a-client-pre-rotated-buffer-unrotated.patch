@@ -169,7 +169,7 @@ index 7aacc76..7304281 100644
  	if (!frameInfo->applyOutputColorMgmt)
  		outputTF = EOTF_Count; //Disable blending stuff.
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index 23efff8..32c92d0 100644
+index 68cd720..3cc737d 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
 @@ -2514,6 +2514,17 @@ void MouseCursor::updateCursorFeedback( bool bForce )
@@ -241,7 +241,7 @@ index 23efff8..32c92d0 100644
  		} else {
  			sourceWidth = scaleW->GetGeometry().nWidth;
  			sourceHeight = scaleW->GetGeometry().nHeight;
-@@ -8739,6 +8756,7 @@ void update_wayland_res(const std::shared_ptr<CommitDoneList_t> &doneCommits, st
+@@ -8752,6 +8769,7 @@ void update_wayland_res(const std::shared_ptr<CommitDoneList_t> &doneCommits, st
  		// Import failed to import, early exit.
  		return;
  	}

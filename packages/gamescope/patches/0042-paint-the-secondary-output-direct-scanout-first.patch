@@ -381,7 +381,7 @@ index 81b1879..f24c323 100644
  gamescope::Rc<CVulkanTexture> vulkan_get_last_output_image( bool partial, bool defer );
  gamescope::Rc<CVulkanTexture> vulkan_blit_rotate_target( gamescope::Rc<CVulkanTexture> pTex, uint32_t uRotation, uint32_t uSlot, bool bAdvance, uint64_t ulContentID = 0, bool *pbNeedsBlit = nullptr );
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index 14842f0..33212e6 100644
+index 40825da..33ba610 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
 @@ -5722,6 +5722,96 @@ determine_and_apply_focus( global_focus_t *pFocus )
@@ -481,7 +481,7 @@ index 14842f0..33212e6 100644
  // The secondary output shows the newest viewable window tagged for it, at the panel's size.
  static void determine_and_apply_secondary_focus()
  {
-@@ -11264,6 +11354,11 @@ steamcompmgr_main(int argc, char **argv)
+@@ -11277,6 +11367,11 @@ steamcompmgr_main(int argc, char **argv)
  			}
  		}
  

@@ -23,7 +23,7 @@ windows are composited regardless of their X origin.
 (retroforge: dual-screen boards, 2026-10-12.)
 ---
 diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
-index 7792d2a..bb760a6 100644
+index fa29d46..9bb25c8 100644
 --- a/src/steamcompmgr.cpp
 +++ b/src/steamcompmgr.cpp
 @@ -1102,6 +1102,25 @@ static std::optional<std::regex> g_SecondaryWindowTitle;
@@ -89,7 +89,7 @@ index 7792d2a..bb760a6 100644
  		changes.y = 0;
  		changes.width = g_uSecondaryOutputWidth;
  		changes.height = g_uSecondaryOutputHeight;
-@@ -9681,6 +9704,7 @@ void init_xwayland_ctx(uint32_t serverId, gamescope_xwayland_server_t *xwayland_
+@@ -9694,6 +9717,7 @@ void init_xwayland_ctx(uint32_t serverId, gamescope_xwayland_server_t *xwayland_
  
  	ctx->root_width = DisplayWidth(ctx->dpy, ctx->scr);
  	ctx->root_height = DisplayHeight(ctx->dpy, ctx->scr);
