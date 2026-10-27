@@ -121,7 +121,7 @@
 #         game's profile: OGUI's per-game setting, else the one the launcher declares in
 #         $XDG_RUNTIME_DIR/opengamepadui/game_profile (retroforge-launch, "gamepad_profile"), else
 #         the global one. A JSON game profile gets Guide -> [layer, ui_guide] and the layer gets
-#         Guide+A -> ui_quick, Guide+Y -> ui_osk where it leaves them free (our YAML profiles carry
+#         Guide+A -> ui_quick, Guide+X -> ui_osk where it leaves them free (our YAML profiles carry
 #         them, test-launch checks); a Guide release without its press is ignored (a combo that
 #         opened a menu swapped the profile while Guide was held). The single-cap [Guide] intercept flipped to
 #         Always on the Guide press and ate the emulator hotkey layer (HW, MANGMI Air X,

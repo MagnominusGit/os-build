@@ -15,7 +15,9 @@
 # profile is the only way it learns Guide was pressed in game. InputPlumber patch 0002 holds the
 # ui_guide back while Guide is down: released alone, OGUI gets a ui_guide tap and opens its menu;
 # released after Guide+R1 (anything the layer mapped), nothing goes out and the menu stays shut.
-# The layer also maps OGUI's Guide+A (quick bar) and Guide+Y (keyboard) to DBus, at the end.
+# The layer also maps OGUI's Guide+A (quick bar) and Guide+X (keyboard) to DBus, at the end.
+# InputPlumber names face buttons by evdev code: North is BTN_NORTH, the alias of BTN_X, so the
+# left button on an Xbox layout (Y is West). OGUI's own Guide+North keyboard combo is X too.
 #
 # History: with OGUI's single-cap intercept ([Guide]) the first HW run (2026-10-21, MANGMI Air X)
 # lost every chord: the Guide press flipped InterceptMode to Always and the layer's F-keys went to
@@ -102,7 +104,7 @@ layers:
         target_events:
           - dbus: ui_quick
 
-      - name: Guide+Y -> ui_osk (OpenGamepadUI on-screen keyboard)
+      - name: Guide+X -> ui_osk (OpenGamepadUI on-screen keyboard)
         source_event:
           gamepad:
             button: North

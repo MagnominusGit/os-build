@@ -126,7 +126,8 @@ Both halves of the problem, fixed where they live:
   focused app); in game: OGUI per-game setting > launcher declaration
   ($XDG_RUNTIME_DIR/opengamepadui/game_profile: path, pid; dead pid = void) > global profile.
   In game OGUI's own Guide combos live in the layer Guide holds: Guide+A -> dbus ui_quick (quick
-  bar), Guide+Y -> dbus ui_osk. A JSON profile gets Guide -> [layer ogui_guide, ui_guide] and
+  bar), Guide+X -> dbus ui_osk (InputPlumber North = BTN_NORTH = BTN_X, the left face button).
+  A JSON profile gets Guide -> [layer ogui_guide, ui_guide] and
   those rows where free (*_guide.json, edited as JSON after the target modification because
   InputPlumberProfile drops `layers`); our YAML profiles carry them (test-launch
   guide_layer_ok). A Guide release with no press seen is ignored (Guide+A opens the quick bar,
@@ -152,8 +153,8 @@ In the library (focus profile) OGUI's combos work the old way (ogui_guide_action
    it puts guide-hotkeys.yaml back and the game gets input.
 4. Guide+R1 saves, Guide+L1 loads, Guide+R2 held fast-forwards, Guide+Start quits — and NONE of
    them opens the menu on Guide release. No stuck keys when Guide is released mid-chord.
-4b. In game: Guide+A opens the quick bar, Guide+Y the keyboard; neither opens the main menu on
-   Guide release, the game gets no A/Y, and the quick bar stays open after Guide is released.
+4b. In game: Guide+A opens the quick bar, Guide+X the keyboard; neither opens the main menu on
+   Guide release, the game gets no A/X, and the quick bar stays open after Guide is released.
    Watch for a stray ui_accept release activating the focused quick-bar item.
 5. After exit: library input normal (focus profile), declaration file gone.
 6. A game WITHOUT a profile (e.g. PPSSPP): ProfilePath = global_default_guide.json (or the

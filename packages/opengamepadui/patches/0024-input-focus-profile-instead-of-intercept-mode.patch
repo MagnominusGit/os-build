@@ -842,7 +842,7 @@ index 2e8b5ee..aaa692c 100644
 +
 +## Returns a profile that carries OpenGamepadUI's Guide handling, which intercept mode used to do:
 +## Guide holds a layer and sends ui_guide (InputPlumber taps it on release only when nothing in the
-+## layer was used), and the layer maps GUIDE_COMBOS (Guide+A quick bar, Guide+Y keyboard). Rows the
++## layer was used), and the layer maps GUIDE_COMBOS (Guide+A quick bar, Guide+X keyboard). Rows the
 +## profile maps itself win; a profile that maps Guide without a layer is left alone. Works on the
 +## JSON directly, after the target modification, since InputPlumberProfile drops `layers`.
 +func _with_guide_layer(profile_path: String) -> String:
