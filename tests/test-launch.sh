@@ -574,6 +574,7 @@ for f in melonDS.toml melonDS-dual-screen.toml; do
   lacks melonds/$f '^HK_(Mic|SwapScreens) = (9|10)$' "mic or swap on L3/R3 alone (too easy to click)"
 done
 has melonds/melonDS.toml 'HK_SwapScreenEmphasis = 16777232' "Home (Qt::Key_Home) swaps the emphasis: Guide+Y"
+has melonds/melonDS.toml 'ScreenSizing = 1' "top screen emphasized: the emphasis swap has nothing to swap at equal sizes"
 lacks melonds/melonDS-dual-screen.toml '^HK_SwapScreenEmphasis' "dual screen: an emphasis hotkey (one screen per panel)"
 has flycast/kbd.cfg 'version = 4' "current mapping format (bind lines)"
 has flycast/kbd.cfg 'bind0 = 58:btn_jump_state' "F1 loads the state: Guide+L1"

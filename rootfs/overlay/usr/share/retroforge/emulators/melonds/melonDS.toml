@@ -31,7 +31,10 @@
 #   The screens: L2 becomes F11 (HK_SwapScreens, Qt::Key_F11 = 0x0100003A), Y Home
 #   (HK_SwapScreenEmphasis: which screen is drawn large, Qt::Key_Home = 0x01000010) and R3 End
 #   (HK_Mic, held, Qt::Key_End = 0x01000011). melonDS has no layout-cycle hotkey, only the menu.
-# - Window0: both screens side by side, same size (960x720 each on a 1920x1080 panel).
+# - Window0: both screens side by side, the top one as large as the panel allows and the touch
+#   screen in the space left (ScreenSizing 1, screenSizing_EmphTop in ScreenLayout.h). Guide+Y
+#   (HK_SwapScreenEmphasis) flips which one is large; it does nothing with equal sizes (0), as
+#   MainWindow::onScreenEmphasisToggled only swaps EmphTop and EmphBot.
 # - 3D.Renderer = 0 (software, melonDS's default): only so the [3D] table exists. A RetroForge option
 #   that writes [3D.GL] before melonDS ever ran would otherwise leave [3D] implicit, and toml11 then
 #   fails melonDS's next save after emptying this file.
@@ -85,4 +88,4 @@ HK_Mic = 16777233
 
 [Instance0.Window0]
 ScreenLayout = 2
-ScreenSizing = 0
+ScreenSizing = 1
