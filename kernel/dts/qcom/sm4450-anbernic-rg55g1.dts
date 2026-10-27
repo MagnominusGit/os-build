@@ -333,9 +333,10 @@
 			default-state = "off";
 		};
 
+		/* Amber, not blue: three separate lamps, seen on the device. */
 		led-2 {
 			gpios = <&tlmm 49 GPIO_ACTIVE_HIGH>;
-			color = <LED_COLOR_ID_BLUE>;
+			color = <LED_COLOR_ID_AMBER>;
 			function = LED_FUNCTION_INDICATOR;
 			default-state = "off";
 		};
