@@ -28,11 +28,11 @@
         "ps2"
       ],
       "github": "ARMSX2/ARMSX2",
-      "tag": "nightly-20261005",
-      "tag_pattern": "^nightly-[0-9]{8}$",
-      "asset": "^ARMSX2-nightly-[0-9]{8}-[0-9a-f]+-Linux-arm64-4K-pages\\.AppImage$",
-      "sha256": "3e385af5f19881e5db70c36aba38eb50c89bd7e76d126a4ce87baaf6cbaeb800",
-      "size": 57960968,
+      "tag": "2.9",
+      "tag_pattern": "^[0-9]+(\\.[0-9]+)+$",
+      "asset": "^ARMSX2-[0-9][0-9.]*-Linux-arm64-4K-pages\\.AppImage$",
+      "sha256": "b35c122ebc5f90dcbfd9c1eb20bb02dc0bd3ab796786c5ac9ec43b22fec56f97",
+      "size": 62892552,
       "homepage": "https://armsx2.net/",
       "licence": {
         "name": "GPL-3.0",

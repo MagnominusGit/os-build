@@ -1,6 +1,6 @@
 {
   "armgba": {"repo": "Jacob-Matthew-Cook/armGBA", "tag": "(v[0-9.]+)", "ref": "{0}"},
-  "armsx2": {"repo": "ARMSX2/ARMSX2", "tag": "(nightly-[0-9]{8})", "ref": "{0}"},
+  "armsx2": {"repo": "ARMSX2/ARMSX2", "tag": "([0-9][0-9.]*)", "ref": "{0}"},
   "azahar": {"repo": "azahar-emu/azahar", "tag": "([^@]+)@.*", "ref": "{0}"},
   "cemu": {"repo": "cemu-project/Cemu", "tag": "nightly-([0-9a-f]+)", "ref": "{0}"},
   "clownmdemu": {"repo": "Clownacy/clownmdemu-frontend", "tag": "([^@-]+)(?:-[0-9]+)?@.*", "ref": "v{0}"},

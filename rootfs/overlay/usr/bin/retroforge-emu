@@ -19,7 +19,7 @@
 # page of GET /releases, by published_at (RPCS3's list is sorted by tag name, not by date), the first
 # release that is not a draft, whose tag fully matches `tag_pattern`, and that has exactly one asset
 # matching `asset`. The tag pattern alone decides: GitHub's prerelease flag is NOT a filter (Cemu's
-# and ARMSX2's nightlies carry it), and a rolling tag that replaces its asset in place
+# nightlies carry it), and a rolling tag that replaces its asset in place
 # (DuckStation's `latest`) is kept out by the pattern. A newest build REQUIRES GitHub's per-asset
 # sha256 digest (exit 4 without one) and the bytes must hash to it; nobody at RetroForge tested it,
 # and `list` says so (installed != tested). `check` resolves it without installing, cached in
