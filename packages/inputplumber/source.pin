@@ -15,7 +15,11 @@
 #         down keeps its other outputs back until release, and sends them as a tap only if the
 #         layer produced nothing meanwhile. Guide -> [layer, dbus ui_guide] then opens the OGUI
 #         menu on a lone tap and stays silent after Guide+R1 (it used to send ui_guide on press,
-#         so every chord also opened the menu). Drop with 0001 once upstream carries it.
+#         so every chord also opened the menu). A profile load also releases what the active
+#         layers produced first: OGUI loads its focus profile while Guide+South is still held, and
+#         the lost ui_quick release made the DBus target drop the next press as a duplicate (quick
+#         bar and OSK opened every other time). Upstream PR #771. Drop with 0001 once upstream
+#         carries it.
 name: inputplumber
 pkgbuild_local: PKGBUILD
 patches: 0001-feat-Input-Layers-add-input-layers-to-map-button-com.patch 0002-feat-Input-Layers-a-held-activator-taps-its-other-outputs.patch

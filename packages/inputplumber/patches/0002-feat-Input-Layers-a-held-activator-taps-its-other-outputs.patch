@@ -1,4 +1,4 @@
-From af0ec83caf5e2de031140e7faa505094d108b4dc Mon Sep 17 00:00:00 2001
+From 2ddaa480154b30d15b1f188d7f72790ec2962a1e Mon Sep 17 00:00:00 2001
 From: Philippe Simons <simons.philippe@gmail.com>
 Date: Mon, 26 Oct 2026 17:18:47 +0100
 Subject: [PATCH] feat(Input Layers): a held activator taps its other outputs
@@ -13,11 +13,18 @@ One button then opens a layer when held with others and keeps its own
 meaning when tapped alone.
 
 Toggle activations and mappings without other outputs are unchanged.
+
+Loading a profile also releases what the active layers produced before
+it resets them, as removing a source device already does. Otherwise a
+target keeps that output pressed and drops the next press of it as a
+duplicate: Guide+South -> dbus ui_quick opens OpenGamepadUI's quick bar,
+OpenGamepadUI loads another profile while South is held, and the next
+Guide+South did nothing.
 ---
  src/input/composite_device/layers.rs      |  94 +++++++++++
  src/input/composite_device/layers_test.rs | 185 ++++++++++++++++++++++
- src/input/composite_device/mod.rs         |  12 ++
- 3 files changed, 291 insertions(+)
+ src/input/composite_device/mod.rs         |  25 +++
+ 3 files changed, 304 insertions(+)
 
 diff --git a/src/input/composite_device/layers.rs b/src/input/composite_device/layers.rs
 index 0548e60..9a7070d 100644
@@ -347,10 +354,26 @@ index 6841b53..427a358 100644
 +    }
  }
 diff --git a/src/input/composite_device/mod.rs b/src/input/composite_device/mod.rs
-index f7bf970..ac2efce 100644
+index f7bf970..eda0dc4 100644
 --- a/src/input/composite_device/mod.rs
 +++ b/src/input/composite_device/mod.rs
-@@ -985,6 +985,18 @@ impl CompositeDevice {
+@@ -470,6 +470,7 @@ impl CompositeDevice {
+                                 continue;
+                             }
+                         };
++                        self.release_layer_outputs().await;
+                         let result = match self.load_device_profile(Some(profile.clone()), None) {
+                             Ok(_) => Ok(()),
+                             Err(e) => Err(e.to_string()),
+@@ -502,6 +503,7 @@ impl CompositeDevice {
+                                 continue;
+                             }
+                         };
++                        self.release_layer_outputs().await;
+                         let result = match self
+                             .load_device_profile(Some(profile.clone()), Some(path.clone()))
+                         {
+@@ -985,6 +987,18 @@ impl CompositeDevice {
                  .filter_map(|event| self.filter_event(event))
                  .collect();
  
@@ -369,6 +392,24 @@ index f7bf970..ac2efce 100644
              // Track what an active layer produced, so removing that layer can
              // release it later while the input is still held.
              self.layers
+@@ -2241,6 +2255,17 @@ impl CompositeDevice {
+         Ok(())
+     }
+ 
++    /// Release everything the active layers produced before a profile change
++    /// resets the layer stack. Without it a target keeps an output pressed that
++    /// the new profile never releases, and drops the next press of it as a
++    /// duplicate (Guide+South -> ui_quick only working every other time).
++    async fn release_layer_outputs(&mut self) {
++        let releases = self.layers.clear();
++        if let Err(e) = self.apply_layer_releases(releases).await {
++            log::error!("Failed to release layer outputs: {e:?}");
++        }
++    }
++
+     /// Emit a DBus signal when source devices change
+     async fn signal_sources_changed(&self) {
+         let dbus_path = self.dbus.path().to_string();
 -- 
 2.55.0
 
