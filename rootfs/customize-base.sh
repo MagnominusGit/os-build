@@ -115,8 +115,8 @@ BOOTSTRAP_PKGS=(base)
 #                       shipped python tools; a missing one fails at the shebang or the import.
 #   scx-scheds          sched_ext schedulers (scx_lavd). Installed but OFF by default: retroforge-powerd
 #                       selects one only when the user picks it. Needs CONFIG_SCHED_CLASS_EXT. Overlay.
-#   rauc                A/B update client. Built at 1.15.x in the overlay (packages/rauc): the
-#                       snapshot's 1.14 cannot install a dm-verity bundle on a kernel >= 6.19.
+#   rauc                A/B update client, the snapshot's 1.15.2 (must be >= 1.15.1: 1.14 cannot
+#                       install a dm-verity bundle on a kernel >= 6.19).
 #                       Reads /etc/rauc/system.conf, which points bootloader=custom at retroforge-bootctl.
 #   btrfs-progs         `btrfstune -U` in the post-install hook, so the two slots never share an fsid.
 #   rsync               the post-install hook copies the running /var into the new slot's /var.

@@ -508,7 +508,7 @@ fi
 # goes red on the device, nothing goes red in CI, and the only symptom is a bill and a slow update.
 # So they are asserted here, where a wrong answer is a build failure.
 #
-# 1. rauc must be BUILT with streaming. It is on by default upstream and packages/rauc/PKGBUILD
+# 1. rauc must be BUILT with streaming. It is on by default upstream and the snapshot's PKGBUILD
 #    passes plain arch-meson, so this holds today -- but a bump that touches meson_options.txt, or a
 #    distro that flips the default, would take it away with no other trace. The binary prints its
 #    own feature set (`1.15.2 create=1 ... streaming=1`), so grep it out of the shipped artefact

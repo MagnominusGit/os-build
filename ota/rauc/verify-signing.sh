@@ -31,7 +31,7 @@
 #     skipped rather than passing silently when the key is absent, which is the normal CI case.
 #
 # THIS IS NOT EVIDENCE ABOUT THE DEVICE. It runs the BUILD CONTAINER's rauc against the shipped
-# config; the device runs its own (packages/rauc). Both are on the same fixed line today, but they
+# config; the device runs its own (the pinned snapshot's). Both are on the same fixed line today, but they
 # are not the same binary, and a 1.14-on-device/1.15-in-container skew is exactly how the verity
 # install bug reached hardware. Only an HW `rauc install` is evidence about the device.
 #
