@@ -126,7 +126,10 @@
 #         opened a menu swapped the profile while Guide was held). The single-cap [Guide] intercept flipped to
 #         Always on the Guide press and ate the emulator hotkey layer (HW, MANGMI Air X,
 #         2026-10-21). Also fixes set_gamepad_profile() never loading on a device with a gamepad
-#         target (it broke out of the device loop first). Goes with inputplumber patch 0002.
+#         target (it broke out of the device loop first). Whole numbers in the edited JSON are
+#         written back as integers: Godot read `version` as 1.0 and InputPlumber refused the file,
+#         so a game with no profile of its own kept the focus profile and got no input (HW, MANGMI
+#         Pocket Max, 2026-10-27: PortMaster). Goes with inputplumber patch 0002.
 #
 # The earlier 0006/0007 (plugin store URL as a project setting, set to "" for RetroForge) were dropped on
 # 2026-10-06: with the store off, OGUI's first-start screen showed an empty catalog. RetroForge has no

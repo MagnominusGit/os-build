@@ -1,4 +1,4 @@
-From bfbaf6296c4c60e825f316c89b20f97c3b0a23c5 Mon Sep 17 00:00:00 2001
+From 2be3f5014c223020ee875eb9fa3aa87cb296f397 Mon Sep 17 00:00:00 2001
 From: Philippe Simons <simons.philippe@gmail.com>
 Date: Mon, 26 Oct 2026 17:24:48 +0100
 Subject: [PATCH] feat(Input): focus profile instead of InputPlumber's
@@ -19,7 +19,10 @@ them free (Guide+South -> ui_quick, the quick bar; Guide+North ->
 ui_osk). With InputPlumber's deferred activation outputs, a lone Guide
 tap opens the main menu and a combo does not. The JSON is edited
 directly, after the target modification, because InputPlumberProfile
-drops `layers` (save_target_modified_profile split out for that).
+drops `layers` (save_target_modified_profile split out for that). Whole
+numbers are written back as integers: JSON.parse_string reads every
+number as a float, and InputPlumber refuses a profile whose integer
+`version` is 1.0 (a game without a profile of its own got no input).
 
 A combo that opens a menu while Guide is held loads the focus profile,
 so the Guide release can arrive without its press; it is ignored
@@ -32,12 +35,12 @@ Also fixes set_gamepad_profile(): it broke out of the device loop as
 soon as a device had a gamepad target, before loading anything.
 ---
  assets/gamepad/profiles/ogui_focus.json     | 566 ++++++++++++++++++++
- core/global/launch_manager.gd               | 221 +++++++-
+ core/global/launch_manager.gd               | 238 +++++++-
  core/systems/input/input_manager.gd         |  15 +-
  core/systems/input/input_plumber.gd         |  17 +-
  core/ui/card_ui/card_ui.gd                  |  24 +-
  core/ui/card_ui/gamepad/gamepad_settings.gd |   5 +-
- 6 files changed, 795 insertions(+), 53 deletions(-)
+ 6 files changed, 812 insertions(+), 53 deletions(-)
  create mode 100644 assets/gamepad/profiles/ogui_focus.json
 
 diff --git a/assets/gamepad/profiles/ogui_focus.json b/assets/gamepad/profiles/ogui_focus.json
@@ -613,7 +616,7 @@ index 0000000..6317b4e
 +	]
 +}
 diff --git a/core/global/launch_manager.gd b/core/global/launch_manager.gd
-index 2e8b5ee..aaa692c 100644
+index 2e8b5ee..d027f50 100644
 --- a/core/global/launch_manager.gd
 +++ b/core/global/launch_manager.gd
 @@ -72,6 +72,18 @@ var _focused_app_id := 0
@@ -780,7 +783,7 @@ index 2e8b5ee..aaa692c 100644
  
  		# Set the target gamepad if one was specified
  		if not target_gamepad.is_empty():
-@@ -573,6 +612,138 @@ func set_gamepad_profile(profile_path: String, target_gamepad: String = "") -> v
+@@ -573,6 +612,155 @@ func set_gamepad_profile(profile_path: String, target_gamepad: String = "") -> v
  	#notification_manager.show(notify)
  
  
@@ -900,8 +903,25 @@ index 2e8b5ee..aaa692c 100644
 +	if not file:
 +		logger.error("Unable to save " + guided + ", Guide will not reach OpenGamepadUI in game")
 +		return profile_path
-+	file.store_string(JSON.stringify(profile, "\t"))
++	file.store_string(JSON.stringify(_whole_numbers_as_ints(profile), "\t"))
 +	return guided
++
++
++## The value with every whole-number float turned back into an int. JSON.parse_string reads every
++## number as a float and JSON.stringify writes 1.0 back, and InputPlumber refuses the whole profile
++## ("Failed to parse file") when an integer field holds one: its `version` is an integer, so a
++## game without a profile of its own kept the focus profile and got no input at all.
++func _whole_numbers_as_ints(value: Variant) -> Variant:
++	if value is float and is_finite(value) and value == floorf(value):
++		return int(value)
++	if value is Array:
++		return value.map(_whole_numbers_as_ints)
++	if value is Dictionary:
++		var ints := {}
++		for key in value:
++			ints[key] = _whole_numbers_as_ints(value[key])
++		return ints
++	return value
 +
 +
 +## The first mapping in the list whose source is the given gamepad button, or null.
