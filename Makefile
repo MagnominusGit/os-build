@@ -841,7 +841,7 @@ $(HIDEMENU_LIB): $(HIDEMENU_SRC) | $(BUILD_STAMP)
 $(MESA_X86_STAMP): $(MESA_X86_SRC)
 	bash packages/mesa-x86/build.sh
 
-$(SPLASH_ASSET): $(IMAGE_DIR)/mksplash.sh $(IMAGE_DIR)/png2nds1.py $(IMAGE_DIR)/splash/logo.svg $(SPLASH_GEOM) | $(BUILD_STAMP)
+$(SPLASH_ASSET): $(IMAGE_DIR)/mksplash.sh $(IMAGE_DIR)/png2nds1.py $(IMAGE_DIR)/splash/logo.svg $(IMAGE_DIR)/splash/logo.png $(SPLASH_GEOM) | $(BUILD_STAMP)
 	$(INBUILD) $(IMAGE_DIR)/mksplash.sh
 
 # Stage-1 steamcl + the steamos-bootconf binary the OS side installs (boot/steamcl.sh, pinned

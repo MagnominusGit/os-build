@@ -87,12 +87,8 @@ px = bytearray()
 for y in range(h):
     for x in range(w):
         # An opaque disc on a transparent field: enough to test placement and clipping.
-        # The radius is 44% of the box, not the whole of it, because a real logo has margins --
-        # image/splash/logo.svg renders to 640px of ink inside its 768px box, ~83%. The rotation
-        # -direction assertion below measures the drawn content's centre of mass against the panel
-        # midline, and a disc that reaches the very edge inflates the logo's share of that bbox
-        # enough to swamp the text beneath it and tip the comparison the wrong way. Match the real
-        # asset's proportions, not just its size.
+        # The radius is 44% of the box: image/splash/logo.svg renders to 685x768px of ink inside
+        # its 768px box, so the real asset fills about that much of it.
         inside = (x - w / 2) ** 2 + (y - h / 2) ** 2 < (0.44 * w) ** 2
         px += bytes((255, 255, 255, 255)) if inside else bytes(4)
 open(sys.argv[1], "wb").write(b"NDS1" + struct.pack("<II", w, h) + bytes(px))
@@ -191,22 +187,43 @@ done
 # A rotation bug that swapped the sense of 90 and 270 would still satisfy every check above. This
 # pins the direction: with the canvas in landscape and the panel portrait, rot=90 must put the
 # logical TOP of the frame against the panel's RIGHT edge (DRM's RIGHT_UP), and rot=270 against
-# its LEFT. Rendering a frame with no text makes the logo the only content, so the asymmetry to
-# measure is the one the gap below the logo creates.
+# its LEFT. Each rotated frame is compared pixel for pixel against the unrotated 800x400 frame
+# turned by hand: clockwise for 90, counter-clockwise for 270. Exact, and blind to the artwork --
+# an earlier bbox-midpoint version of this check broke on a logo change (2026-10-27) because the
+# drawer centres logo+text as one group, so the midpoint only moved by accident of the threshold.
 echo
 echo "rotation direction:"
-# Measured above a threshold of 64, not the clipping checks' 8: the logo's halo fades out at its
-# box edge in every direction, so counting it makes the logo's share of the bbox symmetric enough
-# to swamp the text (the brighter halo of the 2026-10-17 logo put both midpoints at 199/200).
-render "$TMP/r90.ppm" 400 800 90 "x" && read -r _ _ ax0 _ ax1 _ _ < <(probe "$TMP/r90.ppm" 64)
-render "$TMP/r270.ppm" 400 800 270 "x" && read -r _ _ bx0 _ bx1 _ _ < <(probe "$TMP/r270.ppm" 64)
-# The text sits BELOW the logo in logical space. Under rot=90 logical-down maps to panel-left, so
-# the drawn content's centre of mass sits left of the panel's midline; under rot=270 it mirrors.
-a_mid=$(( (ax0 + ax1) / 2 )); b_mid=$(( (bx0 + bx1) / 2 ))
-if [[ $a_mid -lt 200 && $b_mid -gt 200 ]]; then
-    ok "rot=90 puts logical-down on the panel's left, rot=270 on its right"
+render "$TMP/r0.ppm" 800 400 0 "x"
+render "$TMP/r90.ppm" 400 800 90 "x"
+render "$TMP/r270.ppm" 400 800 270 "x"
+rotcheck() {  # rotcheck <rot0.ppm> <rotated.ppm> cw|ccw -> number of mismatched pixels
+    python3 - "$@" <<'PY'
+import sys
+def rd(p):
+    parts = open(p, 'rb').read().split(b'\n', 3)
+    w, h = map(int, parts[1].split())
+    return w, h, parts[3]
+w, h, a = rd(sys.argv[1])
+W, H, b = rd(sys.argv[2])
+if (W, H) != (h, w):
+    print(w * h); raise SystemExit
+cw = sys.argv[3] == 'cw'
+bad = 0
+for y in range(h):
+    for x in range(w):
+        # Clockwise: logical top -> panel right. Counter-clockwise: logical top -> panel left.
+        px, py = (h - 1 - y, x) if cw else (y, w - 1 - x)
+        i, j = (y * w + x) * 3, (py * W + px) * 3
+        bad += a[i:i + 3] != b[j:j + 3]
+print(bad)
+PY
+}
+a_bad=$(rotcheck "$TMP/r0.ppm" "$TMP/r90.ppm" cw)
+b_bad=$(rotcheck "$TMP/r0.ppm" "$TMP/r270.ppm" ccw)
+if [[ $a_bad -eq 0 && $b_bad -eq 0 ]]; then
+    ok "rot=90 is the frame turned clockwise, rot=270 counter-clockwise"
 else
-    bad "rotation direction is wrong or mirrored (rot90 mid=$a_mid, rot270 mid=$b_mid, want <200 and >200)"
+    bad "rotation direction is wrong or mirrored (rot90 off by $a_bad px, rot270 off by $b_bad px)"
 fi
 
 # ---------------------------------------------------------------------------------------------

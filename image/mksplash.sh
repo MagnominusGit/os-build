@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # retroforge splash asset builder -> work/splash/logo.nds1
 #
-# Rasterises image/splash/logo.svg and flattens it to the raw NDS1 container that
-# retroforge-splash loads (apps/retroforge-splash). Two steps, both host-native and both at BUILD
-# time, on purpose:
+# Rasterises image/splash/logo.svg (which places image/splash/logo.png) and flattens it to the
+# raw NDS1 container that retroforge-splash loads (apps/retroforge-splash). Two steps, both
+# host-native and both at BUILD time, on purpose:
 #
 #   logo.svg --rsvg-convert--> logo.png --image/png2nds1.py--> logo.nds1
 #

@@ -1,51 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- RetroForge boot splash logo: the chip mark on its green glow.
+<!-- RetroForge boot splash logo: the anvil-cat badge (logo.png, beside this file).
 
      Square on purpose: image/mksplash.sh renders it into a square box and the drawer centres it on
-     the panel at a fixed share of its short edge, so the box is cropped close to the chip (172 of
-     260 units): the design came as 560x400 on black with a glow of r=200, which left the chip at
-     43% of the box and small on screen. The glow is scaled with the crop (r=130 around the chip's
-     centre, 280,200), and stronger than the design's so it still shows around the bigger chip; it
-     fades to nothing at the box edge: no visible border.
+     the panel at a fixed share of its short edge. The badge comes with no padding and fills the box
+     top to bottom (260 units), centred across, width from the PNG's 1458x1634 aspect.
 
-     No background rect, deliberately: the drawer fills the panel with its own background colour
-     (black by default) and composites this over it with real alpha. Baking a black square in here
-     would show as a hard-edged box the moment the background is anything but pure black, and
-     would also cost the asset its alpha channel entirely (rsvg-convert emits RGB, not RGBA, for a
-     fully opaque image, which image/png2nds1.py rejects). -->
+     The artwork is a raster, referenced rather than embedded: rsvg-convert resolves an href next to
+     the SVG, and base64 would triple a 2 MB PNG in a text file. Its background is transparent, and
+     there is no background rect here either, deliberately: the drawer fills the panel with its own
+     background colour (black by default) and composites this over it with real alpha. Baking a
+     black square in here would show as a hard-edged box the moment the background is anything but
+     pure black, and would also cost the asset its alpha channel entirely (rsvg-convert emits RGB,
+     not RGBA, for a fully opaque image, which image/png2nds1.py rejects). -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="150 70 260 260" width="260" height="260" role="img" aria-label="RetroForge">
-  <defs>
-    <radialGradient id="glow" cx="280" cy="200" r="130" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#4FCF9C" stop-opacity="0.65"/>
-      <stop offset="0.5" stop-color="#4FCF9C" stop-opacity="0.40"/>
-      <stop offset="0.8" stop-color="#4FCF9C" stop-opacity="0.15"/>
-      <stop offset="1" stop-color="#4FCF9C" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-
-  <circle cx="280" cy="200" r="130" fill="url(#glow)"/>
-
-  <!-- Chip mark -->
-  <g fill="#2FA883">
-    <rect x="232" y="114" width="12" height="24" rx="3"/>
-    <rect x="258" y="114" width="12" height="24" rx="3"/>
-    <rect x="290" y="114" width="12" height="24" rx="3"/>
-    <rect x="316" y="114" width="12" height="24" rx="3"/>
-    <rect x="232" y="262" width="12" height="24" rx="3"/>
-    <rect x="258" y="262" width="12" height="24" rx="3"/>
-    <rect x="290" y="262" width="12" height="24" rx="3"/>
-    <rect x="316" y="262" width="12" height="24" rx="3"/>
-    <rect x="194" y="152" width="24" height="12" rx="3"/>
-    <rect x="194" y="178" width="24" height="12" rx="3"/>
-    <rect x="194" y="210" width="24" height="12" rx="3"/>
-    <rect x="194" y="236" width="24" height="12" rx="3"/>
-    <rect x="342" y="152" width="24" height="12" rx="3"/>
-    <rect x="342" y="178" width="24" height="12" rx="3"/>
-    <rect x="342" y="210" width="24" height="12" rx="3"/>
-    <rect x="342" y="236" width="24" height="12" rx="3"/>
-  </g>
-  <rect x="218" y="138" width="124" height="124" rx="26" fill="#1F6F5E"/>
-  <rect x="248" y="190" width="64" height="20" rx="3" fill="#F2F4F3"/>
-  <rect x="270" y="168" width="20" height="64" rx="3" fill="#F2F4F3"/>
-  <rect x="270" y="190" width="20" height="20" rx="2" fill="#D9532A"/>
+  <image href="logo.png" x="164.00" y="70" width="232.00" height="260" preserveAspectRatio="xMidYMid meet"/>
 </svg>
