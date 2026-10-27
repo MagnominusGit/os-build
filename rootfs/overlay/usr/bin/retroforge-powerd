@@ -429,12 +429,38 @@ def led_channel(name):
     return {"red": 0, "green": 1, "blue": 2}.get(color)
 
 
+# What an on/off LED looks like, by the colour in its kernel name. The RG 55G1's status light is
+# three separate gpio-leds, red, green and amber (amber read off the device: tlmm 49 is not blue).
+ONOFF_LED_RGB = {"red": (255, 0, 0), "green": (0, 255, 0), "blue": (0, 0, 255), "amber": (255, 191, 0)}
+
+
+def onoff_led_color(led):
+    """The colour of an on/off (max_brightness 1) coloured LED, or None for any other LED."""
+    if (led / "multi_intensity").exists() or read_text(led / "max_brightness") != "1":
+        return None
+    return ONOFF_LED_RGB.get(led.name.split(":", 1)[0] if ":" in led.name else "")
+
+
+def nearest_onoff_led(leds, color):
+    """The one on/off LED whose colour is nearest `color`, or None for black. They are separate
+    lamps, not channels of one: lighting two shows two colours side by side rather than a mix, and
+    scaling a component onto a 0-1 range rounds every ordinary colour to off."""
+    if not any(color) or not leds:
+        return None
+    return min(leds, key=lambda led: sum((a - b) ** 2 for a, b in zip(onoff_led_color(led), color)))
+
+
 def apply_leds(leds, color, brightness):
     """Colour for multicolor LEDs, brightness for all. A red/green/blue channel LED takes its own
-    component of the colour, so a ring of channels mixes it like a multicolor LED would. Any other
-    single-colour LED has no colour of its own: it is lit at the brightness unless the colour is
-    black."""
+    component of the colour, so a ring of channels mixes it like a multicolor LED would. On/off
+    coloured LEDs light only the nearest one. Any other single-colour LED has no colour of its
+    own: it is lit at the brightness unless the colour is black."""
+    onoff = [led for led in leds if onoff_led_color(led) is not None]
+    lit = nearest_onoff_led(onoff, color) if brightness else None
     for led in leds:
+        if led in onoff:
+            write_text(led / "brightness", 1 if led == lit else 0)
+            continue
         top = int(read_text(led / "max_brightness", "255") or 255)
         if (led / "multi_intensity").exists():
             write_text(led / "multi_intensity", led_intensity(read_text(led / "multi_index"), color))

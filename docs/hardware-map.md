@@ -96,7 +96,7 @@ journal line above is how a wrong name will show.
 | MANGMI Air X MQ65, MQ66, MQ66B (SM6115) | `backlight` (pwm) | `ring-left`/`ring-right` = `rgb:l*` / `rgb:r*` (9 pixels each) |
 | MANGMI Air Y (SM6115) | `backlight` (pwm) | `ring` = `rgb:l*` (10 pixels) |
 | Retroid Pocket Classic, Rev Q, Classic 6 Rev Q (SM4450) | `ae94000.dsi.0` | — |
-| Anbernic RG 55G1 (SM4450) | `backlight` (pwm, inverted) | `power` = `*:indicator` (red/green/blue gpio-leds) |
+| Anbernic RG 55G1 (SM4450) | `backlight` (pwm, inverted) | `power` = `*:indicator` (red/green/amber on/off gpio-leds); `ring-left`/`ring-right` = `rgb:l*` / `rgb:r*` (8 segments each) |
 
 `power` is the PM8550 LPG's multicolor `power-led`. A panel that drives its own brightness over
 DCS registers its backlight under its DSI device, `<host>.dsi.0`, so the name follows the DSI
@@ -134,7 +134,9 @@ Known gaps, from the source:
   groups from this tree, hiding whatever the board lacks. No board-specific code.
 - **retroforge-powerd** drives the `fan` link's hwmon (a two-speed gpio-fan is switched on/off at
   the curve's first step) and every LED in `leds/<group>/` (colour on multicolor LEDs; a
-  `red:`/`green:`/`blue:` channel LED at its component of the colour; brightness on all; off for
+  `red:`/`green:`/`blue:` channel LED at its component of the colour; of on/off coloured LEDs
+  (`max_brightness` 1, e.g. the RG 55G1's red/green/amber lamps) only the one nearest the colour,
+  lit whenever the brightness is above 0; brightness on all; off for
   suspend). It falls back to scanning sysfs only when the map is absent or names
   no LEDs. Its D-Bus interface (`org.retroforge.Power1`) is how a UI changes them: `FanCurve`,
   `LedCount`, `LedEnabled`, `LedColor` (R, G, B), `LedBrightness` (0-255), kept in

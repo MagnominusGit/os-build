@@ -394,6 +394,25 @@ check("hw: each channel LED takes its own component of the colour",
 pd.apply_leds(channels, (0, 0, 0), 200)
 check("hw: black turns every channel off",
       {(leds / n / "brightness").read_text().strip() for n in ("red:indicator-0", "green:indicator-0", "blue:indicator-0")}, {"0"})
+# The RG 55G1 status light: three separate on/off gpio-leds, red, green and amber
+status = tmp / "hw-status"; (status / "leds" / "power").mkdir(parents=True, exist_ok=True)
+for i, name in enumerate(("amber:indicator", "green:indicator", "red:indicator")):
+    d = leds / name; d.mkdir(parents=True, exist_ok=True)
+    (d / "brightness").write_text("0\n"); (d / "max_brightness").write_text("1\n")
+    os.symlink(d, status / "leds" / "power" / f"{i + 1:02d}")
+lamps = pd.discover_leds(leds, hw=status)
+def lamp_states():
+    return [(leds / n / "brightness").read_text().strip() for n in ("red:indicator", "green:indicator", "amber:indicator")]
+pd.apply_leds(lamps, (0, 96, 255), 64)
+check("onoff: the default blue lights the nearest lamp, green, even dim", lamp_states(), ["0", "1", "0"])
+pd.apply_leds(lamps, (255, 191, 0), 255)
+check("onoff: amber lights amber only", lamp_states(), ["0", "0", "1"])
+pd.apply_leds(lamps, (200, 10, 0), 255)
+check("onoff: red lights red only", lamp_states(), ["1", "0", "0"])
+pd.apply_leds(lamps, (200, 10, 0), 0)
+check("onoff: brightness 0 turns every lamp off", lamp_states(), ["0", "0", "0"])
+pd.apply_leds(lamps, (0, 0, 0), 255)
+check("onoff: black turns every lamp off", lamp_states(), ["0", "0", "0"])
 empty = tmp / "hw-empty"; (empty / "leds").mkdir(parents=True, exist_ok=True)
 check("hw: a map with no LED groups falls back to the RGB scan",
       [p.name for p in pd.discover_leds(leds, hw=empty)], ["rgb:l1", "rgb:l2"])
