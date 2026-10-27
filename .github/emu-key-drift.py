@@ -12,7 +12,8 @@
 # not know, no error anywhere. This is the only check for it.
 #
 # HOW. The keys are every `key` an options.json choice sets, plus every key of the first-run seeds
-# in the emulator's data dir (ini/cfg/conf, toml, yml, xml). A key counts as known when its text
+# in the emulator's data dir (ini/cfg/conf, toml, yml, xml) -- never the definition's gamepad_profile,
+# an InputPlumber profile and not the emulator's. A key counts as known when its text
 # appears, case-sensitively, in the upstream source (C/C++/Rust/Python/... files): emulators spell
 # their config keys as string literals. Not found = reported. A key upstream builds at run time
 # is matched the ways upstreams build them: without its trailing digits (ISOPath0 from "ISOPath" + n),
@@ -59,12 +60,22 @@ def base_key(key):
     return key.split("\\", 1)[0]
 
 
+def gamepad_profile(data_dir):
+    """The definition's gamepad_profile file name (the Guide hotkey layer, read by InputPlumber), or None."""
+    try:
+        with open(os.path.join(data_dir, "emulator.json")) as f:
+            return json.load(f).get("gamepad_profile")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
 def written_keys(data_dir):
     """{key: [files that write it]} for one emulator's data dir."""
     found = {}
+    skip = SEED_SKIP | {gamepad_profile(data_dir)}
     for name in sorted(os.listdir(data_dir)):
         path = os.path.join(data_dir, name)
-        if name in SEED_SKIP or not os.path.isfile(path) or os.path.splitext(name)[1].lower() not in SEED_EXT:
+        if name in skip or not os.path.isfile(path) or os.path.splitext(name)[1].lower() not in SEED_EXT:
             continue
         for k in seed_keys(path):
             files = found.setdefault(base_key(k), [])

@@ -46,7 +46,8 @@ printf '<?xml version="1.0"?>\n<!-- <commented/> -->\n<content><mlc_path>x</mlc_
 cat > "$W/data/options.json" <<'EOF'
 {"options": [{"id": "a", "choices": [{"value": "x", "set": [{"key": "Scale", "value": "2"}, {"key": "use_vsync\\default", "value": "false"}]}]}]}
 EOF
-printf '{"not": "a seed"}\n' > "$W/data/emulator.json"
+printf '{"not": "a seed", "gamepad_profile": "guide-hotkeys.yaml"}\n' > "$W/data/emulator.json"
+printf 'source_events:\n  - gamepad:\n      button: Guide\ntarget_events: []\n' > "$W/data/guide-hotkeys.yaml"
 cat > "$W/src/core/config.cpp" <<'EOF'
 cfg.get("Renderer"); cfg.get("ISOPath" + n); group("IR"); control("Up");
 snprintf(k, 32, "axis%sAxis", name); yaml["Video"]["Frame limit"]; xml("content"); xml("mlc_path");
@@ -63,6 +64,9 @@ for k in Renderer ISOPath0 IR/Up axisDownAxis layout_option Gone "Frame limit" V
 done
 for k in "a comment" "comment" "listed" "commented" "not" "Main"; do
   has "$keys" "$k" && bad "extracted '$k'" || ok "skips '$k' (comment, list item, section, emulator.json)"
+done
+for k in source_events target_events; do
+  has "$keys" "$k" && bad "extracted '$k'" || ok "skips '$k' (the gamepad_profile: InputPlumber's, not the emulator's)"
 done
 
 CASE="check"
