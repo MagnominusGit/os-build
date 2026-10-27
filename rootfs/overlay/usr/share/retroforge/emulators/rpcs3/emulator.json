@@ -6,7 +6,8 @@
     "A .psn ROM is a stub RetroForge wrote when it installed a PSN .pkg (plan psn-pkg): its first line is the title id, booted as %RPCS3_GAMEID%:<id> so RPCS3 finds the installed game (dev_hdd0/game/<id>) through its own VFS, wherever vfs.yml puts dev_hdd0.",
     "Firmware: the player's ~/bios/PS3UPDAT.PUP, installed once by install (--headless --installfw has no dialogs and exits 0 even on failure, so success is dev_flash's version.txt). Without it a game is not started: RPCS3 would only show a fatal error box.",
     "gui_args: Big Picture Mode, RPCS3's pad-driven game grid over ~/roms/ps3 (vfs.yml). Never --no-gui there: with no game it only shows an error box.",
-    "SDL_NO_SIGNAL_HANDLERS=1: RPCS3's own SDL3 otherwise catches SIGTERM and turns it into an SDL quit event RPCS3 never reads (its loop is Qt's), so OpenGamepadUI's Exit did nothing (HW 2026-10-07, Pocket FIT: SigCgt had SIGTERM). With the hint SIGTERM keeps its default action and ends RPCS3 at once (RPCS3 saves nothing on exit anyway)."
+    "SDL_NO_SIGNAL_HANDLERS=1: RPCS3's own SDL3 otherwise catches SIGTERM and turns it into an SDL quit event RPCS3 never reads (its loop is Qt's), so OpenGamepadUI's Exit did nothing (HW 2026-10-07, Pocket FIT: SigCgt had SIGTERM). With the hint SIGTERM keeps its default action and ends RPCS3 at once (RPCS3 saves nothing on exit anyway).",
+    "gamepad_profile guide-hotkeys.yaml: hold Guide for L1 reboot from the newest savestate, R1 create a savestate (experimental in RPCS3: a game can refuse it), R2 frame limit off/on (a toggle), Start stop -- as keyboard F1-F4, bound in the seeded CurrentSettings.ini [Shortcuts]. Guide+Start is game_window_stop, RPCS3's graceful shutdown (the game gets its exit request; unlike SIGTERM), and --no-gui then quits RPCS3."
   ],
   "format": "appimage",
   "binary": "usr/bin/rpcs3",
@@ -24,6 +25,7 @@
   "env": {
     "SDL_NO_SIGNAL_HANDLERS": "1"
   },
+  "gamepad_profile": "guide-hotkeys.yaml",
   "seed": [
     {
       "file": "config.yml",

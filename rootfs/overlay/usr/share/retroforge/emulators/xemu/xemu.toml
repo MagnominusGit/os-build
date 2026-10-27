@@ -13,11 +13,22 @@
 #   and records its GUID; the keyboard is never bound. xemu's defaults map by position and label
 #   alike (A south, B east, X west, Y north, LB White, RB Black, analog triggers). Guide is left out
 #   of the SDL mapping in emulator.json. No update check exists on Linux.
+# - general.snapshots.shortcuts.f5: the Guide-modifier hotkeys. The combination lives in
+#   InputPlumber (guide-hotkeys.yaml next to emulator.json): holding Guide turns L1 into F5, R1 into
+#   Shift+F5 and Start into Ctrl+Q. xemu's keys are fixed, not bindable: F5-F8 load the snapshot
+#   named here and Shift+F5-F8 save it (ui/xui/main.cc -> ActionActivateBoundSnapshot), Ctrl+Q is
+#   ActionShutdown (ui/xui/menubar.cc), what the Back + Start menu's Exit runs: the process
+#   ends. All xemu v0.8.136. F1/F2 open xemu's own menus, hence F5. One name for every game: the
+#   snapshot lives in the HDD image, so saving in another game replaces it, and loading another
+#   game's asks to switch discs (SnapshotManager::LoadSnapshotChecked). No fast-forward exists.
 
 [general]
 show_welcome = false
 skip_boot_anim = true
 games_dir = '/home/player/roms/xbox'
+
+[general.snapshots.shortcuts]
+f5 = 'quick'
 
 [display]
 renderer = 'VULKAN'

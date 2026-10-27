@@ -13,7 +13,14 @@
        (HW 2026-10-06, Pocket FIT).
      - Not set: fullscreen (-f does it for games; Open stays windowed) and open_pad (the separate
        GamePad window must stay closed: a second window under gamescope). keys.txt has no setting:
-       ~/.local/share/Cemu/keys.txt is a link to ~/bios/keys.txt (retroforge-home.conf). -->
+       ~/.local/share/Cemu/keys.txt is a link to ~/bios/keys.txt (retroforge-home.conf).
+     - Hotkeys: the Guide-modifier hotkeys. The combination lives in InputPlumber (guide-hotkeys.yaml
+       next to emulator.json): holding Guide turns R2/Start into keyboard F3/F4, bound here to
+       ToggleFastForward (3x timer speed, a toggle) and ExitApplication (the main window closed,
+       no veto: settings saved, the game shut down, Cemu quits). Element names and the value
+       format "<keyboard> <controller>" are wxCemuConfig.cpp / wxCemuConfig.h (sHotkeyCfg): the
+       keyboard part is the wxWidgets key code (WXK_F3 342, WXK_F4 343; modifier bits 0), the
+       controller part -1 (none). Cemu's own defaults (Esc, F11, Alt+Enter, F12) stay. -->
 <content>
     <mlc_path>/home/player/saves/wiiu</mlc_path>
     <check_update>false</check_update>
@@ -29,4 +36,8 @@
         <TVDevice>default</TVDevice>
         <TVVolume>100</TVVolume>
     </Audio>
+    <Hotkeys>
+        <ToggleFastForward>342 -1</ToggleFastForward>
+        <ExitApplication>343 -1</ExitApplication>
+    </Hotkeys>
 </content>

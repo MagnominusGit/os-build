@@ -321,7 +321,8 @@ dlini() { awk -v sec="[$2]" -v key="$3" '$0 == sec {in_s=1; next} /^\[/ {in_s=0}
 dev="$(dlini GCPadNew.ini GCPad1 Device)"
 [ "$dev" = "SDL/0/Xbox One Elite 2 Controller" ] && [ "$(dlini WiimoteNew.ini Wiimote1 Device)" = "$dev" ] && [ "$(dlini Hotkeys.ini Hotkeys Device)" = "$dev" ] \
   && ok "dolphin seed: pad, Wii Remote and hotkeys on the InputPlumber pad (SDL)" || bad "dolphin seed devices differ or are not the SDL pad: '$dev'"
-[ "$(dlini Hotkeys.ini Hotkeys General/Stop)" = "@(Back+Start)" ] && ok "dolphin seed: Select+Start stops the game" || bad "dolphin seed has no pad Stop hotkey"
+[ "$(dlini Hotkeys.ini Hotkeys General/Stop)" = '@(Back+Start) | `XInput2/0/Virtual core pointer:F4`' ] \
+  && ok "dolphin seed: Select+Start and Guide+Start (F4) stop the game" || bad "dolphin seed has no pad Stop hotkey"
 grep -qE '^[^;].*= .*Guide' "$DL_DIR"/*.ini && bad "dolphin seed binds Guide, which OpenGamepadUI owns" || ok "dolphin seed leaves Guide to OGUI"
 DL_DEF="$DL_DIR/emulator.json"
 [ "$(jget "$DL_DEF" format)" = '"appimage-sharun"' ] && [ "$(jget "$DL_DEF" binary)" = '"bin/dolphin-emu"' ] \
@@ -375,7 +376,7 @@ for def in "$SEED_DIR"/*/emulator.json; do
     || bad "$emu names a gamepad_profile that is not in the image"
   profile="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("gamepad_profile") or "")' "$def")"
   [ -z "$profile" ] || { guide_layer_ok "$(dirname "$def")/$profile" \
-    && ok "$emu: its gamepad profile carries OGUI's Guide (layer + ui_guide tap, Guide+A/Y)" \
+    && ok "$emu: its gamepad profile carries OGUI's Guide (layer + ui_guide tap, Guide+A/X)" \
     || bad "$emu: $profile lacks Guide -> [layer, dbus ui_guide] or the layer's South -> ui_quick / North -> ui_osk"; }
 done
 for emu in $(sed -n 's/^[a-z0-9_]*=\([a-z0-9_-]*\)$/\1/p' "$LAUNCH_CONF" | sort -u); do
@@ -521,6 +522,88 @@ python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); i=d["install"]
 sys.exit(not (i == [{"from": "bios/PS3UPDAT.PUP", "unless": ".config/rpcs3/dev_flash/vsh/etc/version.txt", "args": ["--headless", "--installfw", "{file}"]}]))' \
   "$SEED_DIR/rpcs3/emulator.json" && ok "rpcs3: the player's PS3UPDAT.PUP is installed headless before the first game" || bad "rpcs3: firmware install step missing or changed"
 
+
+# =================================================================================================
+CASE="Guide hotkeys"
+# Each gamepad_profile's guide layer turns Guide+L1/R1/R2/Start into keys the seed binds: load
+# state, save state, fast-forward, quit (keyboard F1-F4 where the emulator lets us bind them; its
+# fixed shortcuts where it does not). A seed that loses one of these rows leaves that Guide chord
+# dead with no error anywhere, so every row is pinned here. The why of each is in the seed.
+has duckstation/settings.ini 'LoadSelectedSaveState = Keyboard/F1' "Guide+L1 quick load"
+has duckstation/settings.ini 'SaveSelectedSaveState = Keyboard/F2' "Guide+R1 quick save"
+has duckstation/settings.ini 'FastForward = Keyboard/F3' "Guide+R2 fast-forward (hold)"
+has duckstation/settings.ini 'PowerOff = Keyboard/F4' "Guide+Start quits (-batch ends the process)"
+has duckstation/settings.ini 'ConfirmPowerOff = false' "PowerOff hotkey must not stop on a dialog"
+has armsx2/PCSX2.ini 'LoadStateFromSlot1 = Keyboard/F1' "Guide+L1 load slot 1"
+has armsx2/PCSX2.ini 'SaveStateToSlot1 = Keyboard/F2' "Guide+R1 save slot 1"
+has armsx2/PCSX2.ini 'HoldTurbo = Keyboard/F3' "Guide+R2 fast-forward (hold)"
+has armsx2/PCSX2.ini 'ShutdownVM = Keyboard/F4' "Guide+Start quits (-batch ends the process)"
+has armsx2/PCSX2.ini 'ConfirmShutdown = false' "ShutdownVM hotkey must not stop on a dialog"
+has ppsspp/controls.ini 'Load State = 1-131' "Guide+L1 load state (keyboard F1)"
+has ppsspp/controls.ini 'Save State = 1-132' "Guide+R1 save state (keyboard F2)"
+has ppsspp/controls.ini 'Fast-forward = 1-133' "Guide+R2 fast-forward (keyboard F3)"
+has ppsspp/controls.ini 'Exit App = 1-134' "Guide+Start quits (keyboard F4)"
+has ppsspp/ppsspp.ini 'AskForExitConfirmationAfterSeconds = 0' "Exit App must not stop on a dialog"
+has dolphin/Hotkeys.ini 'Load State/Load State Slot 1 = `XInput2/0/Virtual core pointer:F1`' "Guide+L1 loads slot 1"
+has dolphin/Hotkeys.ini 'Save State/Save State Slot 1 = `XInput2/0/Virtual core pointer:F2`' "Guide+R1 saves slot 1"
+has dolphin/Hotkeys.ini 'Emulation Speed/Disable Emulation Speed Limit = `XInput2/0/Virtual core pointer:F3`' "Guide+R2 fast-forward while held"
+for f in qt-config.ini qt-config-dual-screen.ini; do
+  has azahar/$f 'Shortcuts\Main%20Window\Quick%20Load\KeySeq=F1' "Guide+L1 quick load"
+  has azahar/$f 'Shortcuts\Main%20Window\Quick%20Save\KeySeq=F2' "Guide+R1 quick save"
+  has azahar/$f 'Shortcuts\Main%20Window\Toggle%20Turbo%20Mode\KeySeq=F3' "Guide+R2 turbo toggle"
+  has azahar/$f 'Shortcuts\Main%20Window\Exit%20Azahar\KeySeq=F4' "Guide+Start quits"
+  has azahar/$f 'Shortcuts\Main%20Window\Load%20Amiibo\KeySeq=' "default F2 (Load Amiibo) cleared"
+  has azahar/$f 'Shortcuts\Main%20Window\Remove%20Amiibo\KeySeq=' "default F3 (Remove Amiibo) cleared"
+  has azahar/$f 'Shortcuts\Main%20Window\Continue\Pause%20Emulation\KeySeq=' "default F4 (pause) cleared"
+  has azahar/$f 'Shortcuts\Main%20Window\Swap%20Screens\KeySeq=F9' "Guide+L2 swaps the screens"
+  lacks azahar/$f 'controller_keyseq=.*button:(7|8)"' "screen shortcut on L3/R3 alone (too easy to click)"
+done
+# One screen per panel on a dual-screen board: only the swap there, the layout never changes.
+has azahar/qt-config.ini 'Shortcuts\Main%20Window\Toggle%20Screen%20Layout\KeySeq=F10' "Guide+Y cycles the layouts"
+has azahar/qt-config-dual-screen.ini 'Shortcuts\Main%20Window\Toggle%20Screen%20Layout\KeySeq=' "dual screen: no layout change (default F10 emptied)"
+for row in '<ToggleFastForward>342 -1</ToggleFastForward>:Guide+R2 toggles fast-forward (WXK_F3)' \
+           '<ExitApplication>343 -1</ExitApplication>:Guide+Start quits Cemu (WXK_F4)'; do
+  grep -qE "^[[:space:]]*${row%%:*}\$" "$SEED_DIR/cemu/settings.xml" && ok "cemu/settings.xml: ${row#*:}" \
+    || bad "cemu/settings.xml lacks ${row%%:*} (${row#*:})"
+done
+for f in melonDS.toml melonDS-dual-screen.toml; do
+  has melonds/$f '[Instance0.Keyboard]' "keyboard hotkeys section (Guide layer)"
+  has melonds/$f 'HK_FastForward = 16777273' "F10 (Qt::Key_F10) fast-forwards: Guide+R2"
+  has melonds/$f 'HK_SwapScreens = 16777274' "F11 (Qt::Key_F11) swaps the screens: Guide+L2"
+  has melonds/$f 'HK_Mic = 16777233' "End (Qt::Key_End) is the mic, held: Guide+R3"
+  lacks melonds/$f '^HK_(Mic|SwapScreens) = (9|10)$' "mic or swap on L3/R3 alone (too easy to click)"
+done
+has melonds/melonDS.toml 'HK_SwapScreenEmphasis = 16777232' "Home (Qt::Key_Home) swaps the emphasis: Guide+Y"
+lacks melonds/melonDS-dual-screen.toml '^HK_SwapScreenEmphasis' "dual screen: an emphasis hotkey (one screen per panel)"
+has flycast/kbd.cfg 'version = 4' "current mapping format (bind lines)"
+has flycast/kbd.cfg 'bind0 = 58:btn_jump_state' "F1 loads the state: Guide+L1"
+has flycast/kbd.cfg 'bind1 = 59:btn_quick_save' "F2 saves the state: Guide+R1"
+has flycast/kbd.cfg 'bind2 = 60:btn_fforward' "F3 toggles fast-forward: Guide+R2"
+has flycast/kbd.cfg 'bind3 = 61:btn_escape' "F4 quits (dc_exit): Guide+Start"
+grep -qF '"to": ".config/flycast/mappings/SDL_Keyboard.cfg"' "$SEED_DIR/flycast/emulator.json" \
+  && ok "flycast: kbd.cfg seeds SDL_Keyboard.cfg (the keyboard device's mapping file)" || bad "flycast: kbd.cfg is not seeded as mappings/SDL_Keyboard.cfg"
+has clownmdemu/configuration.ini '[Keyboard Bindings]' "keyboard bindings section (Guide layer)"
+has clownmdemu/configuration.ini '58 = INPUT_BINDING_QUICK_LOAD_STATE' "F1 quick load: Guide+L1"
+has clownmdemu/configuration.ini '59 = INPUT_BINDING_QUICK_SAVE_STATE' "F2 quick save: Guide+R1"
+has clownmdemu/configuration.ini '60 = INPUT_BINDING_FAST_FORWARD' "F3 fast-forward (held): Guide+R2"
+has armgba/frontend.cfg 'hotkey_5 = 58' "F1 loads a state: Guide+L1"
+has armgba/frontend.cfg 'hotkey_4 = 59' "F2 saves a state: Guide+R1"
+has armgba/frontend.cfg 'hotkey_1 = 60' "F3 fast-forwards (held): Guide+R2"
+has armgba/frontend.cfg 'hotkey_12 = 61' "F4 quits (twice within 3 s): Guide+Start"
+has armgba/frontend.cfg 'hotkey_11 = 0' "Restart off F2"
+has armgba/frontend.cfg 'hotkey_13 = 0' "Frame Rate off F3"
+has rmg/mupen64plus.cfg 'LoadState = "F1"' "Guide+L1 loads state"
+has rmg/mupen64plus.cfg 'SaveState = "F2"' "Guide+R1 saves state"
+has rmg/mupen64plus.cfg 'LimitFPS = "F3"' "Guide+R2 toggles the speed limiter"
+has rmg/mupen64plus.cfg 'Shutdown = "F4"' "Guide+Start stops emulation; -q quits RMG"
+has rmg/mupen64plus.cfg 'SoftReset = ""' "F1 no longer soft-resets"
+has rmg/mupen64plus.cfg 'Resume = ""' "F2 no longer pauses"
+has rmg/mupen64plus.cfg 'Screenshot = ""' "F3 no longer takes a screenshot"
+has rpcs3/CurrentSettings.ini 'game_window_savestate_1=F1' "Guide+L1 reboots from the newest savestate"
+has rpcs3/CurrentSettings.ini 'game_window_savestate=F2' "Guide+R1 creates a savestate"
+has rpcs3/CurrentSettings.ini 'game_window_frame_limit=F3' "Guide+R2 toggles the frame limit"
+has rpcs3/CurrentSettings.ini 'game_window_stop=F4' "Guide+Start stops the game; --no-gui quits RPCS3"
+has xemu/xemu.toml "f5 = 'quick'" "Guide+L1/R1 (F5 / Shift+F5) load/save the 'quick' snapshot"
 # =================================================================================================
 CASE="first-run settings (SEED)"
 seeded="$HOME/.local/share/duckstation/settings.ini"

@@ -4,7 +4,8 @@
     "-f: fullscreen; -n hides the menubar, toolbar and statusbar; -q quits RMG when emulation ends (otherwise the game's exit leaves RMG's ROM browser). {rom} boots at once. ROMs: n64/v64/z64 + zip/7z.",
     "gui_args: RMG's own window (ROM browser and settings), for Main menu > Emulators > Open.",
     "SDL_NO_SIGNAL_HANDLERS=1: RMG-Input initialises SDL, whose SIGTERM handler would turn OpenGamepadUI's Exit into an SDL quit event RMG's Qt loop never reads (the melonDS lesson). The seed also turns ConfirmExitWhileInGame off: a confirm dialog would hang that same Exit.",
-    "Saves and save states: the seed points SaveSRAMPath/SaveStatePath at ~/saves/n64 and ~/states/n64 directly (mupen64plus.cfg [Core]); no tmpfiles links needed. gopher64's old saves in there are not RMG-compatible (different naming); games start fresh."
+    "Saves and save states: the seed points SaveSRAMPath/SaveStatePath at ~/saves/n64 and ~/states/n64 directly (mupen64plus.cfg [Core]); no tmpfiles links needed. gopher64's old saves in there are not RMG-compatible (different naming); games start fresh.",
+    "gamepad_profile guide-hotkeys.yaml: hold Guide for L1 load state, R1 save state (current slot), R2 speed limiter off/on (a toggle: RMG has no hold fast-forward), Start stop -- as keyboard F1-F4, bound in the seeded mupen64plus.cfg [Rosalie's Mupen GUI KeyBindings]. Guide+Start is the same Shutdown action as Select + Start, so -q quits RMG through its normal exit."
   ],
   "format": "appimage-sharun",
   "binary": "bin/RMG",
@@ -18,6 +19,7 @@
   "env": {
     "SDL_NO_SIGNAL_HANDLERS": "1"
   },
+  "gamepad_profile": "guide-hotkeys.yaml",
   "seed": [
     {
       "file": "mupen64plus.cfg",

@@ -5,7 +5,8 @@
     "system_settings: armGBA has ONE save folder and ONE state folder, set only in ~/.config/armgba/frontend.cfg (no flag, no -C), so the launcher rewrites save_folder and state_folder to the card's system before every game: ~/saves/<system>, ~/states/<system>. frontend.cfg's seeded gba values serve Open (no system). Saves are <game>.srm (RetroArch's name); mGBA's .sav files hold the same bytes under another name.",
     "Exit: SIGTERM becomes SDL's quit event and armGBA's normal exit (save, settings and options written), so OpenGamepadUI's Exit needs nothing special; no SDL_NO_SIGNAL_HANDLERS (that would make it die without writing the save). From the pad: Hotkey (Select, frontend.cfg) + Start pressed twice within 3 s.",
     "Pad: SDL2 game-controller API, so InputPlumber's Xbox Elite pad maps by itself; Nintendo button layout (A east, B south) is armGBA's default. `armgba --controllers` lists what SDL sees (mapped/unmapped), for a HW check.",
-    "gui_args: armGBA's own menu (General: Load Game, settings; it is what opens with no game), pad-driven."
+    "gui_args: armGBA's own menu (General: Load Game, settings; it is what opens with no game), pad-driven.",
+    "gamepad_profile guide-hotkeys.yaml: hold Guide for L1 load state, R1 save state (current slot), R2 fast-forward (held), Start quit (twice within 3 s, as from any armGBA hotkey) — as keyboard F1-F4, armGBA's keyboard hotkeys bound in the seeded frontend.cfg (hotkey_5/_4/_1/_12; F2 Restart and F3 Frame Rate unbound). The Select Hotkey and its pad combinations are unchanged."
   ],
   "format": "appimage",
   "binary": "usr/bin/armgba",
@@ -17,6 +18,7 @@
     "--fullscreen"
   ],
   "env": {},
+  "gamepad_profile": "guide-hotkeys.yaml",
   "seed": [
     {
       "file": "frontend.cfg",

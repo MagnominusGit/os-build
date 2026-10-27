@@ -2,7 +2,8 @@
   "notes": [
     "DuckStation (PlayStation): the upstream AppImage, mounted; its real binary is run, never AppRun.",
     "-batch quits when the game closes, so OpenGamepadUI gets the panel back instead of DuckStation's own UI; -- ends options in case a ROM name starts with '-'.",
-    "gui_args (Main menu > Emulators > Open): Big Picture is the pad-driven UI (the desktop one needs a mouse); no -batch, which would quit at once with no game."
+    "gui_args (Main menu > Emulators > Open): Big Picture is the pad-driven UI (the desktop one needs a mouse); no -batch, which would quit at once with no game.",
+    "gamepad_profile guide-hotkeys.yaml: hold Guide for L1 quick load, R1 quick save (the selected slot, game slot 1), R2 fast-forward, Start quit — as keyboard F1-F4, bound in the seeded settings.ini [Hotkeys] (LoadSelectedSaveState, SaveSelectedSaveState, FastForward, PowerOff). PowerOff is the pause menu's shut down: resume state and memory cards written, and -batch quits the app. Select + Start (pause menu) stays."
   ],
   "format": "appimage",
   "binary": "usr/bin/duckstation-qt",
@@ -17,6 +18,7 @@
     "-fullscreen"
   ],
   "env": {},
+  "gamepad_profile": "guide-hotkeys.yaml",
   "seed": [
     {
       "file": "settings.ini",

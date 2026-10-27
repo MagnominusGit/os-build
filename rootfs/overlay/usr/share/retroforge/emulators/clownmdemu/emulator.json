@@ -3,9 +3,10 @@
     "ClownMDEmu (Mega Drive, Mega CD): pkgforge-dev's sharun repackaging of clownmdemu-frontend 1.6.12 (SDL3 + Dear ImGui). Replaces ares (2026-10-10, too heavy for these SoCs); 32X is dropped (ClownMDEmu has none, and no light standalone emulator ships for aarch64).",
     "Mega CD needs no BIOS: ClownMDEmu has its own boot ROM and serves the BIOS calls itself. A bare path is loaded as a cartridge or a disc by its contents (CHD, CUE/BIN, ISO).",
     "-u: one user folder per system, ~/.config/clownmdemu/<system> (configuration.ini there). Its 'Save Data' folder is linked to ~/saves/<system> by user-tmpfiles.d/retroforge-home.conf, since ClownMDEmu has no save-path setting.",
-    "Seed: rewinding off (on by default: a rewind buffer every frame, CPU and memory for a feature with no pad binding worth having). Only that key: with a configuration.ini present ClownMDEmu binds no keyboard keys, which a handheld does not miss.",
+    "Seed: rewinding off (on by default: a rewind buffer every frame, CPU and memory for a feature with no pad binding worth having). Only that key and three [Keyboard Bindings] rows (gamepad_profile below): with a configuration.ini present ClownMDEmu binds no other keyboard key (its defaults, F5/F9/Space..., apply only when the file is missing: source/frontend.cpp LoadConfiguration). The file takes no comments (rewritten whole on exit), hence these notes.",
     "Pad: SDL3 gamepad API with a fixed layout (Mega Drive A/B/C on X/A/B, X/Y/Z on LB/Y/RB, Mode on Back); nothing to bind. Exit: SIGTERM becomes SDL's quit event and the frontend's normal exit (saves written, config saved).",
-    "gui_args: the Mega Drive folder's settings (Open has no system)."
+    "gui_args: the Mega Drive folder's settings (Open has no system).",
+    "gamepad_profile guide-hotkeys.yaml: hold Guide for L1 quick load, R1 quick save, R2 fast-forward (held, as RT alone) — keyboard F1-F3, bound in the seeded configuration.ini [Keyboard Bindings] as '<SDL scancode> = <binding>' (58/59/60 = INPUT_BINDING_QUICK_LOAD_STATE / _QUICK_SAVE_STATE / _FAST_FORWARD, the names source/frontend.cpp reads and writes). The quick state is a RAM snapshot (std::optional quick_save_state), lost when the game closes; Save States > Save to File... writes files. No Guide+Start: ClownMDEmu has no quit binding (only File > Exit and the window's close), so OpenGamepadUI's Exit stays the way out."
   ],
   "format": "appimage-sharun",
   "binary": "bin/clownmdemu",
@@ -20,6 +21,7 @@
     "/home/player/.config/clownmdemu/md"
   ],
   "env": {},
+  "gamepad_profile": "guide-hotkeys.yaml",
   "seed": [
     {
       "file": "configuration.ini",

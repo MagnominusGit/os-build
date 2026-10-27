@@ -1,0 +1,109 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/device_profile_v1.json
+#
+# Guide-modifier hotkeys for Dolphin (input layers: InputPlumber 0.82.0 + upstream PR #757 + our
+# 0002, packages/inputplumber). retroforge-launch declares this profile to OpenGamepadUI when the
+# definition names it (emulator.json "gamepad_profile"), and OGUI loads it whenever the game has
+# focus (its own focus profile otherwise; OGUI patch 0024). Same shape as snes9x/guide-hotkeys.yaml,
+# the testbed (its header has the history).
+#
+# Hold Guide and the layer below overrides the base mappings: L1 loads state slot 1, R1 saves it,
+# R2 lifts the speed limit while held, Start stops the game (with -b Dolphin then quits). Released,
+# everything is the plain pad again. The layer emits keyboard F1-F4; the seeded Hotkeys.ini binds
+# those to Load State Slot 1, Save State Slot 1, Disable Emulation Speed Limit and Stop (names from
+# HotkeyManager.cpp), on the XInput2 keyboard. F-keys because no game binds them and the handhelds
+# have no physical keyboard to collide with. Select + Start still stops the game too (Hotkeys.ini).
+#
+# GUIDE -> [layer guide, dbus ui_guide]. OGUI has no intercept mode any more (patch 0024), so this
+# profile is the only way it learns Guide was pressed in game. InputPlumber patch 0002 holds the
+# ui_guide back while Guide is down: released alone, OGUI gets a ui_guide tap and opens its menu;
+# released after Guide+R1 (anything the layer mapped), nothing goes out and the menu stays shut.
+# The layer also maps OGUI's Guide+A (quick bar) and Guide+X (keyboard) to DBus, at the end.
+# InputPlumber names face buttons by evdev code: North is BTN_NORTH, the alias of BTN_X, so the
+# left button on an Xbox layout (Y is West). OGUI's own Guide+North keyboard combo is X too.
+#
+# TARGET_DEVICES IS EXPLICIT, not omitted: omitting keeps the composite's current targets, which
+# on every board but one is already exactly this triple — but the MANGMI Pocket Max ships without
+# a keyboard target (its devices.d header: nothing in that composite produces a keyboard
+# capability), and the layer's F-keys would be dropped there. Loading this profile replaces the
+# target list, so the Max gains keyboard/mouse while the profile is live; OGUI's focus profile has
+# no target_devices, which leaves targets as they are — a residue on the Max only, gone at reboot,
+# harmless (an idle keyboard target).
+#
+# R2 appears twice (trigger AND button): the boards' capability maps disagree on what the right
+# trigger is post-translation — ret1 claims ABS_HAT2Y as an analog trigger, others emit a button.
+# A layer row whose source capability this board never produces simply never matches.
+version: 1
+kind: DeviceProfile
+name: RetroForge Guide hotkeys (Dolphin)
+description: Hold Guide for emulator hotkeys; plain pad otherwise
+target_devices:
+  - xbox-elite
+  - keyboard
+  - mouse
+
+mapping:
+  - name: Guide holds the hotkey layer (and goes to the shell's menu over DBus)
+    source_event:
+      gamepad:
+        button: Guide
+    target_events:
+      - layer:
+          name: guide
+      - dbus: ui_guide
+
+layers:
+  - name: guide
+    mapping:
+      - name: Guide+L1 -> F1 (load state, slot 1)
+        source_event:
+          gamepad:
+            button: LeftBumper
+        target_events:
+          - keyboard: KeyF1
+
+      - name: Guide+R1 -> F2 (save state, slot 1)
+        source_event:
+          gamepad:
+            button: RightBumper
+        target_events:
+          - keyboard: KeyF2
+
+      - name: Guide+R2 (analog) -> F3 (no speed limit while held)
+        source_event:
+          gamepad:
+            trigger:
+              name: RightTrigger
+              deadzone: 0.2
+        target_events:
+          - keyboard: KeyF3
+
+      - name: Guide+R2 (button) -> F3 (no speed limit while held)
+        source_event:
+          gamepad:
+            button: RightTrigger
+        target_events:
+          - keyboard: KeyF3
+
+      - name: Guide+Start -> F4 (Stop; with -b Dolphin quits)
+        source_event:
+          gamepad:
+            button: Start
+        target_events:
+          - keyboard: KeyF4
+
+      # OpenGamepadUI's own Guide combos, which its intercept used to catch: every gamepad_profile
+      # carries them in the layer Guide holds (tests/test-launch.sh checks), so emulators keep A
+      # and Y free for them. Using them counts as using the layer: no ui_guide tap on release.
+      - name: Guide+A -> ui_quick (OpenGamepadUI quick bar)
+        source_event:
+          gamepad:
+            button: South
+        target_events:
+          - dbus: ui_quick
+
+      - name: Guide+X -> ui_osk (OpenGamepadUI on-screen keyboard)
+        source_event:
+          gamepad:
+            button: North
+        target_events:
+          - dbus: ui_osk

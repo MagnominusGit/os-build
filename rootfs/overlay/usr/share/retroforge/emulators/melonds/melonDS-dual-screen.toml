@@ -6,7 +6,7 @@
 #   boot with no files. The DS.* paths are pre-filled for a player who drops real dumps in
 #   ~/bios and turns External BIOS on (it refuses to boot when they are missing).
 # - Mouse.Hide: no cursor over the game (touch still works on the bottom screen).
-# - Mic.InputType = 2 (noise): holding L3 "blows" into the mic (Nintendogs, Spirit Tracks...).
+# - Mic.InputType = 2 (noise): holding Guide+R3 "blows" into the mic (Nintendogs, Spirit Tracks...).
 # - Instance0: the pad is SDL device INDEX 0 (melonDS never uses a name or GUID); cartridge saves in
 #   ~/saves/nds, save states (keyboard F-keys only) in ~/states/nds.
 # - Instance0.Joystick: melonDS ships NO pad mapping. RAW SDL joystick numbers of InputPlumber's
@@ -17,8 +17,20 @@
 #   2 right, 4 down, 8 left); an axis adds 0x10000|(dir<<20)|(axis<<24), dir 0 = +, 1 = -,
 #   2 = trigger, with 0xFFFF in the low 16 bits when there is no button/hat. Directions = D-pad hat
 #   OR left stick in one value: Up 0x1110101, Down 0x1010104, Left 0x110108, Right 0x10102.
-#   Hotkeys: L3 mic, R3 swap screens, LT (0x221FFFF) close/open the lid, RT (0x521FFFF) hold to
-#   fast-forward. Guide stays unbound: OpenGamepadUI owns it.
+#   Hotkeys: LT (0x221FFFF) close/open the lid, RT (0x521FFFF) hold to fast-forward. Mic and swap
+#   screens are no longer on L3/R3 alone (stick clicks are too easy to hit by mistake): they are
+#   Guide chords, below. Guide stays unbound: OpenGamepadUI owns it.
+# - Instance0.Keyboard: the Guide-modifier hotkeys. The combination lives in InputPlumber
+#   (guide-hotkeys.yaml next to emulator.json): holding Guide turns L1 into F1 (Load state > 1),
+#   R1 into Shift+F1 (Save state > 1) and Start into Ctrl+Q (File > Quit: the normal exit, config
+#   and .sav written). Those are melonDS's FIXED menu shortcuts (Window.cpp: Qt::Key_F1 + i - 1,
+#   Shift for save, QKeySequence::Quit), still live in fullscreen (the menu bar is 0 px high, not
+#   hidden). R2 becomes F10, bound here to HK_FastForward (held, as RT alone): a Qt key code
+#   (Qt::Key_F10 = 0x01000039), Config.cpp's "Keyboard.HK_FastForward". F1-F8 are the state slots,
+#   F9 / F12 the state file dialogs and undo; melonDS binds no other key (Instance*.Keyboard = -1).
+#   The screens: L2 becomes F11 (HK_SwapScreens, Qt::Key_F11 = 0x0100003A: which panel shows which
+#   screen) and R3 End (HK_Mic, held, Qt::Key_End = 0x01000011). Home (Guide+Y) stays unbound:
+#   one screen per panel, nothing to emphasize on a dual-screen board.
 # - Window0: both screens side by side, same size (960x720 each on a 1920x1080 panel).
 # - 3D.Renderer = 0 (software, melonDS's default): only so the [3D] table exists. A RetroForge option
 #   that writes [3D.GL] before melonDS ever ran would otherwise leave [3D] implicit, and toml11 then
@@ -62,10 +74,13 @@ Up = 17891585
 Down = 16843012
 Left = 1114376
 Right = 65794
-HK_Mic = 9
-HK_SwapScreens = 10
 HK_Lid = 35782655
 HK_FastForward = 86114303
+
+[Instance0.Keyboard]
+HK_FastForward = 16777273
+HK_SwapScreens = 16777274
+HK_Mic = 16777233
 
 [Instance0.Window0]
 ScreenLayout = 2

@@ -1,0 +1,86 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/device_profile_v1.json
+#
+# Guide-modifier hotkeys for Flycast. Same design as snes9x/guide-hotkeys.yaml (the testbed; its
+# header explains the Guide row, the deferred ui_guide tap, the explicit target_devices and why R2
+# appears twice); only the layer's keyboard outputs are bound elsewhere.
+#
+# Hold Guide: L1 loads the current state slot, R1 saves it, R2 toggles fast-forward (Flycast has no
+# hold mode: press again to stop), Start quits. The layer emits keyboard F1-F4; the seeded keyboard
+# mapping (kbd.cfg -> ~/.config/flycast/mappings/SDL_Keyboard.cfg) binds them to btn_jump_state,
+# btn_quick_save, btn_fforward and btn_escape (Flycast's exit: resume state and VMU written).
+# Select + Start still opens Flycast's menu (pad.cfg).
+version: 1
+kind: DeviceProfile
+name: RetroForge Guide hotkeys (Flycast)
+description: Hold Guide for emulator hotkeys; plain pad otherwise
+target_devices:
+  - xbox-elite
+  - keyboard
+  - mouse
+
+mapping:
+  - name: Guide holds the hotkey layer (and goes to the shell's menu over DBus)
+    source_event:
+      gamepad:
+        button: Guide
+    target_events:
+      - layer:
+          name: guide
+      - dbus: ui_guide
+
+layers:
+  - name: guide
+    mapping:
+      - name: Guide+L1 -> F1 (load state, current slot)
+        source_event:
+          gamepad:
+            button: LeftBumper
+        target_events:
+          - keyboard: KeyF1
+
+      - name: Guide+R1 -> F2 (save state, current slot)
+        source_event:
+          gamepad:
+            button: RightBumper
+        target_events:
+          - keyboard: KeyF2
+
+      - name: Guide+R2 (analog) -> F3 (fast-forward on/off)
+        source_event:
+          gamepad:
+            trigger:
+              name: RightTrigger
+              deadzone: 0.2
+        target_events:
+          - keyboard: KeyF3
+
+      - name: Guide+R2 (button) -> F3 (fast-forward on/off)
+        source_event:
+          gamepad:
+            button: RightTrigger
+        target_events:
+          - keyboard: KeyF3
+
+      - name: Guide+Start -> F4 (quit, resume state and VMU written)
+        source_event:
+          gamepad:
+            button: Start
+        target_events:
+          - keyboard: KeyF4
+
+      # OpenGamepadUI's own Guide combos, which its intercept used to catch: every gamepad_profile
+      # carries them in the layer Guide holds (tests/test-launch.sh checks), so emulators keep A
+      # and X free for them. Using them counts as using the layer: no ui_guide tap on release.
+      - name: Guide+A -> ui_quick (OpenGamepadUI quick bar)
+        source_event:
+          gamepad:
+            button: South
+        target_events:
+          - dbus: ui_quick
+
+      - name: Guide+X -> ui_osk (OpenGamepadUI on-screen keyboard)
+        source_event:
+          gamepad:
+            button: North
+        target_events:
+          - dbus: ui_osk
