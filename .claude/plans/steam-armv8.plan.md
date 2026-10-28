@@ -37,6 +37,7 @@ compatibility overrides.
 | D9 | **Build repo**: `sunshineinabox/proton-armv8`, public (user, 2026-10-22). |
 | D10 | **zram**: `zram-size = min(ram, 8192)`, with no toggle. zram is RAM-only and never writes to the SD card. zswap is rejected: it writes cold pages back to a disk swap device (here the SD card), and the kernel has `CONFIG_ZSWAP` off. |
 | D11 | **The patch-refresh agent is open**: Claude Code Action, or GitHub's own (Copilot/GitHub Models), decided later. Until then a failing patch opens an issue. |
+| D12 | **No FEX of our own** (user, 2026-10-28). The ARMv8.0 FEX build, its swap into Valve's tool and its own tool (`retroforge-steam-fex`, `fex-armv8.pin`, `entry:` in steam-compat-tools) are dropped; Valve's FEX tool stays as Steam installs it. On ARMv8.0 CPUs native x86 Linux games are not supported: a game with a Windows build runs it with our ARMv8.0 Proton. The x86 guest RootFS stays. Proton's own FEX (inside Wine) and its per-game TSO row are unaffected. The FEX job in proton-armv8 can go. |
 
 ## Tasks
 
@@ -111,6 +112,7 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
   - os-build `3b9783e`: steam-compat-tools pins get `entry:` (the file a tool is checked by; own lock and
     waiting folder, no Sarek); `fex-armv8.pin`; `retroforge-steam-fex` apply/install/status, run by
     `/usr/bin/steam`; tests (fex 19, compat-tools 128).
+- [x] **Dropped 2026-10-28 (D12)**: everything below about our FEX was reverted on this branch; the results stay for the record.
 - [x] On the Air X from the real release (2026-10-23): proton-armv8 pushed, the FEX workflow released
   `fex-armv8-FEX-2607-76-g37265b1` in ~5 min (1.4 MB, not "latest"). The branch's `install`: downloaded and
   checked it, installed it in 3 s, took Valve's two scripts in, and swapped 6 binaries into Valve's tool

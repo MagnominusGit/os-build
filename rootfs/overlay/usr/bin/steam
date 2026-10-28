@@ -348,15 +348,11 @@ unset STEAM_RUNTIME STEAM_RUNTIME_LIBRARY_PATH
 
 # ARMv8.0 CPUs: our ARMv8.0 Proton as Steam's default tool, set while the client is not running
 # (retroforge-steam-proton; nothing elsewhere). TEST SEAM: RETROFORGE_STEAM_PROTON_CLI.
-# ARMv8.0 CPUs: our ARMv8.0 FEX for x86 Linux games, as a tool of its own and in Valve's FEX tool while
-# the versions match (retroforge-steam-fex; nothing elsewhere). TEST SEAM: RETROFORGE_STEAM_FEX_CLI.
-# Both only when the client starts: what they set is the client's, and each also starts an update in
-# the background, which a launch without the client would have competing with the game's start.
+# Only when the client starts: what it sets is the client's, and it also starts an update in the
+# background, which a launch without the client would have competing with the game's start.
 proton_cli="${RETROFORGE_STEAM_PROTON_CLI:-/usr/bin/retroforge-steam-proton}"
-fex_cli="${RETROFORGE_STEAM_FEX_CLI:-/usr/bin/retroforge-steam-fex}"
 if [ -z "$direct" ]; then
   [ -x "$proton_cli" ] && "$proton_cli" apply >/dev/null
-  [ -x "$fex_cli" ] && "$fex_cli" apply >/dev/null
 fi
 
 # DXVK-Sarek, the player's setting (Settings > Steam, on by default on the SM6115's Adreno 610,

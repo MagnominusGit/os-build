@@ -860,51 +860,6 @@ tools8 "$T/cpuinfo-v80" - off
 [ "$RC" = 0 ] && [ ! -e "$TOOLS8/$DIR8/user_settings.py" ] && [ ! -e "$TOOLS8/$STABLE/user_settings.py" ] && [ -e "$TOOLS8/$DIR8/proton" ] \
   && ok "Sarek off in it and in a Proton-CachyOS left on the device; the tools stay" || bad "rc=$RC err=$ERR"
 
-# ================================================================================================
-# entry: another kind of tool (fex-armv8.pin, retroforge-steam-fex), beside Proton.
-FEXDIR=fex-armv8-retroforge
-{ printf 'name: fex-armv8\nreleases: %s\nasset: fex-armv8-*.tar.zst\nsidecar: .sha512\n' "$RELEASES"
-  printf 'dir: %s\ndisplay_name: FEX ARMv8.0 (RetroForge)\nentry: FEXCompatTool\n' "$FEXDIR"; } >"$PINS8/fex.pin"
-mktoolfex() {  # mktoolfex <top> [nocompat]: $DL/<top>.tar.zst, a FEX tool's folder (no proton)
-  local d="$T/mkfex/$1"
-  rm -rf "$T/mkfex"; mkdir -p "$d/usr/bin" "$d/rootfs"
-  printf '"compatibilitytools"\n{\n  "compat_tools"\n  {\n    "%s"\n    {\n      "install_path" "."\n      "display_name" "FEX ARMv8.0"\n      "from_oslist" "linux"\n      "to_oslist" "linux"\n    }\n  }\n}\n' "$1" >"$d/compatibilitytool.vdf"
-  printf '"manifest"\n{\n  "commandline" "/fex-compat-tool %%verb%% --"\n  "compatmanager_layer_name" "fex"\n}\n' >"$d/toolmanifest.vdf"
-  echo "$1" >"$d/usr/bin/FEX"; [ "${2:-}" = nocompat ] || echo "$1" >"$d/FEXCompatTool"
-  tar -C "$T/mkfex" -cf - "$1" | zstd -q -f -o "$DL/$1.tar.zst"
-}
-
-CASE="entry: a FEX tool"
-rm -rf "$T/home8"; mktoolfex fex-armv8-FEX-2607-76-g37265b1
-releases8 <<EOF
-fex-armv8-FEX-2607-76-g37265b1 2026-10-23T06:00:00Z fex-armv8-FEX-2607-76-g37265b1
-armv8-proton-11.0-2e 2026-10-22T12:00:00Z proton-armv8-proton-11.0-2e
-EOF
-tools8 "$T/cpuinfo-v80" "$PINS8/fex.pin" on
-[ "$RC" = 0 ] && [ "$OUT" = "$TOOLS8/$FEXDIR" ] && [ "$(tag_of "$TOOLS8/$FEXDIR")" = fex-armv8-FEX-2607-76-g37265b1 ] \
-  && ok "its release, among Proton's, checked by its .sha512" || bad "rc=$RC out=$OUT err=$ERR"
-[ "$(vdf_strings "$TOOLS8/$FEXDIR")" = "compatibilitytools|compat_tools|$FEXDIR|install_path|.|display_name|FEX ARMv8.0 (RetroForge)|from_oslist|linux|to_oslist|linux" ] \
-  && ok "named $FEXDIR for Steam" || bad "$(vdf_strings "$TOOLS8/$FEXDIR")"
-[ -f "$TOOLS8/$FEXDIR/FEXCompatTool" ] && [ ! -e "$TOOLS8/$FEXDIR/user_settings.py" ] && [ ! -e "$TOOLS8/$FEXDIR/proton" ] \
-  && ok "checked by FEXCompatTool, no proton, nothing of Sarek" || bad "$(ls -a "$TOOLS8/$FEXDIR")"
-[ -e "$S8/.retroforge-fex-armv8.lock" ] && [ ! -e "$S8/.retroforge-compat-tools.lock" ] \
-  && ok "its own lock, not Proton's" || bad "$(ls -a "$S8")"
-tools8 "$T/cpuinfo-v80" - on
-[ "$RC" = 0 ] && [ -e "$TOOLS8/$DIR8/proton" ] && [ "$(tag_of "$TOOLS8/$FEXDIR")" = fex-armv8-FEX-2607-76-g37265b1 ] \
-  && ok "Proton installs beside it, and leaves it alone" || bad "rc=$RC err=$ERR"
-tools8 "$T/cpuinfo-v80" "$PINS8/fex.pin" off
-[ "$RC" = 0 ] && [ -f "$TOOLS8/$FEXDIR/FEXCompatTool" ] && [ -f "$TOOLS8/$DIR8/user_settings.py" ] \
-  && ok "off: nothing to do for it, and Proton's Sarek stays" || bad "rc=$RC err=$ERR"
-
-CASE="entry: a FEX tarball without it"
-rm -rf "$T/home8"; mktoolfex fex-armv8-FEX-2607-76-g37265b1 nocompat
-releases8 <<EOF
-fex-armv8-FEX-2607-76-g37265b1 2026-10-23T06:00:00Z fex-armv8-FEX-2607-76-g37265b1
-EOF
-tools8 "$T/cpuinfo-v80" "$PINS8/fex.pin" on
-[ "$RC" = 1 ] && grep -q "has no fex-armv8-FEX-2607-76-g37265b1/ with compatibilitytool.vdf, toolmanifest.vdf, FEXCompatTool" <<<"$ERR" \
-  && [ ! -e "$TOOLS8/$FEXDIR" ] && ok "refused, nothing installed" || bad "rc=$RC err=$ERR"
-
 echo
 echo "$PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]

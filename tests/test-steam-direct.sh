@@ -522,15 +522,15 @@ cat >"$W/guest" <<EOF
 #!/usr/bin/env bash
 echo "\$1" >>"$W/guest.calls"
 EOF
-for t in proton fex; do printf '#!/usr/bin/env bash\necho "$*" >>"%s/%s.calls"\n' "$W" "$t" >"$W/$t"; done
-chmod +x "$W/client" "$W/bootstrap" "$W/sarek" "$W/keep" "$W/bin/systemd-run" "$W/stub-direct" "$W/guest" "$W/proton" "$W/fex"
+printf '#!/usr/bin/env bash\necho "$*" >>"%s/proton.calls"\n' "$W" >"$W/proton"
+chmod +x "$W/client" "$W/bootstrap" "$W/sarek" "$W/keep" "$W/bin/systemd-run" "$W/stub-direct" "$W/guest" "$W/proton"
 # The real helper, as the image installs it: executable (/usr/bin/steam runs it only then).
 cp "$DIRECT" "$W/direct"; chmod +x "$W/direct"
 # The x86 guest is on, its helper a stub that records its calls (test-steam-x86-guest.sh has the rest).
 WENV=(env -u RETROFORGE_STEAM_KEPT -u PROTON_DXVK_SAREK -u RETROFORGE_STEAM_X86_GUEST "${DENV[@]:1}" PATH="$W/bin:$PATH"
       RETROFORGE_STEAM_BOOTSTRAP="$W/bootstrap" RETROFORGE_STEAM_X86_GUEST_HELPER="$W/guest"
       RETROFORGE_STEAM_X86_GUEST_DIR="$W/fex-guest" RETROFORGE_STEAM_SAREK_CLI="$W/sarek" RETROFORGE_STEAM_KEEP_CLI="$W/keep"
-      RETROFORGE_STEAM_DIRECT_CLI="$W/direct" RETROFORGE_STEAM_PROTON_CLI="$W/proton" RETROFORGE_STEAM_FEX_CLI="$W/fex")
+      RETROFORGE_STEAM_DIRECT_CLI="$W/direct" RETROFORGE_STEAM_PROTON_CLI="$W/proton")
 wrap() {  # wrap [VAR=value...] -- args...
   local -a vars=()
   while [ "$1" != -- ]; do vars+=("$1"); shift; done; shift
@@ -547,8 +547,8 @@ wrap DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/0/bus" -- -gamepadui -steamos
 grep -qx status "$W/keep.calls" 2>/dev/null && [ ! -e "$W/sdrun.calls" ] \
   && ok "keep-running on, but Steam has no remembered sign-in: no client beside it" || bad "keep: $(cat "$W/keep.calls" 2>&1) sdrun: $(cat "$W/sdrun.calls" 2>&1)"
 [ ! -e "$W/guest.calls" ] && ok "nor the x86 guest (no FEX game starts this way)" || bad "guest: $(cat "$W/guest.calls")"
-[ ! -e "$W/proton.calls" ] && [ ! -e "$W/fex.calls" ] && ok "nor our ARMv8.0 Proton and FEX (the client's, with updates in the background)" \
-  || bad "proton: $(cat "$W/proton.calls" 2>&1) fex: $(cat "$W/fex.calls" 2>&1)"
+[ ! -e "$W/proton.calls" ] && ok "nor our ARMv8.0 Proton (the client's, with updates in the background)" \
+  || bad "proton: $(cat "$W/proton.calls")"
 [ "$(ran_env PROTON_DXVK_SAREK)" = 1 ] && grep -qx apply "$W/sarek.calls" && ok "DXVK-Sarek is applied first (PROTON_DXVK_SAREK=1)" || bad "sarek=$(ran_env PROTON_DXVK_SAREK)"
 [ -f "$T/ran.env" ] && ! grep -q "^DBUS_SESSION_BUS_ADDRESS=" "$T/ran.env" && ok "a D-Bus address that is not ours is dropped first (bwrap fails on it)" || bad "dbus: $(grep DBUS "$T/ran.env" 2>&1)"
 [ "$(cat "$T/ran.cwd")" = "$GAME/x64Vk" ] && ok "as Steam started it" || bad "cwd: $(cat "$T/ran.cwd")"
@@ -589,8 +589,8 @@ wrap -- -gamepadui -steamos3 -steampal -steamdeck -silent steam://rungameid/2689
   || bad "rc=$WRC client=$(cat "$W/client.args" 2>&1) err=$WERR"
 grep -q status "$W/keep.calls" 2>/dev/null && grep -qx start "$W/guest.calls" 2>/dev/null \
   && ok "and the kept-client path and the x86 guest are taken as before" || bad "keep: $(cat "$W/keep.calls" 2>&1) guest: $(cat "$W/guest.calls" 2>&1)"
-grep -qx apply "$W/proton.calls" 2>/dev/null && grep -qx apply "$W/fex.calls" 2>/dev/null \
-  && ok "and our ARMv8.0 Proton and FEX are applied before the client starts" || bad "proton: $(cat "$W/proton.calls" 2>&1) fex: $(cat "$W/fex.calls" 2>&1)"
+grep -qx apply "$W/proton.calls" 2>/dev/null \
+  && ok "and our ARMv8.0 Proton is applied before the client starts" || bad "proton: $(cat "$W/proton.calls" 2>&1)"
 grep -q 'x64Vk/Hades.exe' "$CACHE/1145360.json" 2>/dev/null && grep -q 'Stardew/x.exe' "$CACHE/413150.json" 2>/dev/null \
   && ok "every game's last launch is kept before the client starts (it may rotate its log)" || bad "kept: $(ls "$CACHE" 2>&1)"
 wrap RETROFORGE_STEAM_DIRECT=off -- -silent steam://rungameid/1145360
