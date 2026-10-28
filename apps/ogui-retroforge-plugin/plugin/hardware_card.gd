@@ -203,33 +203,33 @@ func refresh() -> void:
 	if info == null or not is_visible_in_tree():
 		return
 	var d: Dictionary = info.snapshot()
-	_set("battery", info.format_battery(d["battery"]) if d.has("battery") else "")
+	_set_row("battery", info.format_battery(d["battery"]) if d.has("battery") else "")
 	var charger := ""
 	if d.has("charger"):
 		charger = "Connected" if d["charger"]["online"] else "Not connected"
 		if d["charger"].get("status", "") not in ["", "Unknown"]:
 			charger += " · " + str(d["charger"]["status"])
-	_set("charger", charger)
-	_set("thermal", info.format_temps(d["thermal"]) if d.has("thermal") else "")
-	_set("fan", ("%d rpm" % d["fan_rpm"]) if d.has("fan_rpm") else "")
-	_set("clocks", info.format_clocks(d))
+	_set_row("charger", charger)
+	_set_row("thermal", info.format_temps(d["thermal"]) if d.has("thermal") else "")
+	_set_row("fan", ("%d rpm" % d["fan_rpm"]) if d.has("fan_rpm") else "")
+	_set_row("clocks", info.format_clocks(d))
 	var bl := ""
 	if d.has("backlight") and d["backlight"].get("brightness") != null and d["backlight"].get("max") != null and int(d["backlight"]["max"]) > 0:
 		bl = "%d%% (%d / %d)" % [int(round(100.0 * float(d["backlight"]["brightness"]) / float(d["backlight"]["max"]))), d["backlight"]["brightness"], d["backlight"]["max"]]
-	_set("backlight", bl)
+	_set_row("backlight", bl)
 	var leds := []
 	if d.has("leds"):
 		for group in d["leds"].keys():
 			leds.append("%s ×%d" % [group, d["leds"][group]])
-	_set("leds", ", ".join(leds))
+	_set_row("leds", ", ".join(leds))
 	var dev: Dictionary = d.get("device", {})
 	var board := str(dev.get("name", ""))
 	if dev.get("soc", "") != "":
 		board += " · " + str(dev["soc"])
-	_set("device", board)
+	_set_row("device", board)
 
 
-func _set(key: String, text: String) -> void:
+func _set_row(key: String, text: String) -> void:
 	_values[key].text = text
 	_rows[key].visible = text != ""
 
@@ -248,7 +248,7 @@ func _on_panel_status(status: Dictionary) -> void:
 	# No paneld (an older image) or a refused poll: keep what the row shows, hidden or not.
 	if status.has("error"):
 		return
-	_set("panel", panel.format_rate(status))
+	_set_row("panel", panel.format_rate(status))
 	var saved: String = panel.format_saved(status)
 	if saved == "":
 		return
