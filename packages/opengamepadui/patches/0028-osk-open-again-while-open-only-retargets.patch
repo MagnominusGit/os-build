@@ -5,7 +5,7 @@ Subject: [PATCH] fix(OnScreenKeyboard): opening it while open only retargets
 
 Each open() emitted "opened", and the SpacerGrowerEffect in card_ui.tscn
 grows the menu's KeyboardSpacer to its current height plus the keyboard's.
-Once taps outside the keys reached the menu (0025), a tap on the field the
+Once taps outside the keys reached the menu (0026), a tap on the field the
 keyboard types into opened it again, and every tap pushed the menu up by
 another keyboard height (HW, MANGMI Air X, 2026-10-23).
 

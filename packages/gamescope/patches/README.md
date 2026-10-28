@@ -32,7 +32,7 @@ root (the `gamescope/` checkout inside makepkg's `$srcdir`) by
 0031-composite-blit-build-under-werror-format-security.patch   (ours: one-line build fix for 0027)
 0047-drm-offer-an-edid-less-internal-panels-native-modes-as-refresh-rates.patch   (Kettle Linux 0019, via Nova-Deck 0026)
 0048-steamcompmgr-refresh-only-request-takes-the-exact-mode.patch   (Nova-Deck 0027)
-0048-steamcompmgr-steam-on-another-xwayland-sees-the-focus.patch   (ours: Steam Input under OpenGamepadUI)
+0049-steamcompmgr-steam-on-another-xwayland-sees-the-focus.patch   (ours: Steam Input under OpenGamepadUI)
 ```
 
 `0008`-`0013` are **retired** (see below), and so are `0022`-`0024`, which is why the pre-rotation
@@ -581,7 +581,7 @@ offers it, and only for refresh-only requests — caps keep the doubling, which 
 30 fps game at the panel's top rate for latency. Needs `0047` for an EDID-less panel to have a
 rate list at all. Applied after `0047`, at fuzz 0.
 
-`0048` — **Steam on another XWayland sees the focus.** Steam reads `GAMESCOPE_FOCUSED_APP`,
+`0049` — **Steam on another XWayland sees the focus.** Steam reads `GAMESCOPE_FOCUSED_APP`,
 `_FOCUSED_APP_GFX`, `_FOCUSED_WINDOW`, `_FOCUSABLE_APPS` and `_FOCUSABLE_WINDOWS` from the root of
 the XWayland it runs on; gamescope sets them on the first one only. Under OpenGamepadUI the shell
 is on `:0` and Steam on `:1`, so Steam recognised a game only when the game connected to the client
@@ -595,7 +595,7 @@ game. HW 2026-10-23, MANGMI Air X, SuperTux (native, FEX) started from the Steam
 opened: with the atoms copied to `:1` by hand, Steam logged `game window type: AppID 1572920` and
 its virtual pad (`28de:11ff`) carried 6 button / 179 axis events where it had 0. Steam's window
 under OGUI's id gave a "Last Resort" gamepad config for app 1984639; under 769 it gave `ClientUI`.
-Needs OGUI patch 0024 (a game Steam starts keeps its own `STEAM_GAME`).
+Needs OGUI patch 0025 (a game Steam starts keeps its own `STEAM_GAME`).
 
 Drop the patch files here with those exact names (or rename and update `source.pin`'s
 `patches:` line). **Until a declared patch is present, `make overlay` / `make base` fail fast**

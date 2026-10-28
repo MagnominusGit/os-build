@@ -7,20 +7,20 @@
 # gets wrong shows only on a device with the right library. A new file a patch adds needs no OGUI
 # types to test, so it is taken out of the COMMITTED patch and run here:
 #
-#   - 0031 CardArtWindow: a card's art loads within a screen of the visible part and goes past three
+#   - 0032 CardArtWindow: a card's art loads within a screen of the visible part and goes past three
 #     screens or after the container has been hidden a while. Loading too little shows empty cards;
 #     dropping too little keeps a whole library's art in GPU memory (872 MiB, 1,000 games, Air X).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PATCHES="$ROOT/packages/opengamepadui/patches"
-P0031="$PATCHES/0031-card-art-only-near-the-screen.patch"
+P0032="$PATCHES/0032-card-art-only-near-the-screen.patch"
 
 PASS=0; FAIL=0; CASE=""
 ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  FAIL %s -- %s\n' "$CASE" "$1"; }
 
-[ -f "$P0031" ] || { echo "missing input: $P0031" >&2; exit 1; }
+[ -f "$P0032" ] || { echo "missing input: $P0032" >&2; exit 1; }
 T="$(mktemp -d)" && [ -d "$T" ] || { echo "mktemp -d failed" >&2; exit 1; }
 trap 'rm -rf "$T"' EXIT
 
@@ -29,12 +29,12 @@ added_file() {
   awk -v path="+++ b/$2" '$0 == path { f = 1; next } f && /^@@/ { next } f && /^\+/ { print substr($0, 2); next } f { exit }' "$1"
 }
 
-CASE="card art window (0031)"
+CASE="card art window (0032)"
 GODOT="${RETROFORGE_GODOT:-$(command -v godot || true)}"
 if [ -z "$GODOT" ]; then
   printf '  skip %s -- no Godot (set RETROFORGE_GODOT to a Godot 4 binary)\n' "$CASE"
 else
-  added_file "$P0031" core/ui/components/card_art_window.gd > "$T/card_art_window.gd"
+  added_file "$P0032" core/ui/components/card_art_window.gd > "$T/card_art_window.gd"
   grep -q '^class_name CardArtWindow$' "$T/card_art_window.gd" \
     && ok "the patch adds core/ui/components/card_art_window.gd" || bad "card_art_window.gd not found in the patch"
   printf 'config_version=5\n[application]\nconfig/name="ogui-patches-test"\n' > "$T/project.godot"

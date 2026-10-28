@@ -30,8 +30,8 @@ two threads, 15 s per run).
 | Battery state in OGUI | 50% / charging on a full battery: UPower averaged in the charger's empty companion supply; also drove the docked/undocked performance profile | kernel patch 0967 (built, not yet booted) |
 | GPU load in OGUI / PowerStation | `gpu_busy_percent` "not supported" | kernel patch 0265 (built, not yet booted) |
 | Steam cards at Steam's own art size (600x900, 1200x1800 for `_2x`), one texture per card | idle shell with 67 Steam games: 373 MiB of GPU memory (DRM fdinfo), RAM it shares with the game | plugin 0.1.80: 300x450 card images, one texture per art file: 309 MiB (2026-10-24) |
-| Every card's art loaded when it was built, for every card of every library tab | idle shell with 1,000 games: 872 MiB of GPU memory, 843 MiB of RAM available | OGUI patch 0031: art only within a screen of what is shown, dropped 10 s after its tab hides: 310 MiB, 1,408 MiB available; switching tabs peaks at 359 MiB instead of 937 (2026-10-24) |
-| Switching library tabs with 1,000 games | ~140 ms frame on every switch, the same with and without 0031 (the tab's 1,000 cards laid out again) | none yet: plan Phase 4c, library scaling |
+| Every card's art loaded when it was built, for every card of every library tab | idle shell with 1,000 games: 872 MiB of GPU memory, 843 MiB of RAM available | OGUI patch 0032: art only within a screen of what is shown, dropped 10 s after its tab hides: 310 MiB, 1,408 MiB available; switching tabs peaks at 359 MiB instead of 937 (2026-10-24) |
+| Switching library tabs with 1,000 games | ~140 ms frame on every switch, the same with and without 0032 (the tab's 1,000 cards laid out again) | none yet: plan Phase 4c, library scaling |
 
 ## OpenGamepadUI's frame cost (why navigation lagged)
 
@@ -67,14 +67,14 @@ The Adreno 610 is fill-bound at about 1 Mpx per ms: every full 1422x800 layer co
 
 | Cost | GPU per frame | Fix |
 |---|---|---|
-| Cards' `clip_children` masks (a canvas group each) | 3.2 ms | OGUI patch 0035: the art rounds its own corners in a shader |
-| Card shadows filling the card behind the art twice | 2.1 ms | 0035: the shadow draws its ring only |
+| Cards' `clip_children` masks (a canvas group each) | 3.2 ms | OGUI patch 0036: the art rounds its own corners in a shader |
+| Card shadows filling the card behind the art twice | 2.1 ms | 0036: the shadow draws its ring only |
 | Godot's scaled copy of the 1422x800 render into the 1920x1080 window | 1.9 ms | plugin 0.1.85: Reduced UI shrinks the shell's own Xwayland; the panel plane scales it |
 | Full-screen background panel | 1.2 ms | none (an opaque clear instead saves only 0.5 ms and risks the in-game overlay) |
 
 Under OpenGL the canvas groups were the stutter: each flushes the frame, and the same page drew at
-31 fps with the GPU 42% busy (59 fps after 0035). Per-frame scripts (164 Buttons with an empty
-`_process`, ...) took the idle main thread to 12% of a core; OGUI patch 0036: 9.5%.
+31 fps with the GPU 42% busy (59 fps after 0036). Per-frame scripts (164 Buttons with an empty
+`_process`, ...) took the idle main thread to 12% of a core; OGUI patch 0037: 9.5%.
 
 | Before -> after (fps, p99 frame interval) | Vulkan (Forward+) | OpenGL |
 |---|---|---|

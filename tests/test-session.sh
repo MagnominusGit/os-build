@@ -102,23 +102,23 @@ grep -Fq 'secondary-output' "$ROOT/packages/gamescope/patches/0040-drm-drive-a-s
   && ok "the gamescope build carries the flag (patch 0040 in source.pin)" \
   || bad "--secondary-output is passed but patch 0040 is not in packages/gamescope/source.pin"
 CASE="gamescope focus for Steam on its own XWayland"
-# 0048: Steam runs on :1 under OGUI and reads gamescope's focus atoms from its own root; with them
+# 0049: Steam runs on :1 under OGUI and reads gamescope's focus atoms from its own root; with them
 # on :0 only, a native game got Steam's Desktop controller config (HW, MANGMI Air X, 2026-10-23).
-P48="$ROOT/packages/gamescope/patches/0048-steamcompmgr-steam-on-another-xwayland-sees-the-focus.patch"
-if [ -f "$P48" ] && grep -q '0048-steamcompmgr-steam-on-another-xwayland-sees-the-focus.patch' "$ROOT/packages/gamescope/source.pin"; then
-  grep -qE '^\+\s+for \( size_t i = 1; \( server = wlserver_get_xwayland_server\( i \) \); i\+\+ \)' "$P48" \
-    && grep -qE '^\+\s+publish_focus_on_other_xwaylands\( pFocus, vecPossibleFocusWindows \);' "$P48" \
-    && ok "0048: the focus atoms are published on every XWayland after the first" \
-    || bad "0048: the focus atoms reach the first XWayland only"
-  grep -qE '^\+\s+if \( window_is_steam\( w \) \|\| w->bIsSteamPid \|\| w->bIsSteamWebHelperPid \)' "$P48" \
-    && ok "0048: Steam's own windows are reported to it as 769 (OGUI tags them with its own id)" \
-    || bad "0048: Steam's windows keep OGUI's id, and Steam takes its own UI for a game"
+P49="$ROOT/packages/gamescope/patches/0049-steamcompmgr-steam-on-another-xwayland-sees-the-focus.patch"
+if [ -f "$P49" ] && grep -q '0049-steamcompmgr-steam-on-another-xwayland-sees-the-focus.patch' "$ROOT/packages/gamescope/source.pin"; then
+  grep -qE '^\+\s+for \( size_t i = 1; \( server = wlserver_get_xwayland_server\( i \) \); i\+\+ \)' "$P49" \
+    && grep -qE '^\+\s+publish_focus_on_other_xwaylands\( pFocus, vecPossibleFocusWindows \);' "$P49" \
+    && ok "0049: the focus atoms are published on every XWayland after the first" \
+    || bad "0049: the focus atoms reach the first XWayland only"
+  grep -qE '^\+\s+if \( window_is_steam\( w \) \|\| w->bIsSteamPid \|\| w->bIsSteamWebHelperPid \)' "$P49" \
+    && ok "0049: Steam's own windows are reported to it as 769 (OGUI tags them with its own id)" \
+    || bad "0049: Steam's windows keep OGUI's id, and Steam takes its own UI for a game"
   # OGUI's core takes the XWayland with GAMESCOPE_KEYBOARD_FOCUS_DISPLAY for the primary one.
-  ! grep -qE '^\+.*gamescope(Keyboard|Mouse)?FocusDisplay' "$P48" \
-    && ok "0048: the focus-display atoms stay on the first XWayland (OGUI finds its primary by them)" \
-    || bad "0048: a focus-display atom is published elsewhere: OGUI would see two primaries"
+  ! grep -qE '^\+.*gamescope(Keyboard|Mouse)?FocusDisplay' "$P49" \
+    && ok "0049: the focus-display atoms stay on the first XWayland (OGUI finds its primary by them)" \
+    || bad "0049: a focus-display atom is published elsewhere: OGUI would see two primaries"
 else
-  bad "gamescope patch 0048 is missing or not in packages/gamescope/source.pin"
+  bad "gamescope patch 0049 is missing or not in packages/gamescope/source.pin"
 fi
 
 CASE="no-r-by-default"
@@ -280,86 +280,86 @@ if [ -f "$P23" ]; then
 else
   bad "0023: $P23 is missing"
 fi
-# 0024: a game started from the Steam client's own UI got the client's app id, so Steam Input never
+# 0025: a game started from the Steam client's own UI got the client's app id, so Steam Input never
 # reached it (SuperTux, HW, MANGMI Air X, 2026-10-23).
-P24="$PKG/patches/0024-running-app-a-game-steam-starts-keeps-its-own-app-id.patch"
-if [ -f "$P24" ]; then
-  files24="$(grep -E '^\+\+\+ b/' "$P24" | sed 's#^+++ b/##' | sort -u | tr '\n' ' ')"
-  [ "$files24" = "core/global/launch_manager.gd core/systems/launcher/running_app.gd " ] \
-    && ok "0024: changes launch_manager.gd and running_app.gd only" || bad "0024 touches: $files24"
-  grep -qE '^-\s+xwayland.set_app_id\(window, self.app_id\)' "$P24" && grep -qE '^\+\s+xwayland.set_app_id\(window, wanted\)' "$P24" \
-    && grep -qE '^\+\s+var wanted := get_window_app_id\(window\)' "$P24" \
-    && ok "0024: each window is stamped with the id it should carry, not the app's alone" || bad "0024: every window still gets the app's id"
-  grep -qE '^\+\s+var steam_game_id := steam_game_id_from_env\(Reaper.get_pid_environment\(window_pid\)\)' "$P24" \
-    && grep -qE '^\+\s+var id := env.get\("SteamGameId", ""\) as String' "$P24" \
-    && ok "0024: a window whose process has SteamGameId keeps the game's id" || bad "0024: SteamGameId is not read"
+P25="$PKG/patches/0025-running-app-a-game-steam-starts-keeps-its-own-app-id.patch"
+if [ -f "$P25" ]; then
+  files25="$(grep -E '^\+\+\+ b/' "$P25" | sed 's#^+++ b/##' | sort -u | tr '\n' ' ')"
+  [ "$files25" = "core/global/launch_manager.gd core/systems/launcher/running_app.gd " ] \
+    && ok "0025: changes launch_manager.gd and running_app.gd only" || bad "0025 touches: $files25"
+  grep -qE '^-\s+xwayland.set_app_id\(window, self.app_id\)' "$P25" && grep -qE '^\+\s+xwayland.set_app_id\(window, wanted\)' "$P25" \
+    && grep -qE '^\+\s+var wanted := get_window_app_id\(window\)' "$P25" \
+    && ok "0025: each window is stamped with the id it should carry, not the app's alone" || bad "0025: every window still gets the app's id"
+  grep -qE '^\+\s+var steam_game_id := steam_game_id_from_env\(Reaper.get_pid_environment\(window_pid\)\)' "$P25" \
+    && grep -qE '^\+\s+var id := env.get\("SteamGameId", ""\) as String' "$P25" \
+    && ok "0025: a window whose process has SteamGameId keeps the game's id" || bad "0025: SteamGameId is not read"
   # Godot's to_int() logs an error for a 64-bit unsigned id (a non-Steam shortcut's), on every check.
-  grep -qE '^\+\s+if id.length\(\) > 10 or not id.is_valid_int\(\):' "$P24" \
-    && ok "0024: a shortcut's 64-bit SteamGameId never reaches to_int()" || bad "0024: a 64-bit SteamGameId reaches to_int()"
-  grep -qE '^\+\s+app_ids.insert\(0, window_app_id\)' "$P24" && grep -qE '^\+\s+new_focused_apps.append_array\(app_ids\)' "$P24" \
-    && ok "0024: a focused game's id goes ahead of the app's in the baselayer app ids" || bad "0024: the game's id is not in the baselayer app ids"
+  grep -qE '^\+\s+if id.length\(\) > 10 or not id.is_valid_int\(\):' "$P25" \
+    && ok "0025: a shortcut's 64-bit SteamGameId never reaches to_int()" || bad "0025: a 64-bit SteamGameId reaches to_int()"
+  grep -qE '^\+\s+app_ids.insert\(0, window_app_id\)' "$P25" && grep -qE '^\+\s+new_focused_apps.append_array\(app_ids\)' "$P25" \
+    && ok "0025: a focused game's id goes ahead of the app's in the baselayer app ids" || bad "0025: the game's id is not in the baselayer app ids"
   # From ids cached in update(): focused_app_updated is emitted while GamescopeInstance is bound.
-  grep -qE '^\+\s+if app.owns_app_id\(to\):' "$P24" && grep -qE '^\+\s+return id == self.app_id or id in window_app_ids.values\(\)' "$P24" \
-    && ok "0024: LaunchManager maps a focused game id to its app, without asking gamescope" || bad "0024: a focused game id maps to no running app"
-  grep -q "0023-home-card-rebuilt-when-its-library-item-is-replaced.patch 0024-running-app-a-game-steam-starts-keeps-its-own-app-id.patch" "$PKG/source.pin" \
-    && ok "0024: listed in source.pin, after 0023" || bad "0024: not in source.pin's patches"
+  grep -qE '^\+\s+if app.owns_app_id\(to\):' "$P25" && grep -qE '^\+\s+return id == self.app_id or id in window_app_ids.values\(\)' "$P25" \
+    && ok "0025: LaunchManager maps a focused game id to its app, without asking gamescope" || bad "0025: a focused game id maps to no running app"
+  grep -q "0024-input-focus-profile-instead-of-intercept-mode.patch 0025-running-app-a-game-steam-starts-keeps-its-own-app-id.patch" "$PKG/source.pin" \
+    && ok "0025: listed in source.pin, after 0024" || bad "0025: not in source.pin's patches"
 else
-  bad "0024: $P24 is missing"
+  bad "0025: $P25 is missing"
 fi
-# 0032: one null in launcher.json's recents emptied the home screen's row (HW, Pocket FIT, 2026-10-22).
-P32="$PKG/patches/0032-launch-manager-recent-apps-names-only.patch"
-if [ -f "$P32" ]; then
-  [ "$(grep -E '^\+\+\+ b/' "$P32" | sed 's#^+++ b/##' | sort -u)" = "core/global/launch_manager.gd" ] \
-    && ok "0032: changes launch_manager.gd only" || bad "0032 touches more than launch_manager.gd"
-  grep -qE '^\+\s+if not app is String:' "$P32" && grep -qE '^\+\s+var recent: Array = .*filter\(func\(n\): return n is String\)' "$P32" \
-    && ok "0032: recent apps are read and saved as names only" || bad "0032: a non-name recent entry still reaches the home screen"
-  grep -q "0031-card-art-only-near-the-screen.patch 0032-launch-manager-recent-apps-names-only.patch" "$PKG/source.pin" \
-    && ok "0032: listed in source.pin, after 0031" || bad "0032: not in source.pin's patches"
-else
-  bad "0032: $P32 is missing"
-fi
-# 0033: install scripts' Proton windows set a client launch running; Steam was stopped at its shader
-# prompt before the game started (HW, MANGMI Air X, 2026-10-24).
-P33="$PKG/patches/0033-running-app-a-steam-launch-counts-once-steam-starts-the-game.patch"
+# 0033: one null in launcher.json's recents emptied the home screen's row (HW, Pocket FIT, 2026-10-22).
+P33="$PKG/patches/0033-launch-manager-recent-apps-names-only.patch"
 if [ -f "$P33" ]; then
-  [ "$(grep -E '^\+\+\+ b/' "$P33" | sed 's#^+++ b/##' | sort -u)" = "core/systems/launcher/running_app.gd" ] \
-    && ok "0033: changes running_app.gd only" || bad "0033 touches more than running_app.gd"
-  grep -qE '^\+\s+steam_game_launched = _steam_launch_running\(true\)' "$P33" && grep -qE '^\+\s+if not steam_game_launched:' "$P33" \
-    && ok "0033: a Steam launch stays started until Steam's reaper for the game has run" || bad "0033: windows before the game still set it running"
-  grep -qE '^\+\s+if game_only and "Install=1" in argv' "$P33" \
-    && ok "0033: Steam's install-script reaper (Install=1) is not the game's" || bad "0033: an install-script reaper counts as the game"
-  grep -q "0032-launch-manager-recent-apps-names-only.patch 0033-running-app-a-steam-launch-counts-once-steam-starts-the-game.patch" "$PKG/source.pin" \
+  [ "$(grep -E '^\+\+\+ b/' "$P33" | sed 's#^+++ b/##' | sort -u)" = "core/global/launch_manager.gd" ] \
+    && ok "0033: changes launch_manager.gd only" || bad "0033 touches more than launch_manager.gd"
+  grep -qE '^\+\s+if not app is String:' "$P33" && grep -qE '^\+\s+var recent: Array = .*filter\(func\(n\): return n is String\)' "$P33" \
+    && ok "0033: recent apps are read and saved as names only" || bad "0033: a non-name recent entry still reaches the home screen"
+  grep -q "0032-card-art-only-near-the-screen.patch 0033-launch-manager-recent-apps-names-only.patch" "$PKG/source.pin" \
     && ok "0033: listed in source.pin, after 0032" || bad "0033: not in source.pin's patches"
 else
   bad "0033: $P33 is missing"
 fi
-# 0034: the library tabs kept a card on a replaced LibraryItem (no art, no Play): Hades, HW 2026-10-24.
-P34="$PKG/patches/0034-library-menu-a-card-is-rebuilt-when-its-library-item-is-replaced.patch"
+# 0034: install scripts' Proton windows set a client launch running; Steam was stopped at its shader
+# prompt before the game started (HW, MANGMI Air X, 2026-10-24).
+P34="$PKG/patches/0034-running-app-a-steam-launch-counts-once-steam-starts-the-game.patch"
 if [ -f "$P34" ]; then
-  [ "$(grep -E '^\+\+\+ b/' "$P34" | sed 's#^+++ b/##' | sort -u)" = "core/ui/card_ui/library/library_menu.gd" ] \
-    && ok "0034: changes library_menu.gd only" || bad "0034 touches more than library_menu.gd"
-  grep -qE '^\+\s+if is_instance_valid\(old\) and \(old as GameCard\).library_item == item:' "$P34" \
-    && ok "0034: a library card is reused only while it shows the very item" || bad "0034: cards are still reused by name"
-  grep -q "0033-running-app-a-steam-launch-counts-once-steam-starts-the-game.patch 0034-library-menu-a-card-is-rebuilt-when-its-library-item-is-replaced.patch" "$PKG/source.pin" \
+  [ "$(grep -E '^\+\+\+ b/' "$P34" | sed 's#^+++ b/##' | sort -u)" = "core/systems/launcher/running_app.gd" ] \
+    && ok "0034: changes running_app.gd only" || bad "0034 touches more than running_app.gd"
+  grep -qE '^\+\s+steam_game_launched = _steam_launch_running\(true\)' "$P34" && grep -qE '^\+\s+if not steam_game_launched:' "$P34" \
+    && ok "0034: a Steam launch stays started until Steam's reaper for the game has run" || bad "0034: windows before the game still set it running"
+  grep -qE '^\+\s+if game_only and "Install=1" in argv' "$P34" \
+    && ok "0034: Steam's install-script reaper (Install=1) is not the game's" || bad "0034: an install-script reaper counts as the game"
+  grep -q "0033-launch-manager-recent-apps-names-only.patch 0034-running-app-a-steam-launch-counts-once-steam-starts-the-game.patch" "$PKG/source.pin" \
     && ok "0034: listed in source.pin, after 0033" || bad "0034: not in source.pin's patches"
 else
   bad "0034: $P34 is missing"
 fi
-# 0037: a touch release InputManager never saw left current_touches above zero, and the library no longer
-# followed the D-pad (HW, MANGMI Air X, 2026-10-25).
-P37="$PKG/patches/0037-input-menus-follow-the-d-pad-again-after-a-touch.patch"
-if [ -f "$P37" ]; then
-  [ "$(grep -E '^\+\+\+ b/' "$P37" | sed 's#^+++ b/##' | sort -u | tr '\n' ' ')" = "core/systems/input/input_manager.gd core/ui/card_ui/home/cardui_home.gd core/ui/card_ui/library/library_menu.gd " ] \
-    && ok "0037: changes the input manager, home and the library only" || bad "0037 touches other files"
-  grep -qE '^\+func pointer_recent\(window_msec := 500\) -> bool:' "$P37" \
-    && ok "0037: InputManager.pointer_recent, from the last pointer event's time" || bad "0037: no pointer_recent"
-  [ "$(grep -cE '^-\s+if \(input_manager as InputManager\)\.current_touches > 0:' "$P37")" = 2 ] \
-    && [ "$(grep -cE '^\+\s+if \(input_manager as InputManager\)\.pointer_recent\(\):' "$P37")" = 2 ] \
-    && ok "0037: home and the library no longer trust the touch count" || bad "0037: a menu still skips scrolling on current_touches"
-  grep -q "0036-scripts-with-no-per-frame-work-stop-running-every-frame.patch 0037-input-menus-follow-the-d-pad-again-after-a-touch.patch" "$PKG/source.pin" \
-    && ok "0037: listed in source.pin, after 0036" || bad "0037: not in source.pin's patches"
+# 0035: the library tabs kept a card on a replaced LibraryItem (no art, no Play): Hades, HW 2026-10-24.
+P35="$PKG/patches/0035-library-menu-a-card-is-rebuilt-when-its-library-item-is-replaced.patch"
+if [ -f "$P35" ]; then
+  [ "$(grep -E '^\+\+\+ b/' "$P35" | sed 's#^+++ b/##' | sort -u)" = "core/ui/card_ui/library/library_menu.gd" ] \
+    && ok "0035: changes library_menu.gd only" || bad "0035 touches more than library_menu.gd"
+  grep -qE '^\+\s+if is_instance_valid\(old\) and \(old as GameCard\).library_item == item:' "$P35" \
+    && ok "0035: a library card is reused only while it shows the very item" || bad "0035: cards are still reused by name"
+  grep -q "0034-running-app-a-steam-launch-counts-once-steam-starts-the-game.patch 0035-library-menu-a-card-is-rebuilt-when-its-library-item-is-replaced.patch" "$PKG/source.pin" \
+    && ok "0035: listed in source.pin, after 0034" || bad "0035: not in source.pin's patches"
 else
-  bad "0037: $P37 is missing"
+  bad "0035: $P35 is missing"
+fi
+# 0038: a touch release InputManager never saw left current_touches above zero, and the library no longer
+# followed the D-pad (HW, MANGMI Air X, 2026-10-25).
+P38="$PKG/patches/0038-input-menus-follow-the-d-pad-again-after-a-touch.patch"
+if [ -f "$P38" ]; then
+  [ "$(grep -E '^\+\+\+ b/' "$P38" | sed 's#^+++ b/##' | sort -u | tr '\n' ' ')" = "core/systems/input/input_manager.gd core/ui/card_ui/home/cardui_home.gd core/ui/card_ui/library/library_menu.gd " ] \
+    && ok "0038: changes the input manager, home and the library only" || bad "0038 touches other files"
+  grep -qE '^\+func pointer_recent\(window_msec := 500\) -> bool:' "$P38" \
+    && ok "0038: InputManager.pointer_recent, from the last pointer event's time" || bad "0038: no pointer_recent"
+  [ "$(grep -cE '^-\s+if \(input_manager as InputManager\)\.current_touches > 0:' "$P38")" = 2 ] \
+    && [ "$(grep -cE '^\+\s+if \(input_manager as InputManager\)\.pointer_recent\(\):' "$P38")" = 2 ] \
+    && ok "0038: home and the library no longer trust the touch count" || bad "0038: a menu still skips scrolling on current_touches"
+  grep -q "0037-scripts-with-no-per-frame-work-stop-running-every-frame.patch 0038-input-menus-follow-the-d-pad-again-after-a-touch.patch" "$PKG/source.pin" \
+    && ok "0038: listed in source.pin, after 0037" || bad "0038: not in source.pin's patches"
+else
+  bad "0038: $P38 is missing"
 fi
 # One file of the tree as 0018 leaves it, hunk by hunk (context and added lines; a new file whole).
 newside() { python3 - "$P18" "$1" <<'PY'

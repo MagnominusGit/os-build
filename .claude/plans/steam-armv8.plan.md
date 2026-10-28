@@ -162,7 +162,7 @@ patch covers it. FEX upstream supports ARMv8.0 hosts ("ARMv8.0-a or newer, FEAT_
 
 ### Detour: compression speed (2026-10-23)
 - [x] zlib-ng as the system zlib (0f63372): `zlib-ng-compat 2.3.3-1` from the pinned holo snapshot replaces
-  `core/zlib 1.3.2` (relock diff: that line, plus OGUI's new hash for patch 0024, a539c17). Valve's build on the
+  `core/zlib 1.3.2` (relock diff: that line, plus OGUI's new hash for patch 0025, a539c17). Valve's build on the
   Air X, 32 MB of libraries: inflate 1.4-1.5x, deflate 2x, crc32 6-10x, adler32 2-6x; no LSE; level-1 output
   ~25% bigger. Helps what uses the system libz (our Python tools, OGUI, PortMaster ports), not emulators or
   Steam's runtime (their own zlib). Native-mode zlib-ng (`libz-ng.so.2`): nothing in the image uses it.
