@@ -44,7 +44,8 @@
 # old, and a game it does not list is umu-default (only the store's defaults run). RetroForge's own
 # fixes, for what umu-protonfixes does not cover on ARM, are in <pins>/game-fixes.json: before the game
 # runs, each sets an INI key in its prefix. A player turns both off per game in store-games.json
-# (GAME_CHOICES): umu-protonfixes' were written for x86 GE-Proton.
+# (GAME_CHOICES): umu-protonfixes' were written for x86 GE-Proton. An Epic game starts offline unless
+# its "online" is "on" there (Epic.launch_info).
 #
 # SIGN-IN. RetroForge never takes a password. `sign-in` opens the store's own sign-in page in Chromium
 # (python/chromium_signin.py; .claude/plans/store-signin-window.plan.md), fullscreen over OGUI, where the
@@ -877,13 +878,23 @@ class Epic:
             raise Failed("legendary did not uninstall it")
 
     def launch_info(self, gid):
-        """(exe, args, working folder, install folder) from `legendary launch --json`: online for a fresh exchange
-        code, else offline (a game that runs offline still starts without the network)."""
-        res = self.run(["launch", gid, "--json", "--no-wine", "--skip-version-check"])
+        """(exe, args, working folder, install folder) from `legendary launch --json`: offline (no exchange
+        code), or, for a game the player turned online, online with a fresh one, else offline when Epic
+        cannot be reached (a game that runs offline still starts without the network)."""
+        # Offline unless the player turned the game online (store-games.json "online": "on"). Online, the
+        # game gets Epic's exchange code and signs in to Epic Online Services itself, and an EOS game
+        # whose app the account never consented to (in Epic's launcher or overlay, neither of which runs
+        # here) waits on that sign-in forever: DOOM 64's Play did (scope_consent_required, Pocket FIT
+        # 2026-10-29). Offline it starts with no token, as Nova-Deck ran Epic games (from Steam, without
+        # legendary's parameters); a game whose DRM needs the token is the one to turn online.
+        offline = game_choice(self.name, gid, "online") != "on"
+        res = None if offline else self.run(["launch", gid, "--json", "--no-wine", "--skip-version-check"])
         try:
-            p = json.loads(res.stdout)
+            p = json.loads(res.stdout) if res else None
         except ValueError:
             log("Epic could not be reached: the game starts offline")
+            p = None
+        if p is None:
             p = json.loads(self.run(["launch", gid, "--json", "--no-wine", "--offline"], check=True).stdout)
         exe = os.path.join(p["game_directory"], p["game_executable"].replace("\\", "/"))
         args = list(p.get("game_parameters", [])) + list(p.get("user_parameters", [])) + list(p.get("egl_parameters", []))

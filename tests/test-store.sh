@@ -710,6 +710,19 @@ r = store("epic", "launch", "Fortnite2", env={"FAKE_SYNC_FAIL": "1"})
 syncs = [c for c in calls() if c[0] == "legendary" and "sync-saves" in c]
 ok(r.returncode == 0 and len(syncs) == 1 and game_run(calls()), "no upload after a failed download, and the game still runs", str(syncs))
 ok("cloud copy stays as it was" in open(os.path.join(DATA, "notices-epic")).read(), "the player is told")
+reset_calls()
+store("epic", "launch", "Fortnite2")
+launches = [c for c in calls() if c[0] == "legendary" and "launch" in c]
+ok(len(launches) == 1 and "--offline" in launches[0] and game_run(calls()),
+   "an Epic game starts offline by default, without Epic's token (DOOM 64 waits forever on an EOS consent it cannot get)",
+   str(launches))
+json.dump({"epic-Fortnite2": {"online": "on"}}, open(choices, "w"))
+reset_calls()
+store("epic", "launch", "Fortnite2")
+launches = [c for c in calls() if c[0] == "legendary" and "launch" in c]
+ok(len(launches) == 1 and "--offline" not in launches[0] and "--skip-version-check" in launches[0],
+   "online when the player turned it on for the game", str(launches))
+os.remove(choices)
 
 CASE = "protonfixes"
 UMU_CACHE = os.path.join(DATA, "umu-database.csv")
