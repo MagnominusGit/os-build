@@ -1,0 +1,8 @@
+{
+  "name": "retroforge-store-signin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "One window on GOG's or Epic's own sign-in page; prints the code it ends with",
+  "main": "main.js",
+  "license": "MIT"
+}
