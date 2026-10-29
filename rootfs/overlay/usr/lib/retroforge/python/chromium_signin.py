@@ -38,9 +38,9 @@ READ_PAGE = {"expression": "JSON.stringify([location.href, document.body ? docum
 MAX_MESSAGE = 4 << 20  # bytes of one protocol message; more is not Chromium talking sensibly
 
 
-def screen_scale():
-    """Chromium's scale for the X screen it opens on: its height / PAGE_HEIGHT, at least 1. 1 without
-    a screen (no libX11, no DISPLAY)."""
+def screen_scale(name=None):
+    """Chromium's scale for the X display it opens on (name, else DISPLAY): its screen's height /
+    PAGE_HEIGHT, at least 1. 1 without a screen (no libX11, no display)."""
     try:
         x11 = ctypes.CDLL("libX11.so.6")
     except OSError:
@@ -50,7 +50,7 @@ def screen_scale():
     x11.XDefaultScreen.argtypes = [ctypes.c_void_p]
     x11.XDisplayHeight.argtypes = [ctypes.c_void_p, ctypes.c_int]
     x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
-    display = x11.XOpenDisplay(None)
+    display = x11.XOpenDisplay(name.encode() if name else None)
     if not display:
         return 1.0
     try:

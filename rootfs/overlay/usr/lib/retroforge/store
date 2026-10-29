@@ -4,8 +4,9 @@
 #
 #   store <gog|epic> status            {"ready": bool, "signed_in": bool, "account": "..."} (no network)
 #   store <gog|epic> setup             the store's tool, into the player's home; N% lines
-#   store <gog|epic> sign-in           the store's sign-in page in Chromium (SIGN-IN below): JSON events
-#                                      on stdout; closing stdin cancels it
+#   store <gog|epic> sign-in [--display :N]
+#                                      the store's sign-in page in Chromium (SIGN-IN below), on that X
+#                                      display (else DISPLAY): JSON events on stdout; closing stdin cancels it
 #   store <gog|epic> sign-out
 #   store <gog|epic> games             JSON: every game the account owns, installed or not
 #   store <gog|epic> art               the listed games' covers into the cards' cache (ART below)
@@ -124,6 +125,10 @@ class NotReady(Failed):
 
 class Offline(Failed):
     code = 4
+
+
+class Usage(Failed):
+    code = 2
 
 
 def log(msg):
@@ -552,6 +557,15 @@ def run_windows_game(store, gid, exe, args, workdir, game_dir, extra_env=None):
 SIGN_IN_TIMEOUT = 15 * 60
 
 
+def sign_in_display(args):
+    """The X display `sign-in [--display :N]` names, else None (DISPLAY)."""
+    if not args:
+        return None
+    if len(args) == 2 and args[0] == "--display" and re.fullmatch(r":[0-9]{1,3}", args[1]):
+        return args[1]
+    raise Usage("usage: store <gog|epic> sign-in [--display :N]")
+
+
 def sign_in_browser():
     """(Chromium's command, its environment): RETROFORGE_STORE_CHROMIUM (tests), else the set-up one,
     set up first when it is not, with `browser` setup events."""
@@ -564,17 +578,19 @@ def sign_in_browser():
     return found["binary"], chromium_setup.environment(found)
 
 
-def sign_in(store):
+def sign_in(store, display=None):
     """SIGN-IN above: the store's page in Chromium until it shows a code, which then signs in. Events:
     browser setup (percent), open (pid), closed; then code, and signed_in (account) or error (message).
     The player closing the window, or stdin closing (the plugin's Cancel), ends it without a sign-in."""
     if not tool_command(store.tool):
         raise NotReady(f"{store.title} is not set up")
     binary, env = sign_in_browser()
+    if display:
+        env = dict(env, DISPLAY=display)
     forced = os.environ.get("RETROFORGE_STORE_SCALE")
     if forced and not re.fullmatch(r"[1-4](\.[0-9]{1,2})?", forced):
         raise Failed(f"RETROFORGE_STORE_SCALE is not a scale from 1 to 4: {forced}")
-    scale = float(forced) if forced else chromium_signin.screen_scale()
+    scale = float(forced) if forced else chromium_signin.screen_scale(display)
     try:
         reason, code = chromium_signin.run(
             binary, store.sign_in_url, env=env, scale=scale,
@@ -1199,7 +1215,7 @@ def main(argv):
         elif verb == "setup":
             set_up_tool(store.tool, percent_printer())
         elif verb == "sign-in":
-            sign_in(store)
+            sign_in(store, sign_in_display(rest))
         elif verb == "sign-out":
             store.sign_out()
         elif verb == "games":

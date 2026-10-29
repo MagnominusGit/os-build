@@ -93,6 +93,38 @@ grep -q '_show_progress_file.bind(str(emu.get("progress")), id)' "$SRC/apps_page
   && ! grep -qE '_show_progress(_file)?\.bind\(.*, row\)' "$SRC/apps_page.gd" \
   && ok "the download progress poll finds its row by emulator id, not a row the page may have freed" \
   || bad "apps_page.gd binds a row to its progress poll: it freezes once the page rebuilds its rows"
+# The store sign-in's window (.claude/plans/store-signin-window.plan.md, D3): Chromium opens on OGUI's
+# game display and is adopted as one of OGUI's running apps, so OGUI focuses it as a game. Its windows
+# were orphans behind OGUI otherwise (black screen, Pocket FIT 2026-10-29). OGUI's own is_running()
+# (OS.is_process_running) only knows Godot's children and its kill() (Reaper) spares the pid it is
+# given: signin_app.gd overrides both.
+grep -q 'args.append_array(\["--display", display\])' "$SRC/store_settings.gd" \
+  && grep -q '_window.adopt(int(data.get("pid", 0)), _on_cancel.bind(store))' "$SRC/store_settings.gd" \
+  && [ "$(grep -c '_window.release()' "$SRC/store_settings.gd")" -ge 3 ] \
+  && ok "store_settings.gd opens the sign-in on the game display, adopts its window and releases it" \
+  || bad "store_settings.gd does not pass --display, adopt the window on open, or release it on closed/finish/detach"
+grep -q 'launch_manager._add_running(app)' "$SRC/signin_window.gd" && grep -q 'state_machine.push_state(in_game_state)' "$SRC/signin_window.gd" \
+  && grep -q 'xwayland.set_app_id(window, app.app_id)' "$SRC/signin_window.gd" \
+  && ok "signin_window.gd makes Chromium a running app, in the in-game state, its windows carrying the app id" \
+  || bad "signin_window.gd does not register Chromium with OGUI as a running app"
+grep -q '^extends RunningApp$' "$SRC/signin_app.gd" && grep -q '^func is_running() -> bool:$' "$SRC/signin_app.gd" \
+  && grep -q '^func kill(_sig: Reaper.SIG = Reaper.SIG.TERM) -> void:$' "$SRC/signin_app.gd" \
+  && ok "signin_app.gd overrides RunningApp's is_running() and kill() with their signatures" \
+  || bad "signin_app.gd does not override is_running()/kill() as RunningApp declares them"
+# OGUI's Main menu frees a running-game card only on app_killed, which its own stop emits after the
+# state: release() must too, or every sign-in left a "RetroForge store sign-in" card behind.
+python3 - "$SRC/signin_window.gd" <<'PY2' && ok "release() stops the app as OGUI does: STOPPED, then app_killed" || bad "signin_window.gd release() does not emit app_killed after STOPPED: a stale running-game card stays"
+import sys
+s = open(sys.argv[1]).read()
+body = s[s.index("func release()"):]
+st, kill = body.find("app.state = RunningApp.STATE.STOPPED"), body.find("app.app_killed.emit()")
+sys.exit(0 if 0 <= st < kill else 1)
+PY2
+grep -q 'if not launch_manager.get_running().is_empty():' "$SRC/store_settings.gd" \
+  && ok "Sign in waits for no game to run (the window takes its place; nothing gives it focus back)" \
+  || bad "store_settings.gd signs in over a running game"
+! grep -qiE 'qr|phone' "$SRC/store_settings.gd" && ok "no QR code or phone left on the Stores page (plan D4)" \
+  || bad "store_settings.gd still mentions the QR/phone sign-in"
 # Steam's download ends with the client updated and closed: nothing said the next step is opening it,
 # where Steam's own sign-in (QR) comes up.
 grep -q 'elif code == 0 and emu.get("kind") == "steam" and before == null:' "$SRC/apps_page.gd" \
@@ -1115,7 +1147,7 @@ GD
 
   # =================================================================================================
   # store_runner.gd against a fake /usr/lib/retroforge/store: N% lines, JSON events, a line written to
-  # its stdin (the sign-in page's accept), the exit code and the last stderr line.
+  # its stdin, the exit code and the last stderr line.
   CASE="store runner"
   cat >"$T/fake-store" <<'SH'
 #!/bin/bash

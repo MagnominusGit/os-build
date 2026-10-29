@@ -1,24 +1,25 @@
 extends RefCounted
 ## Settings > Stores: GOG and Epic, each with Sign in or Sign out (.claude/plans/stores.plan.md).
 ##
-## Sign-in is on the player's phone (D6). `store <s> sign-in` serves a one-time page and prints its
-## link with a QR code, which shows under the store's row with Cancel. The phone sends the store's code
-## back as it is pasted, and it is used at once (no second confirm here; user, 2026-10-24): the row
-## then says whom it signed in, and the store's library reloads (`changed`). Each store's tool is set
-## up in the background when the page first shows (`store <s> setup`), so Sign in shows the QR code
-## at once; a store whose tool is not set up yet sets it up first, its progress in the row. Leaving
-## the page keeps a sign-in going until Cancel or its 15 minutes.
+## Sign in opens the store's own sign-in page in a window on the device
+## (.claude/plans/store-signin-window.plan.md): `store <s> sign-in` runs Chromium on OGUI's game
+## display, which signin_window.gd puts in front as OGUI puts a game; the player signs in there by
+## touch and the on-screen keyboard. The window closes by itself once the store gives its code, the
+## code signs in, the row says whom it signed in and the store's library reloads (`changed`). The
+## first sign-in downloads Chromium first (~190 MB, plan D1), its progress in the row, with Cancel
+## under it; the Guide menu's Exit closes the window and cancels. Each store's tool is set up in the
+## background when the page first shows (`store <s> setup`); a store whose tool is not set up yet sets
+## it up first, its progress in the row.
 
 signal changed(store: String)
 
 const Runner := preload("store_runner.gd")
+const SigninWindow := preload("signin_window.gd")
 const TOOL := "/usr/lib/retroforge/store"
 const STORES := {"gog": "GOG", "epic": "Epic Games"}
-## Pixels per QR module on screen, and the light border around it, in modules.
-const QR_SCALE := 6
-const QR_QUIET := 4
 
 var notification_manager := load("res://core/global/notification_manager.tres")
+var launch_manager := load("res://core/global/launch_manager.tres") as LaunchManager
 var section_scene := load("res://core/ui/components/section_label.tscn") as PackedScene
 var setting_scene := load("res://core/ui/components/card_button_setting.tscn") as PackedScene
 var button_scene := load("res://core/ui/components/card_button.tscn") as PackedScene
@@ -26,14 +27,17 @@ var logger := Log.get_logger("RetroForgeStores", Log.LEVEL.INFO)
 var tree: SceneTree
 var tool := TOOL
 var _box: Node
-## store -> {"row", "qr", "text", "cancel", "runner", "status", "step"}
+## store -> {"row", "cancel", "runner", "status", "step"}
 var _stores := {}
+var _window: SigninWindow
 var _nodes: Array[Node] = []
 var _prepared := false
 
 
 func setup(scene_tree: SceneTree) -> RefCounted:
 	tree = scene_tree
+	_window = SigninWindow.new()
+	_window.setup(scene_tree)
 	return self
 
 
@@ -50,24 +54,15 @@ func attach(box: Node) -> bool:
 		row.name = "RetroForgeStore" + title.replace(" ", "")
 		row.text = title
 		row.button_text = "Sign in"
-		var qr := TextureRect.new()
-		qr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-		qr.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
-		qr.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		var text := Label.new()
-		text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		var cancel = button_scene.instantiate()
 		cancel.text = "Cancel"
 		# In the tree FIRST: a component's @onready children only exist once it is ready.
-		for node in [label, row, qr, text, cancel]:
+		for node in [label, row, cancel]:
 			box.add_child(node)
 			_nodes.append(node)
 		var runner := Runner.new()
 		runner.tool = tool
-		_stores[store] = {"row": row, "qr": qr, "text": text, "cancel": cancel, "runner": runner,
-			"status": {}, "step": ""}
+		_stores[store] = {"row": row, "cancel": cancel, "runner": runner, "status": {}, "step": ""}
 		row.pressed.connect(_on_row_pressed.bind(store))
 		cancel.pressed.connect(_on_cancel.bind(store))
 		runner.progressed.connect(_on_progress.bind(store))
@@ -85,6 +80,8 @@ func attach(box: Node) -> bool:
 
 
 func detach() -> void:
+	if _window:
+		_window.release()
 	for store in _stores:
 		_stores[store]["runner"].cancel()
 	for node in _nodes:
@@ -120,7 +117,7 @@ func _refresh_row(store: String) -> void:
 		row.description = "Signed in as %s." % account
 		row.button_text = "Sign out"
 	else:
-		row.description = "Sign in with your phone: RetroForge never sees your password."
+		row.description = "Sign in on %s's own page: RetroForge never sees your password." % STORES[store]
 		row.button_text = "Sign in"
 	if _prepared and not status.get("ready", true):
 		s["step"] = "prepare"
@@ -155,6 +152,10 @@ func _on_row_pressed(store: String) -> void:
 			s["row"].disabled = true
 			s["row"].description = "Getting %s ready..." % STORES[store]
 		return
+	# The window would take the game's place, and nothing gives the game its focus back after.
+	if not launch_manager.get_running().is_empty():
+		_notify("Close the running game first: the sign-in opens in its place.")
+		return
 	s["row"].disabled = true
 	if s["status"].get("ready", false):
 		_start_sign_in(store)
@@ -168,7 +169,12 @@ func _start_sign_in(store: String) -> void:
 	var s: Dictionary = _stores[store]
 	s["step"] = "sign-in"
 	s["row"].description = "Opening the sign-in page..."
-	s["runner"].start([store, "sign-in"])
+	var args := [store, "sign-in"]
+	var display: String = _window.display()
+	if display != "":
+		args.append_array(["--display", display])
+	s["runner"].start(args)
+	_show_panel(store, true)
 
 
 func _sign_out(store: String) -> void:
@@ -188,31 +194,36 @@ func _sign_out(store: String) -> void:
 
 
 func _on_progress(percent: int, store: String) -> void:
-	if _stores[store]["step"] == "setup":
+	if _stores.has(store) and _stores[store]["step"] == "setup":
 		_stores[store]["row"].description = "Getting %s ready... %d%%" % [STORES[store], percent]
 
 
 func _on_event(data: Dictionary, store: String) -> void:
+	if not _stores.has(store):
+		return  # detached while it ran
 	var s: Dictionary = _stores[store]
 	var title: String = STORES[store]
 	match str(data.get("event", "")):
-		"page":
-			s["qr"].texture = qr_texture(data.get("qr", []))
-			s["text"].text = ("Scan this with your phone's camera. Sign in to %s there, then paste what %s shows "
-				+ "at the end into the page.\n%s") % [title, title, data.get("url", "")]
-			s["row"].description = "Waiting for your phone..."
-			_show_panel(store, true)
-			s["cancel"].grab_focus.call_deferred()
-		"code":
-			s["text"].text = "Signing in to %s..." % title
-		"error":
-			s["text"].text = "%s did not take it (%s). Sign in on your phone again." % [title, data.get("message", "")]
+		"browser":
+			match str(data.get("state", "")):
+				"setup":
+					s["row"].description = "Getting the sign-in window ready... %d%%" % int(data.get("percent", 0))
+				"open":
+					s["row"].description = "Sign in to %s in its window." % title
+					_window.adopt(int(data.get("pid", 0)), _on_cancel.bind(store))
+				"closed":
+					_window.release()
+					_show_panel(store, false)
+					s["row"].description = "Signing in to %s..." % title
+					s["row"].grab_focus.call_deferred()
 		"signed_in":
 			_notify("Signed in to %s as %s." % [title, data.get("account", "")])
 			changed.emit(store)
 
 
 func _on_cancel(store: String) -> void:
+	if not _stores.has(store):
+		return
 	var s: Dictionary = _stores[store]
 	s["step"] = "cancelled"
 	s["runner"].cancel()
@@ -227,7 +238,9 @@ func _on_finished(code: int, error: String, store: String) -> void:
 	if step == "setup" and code == 0:
 		_start_sign_in(store)
 		return
-	var was_open: bool = s["cancel"].visible
+	var was_open := step in ["sign-in", "cancelled"]
+	if was_open:
+		_window.release()
 	_show_panel(store, false)
 	if code != 0 and step not in ["cancelled", "prepare"]:
 		logger.warn("store %s %s exited %d: %s" % [store, step, code, error])
@@ -241,31 +254,16 @@ func _on_finished(code: int, error: String, store: String) -> void:
 
 func _show_panel(store: String, on: bool) -> void:
 	var s: Dictionary = _stores[store]
-	for key in ["qr", "text", "cancel"]:
-		s[key].visible = on
+	s["cancel"].visible = on
 	_recalculate_focus()
+	if on:
+		s["cancel"].grab_focus.call_deferred()
 
 
 func _recalculate_focus() -> void:
 	var focus: Node = _box.find_child("FocusGroup", false, false) if is_instance_valid(_box) else null
 	if focus and focus.has_method("recalculate_focus"):
 		focus.recalculate_focus()
-
-
-## The QR code `store sign-in` printed (rows of 0/1) as a texture, with its light border.
-static func qr_texture(rows: Array) -> ImageTexture:
-	if rows.is_empty():
-		return null
-	var n: int = str(rows[0]).length() + 2 * QR_QUIET
-	var image := Image.create(n, n, false, Image.FORMAT_L8)
-	image.fill(Color.WHITE)
-	for y in rows.size():
-		var row := str(rows[y])
-		for x in row.length():
-			if row[x] == "1":
-				image.set_pixel(x + QR_QUIET, y + QR_QUIET, Color.BLACK)
-	image.resize(n * QR_SCALE, n * QR_SCALE, Image.INTERPOLATE_NEAREST)
-	return ImageTexture.create_from_image(image)
 
 
 func _notify(text: String) -> void:

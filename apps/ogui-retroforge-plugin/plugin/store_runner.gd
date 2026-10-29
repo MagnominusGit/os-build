@@ -3,12 +3,12 @@ extends RefCounted
 ## (.claude/plans/stores.plan.md), as scrape_runner.gd runs retroforge-scrape: on a worker thread
 ## through OS.execute_with_pipe, stdout read line by line (`N%` progress, JSON events), stderr drained
 ## on a second task, results back on the main thread as signals. `say` writes a line to the tool's
-## stdin (the sign-in page's `accept` / `reject`). Cancel is SIGTERM. No OGUI types: tested on a stock
-## Godot (tests/test-plugin.sh) against a fake tool.
+## stdin. Cancel is SIGTERM (the store helper closes its sign-in window first). No OGUI types: tested
+## on a stock Godot (tests/test-plugin.sh) against a fake tool.
 
 ## A `N%` line of the running tool.
 signal progressed(percent: int)
-## A JSON line of the running tool (the sign-in page's events).
+## A JSON line of the running tool (the sign-in's events).
 signal event(data: Dictionary)
 ## The tool ended: its exit code (-1 when it could not start) and its last stderr line without the
 ## `store: ` prefix ("" on success).

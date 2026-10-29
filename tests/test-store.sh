@@ -313,7 +313,7 @@ argv = sys.argv[1:]
 profile = next(a.split("=", 1)[1] for a in argv if a.startswith("--user-data-dir="))
 child = subprocess.Popen(["sleep", "300"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) if mode == "stubborn" else None
 json.dump({"argv": argv, "profile": profile, "profile_mode": os.stat(profile).st_mode & 0o777, "pid": os.getpid(),
-           "own_session": os.getsid(0) == os.getpid(), "child": child.pid if child else None, "methods": []},
+           "own_session": os.getsid(0) == os.getpid(), "display": os.environ.get("DISPLAY"), "child": child.pid if child else None, "methods": []},
           open(sys.argv[0] + ".json", "w"))
 open(os.path.join(profile, "Cookies"), "w").write("session")
 print("chromium noise", flush=True)
@@ -393,12 +393,12 @@ def alive(pid):
         return False
 
 
-def sign_in(name, mode, env=None, stop=None):
+def sign_in(name, mode, env=None, stop=None, args=()):
     """`store <name> sign-in` with the fake Chromium in mode; (events, the process's exit status,
     stderr). stop(proc) runs once Chromium is open (the plugin's Cancel, a SIGTERM)."""
     if os.path.exists(CHROME_LOG):
         os.remove(CHROME_LOG)
-    proc = subprocess.Popen([sys.executable, STORE, name, "sign-in"], env=dict(BASE_ENV, FAKE_CHROMIUM=mode, **(env or {})),
+    proc = subprocess.Popen([sys.executable, STORE, name, "sign-in", *args], env=dict(BASE_ENV, FAKE_CHROMIUM=mode, **(env or {})),
                             text=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     events = []
     if stop:
@@ -505,6 +505,11 @@ log = chromium_log()
 ok(kinds(events) == ["open", "closed"] and not alive(log.get("pid", 0)) and not alive(log.get("child") or 0)
    and not os.path.exists(log.get("profile", "/")), "more signals while it closes do not cut the cleanup short",
    str(events) + err[-300:])
+events, rc, err = sign_in("gog", "close", args=("--display", ":7"))
+ok(rc == 0 and chromium_log().get("display") == ":7", "--display puts the window on that X display (OGUI's game one)",
+   str(chromium_log().get("display")) + err[-200:])
+r = store("gog", "sign-in", "--display", "evil:0")
+ok(r.returncode == 2 and chromium_log().get("display") == ":7", "a display that is not :N is a bad invocation", r.stderr)
 r = store("gog", "sign-in", env={"RETROFORGE_STORE_SCALE": "nan"})
 ok(r.returncode == 1 and "not a scale" in r.stderr, "a scale that is not one is refused", r.stderr)
 events, rc, err = sign_in("gog", "gog", env={"RETROFORGE_STORE_CHROMIUM": os.path.join(FAKE, "missing")})
