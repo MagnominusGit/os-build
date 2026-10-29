@@ -152,6 +152,15 @@ a = [x for x in sys.argv[1:] if x != "-y"]
 inst = os.path.join(cfg, "installed.json")
 installed = json.load(open(inst)) if os.path.exists(inst) else {}
 call(os.environ.get("STEAM_COMPAT_DATA_PATH", ""))
+refresh = os.environ.get("FAKE_EPIC_REFRESH")
+if refresh and a[0] != "auth":  # legendary 0.21.1 core._login, then the command's own line
+    if refresh == "refused":
+        print("[Core] ERROR: Stored credentials are no longer valid! Please login again.", file=sys.stderr)
+        os.remove(os.path.join(cfg, "user.json"))  # lock.clear()
+    else:
+        print("[Core] ERROR: HTTP request for login failed: ConnectionError(), please try again later.", file=sys.stderr)
+    print("[cli] ERROR: Login failed, cannot continue!", file=sys.stderr)
+    sys.exit(1)
 if a[:2] == ["auth", "--delete"]:
     if os.path.exists(os.path.join(cfg, "user.json")): os.remove(os.path.join(cfg, "user.json"))
 elif a[:2] == ["auth", "--code"]:
@@ -202,7 +211,10 @@ if a[:2] == ["auth", "--code"]:
     else:
         print(json.dumps({"error": True}))
 elif a == ["auth"]:
-    print(json.dumps(creds) if os.path.exists(auth) else "null")
+    refresh = os.environ.get("FAKE_GOG_REFRESH")  # gogdl 1.3.1 auth.py: null either way, a log line offline
+    if refresh == "unreached":
+        print("[AUTH] ERROR: Failed to refresh credentials", file=sys.stderr)
+    print(json.dumps(creds) if os.path.exists(auth) and not refresh else "null")
 elif a[0] == "info":
     print(json.dumps({"folder_name": "Game One" if a[1] == "1" else f"Game {a[1]}", "buildId": "b1", "versionEtag": "e1"}))
 elif a[0] == "download":
@@ -823,6 +835,26 @@ ok(r.returncode == 0 and {g["id"]: g["installed"] for g in json.loads(store("epi
 r = store("gog", "uninstall", "1")
 ok(r.returncode == 0 and not os.path.exists(gamedir) and json.loads(store("gog", "games").stdout)[0]["installed"] is False,
    "gog: the folder and the record go", r.stderr)
+CASE = "refresh"
+# The stored refresh token: GOG or Epic refusing it signs the store out (the Stores row then says
+# Sign in) and is exit 3 (the library empties, an install says sign in); not reaching the store to
+# use it is offline, and the library is the last one listed.
+r = store("gog", "games", env={"FAKE_GOG_REFRESH": "unreached"})
+ok(r.returncode == 0 and "as last listed" in r.stderr and json.loads(store("gog", "status").stdout)["signed_in"],
+   "gog unreachable: the library as last listed, still signed in", r.stderr)
+r = store("epic", "games", env={"FAKE_EPIC_REFRESH": "unreached"})
+ok(r.returncode == 0 and "as last listed" in r.stderr and json.loads(store("epic", "status").stdout)["signed_in"],
+   "epic unreachable: the library as last listed, still signed in", r.stderr)
+r = store("gog", "games", env={"FAKE_GOG_REFRESH": "refused"})
+ok(r.returncode == 3 and "sign in again" in r.stderr and r.stdout.strip() == "", "gog refuses the token: exit 3, no library", r.stderr)
+ok(json.loads(store("gog", "status").stdout) == {"ready": True, "signed_in": False, "account": ""}
+   and not os.path.exists(os.path.join(CONF, "gog-auth.json")), "and it is signed out here too")
+r = store("epic", "games", env={"FAKE_EPIC_REFRESH": "refused"})
+ok(r.returncode == 3 and "sign in again" in r.stderr and r.stdout.strip() == "", "epic refuses the token: exit 3, no library", r.stderr)
+ok(json.loads(store("epic", "status").stdout)["signed_in"] is False, "and it reads signed out (legendary cleared it)")
+r = store("epic", "games")
+ok(r.returncode == 3, "a signed-out store lists nothing: exit 3", r.stderr)
+
 CASE = "sign-out"
 ok(store("gog", "sign-out").returncode == 0 and json.loads(store("gog", "status").stdout)["signed_in"] is False, "gog")
 ok(store("epic", "sign-out").returncode == 0 and json.loads(store("epic", "status").stdout)["signed_in"] is False, "epic")

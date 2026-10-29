@@ -746,6 +746,11 @@ class Epic:
            "hero": (("DieselGameBox", "OfferImageWide"), "w=1600&resize=1&quality=medium"),
            "logo": (("DieselGameBoxLogo",), "")}
 
+    # What legendary logs when Epic refuses the stored refresh token (expired after a year, or revoked
+    # by a password change; it then clears user.json itself), and when it cannot reach Epic to use it.
+    REFUSED = "Stored credentials are no longer valid"
+    UNREACHED = "HTTP request for login failed"
+
     def __init__(self):
         self.cfg = os.path.join(STORE_CONFIG, "legendary")
         self.env = dict(os.environ, LEGENDARY_CONFIG_PATH=self.cfg)
@@ -753,6 +758,11 @@ class Epic:
     def run(self, args, check=False):
         res = run_tool(self.tool, args, check=False, env=self.env)
         errors = [l for l in res.stderr.splitlines() if "ERROR" in l or "CRITICAL" in l]
+        if check and self.REFUSED in res.stderr:
+            # legendary has already cleared user.json: status reads signed out, the row says Sign in.
+            raise NotReady("Epic Games ended the sign-in: sign in again in Settings > Stores")
+        if check and self.UNREACHED in res.stderr:
+            raise Offline("Epic Games could not be reached to renew the sign-in")
         if check and (res.returncode != 0 or errors):
             raise Failed(f"legendary {args[0]}: {(errors or [res.stderr.strip()])[-1]}")
         return res
@@ -801,6 +811,8 @@ class Epic:
             owned = json.loads(self.run(["list", "--json", "--platform", "Windows"], check=True).stdout or "[]")
             write_private(cache, json.dumps(owned))
         except (Failed, ValueError) as err:
+            if isinstance(err, NotReady):
+                raise  # signed out: no library, not the last one
             owned = read_json(cache, None)
             if owned is None:
                 raise
@@ -910,11 +922,22 @@ class Gog:
         return None
 
     def credentials(self):
-        """The account's token, refreshed when it has expired (gogdl auth)."""
-        creds = json.loads(self.run(["auth"]).stdout or "null")
-        if not isinstance(creds, dict) or not creds.get("access_token"):
-            raise NotReady("not signed in to GOG")
-        return creds
+        """The account's token, refreshed when it has expired (gogdl auth). gogdl prints null both when
+        GOG refuses the refresh token (revoked) and when GOG cannot be reached, and logs only the
+        latter. Refused: signed out here too, so the Stores row says Sign in."""
+        res = self.run(["auth"])
+        try:
+            creds = json.loads(res.stdout or "null")
+        except ValueError:
+            creds = None
+        if isinstance(creds, dict) and creds.get("access_token"):
+            return creds
+        if "Failed to refresh credentials" in res.stderr:
+            raise Offline("GOG could not be reached to renew the sign-in")
+        if self.status()["signed_in"]:
+            self.sign_out()
+            raise NotReady("GOG ended the sign-in: sign in again in Settings > Stores")
+        raise NotReady("not signed in to GOG")
 
     def sign_in(self, code):
         os.makedirs(STORE_CONFIG, mode=0o700, exist_ok=True)

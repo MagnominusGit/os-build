@@ -123,6 +123,12 @@ PY2
 grep -q 'if not launch_manager.get_running().is_empty():' "$SRC/store_settings.gd" \
   && ok "Sign in waits for no game to run (the window takes its place; nothing gives it focus back)" \
   || bad "store_settings.gd signs in over a running game"
+# A store refusing the stored refresh token (revoked, expired) signs it out and is exit 3, like never
+# having signed in: the library reads the helper's stderr so the player is told to sign in again.
+grep -q 'out.append(OS.execute(tool, args, output, true))' "$SRC/library_store.gd" \
+  && grep -q '"sign in again" in line' "$SRC/library_store.gd" \
+  && ok "a store that ended the sign-in says so when its library loads" \
+  || bad "library_store.gd does not tell the player a store ended the sign-in (an empty library, silently)"
 ! grep -qiE 'qr|phone' "$SRC/store_settings.gd" && ok "no QR code or phone left on the Stores page (plan D4)" \
   || bad "store_settings.gd still mentions the QR/phone sign-in"
 # Steam's download ends with the client updated and closed: nothing said the next step is opening it,

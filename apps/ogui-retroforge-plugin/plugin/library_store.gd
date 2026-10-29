@@ -64,23 +64,39 @@ func get_library_launch_items() -> Array[LibraryLaunchItem]:
 	return items
 
 
-## `store <s> games` on a worker thread: it may ask the store's servers.
+## `store <s> games` on a worker thread: it may ask the store's servers. Its stderr comes too
+## (`store: ` lines), for the store refusing the sign-in (exit 3 with "sign in again": the stored
+## refresh token was revoked or expired, and the helper signed the store out): the player is told,
+## where never having signed in is just an empty library.
 func _games() -> Array:
 	var out := []
 	var args := [store, "games"]
 	var task := WorkerThreadPool.add_task(func() -> void:
 		var output: Array = []
-		out.append(OS.execute(tool, args, output))
+		out.append(OS.execute(tool, args, output, true))
 		out.append("".join(output)))
 	while not WorkerThreadPool.is_task_completed(task):
 		await get_tree().process_frame
 	WorkerThreadPool.wait_for_task_completion(task)
+	var text: String = out[1] if out.size() > 1 else ""
+	var lines := text.split("\n", false)
 	if out.size() < 2 or out[0] != 0:
-		if out.size() > 0 and out[0] != 3:  # 3: not signed in, an empty library
-			logger.warn("store %s games failed (exit %s)" % [store, out[0] if out.size() > 0 else "?"])
+		var code: int = out[0] if out.size() > 0 else -1
+		var refused := ""
+		for line in lines:
+			if line.begins_with(Runner.PREFIX) and "sign in again" in line:
+				refused = line.trim_prefix(Runner.PREFIX)
+		if refused != "":
+			logger.warn("store %s games: %s" % [store, refused])
+			notification_manager.show(Notification.new(refused[0].to_upper() + refused.substr(1) + "."))
+		elif code != 3:  # 3: not signed in, an empty library
+			logger.warn("store %s games failed (exit %d)" % [store, code])
 		return []
-	var data = JSON.parse_string(out[1])
-	return data if data is Array else []
+	for line in lines:
+		if line.begins_with("["):
+			var data = JSON.parse_string(line)
+			return data if data is Array else []
+	return []
 
 
 ## OGUI's load_library only ever adds: remove our cards whose game is gone (signed out, a license
