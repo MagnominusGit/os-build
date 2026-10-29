@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# Offline test for /usr/lib/retroforge/store (GOG and Epic, .claude/plans/stores.plan.md) and its QR
-# encoder (/usr/lib/retroforge/python/qr.py).
+# Offline test for /usr/lib/retroforge/store (GOG and Epic, .claude/plans/stores.plan.md).
 #
 #   tests/test-store.sh
 #
 # Fake legendary and gogdl (RETROFORGE_STORE_TOOL_*), a fake runtime, Proton and game runner, and a
 # local server for every https:// request (RETROFORGE_STORE_API): GOG's APIs, the tools' releases and
-# the runtime's channel. Rules: a tool is set up only from its pinned sha256, unpacked and compiled; the
-# sign-in page takes a code only through its one-time path, sealed with the link's fragment key, and
-# uses it only after `accept`; tokens are the player's only (0600); the libraries list owned Windows
-# games with art and their install state; installs report N% and fail on what the tool logs (legendary
-# exits 0 either way); a launch sets the prefix up once, syncs saves down, runs the game through
-# Proton in the runtime (both at oom_score_adj 900, the store at the session's), syncs them up, and
-# does not upload after a failed download; a GOG conflict keeps the last sync time; the game's
-# environment names its umu id and store for protonfixes, from the umu-database cached at install and
-# fetched again only when a day old (kept when that fails), or turns protonfixes off when the player
-# did; RetroForge's own fixes (game-fixes.json) set their INI keys in the prefix before the game starts,
-# keeping the file's other lines, and go off with protonfixes.
+# the runtime's channel. Rules: a tool is set up only from its pinned sha256, unpacked and compiled;
+# sign-in (a fake Chromium on the DevTools pipe) opens the store's own page with the plan's flags in a
+# private profile deleted after, takes a code only from the store's https end page, closes the window
+# (killing what does not close, also on Cancel and SIGTERM) and then signs in; tokens are the player's
+# only (0600); the libraries list owned Windows games with art and their install state; installs report
+# N% and fail on what the tool logs (legendary exits 0 either way); a launch sets the prefix up once,
+# syncs saves down, runs the game through Proton in the runtime (both at oom_score_adj 900, the store at
+# the session's), syncs them up, and does not upload after a failed download; a GOG conflict keeps the
+# last sync time; the game's environment names its umu id and store for protonfixes, from the
+# umu-database cached at install and fetched again only when a day old (kept when that fails), or turns
+# protonfixes off when the player did; RetroForge's own fixes (game-fixes.json) set their INI keys in the
+# prefix before the game starts, keeping the file's other lines, and go off with protonfixes.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -26,8 +26,8 @@ T="$(mktemp -d)" && [ -d "$T" ] || { echo "mktemp -d failed" >&2; exit 1; }
 trap 'rm -rf "$T"' EXIT
 
 python3 - "$STORE" "$T" "$ROOT" <<'PY'
-import base64, hashlib, http.server, io, json, os, re, shutil, stat, subprocess, sys, tarfile, threading, time
-import urllib.error, urllib.request, zipfile
+import hashlib, http.server, io, json, os, re, shutil, signal, stat, subprocess, sys, tarfile, threading, time
+import urllib.error, urllib.parse, urllib.request, zipfile
 
 STORE, T, ROOT = sys.argv[1:4]
 PASS = FAIL = 0
@@ -243,7 +243,8 @@ BASE_ENV = dict(os.environ, HOME=HOME, XDG_CONFIG_HOME=os.path.join(HOME, ".conf
                 XDG_DATA_HOME=os.path.join(HOME, ".local/share"), RETROFORGE_STORE_PINS=PINS,
                 RETROFORGE_STORE_API=API, RETROFORGE_STORE_TOOL_LEGENDARY=LEGENDARY, RETROFORGE_STORE_TOOL_GOGDL=GOGDL,
                 RETROFORGE_STORE_RUNTIME=RUNTIME, RETROFORGE_STEAM_COMPAT_TOOLS=COMPAT, RETROFORGE_STORE_RUN=RUNNER,
-                RETROFORGE_STORE_HOST="127.0.0.1", RETROFORGE_STEAM_ROOT=os.path.join(HOME, "no-steam"))
+                RETROFORGE_STORE_CHROMIUM=os.path.join(FAKE, "chromium"), RETROFORGE_STORE_SCALE="1.5",
+                RETROFORGE_STEAM_ROOT=os.path.join(HOME, "no-steam"))
 
 
 def store(*args, env=None, unset=()):
@@ -274,19 +275,6 @@ def game_run(cs):
     return next((c for c in cs if c[0] == "runner" and "waitforexitandrun" in c), None)
 
 
-# ---- QR ------------------------------------------------------------------------------------------
-CASE = "qr"
-sys.path.insert(0, os.path.join(ROOT, "rootfs/overlay/usr/lib/retroforge/python"))
-import qr
-m = qr.matrix("http://192.168.1.20:40123/abcdefghijklmnopqrstuv#ABCDEFGHIJKLMNOPQRSTUV")
-n = len(m)
-ok(all(len(r) == n for r in m) and (n - 17) % 4 == 0 and 1 <= (n - 17) // 4 <= 10, f"a square of a valid version ({n} modules)")
-finder = ["1111111", "1000001", "1011101", "1011101", "1011101", "1000001", "1111111"]
-corners = [[r[:7] for r in m[:7]], [r[-7:] for r in m[:7]], [r[:7] for r in m[-7:]]]
-ok(all(c == finder for c in corners), "finder patterns in three corners")
-ok(m[6][8:n - 8] == "".join("1" if i % 2 == 0 else "0" for i in range(8, n - 8)), "the timing row alternates")
-ok(m[n - 8][8] == "1", "the dark module")
-
 # ---- setup ---------------------------------------------------------------------------------------
 CASE = "setup"
 r = store("epic", "status", unset=["RETROFORGE_STORE_TOOL_LEGENDARY"])
@@ -312,69 +300,156 @@ ok("fake tool ['x']" in r.stdout, "it runs unpacked", r.stdout + r.stderr)
 
 
 # ---- sign-in -------------------------------------------------------------------------------------
-def sign_in(name, codes):
-    """Run the page and post each code sealed as the page does; (events, page html, statuses, replies,
-    the process's exit status). The page ends once a code signs in."""
-    proc = subprocess.Popen([sys.executable, STORE, name, "sign-in"], env=BASE_ENV, text=True,
-                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    events = [json.loads(proc.stdout.readline())]
-    path_part, frag = events[0]["url"].split("#")
-    key = base64.urlsafe_b64decode(frag + "==")
-    statuses, replies = {}, []
-    page = urllib.request.urlopen(path_part, timeout=10).read().decode()
+# A fake Chromium on the DevTools pipe (fds 3 and 4): FAKE_CHROMIUM picks how the store's pages go.
+# It records its command line, its profile and its pid, and leaves a cookie in the profile.
+EPIC_REDIRECT = "https://www.epicgames.com/id/api/redirect?clientId=34a02cf8f4414e29b15921876da36f9a&responseType=code"
+CHROME_LOG = os.path.join(FAKE, "chromium.json")
+CHROMIUM = os.path.join(FAKE, "chromium")
+with open(CHROMIUM, "w") as f:
+    f.write(r'''#!/usr/bin/env python3
+import json, os, signal, subprocess, sys, time
+mode = os.environ.get("FAKE_CHROMIUM", "gog")
+argv = sys.argv[1:]
+profile = next(a.split("=", 1)[1] for a in argv if a.startswith("--user-data-dir="))
+child = subprocess.Popen(["sleep", "300"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) if mode == "stubborn" else None
+json.dump({"argv": argv, "profile": profile, "profile_mode": os.stat(profile).st_mode & 0o777, "pid": os.getpid(),
+           "own_session": os.getsid(0) == os.getpid(), "child": child.pid if child else None, "methods": []},
+          open(sys.argv[0] + ".json", "w"))
+open(os.path.join(profile, "Cookies"), "w").write("session")
+print("chromium noise", flush=True)
+if mode == "stubborn":
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+methods, buf, reads = [], b"", 0
+def send(m):
+    os.write(4, json.dumps(m).encode() + b"\0")
+def target(url, kind="page", tid="T1"):
+    send({"method": "Target.targetInfoChanged", "params": {"targetInfo": {"targetId": tid, "type": kind, "url": url}}})
+while True:
+    chunk = os.read(3, 65536)
+    if not chunk:
+        break
+    buf += chunk
+    *msgs, buf = buf.split(b"\0")
+    for raw in msgs:
+        m = json.loads(raw)
+        methods.append(m["method"])
+        log = json.load(open(sys.argv[0] + ".json"))
+        log["methods"] = methods
+        json.dump(log, open(sys.argv[0] + ".json", "w"))
+        if m["method"] == "Target.setDiscoverTargets":
+            send({"id": m["id"], "result": {}})
+            os.write(4, b"not json\0")
+            start = next(a.split("=", 1)[1] for a in argv if a.startswith("--app="))
+            send({"method": "Target.targetCreated", "params": {"targetInfo": {"targetId": "T1", "type": "page", "url": start}}})
+            if mode == "gog":
+                target("https://embed.gog.com/on_login_success?origin=client&code=workercode123", kind="service_worker", tid="W")
+                target("https://evil.example/on_login_success?code=evilcode123")
+                target("http://embed.gog.com/on_login_success?origin=client&code=httpcode1234")
+                target("https://embed.gog.com/on_login_success?origin=client&code=x")
+                target("https://embed.gog.com/on_login_success?origin=client&code=goodcode123")
+            elif mode.startswith("epic"):
+                target("https://www.epicgames.com/id/api/redirect?clientId=x&responseType=code")
+            elif mode == "close":
+                sys.exit(0)
+        elif m["method"] == "Target.attachToTarget":
+            send({"id": m["id"], "result": {"sessionId": "S1"}})
+        elif m["method"] == "Runtime.evaluate":
+            reads += 1
+            code = os.environ.get("FAKE_EPIC_CODE", "0123456789abcdef0123456789abcdef")
+            page = json.dumps({"redirectUrl": "x", "authorizationCode": code})
+            if mode == "epic-error":  # the target went: an error, then the window closes
+                send({"id": m["id"], "error": {"code": -32000, "message": "target closed"}})
+                time.sleep(1.5)
+                sys.exit(0)
+            if mode == "epic-foreign":  # navigated elsewhere before the read: a page of another origin
+                send({"id": m["id"], "sessionId": "S1", "result": {"result": {"type": "string", "value": json.dumps(
+                    ["https://evil.example/id/api/redirect", page])}}})
+                time.sleep(1.5)
+                sys.exit(0)
+            text = ["", json.dumps({"authorizationCode": None}), page][min(reads, 3) - 1]
+            send({"id": m["id"], "sessionId": "S1", "result": {"result": {"type": "string", "value": json.dumps(
+                ["https://www.epicgames.com/id/api/redirect?clientId=x&responseType=code", text])}}})
+        elif m["method"] == "Browser.close" and mode != "stubborn":
+            sys.exit(0)
+''')
+os.chmod(CHROMIUM, 0o755)
+
+
+def chromium_log():
     try:
-        urllib.request.urlopen(path_part.rsplit("/", 1)[0] + "/wrong", timeout=10)
-        statuses["wrong"] = 200
-    except urllib.error.HTTPError as err:
-        statuses["wrong"] = err.code
+        return json.load(open(CHROME_LOG))
+    except (FileNotFoundError, ValueError):
+        return {}
 
-    def post(raw):
-        req = urllib.request.Request(path_part, data=json.dumps(raw).encode(), method="POST",
-                                     headers={"Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=20) as r:
-                return r.status, json.loads(r.read() or b"null")
-        except urllib.error.HTTPError as err:
-            return err.code, None
-        except urllib.error.URLError:
-            return "gone", None
 
-    def seal(text):
-        data = text.encode()
-        ks, counter = b"", 0
-        while len(ks) < len(data):
-            ks += hashlib.sha256(key + counter.to_bytes(4, "big")).digest()
-            counter += 1
-        return base64.urlsafe_b64encode(bytes(a ^ b for a, b in zip(data, ks))).decode().rstrip("=")
-
-    statuses["garbage"] = post({"c": "!!"})[0]
-    statuses["plain"] = post({"c": base64.urlsafe_b64encode(codes[0].encode()).decode()})[0]
-    for code in codes:
-        replies.append(post({"c": seal(code)}))
-        events.append(json.loads(proc.stdout.readline()))
-        events.append(json.loads(proc.stdout.readline()))
+def alive(pid):
     try:
-        rc = proc.wait(timeout=10)
-    except subprocess.TimeoutExpired:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    try:  # a zombie of ours is gone as far as the player is concerned
+        return open(f"/proc/{pid}/stat").read().split(")")[-1].split()[0] != "Z"
+    except FileNotFoundError:
+        return False
+
+
+def sign_in(name, mode, env=None, stop=None):
+    """`store <name> sign-in` with the fake Chromium in mode; (events, the process's exit status,
+    stderr). stop(proc) runs once Chromium is open (the plugin's Cancel, a SIGTERM)."""
+    if os.path.exists(CHROME_LOG):
+        os.remove(CHROME_LOG)
+    proc = subprocess.Popen([sys.executable, STORE, name, "sign-in"], env=dict(BASE_ENV, FAKE_CHROMIUM=mode, **(env or {})),
+                            text=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    events = []
+    if stop:
+        line = proc.stdout.readline()
+        events.append(json.loads(line) if line else {})
+        for _ in range(50):
+            if chromium_log().get("methods"):
+                break
+            time.sleep(0.1)
+        stop(proc)
+    # stdin stays open (closing it is the Cancel) until the helper is done.
+    timer = threading.Timer(60, proc.kill)
+    timer.start()
+    out, err = proc.stdout.read(), proc.stderr.read()
+    proc.wait()
+    timer.cancel()
+    if not proc.stdin.closed:
         proc.stdin.close()
-        rc = proc.wait(timeout=10)
-        rc = f"still serving, stopped by closing stdin ({rc})"
-    statuses["after"] = post({"c": seal(codes[-1])})[0]
-    return events, page, statuses, replies, rc
+    try:
+        events += [json.loads(l) for l in out.splitlines()]
+    except ValueError:
+        events.append({"not json": out})
+    return events, proc.returncode, err
+
+
+def kinds(events):
+    return [e.get("state") or e.get("event") for e in events]
 
 
 CASE = "sign-in gog"
-events, page, st, replies, rc = sign_in("gog", ["goodcode123"])
-ok(events[0]["event"] == "page" and events[0]["url"].startswith("http://127.0.0.1:") and len(events[0]["qr"]) >= 21,
-   "the page's link and QR code come first", str(events[0])[:200])
-ok("auth.gog.com/auth?client_id=46899977096215655" in page and "Open GOG sign-in" in page and "password" in page
-   and "'paste'" in page, "the page links to GOG's own sign-in and sends as it is pasted")
-ok(st["wrong"] == 404, "any other path is a 404")
-ok(st["garbage"] == 400 and st["plain"] == 400, "a code not sealed with the link's key is refused", str(st))
-ok([e["event"] for e in events[1:]] == ["code", "signed_in"] and events[-1].get("account") == "gogtester",
-   "a code signs in as it arrives, as the account's name", str(events[1:]))
-ok(replies == [(200, {"ok": True, "account": "gogtester"})], "the phone is told whom it signed in", str(replies))
-ok(rc == 0 and st["after"] == "gone", "and the page is gone", f"rc={rc} after={st['after']}")
+events, rc, err = sign_in("gog", "gog")
+log = chromium_log()
+ok(kinds(events) == ["open", "closed", "code", "signed_in"] and events[0].get("pid") == log.get("pid")
+   and events[-1].get("account") == "gogtester", "Chromium opens, closes, then the code signs in as the account's name",
+   str(events) + err[-300:])
+ok(rc == 0, "exit 0", err[-300:])
+argv = log.get("argv", [])
+gog_url = "https://auth.gog.com/auth?client_id=46899977096215655&redirect_uri=https%3A%2F%2Fembed.gog.com%2Fon_login_success%3Forigin%3Dclient&response_type=code&layout=galaxy"
+ok(f"--app={gog_url}" in argv, "on GOG's own sign-in page, in app mode", str(argv))
+ok("--remote-debugging-pipe" in argv and not [a for a in argv if a.startswith("--remote-debugging-port")],
+   "driven over the pipe, no port")
+ok("--disable-blink-features=AutomationControlled" in argv, "not marked automation-controlled (Cloudflare, F2)")
+ok("--force-device-scale-factor=1.5" in argv and "--start-fullscreen" in argv, "fullscreen, at the screen's scale (F3)")
+ok(log.get("profile_mode") == 0o700 and not os.path.exists(log.get("profile", "/")), "its profile is private, and gone after",
+   str(log.get("profile")))
+ok(log.get("own_session") is True and log.get("methods", [])[-1:] == ["Browser.close"], "its own session, closed by us",
+   str(log.get("methods")))
+gog_codes = [c for c in calls() if c[0] == "gogdl" and "--code" in c]
+ok([c[c.index("--code") + 1] for c in gog_codes][-1:] == ["goodcode123"] and len(gog_codes) == 1,
+   "only the https embed.gog.com page's code is used (not a worker's, another host's, http, or a malformed one)",
+   str(gog_codes))
 ok(("/users.gog.com/users/u1", "Bearer tok") in SEEN, "the name comes from GOG's users API with the token")
 ok(mode(os.path.join(CONF, "gog-auth.json")) == 0o600 and mode(os.path.join(CONF, "gog-account.json")) == 0o600,
    "the tokens and the account are the player's only")
@@ -382,23 +457,60 @@ r = store("gog", "status")
 ok(json.loads(r.stdout) == {"ready": True, "signed_in": True, "account": "gogtester"}, "status", r.stdout)
 
 CASE = "sign-in epic"
-events, page, st, replies, rc = sign_in("epic", ["ffffffffffffffffffffffffffffffff", "0123456789abcdef0123456789abcdef"])
-ok("legendary.gl/epiclogin" in page and "authorizationCode" in page, "the page links to Epic's sign-in")
-ok([e["event"] for e in events[1:]] == ["code", "error", "code", "signed_in"] and events[-1]["account"] == "Tester",
-   "a code Epic refuses is an error and the page stays; the next one signs in", str(events[1:]))
-ok(replies[0][0] == 200 and replies[0][1]["ok"] is False and "Logging in failed" in replies[0][1]["message"]
-   and replies[1] == (200, {"ok": True, "account": "Tester"}), "the phone is told each time", str(replies))
+events, rc, err = sign_in("epic", "epic", env={"FAKE_EPIC_CODE": "ffffffffffffffffffffffffffffffff"})
+ok(kinds(events) == ["open", "closed", "code", "error"] and "Logging in failed" in events[-1].get("message", "")
+   and rc == 1 and err.strip().splitlines()[-1].startswith("store: "), "a code Epic refuses: an error, exit 1",
+   str(events) + err[-300:])
+reset_calls()
+events, rc, err = sign_in("epic", "epic")
+log = chromium_log()
+epic_url = "https://www.epicgames.com/id/login?redirectUrl=" + urllib.parse.quote(EPIC_REDIRECT, safe="")
+ok(kinds(events) == ["open", "closed", "code", "signed_in"] and events[-1].get("account") == "Tester" and rc == 0,
+   "the code on Epic's redirect page signs in", str(events) + err[-300:])
+ok(f"--app={epic_url}" in log.get("argv", []), "on Epic's sign-in, redirecting to legendary's client's code page",
+   str(log.get("argv")))
+ok(log.get("methods", []).count("Runtime.evaluate") == 3 and "Target.attachToTarget" in log.get("methods", []),
+   "the page is read until its JSON has the code", str(log.get("methods")))
 legend = [c for c in calls() if c[0] == "legendary"]
-ok(legend[-2][1:3] == ["auth", "--delete"] and legend[-1][1:3] == ["auth", "--code"],
-   "an earlier sign-in is dropped first (legendary keeps it over a new code)")
+ok([c[1:3] for c in legend] == [["auth", "--delete"], ["auth", "--code"]],
+   "an earlier sign-in is dropped first (legendary keeps it over a new code)", str(legend))
 r = store("epic", "status")
 ok(json.loads(r.stdout)["account"] == "Tester", "status reads the account without the network", r.stdout)
-CASE = "sign-in cancel"
-proc = subprocess.Popen([sys.executable, STORE, "gog", "sign-in"], env=BASE_ENV, text=True,
-                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-proc.stdout.readline()
-proc.stdin.close()
-ok(proc.wait(timeout=10) == 0, "closing stdin (the plugin's Cancel) ends the page")
+events, rc, err = sign_in("epic", "epic-foreign")
+ok(kinds(events) == ["open", "closed"] and chromium_log().get("methods", []).count("Runtime.evaluate") == 1,
+   "Epic's JSON on a page of another origin is not a code, and is not read again", str(events) + str(chromium_log().get("methods")))
+events, rc, err = sign_in("epic", "epic-error")
+ok(kinds(events) == ["open", "closed"] and chromium_log().get("methods", []).count("Runtime.evaluate") == 1,
+   "an error answer stops the reading", str(chromium_log().get("methods")))
+
+CASE = "sign-in ends"
+events, rc, err = sign_in("gog", "close")
+ok(kinds(events) == ["open", "closed"] and rc == 0, "the player closing the window: no sign-in, exit 0", str(events) + err[-300:])
+events, rc, err = sign_in("gog", "hang", stop=lambda p: p.stdin.close())
+log = chromium_log()
+ok(kinds(events) == ["open", "closed"] and rc == 0 and log.get("methods", [])[-1:] == ["Browser.close"],
+   "closing stdin (the plugin's Cancel) closes the window", str(events) + err[-300:])
+ok(not os.path.exists(log.get("profile", "/")), "its profile is gone")
+events, rc, err = sign_in("gog", "stubborn", stop=lambda p: p.stdin.close())
+log = chromium_log()
+ok(kinds(events) == ["open", "closed"] and not alive(log.get("pid", 0)) and not alive(log.get("child") or 0),
+   "a Chromium that does not close is killed, with what it started", str(log))
+events, rc, err = sign_in("gog", "hang", stop=lambda p: p.send_signal(signal.SIGTERM))
+log = chromium_log()
+ok(kinds(events) == ["open", "closed"] and not alive(log.get("pid", 0)) and not os.path.exists(log.get("profile", "/")),
+   "SIGTERM closes the window and deletes the profile first", str(events) + err[-300:])
+events, rc, err = sign_in("gog", "stubborn", stop=lambda p: (p.send_signal(signal.SIGTERM), time.sleep(0.3),
+                                                                p.send_signal(signal.SIGTERM), p.send_signal(signal.SIGHUP)))
+log = chromium_log()
+ok(kinds(events) == ["open", "closed"] and not alive(log.get("pid", 0)) and not alive(log.get("child") or 0)
+   and not os.path.exists(log.get("profile", "/")), "more signals while it closes do not cut the cleanup short",
+   str(events) + err[-300:])
+r = store("gog", "sign-in", env={"RETROFORGE_STORE_SCALE": "nan"})
+ok(r.returncode == 1 and "not a scale" in r.stderr, "a scale that is not one is refused", r.stderr)
+events, rc, err = sign_in("gog", "gog", env={"RETROFORGE_STORE_CHROMIUM": os.path.join(FAKE, "missing")})
+ok(rc == 1 and "could not open Chromium" in err and events == [], "a Chromium that cannot start: exit 1", err[-300:])
+r = store("gog", "sign-in", unset=["RETROFORGE_STORE_TOOL_GOGDL"])
+ok(r.returncode == 3, "the store's tool not set up: exit 3", r.stderr)
 
 
 CASE = "games gog"

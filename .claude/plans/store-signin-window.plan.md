@@ -1,7 +1,7 @@
 # Plan: store sign-in on the device (Chromium window)
 
 **Complexity**: Medium-High. **Branch**: `steam-armv8-proton`. **Status**: prototype committed at
-f8f62179 (2026-10-29), HW-OK on Pocket FIT for GOG and Epic + Google; D1, D4, D5 agreed 2026-10-29; Phase 1 done offline 2026-10-29 (`store browser status|setup`), HW pending.
+f8f62179 (2026-10-29), HW-OK on Pocket FIT for GOG and Epic + Google; D1, D4, D5 agreed 2026-10-29; Phase 1 done offline 2026-10-29 (`store browser status|setup`), HW pending; Phase 2 done offline 2026-10-29 (`sign-in` opens Chromium, python/chromium_signin.py; LAN page and qr.py removed), HW pending.
 
 ## Summary
 
@@ -44,6 +44,11 @@ None (Q1-Q3 answered 2026-10-29: D4, D5, D1).
    Chromium set-up (run by `sign-in`) downloads, checks, unpacks, with progress. `tests/test-store-browser.sh` against a fake snapshot.
 2. **Helper**: `sign-in` opens Chromium (flags F2, F3, profile in a private temp folder deleted after),
    reads the code, signs in. Fake-Chromium test for the code reading (GOG address, Epic JSON page).
+   Done: events `browser` (`setup` + percent when Chromium is not set up yet, `open` + pid, `closed`), then
+   `code` and `signed_in` or `error` (exit 1); the player closing the window, stdin closing (Cancel) or
+   SIGTERM end it with exit 0 and no sign-in. The scale is read from the X screen (libX11 through ctypes:
+   the image has no xwininfo). Chromium gets its own session, killed whole when it does not close in 10 s.
+   The plugin still expects the LAN page's `page` event until Phase 3.
 3. **Plugin**: Sign in row runs it, progress, focus (D3), Cancel, the QR panel removed.
    `tests/test-plugin.sh` cases.
 4. **HW**: Pocket FIT, and Air X once its Wi-Fi is sorted. Then

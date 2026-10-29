@@ -13,7 +13,8 @@
 # unpacks only Chromium's folder, top-level libraries and compiled schemas, into the player's home
 # (0700); a second set-up downloads nothing; a new pin gets its own folder, the old one goes at the set-up
 # after (a Chromium may run from it); a killed set-up's leftovers go before the free-space check; a bad pin
-# fails with the helper's `store:` line.
+# fails with the helper's `store:` line; a first `sign-in` sets Chromium up, reporting it, then runs it on its
+# own libraries.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -120,7 +121,7 @@ PKGS = {
     "chromium": tar_bytes("w:zst", [
         (".PKGINFO", b"pkgname = chromium\n", 0o644),
         ("usr/bin/chromium", b"#!/bin/sh\n", 0o755),
-        ("usr/lib/chromium/chromium", b"#!/bin/sh\necho fake chromium\n", 0o755),
+        ("usr/lib/chromium/chromium", b"#!/bin/sh\necho \"fake chromium on $LD_LIBRARY_PATH\"\n", 0o755),
         ("usr/lib/chromium/chrome-sandbox", b"x", 0o4755),
         ("usr/lib/chromium/resources.pak", b"pak", 0o644),
         ("usr/lib/chromium/locales/en-US.pak", b"pak", 0o644),
@@ -238,6 +239,19 @@ r = store("browser", "setup", pin_dir=os.path.join(T, "pins-bad"))
 ok(r.returncode == 1 and r.stderr.strip().splitlines()[-1].startswith("store: ") and "bad line" in r.stderr,
    "a malformed pin ends with the `store:` line, not a traceback", r.stderr)
 ok(store("browser", "bogus", pin_dir=good).returncode == 2, "a bad invocation is exit 2")
+
+CASE = "sign-in"
+signin = pins("signin", ["chromium", "gtk3"], comment="the sign-in's own set-up")
+r = subprocess.run([sys.executable, STORE, "gog", "sign-in"], input="", text=True, capture_output=True, timeout=60,
+                   env=dict(BASE_ENV, RETROFORGE_STORE_PINS=signin, RETROFORGE_STORE_TOOL_GOGDL="true",
+                            RETROFORGE_STORE_SCALE="1.5"))
+events = [json.loads(l) for l in r.stdout.splitlines()]
+steps = [e.get("percent") for e in events if e.get("state") == "setup"]
+found = json.loads(store("browser", "status", pin_dir=signin).stdout)
+ok(steps and steps == sorted(steps) and steps[-1] == 100 and [e["state"] for e in events[len(steps):]] == ["open", "closed"],
+   "a first sign-in sets Chromium up (setup events up to 100), then opens it", r.stdout + r.stderr)
+ok(found["ready"] and f"fake chromium on {os.path.join(os.path.dirname(os.path.dirname(found['binary'])), 'lib')}" in r.stderr,
+   "the set-up Chromium runs on its own libraries, its output kept off the events", r.stderr)
 
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

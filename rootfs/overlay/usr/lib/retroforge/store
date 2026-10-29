@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-# store — the GOG and Epic stores for RetroForge: sign-in on the player's phone, the library, installs,
+# store — the GOG and Epic stores for RetroForge: sign-in in Chromium on the device, the library, installs,
 # and launches of Windows builds through our Proton, with cloud saves. .claude/plans/stores.plan.md.
 #
 #   store <gog|epic> status            {"ready": bool, "signed_in": bool, "account": "..."} (no network)
 #   store <gog|epic> setup             the store's tool, into the player's home; N% lines
-#   store <gog|epic> sign-in           the phone sign-in page (SIGN-IN below): JSON events on stdout;
-#                                      closing stdin cancels it
+#   store <gog|epic> sign-in           the store's sign-in page in Chromium (SIGN-IN below): JSON events
+#                                      on stdout; closing stdin cancels it
 #   store <gog|epic> sign-out
 #   store <gog|epic> games             JSON: every game the account owns, installed or not
 #   store <gog|epic> art               the listed games' covers into the cards' cache (ART below)
@@ -45,21 +45,21 @@
 # runs, each sets an INI key in its prefix. A player turns both off per game in store-games.json
 # (GAME_CHOICES): umu-protonfixes' were written for x86 GE-Proton.
 #
-# SIGN-IN. RetroForge never takes a password. `sign-in` serves a one-time page on the LAN while the
-# plugin's sign-in panel is open, and prints its address with a QR code of it. On the phone the page
-# links to the store's own sign-in and takes back what the store shows at the end (GOG: the address
-# with code=, Epic: the authorizationCode), and sends it as it is pasted. The page XORs the code with
-# a keystream from a key that is only in the link's #fragment, which a browser never sends, so the
-# Wi-Fi traffic does not carry it, and the link is unguessable and lives only while the panel is open:
-# the code is used as it arrives (no second confirm on the device; user, 2026-10-24) and the phone
-# shows whom it signed in. Neither store has a device sign-in this can use: GOG has no device-code
-# grant, and Epic's is open only to its own apps' clients. Tokens stay in the player's home, which
-# only the player can read.
+# SIGN-IN. RetroForge never takes a password. `sign-in` opens the store's own sign-in page in Chromium
+# (python/chromium_signin.py; .claude/plans/store-signin-window.plan.md), fullscreen over OGUI, where the
+# player signs in by touch and the on-screen keyboard; Google refuses sign-in in an embedded web view, so
+# it is the real browser, set up at the first sign-in (BROWSER below). Chromium is driven over its
+# DevTools pipe, which opens no port, and the store's code is read where the store ends: GOG's in the
+# address it redirects to, Epic's in the JSON page of legendary's client. The window then closes and the
+# code signs in. Its profile is a temporary folder, deleted after. Neither store has a device sign-in
+# this could use instead: GOG has no device-code grant, and Epic's is open only to its own apps'
+# clients. Tokens stay in the player's home, which only the player can read.
 #
 # BROWSER. The on-device sign-in (.claude/plans/store-signin-window.plan.md) opens the store's page in
-# Chromium, which is not on the image: `browser setup` downloads the snapshot packages chromium.pin
-# lists, checks each against its sha256 and unpacks them into <data>/retroforge/stores/chromium/
-# (python/chromium_setup.py). No package manager: release roots have none.
+# Chromium, which is not on the image: `browser setup` (and `sign-in`, when it is not set up yet)
+# downloads the snapshot packages chromium.pin lists, checks each against its sha256 and unpacks them
+# into <data>/retroforge/stores/chromium/ (python/chromium_setup.py). No package manager: release roots
+# have none.
 #
 # ART. A Steam card's cover is on disk already (the client's library cache); a store's is on its CDN,
 # and a card that fetched its own (library_store.gd: one curl, one TLS handshake each) came in slowly
@@ -70,20 +70,17 @@
 # TEST SEAMS (tests/test-store.sh, tests/test-store-browser.sh): RETROFORGE_STORE_DATA (for <data>/retroforge/stores),
 # RETROFORGE_STORE_PINS, RETROFORGE_STORE_TOOL_<NAME> (a tool's command, instead of the set-up one),
 # RETROFORGE_STEAM_ROOT, RETROFORGE_STEAM_COMPAT_TOOLS, RETROFORGE_STORE_RUNTIME (a runtime folder),
-# RETROFORGE_STORE_RUN (a command run with the game's command line instead of it), RETROFORGE_STORE_HOST
-# (the sign-in page's address), RETROFORGE_STORE_API (a server every https:// request goes to instead,
+# RETROFORGE_STORE_RUN (a command run with the game's command line instead of it), RETROFORGE_STORE_CHROMIUM
+# (a browser command instead of the set-up Chromium), RETROFORGE_STORE_SCALE (its scale instead of the
+# screen's), RETROFORGE_STORE_API (a server every https:// request goes to instead,
 # as <it>/<host>/<path>).
-import base64
 import csv
 import hashlib
-import html
 import json
 import os
 import re
-import secrets
 import shutil
 import signal
-import socket
 import subprocess
 import sys
 import tarfile
@@ -91,12 +88,13 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "python"))  # /usr/lib/retroforge/python
 import chromium_setup  # noqa: E402
-import qr  # noqa: E402
+import chromium_signin  # noqa: E402
 
 DATA_HOME = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
 CONFIG_HOME = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
@@ -190,16 +188,17 @@ def get_text(url, timeout=30):
         raise Offline(f"could not reach {url}: {err.reason}")
 
 
-def percent_printer(lo=0, hi=100):
-    """A progress(done, total) that prints `N%` lines, scaled into lo..hi, each value once."""
+def percent_printer(lo=0, hi=100, emit=None):
+    """A progress(done, total) that prints `N%` lines (or calls emit(N)), scaled into lo..hi, each value once."""
     last = [-1]
+    emit = emit or (lambda pct: print(f"{pct}%", flush=True))
 
     def progress(done, total):
         if total > 0:
             pct = lo + (hi - lo) * min(done, total) // total
             if pct != last[0]:
                 last[0] = pct
-                print(f"{pct}%", flush=True)
+                emit(pct)
     return progress
 
 
@@ -550,154 +549,52 @@ def run_windows_game(store, gid, exe, args, workdir, game_dir, extra_env=None):
 
 # ---- sign-in --------------------------------------------------------------------------------------
 
-PAGE = """<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in to {store}</title>
-<style>body{{font:17px system-ui,sans-serif;margin:0 auto;max-width:34em;padding:1em;line-height:1.45}}
-a.b,button{{display:block;width:100%;box-sizing:border-box;padding:.8em;margin:.6em 0;font:inherit;
-border:0;border-radius:.5em;background:#2563eb;color:#fff;text-align:center;text-decoration:none}}
-textarea{{width:100%;box-sizing:border-box;height:7em;font:14px monospace}}#s{{font-weight:600}}</style>
-</head><body><h2>Sign in to {store} on RetroForge</h2>
-<p>1. Sign in on {store}'s own page. RetroForge never sees your password.</p>
-<a class="b" href="{login}" target="_blank" rel="noreferrer">Open {store} sign-in</a>
-<p>2. {after} It is sent to your RetroForge device as you paste it.</p>
-<textarea id="t" placeholder="Paste here"></textarea>
-<button id="go">Send again</button><p id="s"></p>
-<script>
-const K=[0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,0xe49b69c1,
-0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,
-0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,0x27b70a85,0x2e1b2138,0x4d2c6dfc,
-0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,
-0xd192e819,0xd6990624,0xf40e3585,0x106aa070,0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,
-0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,
-0xbef9a3f7,0xc67178f2];
-function sha256(m){{const l=m.length,n=((l+9+63)>>6)<<6,b=new Uint8Array(n);b.set(m);b[l]=0x80;
-const v=new DataView(b.buffer);v.setUint32(n-4,l*8);let h=[0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,
-0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];const w=new Array(64),r=(x,k)=>(x>>>k)|(x<<(32-k));
-for(let o=0;o<n;o+=64){{for(let i=0;i<16;i++)w[i]=v.getUint32(o+i*4);for(let i=16;i<64;i++){{
-const s0=r(w[i-15],7)^r(w[i-15],18)^(w[i-15]>>>3),s1=r(w[i-2],17)^r(w[i-2],19)^(w[i-2]>>>10);
-w[i]=(w[i-16]+s0+w[i-7]+s1)|0}}let[a,c,d,e,f,g,k,j]=h;for(let i=0;i<64;i++){{
-const t1=(j+(r(f,6)^r(f,11)^r(f,25))+((f&g)^(~f&k))+K[i]+w[i])|0,
-t2=((r(a,2)^r(a,13)^r(a,22))+((a&c)^(a&d)^(c&d)))|0;j=k;k=g;g=f;f=(e+t1)|0;e=d;d=c;c=a;a=(t1+t2)|0}}
-h=h.map((x,i)=>(x+[a,c,d,e,f,g,k,j][i])|0)}}const o=new Uint8Array(32);
-h.forEach((x,i)=>new DataView(o.buffer).setUint32(i*4,x));return o}}
-function b64d(s){{s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';
-return Uint8Array.from(atob(s),c=>c.charCodeAt(0))}}
-function b64e(a){{return btoa(String.fromCharCode(...a)).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'')}}
-function stream(key,n){{const out=new Uint8Array(n);for(let i=0,c=0;i<n;c++){{
-const blk=new Uint8Array(key.length+4);blk.set(key);new DataView(blk.buffer).setUint32(key.length,c);
-const d=sha256(blk);for(let j=0;j<32&&i<n;j++)out[i++]=d[j]}}return out}}
-let sending=false;
-async function send(){{const s=document.getElementById('s');
-const m=document.getElementById('t').value.match(/{pattern}/);
-if(!m){{s.textContent="{missing}";return}}if(sending)return;sending=true;
-const code=new TextEncoder().encode(m[1]),ks=stream(b64d(location.hash.slice(1)),code.length);
-const x=code.map((b,i)=>b^ks[i]);s.textContent="Sending...";
-try{{const r=await fetch(location.pathname,{{method:"POST",headers:{{"Content-Type":"application/json"}},
-body:JSON.stringify({{c:b64e(x)}})}});const a=r.ok?await r.json():null;
-s.textContent=!a?"Your RetroForge device did not take it. Open the sign-in there again.":
-a.ok?"Signed in to {store} as "+a.account+". You can close this page.":a.message+" Sign in on {store}'s page again."}}
-catch(e){{s.textContent="Could not reach your RetroForge device. Is the phone on the same Wi-Fi?"}}sending=false}}
-document.getElementById('go').onclick=send;
-document.getElementById('t').addEventListener('paste',()=>setTimeout(send,0));
-</script></body></html>"""
+SIGN_IN_TIMEOUT = 15 * 60
 
 
-def keystream(key, n):
-    """The page's keystream: SHA-256 of key + a 4-byte big-endian counter, block after block."""
-    out, counter = bytearray(), 0
-    while len(out) < n:
-        out += hashlib.sha256(key + counter.to_bytes(4, "big")).digest()
-        counter += 1
-    return bytes(out[:n])
+def sign_in_browser():
+    """(Chromium's command, its environment): RETROFORGE_STORE_CHROMIUM (tests), else the set-up one,
+    set up first when it is not, with `browser` setup events."""
+    forced = os.environ.get("RETROFORGE_STORE_CHROMIUM")
+    if forced:
+        return forced, dict(os.environ)
+    found = chromium_setup.installed(DATA, os.path.join(PINS, "chromium.pin"))
+    if not found:
+        found = set_up_browser(percent_printer(emit=lambda pct: event(event="browser", state="setup", percent=pct)))
+    return found["binary"], chromium_setup.environment(found)
 
 
-def lan_address():
-    """This device's IPv4 address on the network its default route leaves by (no packet is sent)."""
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        s.connect(("192.0.2.1", 9))
-        return s.getsockname()[0]
-    except OSError:
-        return ""
-    finally:
-        s.close()
-
-
-def serve_sign_in(store):
-    """The one-time sign-in page, until a code signs in, stdin closes or 15 minutes pass. A code is
-    used as it arrives and the page gets the result: {"ok": true, "account"} or {"ok": false, "message"}."""
-    import http.server
-
+def sign_in(store):
+    """SIGN-IN above: the store's page in Chromium until it shows a code, which then signs in. Events:
+    browser setup (percent), open (pid), closed; then code, and signed_in (account) or error (message).
+    The player closing the window, or stdin closing (the plugin's Cancel), ends it without a sign-in."""
     if not tool_command(store.tool):
         raise NotReady(f"{store.title} is not set up")
-    host = os.environ.get("RETROFORGE_STORE_HOST") or lan_address()
-    if not host:
-        raise Offline("not connected to a network")
-    token, key = secrets.token_urlsafe(16), secrets.token_bytes(16)
-    page = PAGE.format(store=store.title, login=html.escape(store.login_url), after=store.after_sign_in,
-                       pattern=store.code_pattern.replace("/", "\\/"),  # into a JS regex literal
-                       missing=f"That is not what {store.title} shows at the end. Copy it again.")
-    busy = threading.Lock()  # one code at a time
-    done = threading.Event()
-
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def log_message(self, *a):
-            pass
-
-        def answer(self, status, body=b"", kind="text/plain; charset=utf-8"):
-            self.send_response(status)
-            self.send_header("Content-Type", kind)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Referrer-Policy", "no-referrer")
-            self.end_headers()
-            self.wfile.write(body)
-
-        def do_GET(self):
-            if self.path != "/" + token:
-                return self.answer(404)
-            self.answer(200, page.encode(), "text/html; charset=utf-8")
-
-        def do_POST(self):
-            if self.path != "/" + token:
-                return self.answer(404)
-            try:
-                size = min(int(self.headers.get("Content-Length") or 0), 8192)
-                sealed = base64.urlsafe_b64decode(json.loads(self.rfile.read(size))["c"] + "==")
-                code = bytes(a ^ b for a, b in zip(sealed, keystream(key, len(sealed)))).decode()
-            except (ValueError, KeyError, TypeError, UnicodeDecodeError):
-                return self.answer(400)
-            if not re.fullmatch(store.code_shape, code):
-                return self.answer(400)
-            if done.is_set() or not busy.acquire(blocking=False):
-                return self.answer(409)
-            try:
-                event(event="code", sender=self.client_address[0])
-                try:
-                    result = {"ok": True, "account": store.sign_in(code)}
-                    event(event="signed_in", account=result["account"])
-                    done.set()
-                except Failed as err:
-                    result = {"ok": False, "message": str(err)}
-                    event(event="error", message=str(err))
-            finally:
-                busy.release()
-            self.answer(200, json.dumps(result).encode(), "application/json")
-
-    server = http.server.ThreadingHTTPServer(("0.0.0.0", 0), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    fragment = base64.urlsafe_b64encode(key).decode().rstrip("=")
-    url = f"http://{host}:{server.server_address[1]}/{token}#{fragment}"
-    event(event="page", url=url, qr=qr.matrix(url))
-    # stdin closing is the plugin's Cancel (or the plugin gone).
-    threading.Thread(target=lambda: (sys.stdin.read(), done.set()), daemon=True).start()
+    binary, env = sign_in_browser()
+    forced = os.environ.get("RETROFORGE_STORE_SCALE")
+    if forced and not re.fullmatch(r"[1-4](\.[0-9]{1,2})?", forced):
+        raise Failed(f"RETROFORGE_STORE_SCALE is not a scale from 1 to 4: {forced}")
+    scale = float(forced) if forced else chromium_signin.screen_scale()
     try:
-        done.wait(15 * 60)
-        with busy:  # a sign-in that is going finishes, and its page gets the answer
-            pass
-    finally:
-        server.shutdown()
+        reason, code = chromium_signin.run(
+            binary, store.sign_in_url, env=env, scale=scale,
+            code_in_url=store.code_in_url, reads_page=store.reads_page, code_in_page=store.code_in_page,
+            stop_fd=sys.stdin.fileno(), timeout=SIGN_IN_TIMEOUT,
+            on_open=lambda pid: event(event="browser", state="open", pid=pid))
+    except OSError as err:
+        raise Failed(f"could not open Chromium: {err}")
+    event(event="browser", state="closed")
+    if reason == "timeout":
+        raise Failed(f"{SIGN_IN_TIMEOUT // 60} minutes without signing in")
+    if code is None:
+        return
+    event(event="code")
+    try:
+        account = store.sign_in(code)
+    except Failed as err:
+        event(event="error", message=str(err))
+        raise
+    event(event="signed_in", account=account)
 
 
 # ---- the stores -----------------------------------------------------------------------------------
@@ -795,10 +692,10 @@ class Epic:
     result is read from what it logs and from installed.json."""
 
     name, title, tool = "epic", "Epic Games", "legendary"
-    login_url = "https://legendary.gl/epiclogin"
-    after_sign_in = ("Epic then shows a page of text with an \"authorizationCode\". Select all of it, copy "
-                     "it, and paste it here.")
-    code_pattern = r'(?:"authorizationCode"\s*:\s*")?\b([0-9a-f]{32})\b'
+    # Epic's sign-in, ending on its redirect API's JSON page with the authorizationCode for legendary's
+    # client (what legendary.gl/epiclogin links to).
+    redirect = "https://www.epicgames.com/id/api/redirect?clientId=34a02cf8f4414e29b15921876da36f9a&responseType=code"
+    sign_in_url = "https://www.epicgames.com/id/login?redirectUrl=" + urllib.parse.quote(redirect, safe="")
     code_shape = r"[0-9a-f]{32}"
     # Art key -> (keyImages types, best first; the CDN's resize query, "" for the file as it is). The
     # files are up to 1200x1600 PNGs of 2-3 MB, which a card shows at 300x450: resized, a 360 px JPEG is
@@ -822,6 +719,23 @@ class Epic:
     def status(self):
         user = read_json(os.path.join(self.cfg, "user.json"), {})
         return {"signed_in": bool(user.get("refresh_token")), "account": str(user.get("displayName", ""))}
+
+    @staticmethod
+    def code_in_url(url):
+        return None
+
+    @staticmethod
+    def reads_page(url):
+        u = urllib.parse.urlsplit(url)
+        return u.scheme == "https" and u.hostname == "www.epicgames.com" and u.path == "/id/api/redirect"
+
+    @classmethod
+    def code_in_page(cls, text):
+        try:
+            code = json.loads(text).get("authorizationCode")
+        except (ValueError, AttributeError):
+            return None
+        return code if isinstance(code, str) and re.fullmatch(cls.code_shape, code) else None
 
     def sign_in(self, code):
         os.makedirs(self.cfg, mode=0o700, exist_ok=True)
@@ -909,11 +823,9 @@ class Gog:
 
     name, title, tool = "gog", "GOG", "gogdl"
     client_id = "46899977096215655"
-    login_url = ("https://auth.gog.com/auth?client_id=46899977096215655&redirect_uri=https%3A%2F%2Fembed.gog.com"
-                 "%2Fon_login_success%3Forigin%3Dclient&response_type=code&layout=galaxy")
-    after_sign_in = ("GOG then opens an empty page. Copy that page's address (it has \"code=\" in it) and "
-                     "paste it here.")
-    code_pattern = r"[?&]code=([A-Za-z0-9_\-.~]+)"
+    # GOG Galaxy's sign-in, ending on an empty page whose address carries the code.
+    sign_in_url = ("https://auth.gog.com/auth?client_id=46899977096215655&redirect_uri=https%3A%2F%2Fembed.gog.com"
+                   "%2Fon_login_success%3Forigin%3Dclient&response_type=code&layout=galaxy")
     code_shape = r"[A-Za-z0-9_\-.~]{10,2048}"
 
     def __init__(self):
@@ -928,6 +840,22 @@ class Gog:
     def status(self):
         signed_in = bool(read_json(self.auth, {}).get(self.client_id))
         return {"signed_in": signed_in, "account": read_json(self.account, {}).get("username", "") if signed_in else ""}
+
+    @classmethod
+    def code_in_url(cls, url):
+        u = urllib.parse.urlsplit(url)
+        if u.scheme != "https" or u.hostname != "embed.gog.com" or u.path != "/on_login_success":
+            return None
+        code = (urllib.parse.parse_qs(u.query).get("code") or [None])[0]
+        return code if code and re.fullmatch(cls.code_shape, code) else None
+
+    @staticmethod
+    def reads_page(url):
+        return False
+
+    @staticmethod
+    def code_in_page(text):
+        return None
 
     def credentials(self):
         """The account's token, refreshed when it has expired (gogdl auth)."""
@@ -1226,18 +1154,22 @@ def launch(store, gid):
     return code
 
 
+def set_up_browser(progress):
+    """The sign-in's Chromium (BROWSER above), set up when it is not; its paths."""
+    try:
+        return chromium_setup.set_up(DATA, os.path.join(PINS, "chromium.pin"), fetch, progress)
+    except (chromium_setup.SetupError, OSError) as err:
+        raise Failed(f"Chromium set-up: {err}")
+
+
 def browser(verb):
     """`store browser status|setup`: the sign-in's Chromium (BROWSER above)."""
-    pin = os.path.join(PINS, "chromium.pin")
     if verb == "status":
-        found = chromium_setup.installed(DATA, pin)
+        found = chromium_setup.installed(DATA, os.path.join(PINS, "chromium.pin"))
         print(json.dumps({"ready": bool(found), "binary": found["binary"] if found else None}))
     elif verb == "setup":
         os.nice(10)  # as a tool's set-up: behind OGUI
-        try:
-            chromium_setup.set_up(DATA, pin, fetch, percent_printer())
-        except (chromium_setup.SetupError, OSError) as err:
-            raise Failed(f"Chromium set-up: {err}")
+        set_up_browser(percent_printer())
     else:
         print("usage: store browser status|setup", file=sys.stderr)
         return 2
@@ -1267,7 +1199,7 @@ def main(argv):
         elif verb == "setup":
             set_up_tool(store.tool, percent_printer())
         elif verb == "sign-in":
-            serve_sign_in(store)
+            sign_in(store)
         elif verb == "sign-out":
             store.sign_out()
         elif verb == "games":
