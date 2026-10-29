@@ -807,6 +807,8 @@ class Epic:
             log(f"the Epic library as last listed (now: {err})")
         installed, out = self.installed(), []
         for game in owned:
+            if not self.is_game(game):
+                continue
             app = str(game.get("app_name", ""))
             images = {i.get("type"): i.get("url") for i in game.get("metadata", {}).get("keyImages", [])
                       if isinstance(i, dict)}
@@ -819,6 +821,15 @@ class Epic:
             out.append({"id": app, "title": str(game.get("app_title") or app), "installed": inst is not None,
                         "dir": inst.get("install_path", "") if inst else "", "art": art})
         return out
+
+    @staticmethod
+    def is_game(item):
+        """An owned item that is a game. `legendary list` also gives a game's digital extras as items
+        of their own (Death Stranding Content: its soundtrack and art book, categories games +
+        digitalextras, not flagged DLC; Pocket FIT, 2026-10-29) and could give Unreal Engine assets
+        (no `games` category). An item without categories is kept."""
+        cats = {c.get("path") for c in item.get("metadata", {}).get("categories", []) if isinstance(c, dict)}
+        return not cats or ("games" in cats and "digitalextras" not in cats)
 
     def install(self, gid, progress):
         base = os.path.join(GAMES, self.name)

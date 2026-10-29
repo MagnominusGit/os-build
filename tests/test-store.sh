@@ -163,7 +163,10 @@ elif a[:2] == ["auth", "--code"]:
 elif a[0] == "list":
     print(json.dumps([{"app_name": "Fortnite2", "app_title": "Game Two", "metadata": {"keyImages": [
         {"type": "DieselGameBoxTall", "url": "https://cdn.epic/tall.jpg"}, {"type": "DieselGameBox", "url": "https://cdn.epic/wide.jpg"}]}},
-        {"app_name": "Plain", "app_title": "Plain Game", "metadata": {}}]))
+        {"app_name": "Plain", "app_title": "Plain Game", "metadata": {}},
+        {"app_name": "Extras", "app_title": "Game Two Content", "metadata": {"categories": [
+            {"path": "public"}, {"path": "digitalextras"}, {"path": "games"}, {"path": "applications"}]}},
+        {"app_name": "Asset", "app_title": "An Unreal asset", "metadata": {"categories": [{"path": "assets"}]}}]))
 elif a[0] == "install":
     app = a[1]
     base = a[a.index("--base-path") + 1]
@@ -536,6 +539,8 @@ ok(set(games) == {"Fortnite2", "Plain"} and games["Fortnite2"]["art"] == {
    "portrait": "https://cdn.epic/tall.jpg?w=360&resize=1&quality=medium",
    "landscape": "https://cdn.epic/wide.jpg?w=800&resize=1&quality=medium",
    "hero": "https://cdn.epic/wide.jpg?w=1600&resize=1&quality=medium"}, "games and their art, resized by Epic's CDN", r.stdout + r.stderr)
+ok("Extras" not in games and "Asset" not in games,
+   "a game's digital extras and an item that is not a game are not listed", str(sorted(games)))
 r = store("epic", "games", env={"XDG_CONFIG_HOME": os.path.join(T, "nobody")})
 ok(r.returncode == 3, "not signed in: exit 3", r.stderr)
 
