@@ -756,9 +756,11 @@ paths (VR streaming, pairing over the Frame's own hotspot, echo cancellation) sw
 - **Hardware decode.** The client decodes H.264/HEVC through its own stateful V4L2 decoder
   (`CV4L2Accel`): it probes `/dev/video-dec0..99` and `/dev/video0..99` for a mem2mem device, so
   Iris (SM8250/8550/8650) and venus (SM6115, `VIDEO_QCOM_VENUS=m`) need no package in the image.
-  `70-retroforge-video-codec.rules` links `/dev/video-dec0`/`video-enc0` to the codec by its driver
-  name, which the UI's Chromium also looks for. Without a decoder the client falls back to software
-  (FFmpeg 8 in `libvideo.so`).
+  `70-retroforge-video-codec.rules` links only `/dev/video-enc0`: the UI's Chromium decodes on the
+  codec only when `/dev/video-dec0` exists, and on iris that is slower and hotter than its CPU
+  decode (four cores at 95 C on the Pocket FIT at its first sign-in, 2026-10-29; Nova-Deck measured
+  the same and ships no link). Without a decoder the client falls back to software (FFmpeg 8 in
+  `libvideo.so`).
 - **Network.** The image has no firewall: discovery (UDP broadcast on 27036) and the stream
   (UDP 27031-27036, TCP 27036-27037) are open. A firewall added later must keep those open.
 - **Audio** goes through pipewire-pulse, as for everything else.
