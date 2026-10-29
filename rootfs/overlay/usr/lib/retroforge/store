@@ -167,9 +167,14 @@ def fetch(url, dest, sha256=None, progress=None):
     A transfer that fails is started again, FETCH_TRIES times in all: the snapshot's CDN (Akamai) now
     and then stalls a TLS handshake and resets it, which ended a 190 MB Chromium set-up on its 19th
     package while the same file came at once on the next try (Pocket FIT, 2026-10-29)."""
+    return _tries(lambda: _fetch_once(url, dest, sha256, progress))
+
+
+def _tries(attempt_once):
+    """attempt_once(), again after a network failure, FETCH_TRIES times in all."""
     for attempt in range(1, FETCH_TRIES + 1):
         try:
-            return _fetch_once(url, dest, sha256, progress)
+            return attempt_once()
         except (Offline, _Transfer) as err:
             if attempt == FETCH_TRIES:
                 raise
@@ -209,13 +214,21 @@ def _fetch_once(url, dest, sha256, progress):
     return h.hexdigest()
 
 
-def get_text(url, timeout=30):
-    req = urllib.request.Request(url_of(url), headers={"User-Agent": AGENT})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return r.read().decode("utf-8", "replace")
-    except urllib.error.URLError as err:
-        raise Offline(f"could not reach {url}: {err.reason}")
+def get_text(url, timeout=30, tries=True):
+    """url's text. Tried again as fetch() is (a TLS handshake to repo.steampowered.com timed out
+    once and failed a whole install, Pocket FIT 2026-10-29), unless tries is False."""
+    def once():
+        req = urllib.request.Request(url_of(url), headers={"User-Agent": AGENT})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as err:
+            raise Failed(f"could not reach {url}: HTTP {err.code}")
+        except urllib.error.URLError as err:
+            raise Offline(f"could not reach {url}: {err.reason}")
+        except OSError as err:
+            raise _Transfer(f"could not reach {url}: {err}")
+    return _tries(once) if tries else once()
 
 
 def percent_printer(lo=0, hi=100, emit=None):
@@ -420,7 +433,7 @@ def umu_database():
     except OSError:
         pass
     try:
-        text = get_text(UMU_DATABASE, timeout=10)
+        text = get_text(UMU_DATABASE, timeout=10, tries=False)  # the cache serves when it fails
         header = next(csv.reader([text.split("\n", 1)[0]]), [])
         if not {"STORE", "CODENAME", "UMU_ID"} <= set(header):
             raise Failed(f"{UMU_DATABASE} sent no umu-database")
@@ -1289,7 +1302,9 @@ def main(argv):
             if not tool_command(store.tool):
                 set_up_tool(store.tool, lambda d, t: None)
             # The game, then what it runs in (a first one may download both) and the umu-database,
-            # so that its first launch does not wait for them, and has its fixes offline.
+            # so that its first launch does not wait for them, and has its fixes offline. A launch
+            # never downloads the runtime: without it the install fails, and installing again
+            # finds the game there and fetches only the rest.
             store.install(rest[0], percent_printer(0, 90))
             runtime_dir(percent_printer(90, 99))
             proton_dir()
