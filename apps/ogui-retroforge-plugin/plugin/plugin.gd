@@ -221,7 +221,7 @@ func _add_game_settings_page() -> void:
 
 ## Main menu > Apps: an entry after Library, wired like OGUI's own (main_menu.tscn): it pushes
 ## the screen's state on the menu state machine and the menu state on the global one, and clears
-## the popup machine, which closes the main menu. The screen (emulators_screen.gd) sits beside
+## the popup machine, which closes the main menu. The screen (apps_screen.gd) sits beside
 ## Settings in card_ui.tscn's AboveContextBarMargin.
 func _add_emulators_screen() -> void:
 	var main_menu: Node = get_tree().root.find_child("MainMenu", true, false)
@@ -234,8 +234,8 @@ func _add_emulators_screen() -> void:
 
 	var screen_state := State.new()
 	screen_state.name = "retroforge_emulators"
-	_emulators_screen = load(plugin_base.path_join("emulators_screen.gd")).new()
-	_emulators_screen.setup(screen_state, load(plugin_base.path_join("emulators_page.gd")))
+	_emulators_screen = load(plugin_base.path_join("apps_screen.gd")).new()
+	_emulators_screen.setup(screen_state, load(plugin_base.path_join("apps_page.gd")))
 	holder.add_child(_emulators_screen)
 
 	_emulators_button = load("res://core/ui/components/card_button.tscn").instantiate()
@@ -265,7 +265,7 @@ func _add_emulators_screen() -> void:
 	logger.info("Main menu > Apps added")
 
 
-## Apps > Steam Client's page ends with these, under its own rows (emulators_page.gd builds the page
+## Apps > Steam Client's page ends with these, under its own rows (apps_page.gd builds the page
 ## again at each visit, so this runs each time): Proton (ARMv8.0 CPUs only), DXVK-Sarek, keep Steam
 ## running, start without Steam. A row whose command is missing is left out.
 func _add_steam_rows(box: Node) -> void:

@@ -88,15 +88,15 @@ grep -q 'load(plugin_base.path_join("boxart_retroforge.gd"))' "$SRC/plugin.gd" &
 # A download's progress poll outlives the page's rows (the player leaves Emulators and comes back):
 # it finds the row by emulator id on every tick. Bound to a row, every tick errored on the freed
 # row and the shown progress froze, and an install looked stuck (HW, Pocket FIT, 2026-10-19).
-grep -q '_show_progress_file.bind(str(emu.get("progress")), id)' "$SRC/emulators_page.gd" \
-  && grep -q '_show_progress.bind(part, int(emu.get("size", 0)), id)' "$SRC/emulators_page.gd" \
-  && ! grep -qE '_show_progress(_file)?\.bind\(.*, row\)' "$SRC/emulators_page.gd" \
+grep -q '_show_progress_file.bind(str(emu.get("progress")), id)' "$SRC/apps_page.gd" \
+  && grep -q '_show_progress.bind(part, int(emu.get("size", 0)), id)' "$SRC/apps_page.gd" \
+  && ! grep -qE '_show_progress(_file)?\.bind\(.*, row\)' "$SRC/apps_page.gd" \
   && ok "the download progress poll finds its row by emulator id, not a row the page may have freed" \
-  || bad "emulators_page.gd binds a row to its progress poll: it freezes once the page rebuilds its rows"
+  || bad "apps_page.gd binds a row to its progress poll: it freezes once the page rebuilds its rows"
 # Steam's download ends with the client updated and closed: nothing said the next step is opening it,
 # where Steam's own sign-in (QR) comes up.
-grep -q 'elif code == 0 and emu.get("kind") == "steam" and before == null:' "$SRC/emulators_page.gd" \
-  && grep -q 'Open it from Main menu > Steam to sign in' "$SRC/emulators_page.gd" \
+grep -q 'elif code == 0 and emu.get("kind") == "steam" and before == null:' "$SRC/apps_page.gd" \
+  && grep -q 'Open it from Main menu > Steam to sign in' "$SRC/apps_page.gd" \
   && ok "Steam's first download says to open it from Main menu > Steam to sign in" \
   || bad "Steam's first download ends without saying where to sign in"
 # OGUI's desktop library lists the shortcut Steam writes for each game it installs, on the same card

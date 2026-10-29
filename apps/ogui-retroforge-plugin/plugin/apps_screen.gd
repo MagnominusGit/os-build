@@ -2,7 +2,7 @@ extends Control
 
 ## The Apps screen, opened from the main menu's Apps entry (plugin.gd): a full-screen
 ## menu laid out like OGUI's Settings (settings_menu.tscn) -- every catalog emulator on the left,
-## the focused one's page on the right (emulators_page.gd) under its name.
+## the focused one's page on the right (apps_page.gd) under its name.
 ##
 ## A plugin-owned State on OGUI's menu state machine shows it (fade in, focus on the list; Back
 ## pops it, as Settings). Inside, a plugin-owned StateMachine holds the page's state: A on an
@@ -23,7 +23,7 @@ var state_machine_watcher_script := load("res://core/systems/state/state_machine
 
 ## The screen's state on the menu state machine; the main menu's Apps entry pushes it.
 var state: State
-var page: Control  # emulators_page.gd
+var page: Control  # apps_page.gd
 var logger := Log.get_logger("RetroForgeEmulators", Log.LEVEL.INFO)
 var _page_machine := StateMachine.new()
 var _list: VBoxContainer

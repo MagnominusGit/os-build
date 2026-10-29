@@ -745,7 +745,7 @@ games show a Stream button in Big Picture, and nothing gates it to the Frame. It
 paths (VR streaming, pairing over the Frame's own hotspot, echo cancellation) switch on with
 `-steamframe`/`-deckard`, which we never pass. What the image adds:
 
-- **A way in.** Open on Main menu > Emulators > Steam Client (`emulators_page.gd`) starts
+- **A way in.** Open on Main menu > Apps > Steam Client (`apps_page.gd`) starts
   `steam -gamepadui -steamos3 -steampal -steamdeck steam://open/bigpicture`. Not `steam://rungameid/`:
   OGUI treats that as one game and SIGTERMs Steam once only Steam's own windows are left, which would
   end a stream. There is no Steam library card.

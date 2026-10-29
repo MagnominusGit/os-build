@@ -24,7 +24,7 @@ func setup(scene_tree: SceneTree) -> RefCounted:
 
 ## Add the toggle to target (Apps > Steam Client), else under Settings > General after the DXVK-Sarek
 ## one. False when the layout differs or the command is missing.
-func attach(target: Node = null) -> bool:  # target: Apps > Steam Client's rows (emulators_page.gd)
+func attach(target: Node = null) -> bool:  # target: Apps > Steam Client's rows (apps_page.gd)
 	var menu: Node = tree.root.find_child("GeneralSettings", true, false)
 	var box: Node = target if target else (menu.get_node_or_null("MarginContainer/VBoxContainer/VBoxContainer") if menu else null)
 	if not box or not FileAccess.file_exists(TOOL):

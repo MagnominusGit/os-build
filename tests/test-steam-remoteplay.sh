@@ -5,7 +5,7 @@
 #   tests/test-steam-remoteplay.sh
 #
 # WHY THIS EXISTS. Each of these fails silently on a device:
-#   - the way in: the Emulators page's Open on Steam Client (emulators_page.gd) launches `steam` with
+#   - the way in: the Apps page's Open on Steam Client (apps_page.gd) launches `steam` with
 #     the Steam plugin's flags and steam://open/bigpicture. A steam://rungameid/ launch is treated as
 #     one game and Steam is SIGTERMed once only its own windows remain, which would end a Remote Play
 #     stream; -steamframe/-deckard switch on Frame-only paths. There is no Steam library card (removed
@@ -18,7 +18,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-PAGE="$ROOT/apps/ogui-retroforge-plugin/plugin/emulators_page.gd"
+PAGE="$ROOT/apps/ogui-retroforge-plugin/plugin/apps_page.gd"
 INPUT="$ROOT/rootfs/overlay/usr/lib/udev/rules.d/60-steam-input.rules"
 CODEC="$ROOT/rootfs/overlay/usr/lib/udev/rules.d/70-retroforge-video-codec.rules"
 for f in "$PAGE" "$INPUT" "$CODEC"; do [ -f "$f" ] || { echo "missing: $f" >&2; exit 1; }; done

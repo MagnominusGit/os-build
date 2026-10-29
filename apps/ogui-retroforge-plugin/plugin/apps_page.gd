@@ -1,6 +1,6 @@
 extends ScrollContainer
 
-## The right side of the Apps screen (emulators_screen.gd): ONE catalog emulator at a time,
+## The right side of the Apps screen (apps_screen.gd): ONE catalog emulator at a time,
 ## the one focused in the screen's list (show_emulator).
 ##
 ## Its block: who made it (author, homepage, licence and its link:
