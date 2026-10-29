@@ -1,0 +1,130 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Thu, 29 Oct 2026 13:00:00 +0100
+Subject: [PATCH] settings, first boot: no plugin store, no plugin manager
+
+RetroForge ships the one plugin it needs in the image and updates it by OTA. The plugin store
+offered plugins that cannot work here (the Steam plugin's own sign-in runs steamcmd, an x86 binary),
+and the Plugins page could disable or remove RetroForge's own plugin.
+
+- Settings: the Plugins and Plugin Store buttons are gone. Their menus stay in the TabContainer
+  (the buttons' TabSetters address tabs by index), but the store menu no longer fetches the store
+  (it did at every start, and each time it was shown), and the plugins menu no longer polls the
+  store for updates every five minutes.
+- First boot: the plugin step skips itself, as it already did without a network, from either way
+  into it (language select when already online, network select).
+---
+diff -ruN a/core/ui/card_ui/ootbe/plugin_select.gd b/core/ui/card_ui/ootbe/plugin_select.gd
+--- a/core/ui/card_ui/ootbe/plugin_select.gd
++++ b/core/ui/card_ui/ootbe/plugin_select.gd
+@@ -15,14 +15,8 @@
+ 	plugin_select_state.state_entered.connect(_on_state_entered)
+ 
+ 
+-# When this menu is shown, check if networking is supported. If not,
+-# proceed to the next OOBE menu.
++# RetroForge: no plugin store (its plugin ships in the image and updates by OTA), so no plugins to
++# pick: when this menu is shown, on to the end of the first boot, as without a network.
+ func _on_state_entered(_from: State) -> void:
+-	if not network_manager.is_running():
+-		logger.info("Networking is not supported. Skipping.")
+-		state_machine.replace_state(no_networking_state)
+-		return
+-	if network_manager.state < network_manager.NM_STATE_CONNECTED_GLOBAL:
+-		logger.info("Network is not available. Skipping.")
+-		state_machine.replace_state(no_networking_state)
+-		return
++	logger.info("No plugin store on RetroForge. Skipping.")
++	state_machine.replace_state(no_networking_state)
+diff -ruN a/core/ui/card_ui/settings/plugin_settings_menu.gd b/core/ui/card_ui/settings/plugin_settings_menu.gd
+--- a/core/ui/card_ui/settings/plugin_settings_menu.gd
++++ b/core/ui/card_ui/settings/plugin_settings_menu.gd
+@@ -13,15 +13,8 @@
+ func _ready() -> void:
+ 	_populate_plugins()
+ 	plugin_loader.plugins_reloaded.connect(_populate_plugins)
+-
+-	# Create and start a timer to check for plugin updates
+-	var update_timer := Timer.new()
+-	update_timer.one_shot = false
+-	update_timer.process_callback = Timer.TIMER_PROCESS_IDLE
+-	update_timer.timeout.connect(plugin_loader.on_update_timeout)
+-	update_timer.wait_time = 300 # Five minutes seems reasonable
+-	add_child(update_timer)
+-	update_timer.start()
++	# RetroForge: no update check against the plugin store every five minutes; its plugin updates
++	# by OTA, and there is no store.
+ 
+ 
+ # Populates the menu with plugins
+diff -ruN a/core/ui/card_ui/settings/plugin_store_menu.gd b/core/ui/card_ui/settings/plugin_store_menu.gd
+--- a/core/ui/card_ui/settings/plugin_store_menu.gd
++++ b/core/ui/card_ui/settings/plugin_store_menu.gd
+@@ -16,8 +16,8 @@
+ func _ready() -> void:
+ 	plugin_store_loaded.connect(_on_plugin_store_loaded)
+ 	plugin_loader.plugin_upgradable.connect(_on_plugin_upgradable)
+-	visibility_changed.connect(load_plugin_store_items)
+-	load_plugin_store_items()
++	# RetroForge: no plugin store (its plugin ships in the image and updates by OTA). The menu stays
++	# in the settings' TabContainer, whose tabs are set by index, but never fetches the store.
+ 
+ 
+ # Loads available plugins from the plugin store and emits the 'plugin_store_loaded'
+diff -ruN a/core/ui/card_ui/settings/settings_menu.tscn b/core/ui/card_ui/settings/settings_menu.tscn
+--- a/core/ui/card_ui/settings/settings_menu.tscn
++++ b/core/ui/card_ui/settings/settings_menu.tscn
+@@ -362,53 +362,6 @@
+ [node name="HSeparator4" type="HSeparator" parent="MarginContainer/HBoxContainer/MenuContainer/VBoxContainer/ButtonContainer/MarginContainer/ScrollContainer/MarginContainer/SettingButtonsContainer"]
+ layout_mode = 2
+ 
+-[node name="PluginsButton" parent="MarginContainer/HBoxContainer/MenuContainer/VBoxContainer/ButtonContainer/MarginContainer/ScrollContainer/MarginContainer/SettingButtonsContainer" instance=ExtResource("14_obber")]
+-layout_mode = 2
+-text = "Plugins"
+-
+-[node name="StateUpdater" parent="MarginContainer/HBoxContainer/MenuContainer/VBoxContainer/ButtonContainer/MarginContainer/ScrollContainer/MarginContainer/SettingButtonsContainer/PluginsButton" instance=ExtResource("14_cid64")]
+-state_machine = ExtResource("15_cb33u")
+-state = ExtResource("21_6lg2v")
+-action = 3
+-on_signal = "button_up"
+-
+-[node name="TabSetter" type="Node" parent="MarginContainer/HBoxContainer/MenuContainer/VBoxContainer/ButtonContainer/MarginContainer/ScrollContainer/MarginContainer/SettingButtonsContainer/PluginsButton" node_paths=PackedStringArray("target")]
+-script = ExtResource("16_l8xyu")
+-target = NodePath("../../../../../../../../../ContentContainer/VBoxContainer/ContentContainer/MarginContainer/TabContainer")
+-tab_number = 7
+-on_signal = "focus_entered"
+-
+-[node name="TextSetter" type="Node" parent="MarginContainer/HBoxContainer/MenuContainer/VBoxContainer/ButtonContainer/MarginContainer/ScrollContainer/MarginContainer/SettingButtonsContainer/PluginsButton" node_paths=PackedStringArray("target")]
+-script = ExtResource("18_wbniw")
+-target = NodePath("../../../../../../../../../ContentContainer/VBoxContainer/TitleContainer/MarginContainer/HBoxContainer/SectionLabel")
+-text = "Plugins"
+-on_signal = "focus_entered"
+-
+-[node name="PluginStoreButton" parent="MarginContainer/HBoxContainer/MenuContainer/VBoxContainer/ButtonContainer/MarginContainer/ScrollContainer/MarginContainer/SettingButtonsContainer" instance=ExtResource("14_obber")]
+-layout_mode = 2
+-text = "Plugin Store"
+-
+-[node name="StateUpdater" parent="MarginContainer/HBoxContainer/MenuContainer/VBoxContainer/ButtonContainer/MarginContainer/ScrollContainer/MarginContainer/SettingButtonsContainer/PluginStoreButton" instance=ExtResource("14_cid64")]
+-state_machine = ExtResource("15_cb33u")
+-state = ExtResource("22_ntyf3")
+-action = 3
+-on_signal = "button_up"
+-
+-[node name="TabSetter" type="Node" parent="MarginContainer/HBoxContainer/MenuContainer/VBoxContainer/ButtonContainer/MarginContainer/ScrollContainer/MarginContainer/SettingButtonsContainer/PluginStoreButton" node_paths=PackedStringArray("target")]
+-script = ExtResource("16_l8xyu")
+-target = NodePath("../../../../../../../../../ContentContainer/VBoxContainer/ContentContainer/MarginContainer/TabContainer")
+-tab_number = 8
+-on_signal = "focus_entered"
+-
+-[node name="TextSetter" type="Node" parent="MarginContainer/HBoxContainer/MenuContainer/VBoxContainer/ButtonContainer/MarginContainer/ScrollContainer/MarginContainer/SettingButtonsContainer/PluginStoreButton" node_paths=PackedStringArray("target")]
+-script = ExtResource("18_wbniw")
+-target = NodePath("../../../../../../../../../ContentContainer/VBoxContainer/TitleContainer/MarginContainer/HBoxContainer/SectionLabel")
+-text = "Plugin Store"
+-on_signal = "focus_entered"
+-
+-[node name="HSeparator5" type="HSeparator" parent="MarginContainer/HBoxContainer/MenuContainer/VBoxContainer/ButtonContainer/MarginContainer/ScrollContainer/MarginContainer/SettingButtonsContainer"]
+-layout_mode = 2
+-
+ [node name="ProcessesButton" parent="MarginContainer/HBoxContainer/MenuContainer/VBoxContainer/ButtonContainer/MarginContainer/ScrollContainer/MarginContainer/SettingButtonsContainer" instance=ExtResource("14_obber")]
+ layout_mode = 2
+ text = "Processes"
