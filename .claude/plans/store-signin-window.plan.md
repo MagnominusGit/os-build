@@ -1,7 +1,7 @@
 # Plan: store sign-in on the device (Chromium window)
 
 **Complexity**: Medium-High. **Branch**: `steam-armv8-proton`. **Status**: prototype committed at
-f8f62179 (2026-10-29), HW-OK on Pocket FIT for GOG and Epic + Google; D4, D5 agreed 2026-10-29; Q3 open.
+f8f62179 (2026-10-29), HW-OK on Pocket FIT for GOG and Epic + Google; D1, D4, D5 agreed 2026-10-29; no open questions.
 
 ## Summary
 
@@ -27,7 +27,7 @@ it signed in. The prototype in `apps/retroforge-store-signin/` proved the pieces
 
 | | Decision |
 |---|---|
-| D1 | **Chromium downloaded at the first sign-in, never shipped** (as legendary/gogdl, stores D1). The packages come from the image's own snapshot (`rootfs/manifest.lock`), listed with their sha256 in a pin the build writes when it relocks (`/usr/share/retroforge/stores/chromium.pin`: filename, sha256, size; measured, not copied). Unpacked into the player's home (`~/.local/share/retroforge/chromium/`), checked against the pin, replaced when the pin changes. Progress shows on the Sign in row. Chromium is only ever pointed at the two stores' sign-in pages, so a snapshot-old Chromium is acceptable; it moves with each relock. |
+| D1 | **Chromium downloaded when Sign in is pressed, never shipped, never in the background** (user, 2026-10-29; as legendary/gogdl, stores D1). No pacman (seal-rootfs.sh strips it from release roots, with gnupg and the keyring): the store helper installs it itself. (1) The build writes `/usr/share/retroforge/stores/chromium.pin` from the image's own snapshot db (`rootfs/manifest.lock`'s `repo snapshot`): Chromium and the packages of its closure the image lacks (2026-10-29: 19 files, 181 MB, GTK3 the largest after Chromium), each with filename, sha256, size, measured at relock. (2) On Sign in the helper downloads them over HTTPS from that snapshot, each checked against the pin; any mismatch aborts with nothing installed. (3) It unpacks with Python 3.14's `tarfile` (`r:zst`, `filter="data"`: no path outside the target), only `usr/lib/chromium/` and the `usr/lib/*.so*` it needs, into `~/.local/share/retroforge/chromium/<pin hash>/`, then swaps a `current` link; Chromium finds the libraries through `LD_LIBRARY_PATH`, nothing in `/usr` changes. A new pin (next relock) replaces it at the next Sign in. Progress shows on the Sign in row. Chromium only ever opens the two stores' sign-in pages, so a snapshot-old Chromium is acceptable; it moves with each relock. |
 | D2 | **One helper verb**: `store <gog\|epic> sign-in` keeps its name and events but opens the window instead of the LAN page: `chromium-signin.py` folds into the helper (or `/usr/lib/retroforge/python/`), then `sign_in(code)` as now. New events: `browser` (`setup` progress, `open` with Chromium's pid, `closed`). |
 | D3 | **The plugin owns the window's focus.** On `open` it finds the window of that pid in gamescope's focusable windows and puts its app id in the base layer, and puts OGUI back when it closes (the `/run` helper's logic, in GDScript). No OGUI patch. |
 | D4 | **The LAN/QR page is removed, no fallback** (user, 2026-10-29). Its server was awaiting a security review; `qr.py` (only the store helper, store_settings.gd and test-store.sh use it) goes with it. |
@@ -36,12 +36,12 @@ it signed in. The prototype in `apps/retroforge-store-signin/` proved the pieces
 
 ## Open questions
 
-- **Q3** Download the Chromium in the background at the first visit to Settings > Stores (as the tools' setup), or only when Sign in is pressed?
+None (Q1-Q3 answered 2026-10-29: D4, D5, D1).
 
 ## Phases
 
-1. **Pin + set-up**: the build writes `chromium.pin` from the snapshot db at relock; `store chromium-setup`
-   downloads, checks, unpacks, with progress. `tests/test-store.sh` against a fake snapshot.
+1. **Pin + set-up**: the build writes `chromium.pin` from the snapshot db at relock; the helper's
+   Chromium set-up (run by `sign-in`) downloads, checks, unpacks, with progress. `tests/test-store.sh` against a fake snapshot.
 2. **Helper**: `sign-in` opens Chromium (flags F2, F3, profile in a private temp folder deleted after),
    reads the code, signs in. Fake-Chromium test for the code reading (GOG address, Epic JSON page).
 3. **Plugin**: Sign in row runs it, progress, focus (D3), Cancel, the QR panel removed.
