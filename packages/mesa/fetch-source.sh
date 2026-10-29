@@ -3,15 +3,15 @@
 #
 #   packages/mesa/fetch-source.sh <destdir>
 #
-# THE ONE FETCH FOR ALL THREE MESA BUILDS. packages/mesa (host, via makepkg), packages/mesa-x86
-# (FEX guest) and packages/mesa-android (Android guest) build the same tarball for three targets;
-# before this file each fetched it with its own bare `curl`, so an upstream outage broke all three
-# separately and a mirror would have had to be added three times.
+# THE ONE FETCH FOR BOTH MESA BUILDS. packages/mesa (host, via makepkg) and packages/mesa-x86
+# (FEX guest) build the same tarball for two targets; before this file each fetched it with its own
+# bare `curl`, so an upstream outage broke both separately and a mirror would have had to be added
+# twice.
 #
 # WHY A MIRROR AT ALL. archive.mesa3d.org is one machine (annarchy.freedesktop.org) with no CDN in
 # front of it -- mesa.freedesktop.org is Fastly-fronted but fills from the same origin, so it goes
 # down with it. MEASURED 2026-08-23: both unreachable for over half an hour, which is long enough
-# to fail a cold build of all three drivers and, in CI, a whole release run. Nothing about that
+# to fail a cold build of both drivers and, in CI, a whole release run. Nothing about that
 # outage is unusual for freedesktop infrastructure.
 #
 # THE MIRROR IS NOT TRUSTED, IT IS VERIFIED. Whichever host answers, the tarball must match the
