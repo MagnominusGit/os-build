@@ -150,8 +150,9 @@ func _run(item: LibraryLaunchItem, verb: String) -> bool:
 	if code != 0:
 		logger.warn("store %s %s %s exited %d: %s" % [store, verb, item.provider_app_id, code, result[1]])
 		notification_manager.show(Notification.new("%s: %s" % [item.name, Runner.failure_text(TITLES[store], code, result[1])]))
-	else:
-		library_manager.load_library.call_deferred(library_id)  # the card's installed state
+	# The card's installed state, also after a failure: an install fails after the game is in when
+	# what it runs in could not be fetched (DOOM 64 kept its Install button, Pocket FIT 2026-10-29).
+	library_manager.load_library.call_deferred(library_id)
 	return code == 0
 
 
