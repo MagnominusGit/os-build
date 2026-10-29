@@ -1,7 +1,7 @@
 # Plan: store sign-in on the device (Chromium window)
 
 **Complexity**: Medium-High. **Branch**: `steam-armv8-proton`. **Status**: prototype committed at
-f8f62179 (2026-10-29), HW-OK on Pocket FIT for GOG and Epic + Google; plan not yet agreed.
+f8f62179 (2026-10-29), HW-OK on Pocket FIT for GOG and Epic + Google; D4 agreed 2026-10-29 (Q1); Q2, Q3 open.
 
 ## Summary
 
@@ -30,13 +30,12 @@ it signed in. The prototype in `apps/retroforge-store-signin/` proved the pieces
 | D1 | **Chromium downloaded at the first sign-in, never shipped** (as legendary/gogdl, stores D1). The packages come from the image's own snapshot (`rootfs/manifest.lock`), listed with their sha256 in a pin the build writes when it relocks (`/usr/share/retroforge/stores/chromium.pin`: filename, sha256, size; measured, not copied). Unpacked into the player's home (`~/.local/share/retroforge/chromium/`), checked against the pin, replaced when the pin changes. Progress shows on the Sign in row. Chromium is only ever pointed at the two stores' sign-in pages, so a snapshot-old Chromium is acceptable; it moves with each relock. |
 | D2 | **One helper verb**: `store <gog\|epic> sign-in` keeps its name and events but opens the window instead of the LAN page: `chromium-signin.py` folds into the helper (or `/usr/lib/retroforge/python/`), then `sign_in(code)` as now. New events: `browser` (`setup` progress, `open` with Chromium's pid, `closed`). |
 | D3 | **The plugin owns the window's focus.** On `open` it finds the window of that pid in gamescope's focusable windows and puts its app id in the base layer, and puts OGUI back when it closes (the `/run` helper's logic, in GDScript). No OGUI patch. |
-| D4 | **The LAN/QR page is removed** (its server was awaiting a security review; `qr.py` goes if nothing else uses it). |
+| D4 | **The LAN/QR page is removed, no fallback** (user, 2026-10-29). Its server was awaiting a security review; `qr.py` (only the store helper, store_settings.gd and test-store.sh use it) goes with it. |
 | D5 | **Input**: touch and the OGUI on-screen keyboard (works since b4d6e5a9). Devices without a touchscreen need a pointer: open question Q2. |
 | D6 | **Cancel**: B / the Guide menu's Close ends the window; the row goes back to Sign in. The 15-minute limit stays. |
 
 ## Open questions
 
-- **Q1** Drop the LAN/QR sign-in entirely (D4), or keep it as a fallback when the 181 MB download is not possible?
 - **Q2** Non-touch devices (RP Classic, RG55G1?): an InputPlumber profile for the sign-in window (stick = mouse, A = click, D-pad = Tab/arrows), or out of scope for now?
 - **Q3** Download the Chromium in the background at the first visit to Settings > Stores (as the tools' setup), or only when Sign in is pressed?
 
