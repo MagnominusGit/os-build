@@ -647,6 +647,10 @@ for c in cs:
         order.append("sync " + ("down" if "--skip-upload" in c else "up"))
 ok(r.returncode == 7, "the game's exit status", r.stderr)
 ok(order == ["boot", "sync down", "game", "sync up"], "prefix set up, saves down, the game, saves up", str(order))
+boot = next((c for c in cs if c[0] == "runner" and "wineboot" in c), None)
+ok(boot and boot[-8].get("UMU_ID") == "umu-default" and boot[-8].get("PROTONFIXES_DISABLE") == "1",
+   "the prefix's set-up names an umu id (else Proton's steam.exe asserts on our empty Steam client), no fixes",
+   str(boot[-8] if boot else None))
 syncs = [c for c in cs if c[0] == "gogdl" and "save-sync" in c]
 pfx_saves = os.path.join(DATA, "prefixes", "gog-1", "pfx", "drive_c", "users", "steamuser", "AppData", "Local", "Game One", "Saves")
 ok(syncs and syncs[0][syncs[0].index("save-sync") + 1] == pfx_saves, "the save folder inside the prefix", str(syncs[:1]))
@@ -770,8 +774,8 @@ ROUTES[UMU_ROUTE] = UMU_CSV
 n = fetches()
 json.dump({"gog-1": {"tso": "off", "protonfixes": "off"}}, open(choices, "w"))
 pf, tso, err = pf_run("gog", "1")
-ok(pf == {"UMU_ID": None, "STORE": None, "PROTONFIXES_DISABLE": "1"} and tso == "0" and "protonfixes off" in err,
-   "off for the game: PROTONFIXES_DISABLE and no umu id, beside its TSO choice", str(pf))
+ok(pf == {"UMU_ID": "umu-default", "STORE": "gog", "PROTONFIXES_DISABLE": "1"} and tso == "0" and "protonfixes off" in err,
+   "off for the game: PROTONFIXES_DISABLE, still an umu id (not Steam's game to Proton), beside its TSO choice", str(pf))
 ok(fetches() == n, "and the umu-database is not fetched for it")
 pf, _, _ = pf_run("epic", "Fortnite2")
 ok(pf["UMU_ID"] == "umu-2002" and fetches() == n + 1, "another game keeps its fixes", str(pf))

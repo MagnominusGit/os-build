@@ -465,11 +465,15 @@ def umu_id(store, gid):
     return found
 
 
-def protonfixes_env(store, gid):
+def protonfixes_env(store, gid, fixes=True):
     """What umu-protonfixes picks the game's fixes by (fix.py: UMU_ID, and STORE for its gamefixes-<store>),
-    as umu-run sets them; PROTONFIXES_DISABLE when the player turned them off."""
-    if game_choice(store, gid, "protonfixes") == "off":
-        return {"PROTONFIXES_DISABLE": "1"}
+    as umu-run sets them; PROTONFIXES_DISABLE when the player turned them off, or fixes is False.
+    UMU_ID is set either way: it is also what tells Proton the game is not Steam's. Without it Proton
+    starts the game through its steam.exe, which asserts (steamclient_main.c "!status") on our empty
+    Steam client folder (Proton-CachyOS 11, DOOM 64's prefix set-up, Pocket FIT 2026-10-29)."""
+    if not fixes or game_choice(store, gid, "protonfixes") == "off":
+        # The id only has to be there: no lookup, no umu-database fetch.
+        return {"UMU_ID": "umu-default", "STORE": UMU_STORES[store], "PROTONFIXES_DISABLE": "1"}
     return {"UMU_ID": umu_id(store, gid) or "umu-default", "STORE": UMU_STORES[store]}
 
 
@@ -731,7 +735,8 @@ def prepare_prefix(store, gid):
     compat = os.path.dirname(prefix_path(store, gid))
     os.makedirs(compat, mode=0o700, exist_ok=True)
     env = dict(os.environ, STEAM_COMPAT_DATA_PATH=compat, STEAM_COMPAT_TOOL_PATHS=f"{proton}:{runtime}",
-               STEAM_COMPAT_CLIENT_INSTALL_PATH=os.path.join(DATA, "steam-client"), SteamAppId="0", SteamGameId="0")
+               STEAM_COMPAT_CLIENT_INSTALL_PATH=os.path.join(DATA, "steam-client"), SteamAppId="0", SteamGameId="0",
+               **protonfixes_env(store, gid, fixes=False))
     os.makedirs(env["STEAM_COMPAT_CLIENT_INSTALL_PATH"], mode=0o700, exist_ok=True)
     cmd = [os.path.join(runtime, "_v2-entry-point"), "--verb=run", "--",
            os.path.join(proton, "proton"), "run", "wineboot", "--init"]
