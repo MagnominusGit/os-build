@@ -183,6 +183,23 @@ def _tries(attempt_once):
             time.sleep(FETCH_PAUSE * attempt)
 
 
+def listed(list_once):
+    """A store's library from list_once(), tried again as fetch() is when it fails for any reason but
+    the store refusing the sign-in (NotReady): the first `legendary list` after a sign-in on the
+    Pocket FIT failed on a network stall and, with no list cached yet, left the library empty
+    (2026-10-29)."""
+    for attempt in range(1, FETCH_TRIES + 1):
+        try:
+            return list_once()
+        except NotReady:
+            raise
+        except (Failed, ValueError) as err:
+            if attempt == FETCH_TRIES:
+                raise
+            log(f"listing failed ({err}); trying again ({attempt + 1}/{FETCH_TRIES})")
+            time.sleep(FETCH_PAUSE * attempt)
+
+
 FETCH_TRIES = 3
 FETCH_PAUSE = 2  # seconds before the second try, twice that before the third
 FETCH_TIMEOUT = 30  # seconds one connect or read may wait
@@ -827,7 +844,7 @@ class Epic:
     def games(self):
         cache = os.path.join(DATA, "epic-games.json")
         try:
-            owned = json.loads(self.run(["list", "--json", "--platform", "Windows"], check=True).stdout or "[]")
+            owned = listed(lambda: json.loads(self.run(["list", "--json", "--platform", "Windows"], check=True).stdout or "[]"))
             write_private(cache, json.dumps(owned))
         except (Failed, ValueError) as err:
             if isinstance(err, NotReady):
@@ -1003,36 +1020,7 @@ class Gog:
     def games(self):
         cache = os.path.join(DATA, "gog-games.json")
         try:
-            creds = self.credentials()
-            ids, page = [], ""
-            while True:
-                url = f"https://galaxy-library.gog.com/users/{creds['user_id']}/releases"
-                data = http_json(url + (f"?page_token={page}" if page else ""), creds["access_token"])
-                ids += [str(i["external_id"]) for i in data.get("items", [])
-                        if i.get("platform_id") == "gog" and i.get("owned", True)]
-                page = data.get("next_page_token") or ""
-                if not page:
-                    break
-            from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(8) as pool:
-                metas = list(pool.map(lambda g: (g, self._safe_details(g, creds["access_token"])), ids))
-            owned = []
-            for gid, meta in metas:
-                game = meta.get("game") or {}
-                oses = {o.get("slug") for o in meta.get("supported_operating_systems", []) if isinstance(o, dict)}
-                if meta.get("type") != "game" or game.get("visible_in_library") is False or "windows" not in oses:
-                    continue
-                title = (meta.get("title") or {}).get("*") or (game.get("title") or {}).get("*") or gid
-                # GOG's image service sizes by a suffix ("{formatter}"): a cover is 54 KB as it is
-                # and 30 KB as _glx_vertical_cover (both 342x482), a background 365 KB and 63 KB at
-                # _800, a logo 2.1 MB and 14 KB as _glx_logo.
-                art = {}
-                for key, field, size, ext in (("portrait", "vertical_cover", "_glx_vertical_cover", "jpg"), ("landscape", "background", "_800", "jpg"),
-                                              ("hero", "background", "_1600", "jpg"), ("logo", "logo", "_glx_logo", "png")):
-                    fmt = (game.get(field) or {}).get("url_format", "")
-                    if fmt:
-                        art[key] = fmt.replace("{formatter}", size).replace("{ext}", ext)
-                owned.append({"id": gid, "title": title, "art": art})
+            owned = listed(self._owned_online)
             write_private(cache, json.dumps(owned))
         except (Failed, ValueError) as err:
             if isinstance(err, NotReady):
@@ -1045,6 +1033,40 @@ class Gog:
         for game in owned:
             inst = installed.get(game["id"])
             game.update(installed=inst is not None, dir=inst["path"] if inst else "")
+        return owned
+
+    def _owned_online(self):
+        """The account's Windows games, from GOG's APIs (as Heroic reads them)."""
+        creds = self.credentials()
+        ids, page = [], ""
+        while True:
+            url = f"https://galaxy-library.gog.com/users/{creds['user_id']}/releases"
+            data = http_json(url + (f"?page_token={page}" if page else ""), creds["access_token"])
+            ids += [str(i["external_id"]) for i in data.get("items", [])
+                    if i.get("platform_id") == "gog" and i.get("owned", True)]
+            page = data.get("next_page_token") or ""
+            if not page:
+                break
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(8) as pool:
+            metas = list(pool.map(lambda g: (g, self._safe_details(g, creds["access_token"])), ids))
+        owned = []
+        for gid, meta in metas:
+            game = meta.get("game") or {}
+            oses = {o.get("slug") for o in meta.get("supported_operating_systems", []) if isinstance(o, dict)}
+            if meta.get("type") != "game" or game.get("visible_in_library") is False or "windows" not in oses:
+                continue
+            title = (meta.get("title") or {}).get("*") or (game.get("title") or {}).get("*") or gid
+            # GOG's image service sizes by a suffix ("{formatter}"): a cover is 54 KB as it is
+            # and 30 KB as _glx_vertical_cover (both 342x482), a background 365 KB and 63 KB at
+            # _800, a logo 2.1 MB and 14 KB as _glx_logo.
+            art = {}
+            for key, field, size, ext in (("portrait", "vertical_cover", "_glx_vertical_cover", "jpg"), ("landscape", "background", "_800", "jpg"),
+                                          ("hero", "background", "_1600", "jpg"), ("logo", "logo", "_glx_logo", "png")):
+                fmt = (game.get(field) or {}).get("url_format", "")
+                if fmt:
+                    art[key] = fmt.replace("{formatter}", size).replace("{ext}", ext)
+            owned.append({"id": gid, "title": title, "art": art})
         return owned
 
     def _safe_details(self, gid, token):

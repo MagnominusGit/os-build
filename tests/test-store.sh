@@ -152,6 +152,12 @@ a = [x for x in sys.argv[1:] if x != "-y"]
 inst = os.path.join(cfg, "installed.json")
 installed = json.load(open(inst)) if os.path.exists(inst) else {}
 call(os.environ.get("STEAM_COMPAT_DATA_PATH", ""))
+once = os.environ.get("FAKE_FAIL_ONCE")  # a marker path: the first list fails (a network stall), later ones do not
+if once and a[0] == "list" and not os.path.exists(once):
+    open(once, "w").close()
+    print("requests.exceptions.ReadTimeout: HTTPSConnectionPool(host='launcher-public-service-prod06.ol.epicgames.com')", file=sys.stderr)
+    print("[cli] ERROR: could not list games", file=sys.stderr)
+    sys.exit(1)
 refresh = os.environ.get("FAKE_EPIC_REFRESH")
 if refresh and a[0] != "auth":  # legendary 0.21.1 core._login, then the command's own line
     if refresh == "refused":
@@ -212,6 +218,10 @@ if a[:2] == ["auth", "--code"]:
         print(json.dumps({"error": True}))
 elif a == ["auth"]:
     refresh = os.environ.get("FAKE_GOG_REFRESH")  # gogdl 1.3.1 auth.py: null either way, a log line offline
+    once = os.environ.get("FAKE_FAIL_ONCE")
+    if once and not os.path.exists(once):
+        open(once, "w").close()
+        refresh = "unreached"
     if refresh == "unreached":
         print("[AUTH] ERROR: Failed to refresh credentials", file=sys.stderr)
     print(json.dumps(creds) if os.path.exists(auth) and not refresh else "null")
@@ -852,6 +862,14 @@ ok(r.returncode == 0 and {g["id"]: g["installed"] for g in json.loads(store("epi
 r = store("gog", "uninstall", "1")
 ok(r.returncode == 0 and not os.path.exists(gamedir) and json.loads(store("gog", "games").stdout)[0]["installed"] is False,
    "gog: the folder and the record go", r.stderr)
+CASE = "listing retried"
+for name in ("epic", "gog"):
+    marker = os.path.join(T, f"failed-once-{name}")
+    r = store(name, "games", env={"FAKE_FAIL_ONCE": marker})
+    ok(r.returncode == 0 and "trying again (2/3)" in r.stderr and "as last listed" not in r.stderr
+       and os.path.exists(marker) and json.loads(r.stdout or "[]"),
+       f"{name}: a listing that fails once (a network stall) is tried again, and lists the library", r.stderr)
+
 CASE = "refresh"
 # The stored refresh token: GOG or Epic refusing it signs the store out (the Stores row then says
 # Sign in) and is exit 3 (the library empties, an install says sign in); not reaching the store to
