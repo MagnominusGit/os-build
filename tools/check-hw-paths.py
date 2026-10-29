@@ -12,7 +12,8 @@ against that:
                   and the name fits THERMAL_NAME_LENGTH (the core refuses longer ones)
   LEDs            led_compose_name(): the label, else color:function[-enumerator], else the node
                   name -- for each LED whose controller (and, for a multicolor group, every member;
-                  for a PWM LED, every PWM provider) is enabled
+                  for a PWM LED, every PWM provider) is enabled; plus the names a driver registers
+                  with no node per LED (DRIVER_LEDS)
   backlights      pwm-backlight: the device name; qcom WLED: label or node name; SY7758 and the
                   Odin 2 Mini's controller: their fixed names; a DSI panel that dims over DCS:
                   its DSI device, <host>.<channel> (the PANELS table says which panels do)
@@ -102,6 +103,10 @@ WLED = {"qcom,pm8150l-wled", "qcom,pmi8998-wled", "qcom,pm8941-wled", "qcom,pmi8
         "qcom,pm660l-wled", "qcom,pm6150l-wled", "qcom,pmi8950-wled", "qcom,pm8950-wled"}
 LED_CHIPS = {"heroic,htr3212", "awinic,aw20036", "awinic,aw20054", "awinic,aw20072",
              "awinic,aw20108", "pwm-leds", "gpio-leds"}
+# LEDs a driver registers under names of its own, with no child node per LED.
+DRIVER_LEDS = {
+    "singleadc-joypad": [f"rgb:{s}{i}" for s in "lr" for i in range(1, 9)],   # 0763 stick rings
+}
 LED_COLORS = ["white", "red", "green", "blue", "amber", "violet", "yellow", "ir", "multicolor",
               "rgb", "purple", "orange", "pink", "cyan", "lime"]   # drivers/leds/led-core.c
 THERMAL_NAME_LENGTH = 20                                            # including the NUL
@@ -348,6 +353,9 @@ class Board:
             if not n.available():
                 continue
             lpg = any(c.startswith("qcom,") and c.endswith(("-lpg", "-pwm")) for c in n.strings("compatible"))
+            for c in n.strings("compatible"):
+                for name in DRIVER_LEDS.get(c, []):
+                    leds[name] = n
             if lpg or n.compatible(*LED_CHIPS):
                 for child in n.children:
                     if not child.available() or not any(k in child.props for k in ("label", "color", "function")):
