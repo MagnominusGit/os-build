@@ -725,6 +725,12 @@ func test_steam_apps() -> void:
 	write(cdn + "/413150/logo.png", "logo")
 	check("steam art fetch: not asked again for a day", SteamApps.fetch_art(art, 413150, 3), "")
 	check("steam art fetch: no app id or no such layout: nothing asked", [SteamApps.fetch_art(art, 0, 0), SteamApps.fetch_art(art, 413150, 9)], ["", ""])
+	OS.set_environment("RETROFORGE_STEAM_ART_CDN", "http://127.0.0.1:9")
+	check("steam art fetch: an unreachable CDN (a network stall): none, no mark, asked again next time",
+		[SteamApps.fetch_art(art, 413150, 2), FileAccess.file_exists(art + "/413150/library_hero.jpg.missing")], ["", false])
+	write(cache + "/2073850/bde08dae/library_capsule.jpg", "c")
+	check("steam art: the newer cache's portrait (library_capsule.jpg, in a hashed folder)",
+		SteamApps.art_path(root, 2073850, 0), cache + "/2073850/bde08dae/library_capsule.jpg")
 	OS.set_environment("RETROFORGE_STEAM_ART_CDN", "")
 	var watch = SteamWatch.new().watch_steam(root)
 	check("steam rescan: nothing before OGUI's first library load", [watch.poll(false), watch.poll(false)], [false, false])

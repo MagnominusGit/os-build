@@ -19,9 +19,11 @@ const LAUNCH_ARGS := ["-gamepadui", "-steamos3", "-steampal", "-steamdeck", "-si
 const FULLY_INSTALLED := 4
 const STILL_GOING := 2 | 256 | 512 | 1024 | 0x100000 | 0x200000 | 0x400000
 ## OGUI's BoxArtProvider.LAYOUT (GRID_PORTRAIT, GRID_LANDSCAPE, BANNER, LOGO) -> the client's files;
-## the first of each is also the file's name on Valve's CDN.
+## the first of each is also the file's name on Valve's CDN. The client's newer cache names the
+## portrait library_capsule.jpg (300x450, in a hashed folder): 19 of 161 games had only that one
+## (Pocket FIT, 2026-10-29).
 const ART := [
-	["library_600x900.jpg", "library_600x900_2x.jpg"],
+	["library_600x900.jpg", "library_600x900_2x.jpg", "library_capsule.jpg"],
 	["header.jpg", "library_header.jpg"],
 	["library_hero.jpg"],
 	["logo.png"],
@@ -178,7 +180,9 @@ static func art_cache_dir() -> String:
 
 
 ## An app's art for a layout from Valve's CDN, kept in cache_dir/<appid>/<file>: its path, or "" when
-## it could not be fetched (not tried again for ART_RETRY: a game without that art stays without it).
+## it could not be fetched. Only an HTTP error (curl exit 22: the CDN has no such file) is not tried
+## again for ART_RETRY, so a game without that art stays without it; a network failure is tried again
+## at the next ask, as library_store.gd does.
 ## Blocks for the download: call it off the main thread. TEST SEAM: RETROFORGE_STEAM_ART_CDN.
 static func fetch_art(cache_dir: String, appid: int, kind: int) -> String:
 	if kind < 0 or kind >= ART.size() or appid <= 0:
@@ -201,9 +205,10 @@ static func fetch_art(cache_dir: String, appid: int, kind: int) -> String:
 		DirAccess.remove_absolute(missing)
 		return dest
 	DirAccess.remove_absolute(part)
-	var mark := FileAccess.open(missing, FileAccess.WRITE)
-	if mark:
-		mark.close()
+	if code in [22, 37]:  # 37: the file:// test seam's "no such file"
+		var mark := FileAccess.open(missing, FileAccess.WRITE)
+		if mark:
+			mark.close()
 	return ""
 
 
