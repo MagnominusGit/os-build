@@ -12,6 +12,8 @@
 #   store <gog|epic> install <id>      N% lines; exit 0 once installed
 #   store <gog|epic> uninstall <id>
 #   store <gog|epic> launch <id>       saves down, the game, saves up; the game's exit status
+#   store browser status               {"ready": bool, "binary": path|null}: the sign-in's Chromium (no network)
+#   store browser setup                that Chromium, into the player's home; N% lines (BROWSER below)
 #
 # Errors go to stderr as `store: ...`. Exit 0; 1 for a failure (the last stderr line says why); 2 for a
 # bad invocation; 3 when the store is not set up or not signed in; 4 when the network cannot be reached.
@@ -54,13 +56,18 @@
 # grant, and Epic's is open only to its own apps' clients. Tokens stay in the player's home, which
 # only the player can read.
 #
+# BROWSER. The on-device sign-in (.claude/plans/store-signin-window.plan.md) opens the store's page in
+# Chromium, which is not on the image: `browser setup` downloads the snapshot packages chromium.pin
+# lists, checks each against its sha256 and unpacks them into <data>/retroforge/stores/chromium/
+# (python/chromium_setup.py). No package manager: release roots have none.
+#
 # ART. A Steam card's cover is on disk already (the client's library cache); a store's is on its CDN,
 # and a card that fetched its own (library_store.gd: one curl, one TLS handshake each) came in slowly
 # as the player scrolled. So once a library is listed, `art` fetches every portrait cover into the
 # same cache, on a few kept-alive connections at a low priority: the cards then read them from disk.
 # A card shown before then still fetches its own.
 #
-# TEST SEAMS (tests/test-store.sh): RETROFORGE_STORE_DATA (for <data>/retroforge/stores),
+# TEST SEAMS (tests/test-store.sh, tests/test-store-browser.sh): RETROFORGE_STORE_DATA (for <data>/retroforge/stores),
 # RETROFORGE_STORE_PINS, RETROFORGE_STORE_TOOL_<NAME> (a tool's command, instead of the set-up one),
 # RETROFORGE_STEAM_ROOT, RETROFORGE_STEAM_COMPAT_TOOLS, RETROFORGE_STORE_RUNTIME (a runtime folder),
 # RETROFORGE_STORE_RUN (a command run with the game's command line instead of it), RETROFORGE_STORE_HOST
@@ -88,6 +95,7 @@ import urllib.request
 import zipfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "python"))  # /usr/lib/retroforge/python
+import chromium_setup  # noqa: E402
 import qr  # noqa: E402
 
 DATA_HOME = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
@@ -1218,7 +1226,31 @@ def launch(store, gid):
     return code
 
 
+def browser(verb):
+    """`store browser status|setup`: the sign-in's Chromium (BROWSER above)."""
+    pin = os.path.join(PINS, "chromium.pin")
+    if verb == "status":
+        found = chromium_setup.installed(DATA, pin)
+        print(json.dumps({"ready": bool(found), "binary": found["binary"] if found else None}))
+    elif verb == "setup":
+        os.nice(10)  # as a tool's set-up: behind OGUI
+        try:
+            chromium_setup.set_up(DATA, pin, fetch, percent_printer())
+        except (chromium_setup.SetupError, OSError) as err:
+            raise Failed(f"Chromium set-up: {err}")
+    else:
+        print("usage: store browser status|setup", file=sys.stderr)
+        return 2
+    return 0
+
+
 def main(argv):
+    if len(argv) == 3 and argv[1] == "browser":
+        try:
+            return browser(argv[2])
+        except Failed as err:
+            log(str(err))
+            return err.code
     if len(argv) < 3 or argv[1] not in STORES:
         print("usage: store <gog|epic> status|setup|sign-in|sign-out|games|install <id>|uninstall <id>|launch <id>",
               file=sys.stderr)

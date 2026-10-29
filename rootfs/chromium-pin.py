@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+# retroforge Chromium pin generator -> rootfs/overlay/usr/share/retroforge/stores/chromium.pin
+#
+#   rootfs/chromium-pin.py [--lock rootfs/manifest.lock] [--db-dir DIR] [--out PIN]
+#
+# The store sign-in opens the store's own page in Chromium (.claude/plans/store-signin-window.plan.md,
+# D1). Chromium is too big for the root (162 MB to download, 396 MB unpacked, 2026-10-29), so the image
+# ships only this pin and /usr/lib/retroforge/store downloads the packages when the player first presses
+# Sign in: Chromium and every package of its dependency closure that the image does not have, from the
+# snapshot the image is built from (manifest.lock's `repo snapshot`), each checked against its sha256 here.
+#
+# Run by `make relock` after genmanifest.sh, so the pin follows the lock: a package the image gains drops
+# out of the pin, one it loses comes in. tests/test-store-browser.sh fails when the pin's snapshot is not the
+# lock's. The hashes are the snapshot's own (core.db/extra.db's SHA256SUM), as the lock's snapshot rows.
+#
+# PRESENT ON THE IMAGE = the lock's snapshot and retroforge rows, with what they provide. Not its
+# stripped rows (pacman, gnupg...: seal-rootfs.sh deletes them from a release root) nor its prebuilt ones
+# (not packages). Only DEPENDS is followed, as pacman does; optional dependencies are not.
+#
+# --db-dir: a folder with core.db and extra.db instead of the snapshot's (tests). Without it they are
+# downloaded into work/chromium-pin/ (no cache: a relock wants the snapshot as it is served).
+import argparse
+import os
+import re
+import sys
+import tarfile
+import urllib.request
+
+ROOT = "chromium"
+REPOS = ("core", "extra")
+HERE = os.path.dirname(os.path.realpath(__file__))
+OUT = os.path.join(HERE, "overlay/usr/share/retroforge/stores/chromium.pin")
+
+
+def bare(dep):
+    """`libfoo.so=1-64` or `glib2>=2.80` -> the name."""
+    return re.split("[<>=]", dep, maxsplit=1)[0]
+
+
+def read_lock(path):
+    """(snapshot url, {name: source class})."""
+    snapshot, rows = None, {}
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if line.startswith("# repo snapshot:"):
+                snapshot = line.split(":", 1)[1].strip()
+            elif line.strip() and not line.startswith("#"):
+                cols = line.split()
+                rows[cols[0]] = cols[3]
+    if not snapshot:
+        sys.exit(f"chromium-pin: no `# repo snapshot:` line in {path}")
+    return snapshot, rows
+
+
+def read_db(path, repo):
+    """{name: desc fields} of one repo database (a tar of <pkg>/desc files)."""
+    pkgs = {}
+    with tarfile.open(path, "r:*") as t:
+        for m in t:
+            if not (m.isfile() and m.name.endswith("/desc")):
+                continue
+            fields, key = {}, None
+            for line in t.extractfile(m).read().decode("utf-8").splitlines():
+                if line.startswith("%") and line.endswith("%"):
+                    key = line.strip("%")
+                    fields[key] = []
+                elif line and key:
+                    fields[key].append(line)
+            fields["REPO"] = [repo]
+            pkgs[fields["NAME"][0]] = fields
+    return pkgs
+
+
+def closure(pkgs, lock_rows):
+    """The packages ROOT needs that the image does not have, by name."""
+    provider = {}
+    for name, f in pkgs.items():
+        for p in f.get("PROVIDES", []) + [name]:
+            provider.setdefault(bare(p), name)
+    have = {n for n, cls in lock_rows.items() if cls in ("snapshot", "retroforge")}
+    have |= {bare(p) for n in list(have) if n in pkgs for p in pkgs[n].get("PROVIDES", [])}
+    need, todo = set(), [ROOT]
+    while todo:
+        dep = bare(todo.pop())
+        name = provider.get(dep)
+        if dep in have or name in have or name in need:
+            continue
+        if name is None:
+            sys.exit(f"chromium-pin: nothing in {'/'.join(REPOS)} provides {dep}")
+        need.add(name)
+        todo += pkgs[name].get("DEPENDS", [])
+    return sorted(need)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Write chromium.pin from the image's snapshot.")
+    ap.add_argument("--lock", default=os.path.join(HERE, "manifest.lock"))
+    ap.add_argument("--db-dir")
+    ap.add_argument("--out", default=OUT)
+    args = ap.parse_args()
+
+    snapshot, rows = read_lock(args.lock)
+    db_dir = args.db_dir or os.path.join(HERE, "..", "work", "chromium-pin")
+    pkgs = {}
+    for repo in REPOS:
+        path = os.path.join(db_dir, repo + ".db")
+        if not args.db_dir:
+            os.makedirs(db_dir, exist_ok=True)
+            urllib.request.urlretrieve(f"{snapshot}/{repo}/os/aarch64/{repo}.db", path)
+        pkgs.update(read_db(path, repo))
+    if ROOT not in pkgs:
+        sys.exit(f"chromium-pin: {ROOT} is not in the snapshot")
+    need = closure(pkgs, rows)
+
+    total = sum(int(pkgs[n]["CSIZE"][0]) for n in need)
+    lines = [
+        "# Chromium for the on-device store sign-in: GENERATED by rootfs/chromium-pin.py at `make relock`, do",
+        "# not hand-edit. Chromium and the packages of its closure the image lacks, from the image's snapshot;",
+        "# /usr/lib/retroforge/store downloads them at the first Sign in, checks each against its sha256 and",
+        "# unpacks them into the player's home. Fields: repo, file, sha256, size in bytes.",
+        f"# {len(need)} packages, {total / 1e6:.0f} MB to download.",
+        f"snapshot: {snapshot}",
+    ]
+    for n in need:
+        f = pkgs[n]
+        lines.append(f"package: {f['REPO'][0]} {f['FILENAME'][0]} {f['SHA256SUM'][0]} {f['CSIZE'][0]}")
+    tmp = args.out + ".part"
+    with open(tmp, "w", encoding="utf-8") as out:
+        out.write("\n".join(lines) + "\n")
+    os.replace(tmp, args.out)
+    print(f"chromium-pin: {len(need)} packages, {total / 1e6:.0f} MB -> {args.out}")
+
+
+if __name__ == "__main__":
+    main()

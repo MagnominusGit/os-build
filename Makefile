@@ -482,6 +482,7 @@ test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-steam-proton.sh
 	bash $(TESTS_DIR)/test-steam-remoteplay.sh
 	bash $(TESTS_DIR)/test-store.sh
+	bash $(TESTS_DIR)/test-store-browser.sh
 	bash $(TESTS_DIR)/test-emu.sh
 	bash $(TESTS_DIR)/test-scrape.sh
 	bash $(TESTS_DIR)/test-sysctl.sh
@@ -719,8 +720,9 @@ $(KERNEL): $(KERNEL_SRC_HASH) $(FW_LINUX) $(FW_QCOM) | $(BUILD_STAMP)
 relock: $(if $(OVERLAY_PINS),$(OVERLAY_STAMP)) ## Re-resolve from PKGS and regenerate rootfs/manifest.lock (host; release only)
 	RETROFORGE_DEV= RETROFORGE_RESOLVE=1 FORCE=1 $(ROOTFS_DIR)/customize-base.sh
 	$(ROOTFS_DIR)/genmanifest.sh
+	$(ROOTFS_DIR)/chromium-pin.py   # the store sign-in's Chromium follows the lock (packages the image lacks)
 	rm -f $(BASE_STAMP) work/.base-mode-*   # the tree left behind is a RESOLVE tree: claim no mode for it
-	@echo "review the diff, commit it, then rebuild: git diff $(ROOTFS_DIR)/manifest.lock"
+	@echo "review the diff, commit it, then rebuild: git diff $(ROOTFS_DIR)/manifest.lock $(ROOTFS_DIR)/overlay/usr/share/retroforge/stores/chromium.pin"
 
 # ==============================================================================
 # Installer image (host docker + qemu) — the standalone medium that installs to internal storage
