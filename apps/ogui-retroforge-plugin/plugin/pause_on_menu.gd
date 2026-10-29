@@ -15,6 +15,10 @@ extends RefCounted
 ## its own presses, so its label is set here ("Unpause" while frozen), or its first press looked
 ## like it did nothing. Unpause in the menu lets the game run behind it; closing the menu always
 ## goes back to a running game.
+##
+## The on-screen keyboard is the exception: it types into the game (KeyboardContext.TYPE.X11), so
+## the game runs while the keyboard is the popup on top, and a keyboard opened over a menu resumes
+## it. Frozen behind the keyboard, a game never saw the keys (Air X, 2026-10-28).
 
 const SECTION := "retroforge"
 const RUNNING_GAME_CARD := "res://core/ui/card_ui/navigation/running_game_card.gd"
@@ -23,6 +27,9 @@ const KEY := "pause_in_menus"
 var settings := load("res://core/global/settings_manager.tres") as SettingsManager
 var launch_manager := load("res://core/global/launch_manager.tres") as LaunchManager
 var in_game_state := load("res://assets/state/states/in_game.tres") as State
+var osk_state := load("res://assets/state/states/osk.tres") as State
+var global_state_machine := load("res://assets/state/state_machines/global_state_machine.tres") as StateMachine
+var popup_state_machine := load("res://assets/state/state_machines/popup_state_machine.tres") as StateMachine
 var toggle_scene := load("res://core/ui/components/toggle.tscn") as PackedScene
 var logger := Log.get_logger("RetroForgePause", Log.LEVEL.INFO)
 var tree: SceneTree
@@ -34,6 +41,7 @@ func setup(scene_tree: SceneTree) -> RefCounted:
 	tree = scene_tree
 	in_game_state.state_exited.connect(_on_in_game_exited)
 	in_game_state.state_entered.connect(_on_in_game_entered)
+	popup_state_machine.state_changed.connect(_on_popup_changed)
 	launch_manager.app_switched.connect(func(_from, _to): resume())
 	return self
 
@@ -69,6 +77,20 @@ func enabled() -> bool:
 
 
 func _on_in_game_exited(_to: State) -> void:
+	if popup_state_machine.current_state() == osk_state:
+		return
+	_pause()
+
+
+## The keyboard on top: the game runs. Another popup on top of the keyboard: frozen again.
+func _on_popup_changed(_from: State, to: State) -> void:
+	if to == osk_state:
+		resume()
+	elif to != null and _from == osk_state and global_state_machine.current_state() != in_game_state:
+		_pause()
+
+
+func _pause() -> void:
 	if not enabled() or _paused:
 		return
 	var app := launch_manager.get_current_app()
