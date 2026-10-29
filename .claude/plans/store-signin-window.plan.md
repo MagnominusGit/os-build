@@ -1,14 +1,14 @@
 # Plan: store sign-in on the device (Chromium window)
 
 **Complexity**: Medium-High. **Branch**: `steam-armv8-proton`. **Status**: prototype committed at
-f8f62179 (2026-10-29), HW-OK on Pocket FIT for GOG and Epic + Google; D1, D4, D5 agreed 2026-10-29; Phase 1 done offline 2026-10-29 (`store browser status|setup`), HW pending; Phase 2 done offline 2026-10-29 (`sign-in` opens Chromium, python/chromium_signin.py; LAN page and qr.py removed), HW pending; Phase 3 done offline 2026-10-29 (plugin 0.1.93), HW pending.
+f8f62179 (2026-10-29), HW-OK on Pocket FIT for GOG and Epic + Google; D1, D4, D5 agreed 2026-10-29; Phase 1 done offline 2026-10-29 (`store browser status|setup`), HW pending; Phase 2 done offline 2026-10-29 (`sign-in` opens Chromium, python/chromium_signin.py; LAN page and qr.py removed), HW pending; Phase 3 done 2026-10-29 (plugin 0.1.93). Phases 1-3 HW-OK on the Pocket FIT 2026-10-29 (dev card): Chromium set-up, GOG (loki666b) and Epic (loki_666b) signed in from Settings > Stores, Guide > Exit cancels; found and fixed there: CDN resets (16b8f478), Epic digital extras listed as games (10a290c4). Air X pending (its Wi-Fi).
 
 ## Summary
 
 Settings > Stores signs in with the phone today (stores.plan.md D6: a QR code for a one-time LAN page).
 This replaces it with the store's own sign-in page in a window on the device: Sign in opens it, the
 player signs in there (touch or on-screen keyboard), the window closes by itself and the row says whom
-it signed in. The prototype in `apps/retroforge-store-signin/` proved the pieces on the Pocket FIT
+it signed in. The prototype (`apps/retroforge-store-signin/`, removed after Phase 4; at f8f62179) proved the pieces on the Pocket FIT
 (2026-10-29): Chromium in app mode, the code read over the DevTools pipe, the existing `sign_in(code)`.
 
 ## What the prototype established
@@ -57,3 +57,6 @@ None (Q1-Q3 answered 2026-10-29: D4, D5, D1).
    Nothing compiled offline (no Godot here): the device's plugin load is the first check.
 4. **HW**: Pocket FIT, and Air X once its Wi-Fi is sorted. Then
    remove `hw-test/`, `main.js`, `package.json`.
+   Done on the Pocket FIT 2026-10-29: set-up (after the retry fix), GOG, Epic, Guide > Exit, no Chromium,
+   profile or running-game card left behind. The whole prototype folder is removed (its
+   chromium-signin.py lives on as python/chromium_signin.py). Air X still to do.

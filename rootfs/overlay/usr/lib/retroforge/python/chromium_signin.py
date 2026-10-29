@@ -1,7 +1,7 @@
 # chromium_signin — a store's own sign-in page in Chromium, and the code it ends with
 # (/usr/lib/retroforge/store `sign-in`; .claude/plans/store-signin-window.plan.md, D2). Moved from the
-# prototype (apps/retroforge-store-signin/chromium-signin.py), HW-OK for GOG and Epic + Google on the
-# Pocket FIT, 2026-10-29.
+# prototype (apps/retroforge-store-signin/chromium-signin.py at f8f62179); GOG and Epic HW-OK from
+# Settings > Stores on the Pocket FIT, 2026-10-29.
 #
 # WHY CHROMIUM. Google refuses "Sign in with Google" in embedded web views (Electron, WebKit) by policy;
 # Chromium is the browser itself, which Google treats as one (plan F1).
