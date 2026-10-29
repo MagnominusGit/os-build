@@ -715,9 +715,13 @@ def http_json(url, token=None, headers=None):
         raise Failed(f"{url} sent no JSON: {err}")
 
 
+STOPPED = []  # set once TERM or INT stopped a download: the player cancelled, so nothing tries again
+
+
 def follow(name, args, progress_re, progress, env=None):
-    """The tool's download (install), progress(percent, 100) as it goes: (exit status, last error
-    line). TERM or INT here stops it the way its own Ctrl-C does: SIGINT to its whole process group."""
+    """The tool's download (install), progress(percent, 100) as it goes: (exit status, its last error
+    line, else its last line: a crash logs no ERROR, only a traceback ending in the exception). TERM or
+    INT here stops it the way its own Ctrl-C does: SIGINT to its whole process group."""
     cmd = tool_command(name)
     if not cmd:
         raise NotReady(f"{name} is not set up")
@@ -725,6 +729,7 @@ def follow(name, args, progress_re, progress, env=None):
                             env=env, start_new_session=True)
 
     def stop(_sig, _frame):
+        STOPPED.append(1)
         try:
             os.killpg(proc.pid, signal.SIGINT)
         except OSError:
@@ -732,7 +737,7 @@ def follow(name, args, progress_re, progress, env=None):
         threading.Timer(20, lambda: proc.poll() is None and os.killpg(proc.pid, signal.SIGKILL)).start()
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(sig, stop)
-    error = ""
+    error = last = ""
     for line in proc.stderr:
         m = re.search(progress_re, line)
         if m:
@@ -740,7 +745,26 @@ def follow(name, args, progress_re, progress, env=None):
         elif "ERROR" in line or "CRITICAL" in line:
             error = line.strip()
             log(error)
-    return proc.wait(), error
+        elif line.strip():
+            last = line.strip()
+    return proc.wait(), error or last
+
+
+def install_tries(install_once):
+    """install_once(), again after a failure, FETCH_TRIES times in all: both tools resume a download
+    where it broke off. DOOM 64's legendary install died on a network stall with a traceback and
+    exit 1, and the same command a minute later installed it in 10 s (Pocket FIT, 2026-10-29). Not
+    after the player's cancel, nor when the store refuses the sign-in."""
+    for attempt in range(1, FETCH_TRIES + 1):
+        try:
+            return install_once()
+        except NotReady:
+            raise
+        except Failed as err:
+            if STOPPED or attempt == FETCH_TRIES:
+                raise
+            log(f"install failed ({err}); trying again ({attempt + 1}/{FETCH_TRIES})")
+            time.sleep(FETCH_PAUSE * attempt)
 
 
 def prepare_prefix(store, gid):
@@ -1343,7 +1367,7 @@ def main(argv):
             # so that its first launch does not wait for them, and has its fixes offline. A launch
             # never downloads the runtime: without it the install fails, and installing again
             # finds the game there and fetches only the rest.
-            store.install(rest[0], percent_printer(0, 90))
+            install_tries(lambda: store.install(rest[0], percent_printer(0, 90)))
             runtime_dir(percent_printer(90, 99))
             proton_dir()
             umu_database()

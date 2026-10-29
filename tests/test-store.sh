@@ -185,6 +185,17 @@ elif a[0] == "list":
 elif a[0] == "install":
     app = a[1]
     base = a[a.index("--base-path") + 1]
+    if os.environ.get("FAKE_INSTALL_SLOW"):  # a download under way, for the cancel
+        print("[DLManager] INFO: = Progress: 5.00% (1/2)", file=sys.stderr, flush=True)
+        import time
+        time.sleep(30)
+    crash = os.environ.get("FAKE_INSTALL_CRASH")  # a marker path, or "always": a traceback, exit 1, no ERROR line
+    if crash and (crash == "always" or not os.path.exists(crash)):
+        if crash != "always":
+            open(crash, "w").close()
+        print("Traceback (most recent call last):", file=sys.stderr)
+        print("requests.exceptions.ReadTimeout: HTTPSConnectionPool(host='egdownload.fastly-edge.com'): Read timed out.", file=sys.stderr)
+        sys.exit(1)
     for pct in ("10.00", "55.50", "100.00"):
         print(f"[DLManager] INFO: = Progress: {pct}% (1/2), Running for 00:00:01, ETA: 00:00:01", file=sys.stderr, flush=True)
     if app == "broken":
@@ -610,6 +621,22 @@ r = store("epic", "games")
 ok({g["id"]: g["installed"] for g in json.loads(r.stdout)}["Fortnite2"] is True, "installed in the library")
 r = store("epic", "install", "broken")
 ok(r.returncode == 1 and "Installation failed" in (r.stderr.splitlines() or [""])[-1], "legendary's logged failure fails the install (it exits 0)", r.stderr)
+reset_calls()
+r = store("epic", "install", "Crashy", env={"FAKE_INSTALL_CRASH": os.path.join(T, "crashed-once")})
+ok(r.returncode == 0 and "trying again (2/3)" in r.stderr and len([c for c in calls() if c[0] == "legendary" and "install" in c]) == 2,
+   "an install that crashes once (a network stall) is tried again, and installs", r.stderr)
+store("epic", "uninstall", "Crashy")
+r = store("epic", "install", "Crashy2", env={"FAKE_INSTALL_CRASH": "always"})
+ok(r.returncode == 1 and "Read timed out" in (r.stderr.splitlines() or [""])[-1],
+   "one that keeps crashing fails with the traceback's last line, not just an exit status", r.stderr[-300:])
+reset_calls()
+proc = subprocess.Popen([sys.executable, STORE, "epic", "install", "Slow"], env=dict(BASE_ENV, FAKE_INSTALL_SLOW="1"),
+                        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+proc.stdout.readline()  # its first N%: the download is under way
+proc.terminate()
+out, err = proc.communicate(timeout=60)
+ok(proc.returncode != 0 and "trying again" not in err and len([c for c in calls() if c[0] == "legendary" and "install" in c]) == 1,
+   "a cancelled install is not tried again", err[-300:])
 
 CASE = "install gog"
 r = store("gog", "install", "1")
