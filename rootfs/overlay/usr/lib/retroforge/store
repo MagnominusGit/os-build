@@ -163,11 +163,34 @@ def write_private(path, text):
 
 
 def fetch(url, dest, sha256=None, progress=None):
-    """url -> dest, refused unless its sha256 matches (when one is given). progress(done, total)."""
+    """url -> dest, refused unless its sha256 matches (when one is given). progress(done, total).
+    A transfer that fails is started again, FETCH_TRIES times in all: the snapshot's CDN (Akamai) now
+    and then stalls a TLS handshake and resets it, which ended a 190 MB Chromium set-up on its 19th
+    package while the same file came at once on the next try (Pocket FIT, 2026-10-29)."""
+    for attempt in range(1, FETCH_TRIES + 1):
+        try:
+            return _fetch_once(url, dest, sha256, progress)
+        except (Offline, _Transfer) as err:
+            if attempt == FETCH_TRIES:
+                raise
+            log(f"{err}; trying again ({attempt + 1}/{FETCH_TRIES})")
+            time.sleep(FETCH_PAUSE * attempt)
+
+
+FETCH_TRIES = 3
+FETCH_PAUSE = 2  # seconds before the second try, twice that before the third
+FETCH_TIMEOUT = 30  # seconds one connect or read may wait
+
+
+class _Transfer(Failed):
+    """A download that broke off (a connection reset mid-file)."""
+
+
+def _fetch_once(url, dest, sha256, progress):
     h = hashlib.sha256()
     req = urllib.request.Request(url_of(url), headers={"User-Agent": AGENT})
     try:
-        with urllib.request.urlopen(req, timeout=60) as r, open(dest, "wb") as out:
+        with urllib.request.urlopen(req, timeout=FETCH_TIMEOUT) as r, open(dest, "wb") as out:
             total, done = int(r.headers.get("Content-Length") or 0), 0
             while chunk := r.read(1 << 20):
                 h.update(chunk)
@@ -175,10 +198,12 @@ def fetch(url, dest, sha256=None, progress=None):
                 done += len(chunk)
                 if progress:
                     progress(done, total)
+    except urllib.error.HTTPError as err:
+        raise Failed(f"could not download {url}: HTTP {err.code}")
     except urllib.error.URLError as err:
         raise Offline(f"could not download {url}: {err.reason}")
     except OSError as err:
-        raise Failed(f"could not download {url}: {err}")
+        raise _Transfer(f"could not download {url}: {err}")
     if sha256 and h.hexdigest() != sha256:
         raise Failed(f"sha256 mismatch for {url}: got {h.hexdigest()}, want {sha256}")
     return h.hexdigest()

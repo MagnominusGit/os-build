@@ -8,7 +8,7 @@
 # Fake repo databases and .pkg.tar.zst packages, served for every https:// request (RETROFORGE_STORE_API).
 # Rules: the pin is Chromium's dependency closure minus the lock's snapshot and retroforge rows (and
 # what they provide), stripped rows not counted as present, an unresolvable dependency fails; the
-# committed pin's snapshot is the lock's. Set-up refuses a package whose sha256 is not the pin's, one
+# committed pin's snapshot is the lock's. Set-up tries a reset connection again, refuses a package whose sha256 is not the pin's, one
 # that would write outside its folder, and too little free space, each leaving nothing set up; it
 # unpacks only Chromium's folder, top-level libraries and compiled schemas, into the player's home
 # (0700); a second set-up downloads nothing; a new pin gets its own folder, the old one goes at the set-up
@@ -26,7 +26,7 @@ T="$(mktemp -d)" && [ -d "$T" ] || { echo "mktemp -d failed" >&2; exit 1; }
 trap 'rm -rf "$T"' EXIT
 
 python3 - "$STORE" "$GEN" "$T" "$ROOT" <<'PY'
-import hashlib, http.server, io, json, os, stat, subprocess, sys, tarfile, threading
+import hashlib, http.server, io, json, os, socket, stat, struct, subprocess, sys, tarfile, threading
 
 STORE, GEN, T, ROOT = sys.argv[1:5]
 PASS = FAIL = 0
@@ -138,6 +138,7 @@ PKGS = {
 }
 ROUTES = {f"/snap.example/mash/extra/os/aarch64/{n}-1-1-aarch64.pkg.tar.zst": b for n, b in PKGS.items()}
 SEEN = []
+RESETS = {}  # path -> connections still to reset (a CDN that drops a handshake, Pocket FIT 2026-10-29)
 
 
 class Api(http.server.BaseHTTPRequestHandler):
@@ -146,6 +147,12 @@ class Api(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         SEEN.append(self.path)
+        if RESETS.get(self.path, 0) > 0:
+            RESETS[self.path] -= 1
+            self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+            self.connection.close()  # an RST, no answer
+            self.close_connection = True
+            return
         body = ROUTES.get(self.path)
         self.send_response(200 if body is not None else 404)
         if body is not None:
@@ -203,8 +210,12 @@ ok(r.returncode == 1 and "not enough free space" in r.stderr and nothing_set_up(
    "too little free space: refused first, a killed set-up's leftovers gone before the check", r.stderr)
 
 SEEN.clear()
+RESETS["/snap.example/mash/extra/os/aarch64/gtk3-1-1-aarch64.pkg.tar.zst"] = 1
 r = store("browser", "setup", pin_dir=good)
 cur = os.path.join(CHROMIUM, "current")
+ok(r.returncode == 0 and "trying again (2/3)" in r.stderr and SEEN.count(next(iter(RESETS))) == 2,
+   "a connection the server resets is tried again, and the set-up goes on", r.stderr)
+SEEN.remove(next(iter(RESETS)))  # the reset try: the count below is of downloads
 st = json.loads(store("browser", "status", pin_dir=good).stdout)
 ok(r.returncode == 0 and r.stdout.strip().splitlines()[-1] == "100%" and len(SEEN) == 2, "set up: two downloads, 100%", r.stdout + r.stderr)
 ok(st["ready"] and st["binary"] == os.path.join(os.path.realpath(cur), "chromium", "chromium")
