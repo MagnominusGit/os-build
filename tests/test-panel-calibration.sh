@@ -289,9 +289,11 @@ def fake_rate(seconds=rp.MEASURE_S):  # the simulated Odin 3: 76 scans 118.4 Hz,
     return 118.4 + (76 - rp.read_knob(rp.panel_knobs()[1][120])) * 0.05
 rp.measure_rate = fake_rate
 
+# Before the daemon thread starts: paneld.main imports gi too, and two threads loading GLib's
+# overrides at once can leave one with a half-initialised module (CI: "GLib has no attribute Idle").
+from gi.repository import Gio, GLib
 daemon = threading.Thread(target=paneld.main)
 daemon.start()
-from gi.repository import Gio, GLib
 bus = Gio.bus_get_sync(Gio.BusType.SESSION)
 def call(method, args=None):
     try:
