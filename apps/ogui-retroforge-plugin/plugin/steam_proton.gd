@@ -1,5 +1,5 @@
 extends RefCounted
-## Settings > Steam > "Proton": the default Proton on ARMv8.0 CPUs (no LSE atomics, e.g. the SM6115), our
+## Apps > Steam Client > "Proton": the default Proton on ARMv8.0 CPUs (no LSE atomics, e.g. the SM6115), our
 ## ARMv8.0 build's stable or experimental channel, kept by /usr/bin/retroforge-steam-proton. Shown only on
 ## those CPUs: elsewhere the command answers "steam" and Steam's own default stays.
 
@@ -18,7 +18,7 @@ func setup(scene_tree: SceneTree) -> RefCounted:
 	return self
 
 
-## Add the row at the top of box. False on a CPU with LSE atomics, or when the command is missing.
+## Add the row at the end of box. False on a CPU with LSE atomics, or when the command is missing.
 func attach(box: Node) -> bool:
 	if not box or not FileAccess.file_exists(TOOL):
 		return false
@@ -30,7 +30,6 @@ func attach(box: Node) -> bool:
 	_dropdown.title = "Proton"
 	_dropdown.description = "Built for this CPU. Steam uses it for every game not set to another tool. Experimental follows Valve's Proton Experimental."
 	box.add_child(_dropdown)
-	box.move_child(_dropdown, 1)  # after the page's FocusGroup
 	_dropdown.add_item("ARMv8.0 stable")
 	_dropdown.add_item("ARMv8.0 experimental")
 	_dropdown.select(CHANNELS.find(now))  # select() does not emit item_selected

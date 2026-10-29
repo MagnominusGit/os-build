@@ -1,6 +1,6 @@
 extends RefCounted
 
-## What the Emulators page offers for one emulator (plan emulator-latest, Phase 2), from its
+## What the Apps page offers for one emulator (plan emulator-latest, Phase 2), from its
 ## `retroforge-emu list` entry and its `retroforge-emu check` answer ({} until one arrives, or
 ## offline). No OGUI types, so tests/test-plugin.sh runs it in a stock headless Godot.
 ##

@@ -1,5 +1,5 @@
 extends RefCounted
-## Settings > Steam > "Steam: keep running in the background": the player's setting, kept by
+## Apps > Steam Client > "Steam: keep running in the background": the player's setting, kept by
 ## /usr/bin/retroforge-steam-keep (KEEP_RUNNING=on|off in ~/.config/retroforge/steam.conf), which
 ## /usr/bin/steam reads at every launch. On (the default), the first launch leaves Steam running as a
 ## user unit, signed in with its UI closed (~240 MB), and games use it: achievements, playtime and cloud
@@ -22,9 +22,9 @@ func setup(scene_tree: SceneTree) -> RefCounted:
 	return self
 
 
-## Add the toggle to target (Settings > Steam), else under Settings > General after the DXVK-Sarek
+## Add the toggle to target (Apps > Steam Client), else under Settings > General after the DXVK-Sarek
 ## one. False when the layout differs or the command is missing.
-func attach(target: Node = null) -> bool:  # target: the Settings > Steam page (steam_settings.gd)
+func attach(target: Node = null) -> bool:  # target: Apps > Steam Client's rows (emulators_page.gd)
 	var menu: Node = tree.root.find_child("GeneralSettings", true, false)
 	var box: Node = target if target else (menu.get_node_or_null("MarginContainer/VBoxContainer/VBoxContainer") if menu else null)
 	if not box or not FileAccess.file_exists(TOOL):

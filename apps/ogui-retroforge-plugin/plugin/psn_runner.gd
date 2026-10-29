@@ -114,5 +114,5 @@ static func failure_text(code: int, error: String) -> String:
 	if "already running" in error:
 		return "A PSN install or a PlayStation 3 game is already running."
 	if "not installed" in error:
-		return "RPCS3 is not installed. Download it from Emulators in the main menu first."
+		return "RPCS3 is not installed. Download it from Apps in the main menu first."
 	return "The PSN install could not run (%d)." % code

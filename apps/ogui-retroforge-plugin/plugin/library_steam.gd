@@ -9,7 +9,7 @@ extends Library
 ##
 ## A game that is not installed gets OGUI's Install, and an installed one Uninstall: both are handed
 ## to Steam (steam://install/<appid>, steam://uninstall/<appid>), whose own dialog opens in Big
-## Picture, started as Main menu > Emulators > Steam Client starts it. The game's app manifest then
+## Picture, started as Main menu > Apps > Steam Client starts it. The game's app manifest then
 ## says how the download goes (install_progressed) and when it is done. Steam downloads while it
 ## runs: leaving Steam before the end ends the install here as failed, and Steam carries on with it
 ## while it still runs, or at its next start.
@@ -133,7 +133,7 @@ func _through_steam(item: LibraryLaunchItem, verb: String) -> bool:
 
 
 ## True while OGUI runs a launch through /usr/bin/steam: this one, Steam opened from Main menu >
-## Emulators > Steam Client (whose client this one's hands the install to), or a Steam game. Not the
+## Apps > Steam Client (whose client this one's hands the install to), or a Steam game. Not the
 ## client process: kept running between games (steam_keep.gd), it outlives every launch.
 func _steam_in_use() -> bool:
 	for app in launch_manager.get_running():

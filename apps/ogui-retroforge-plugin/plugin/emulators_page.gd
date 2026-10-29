@@ -1,6 +1,6 @@
 extends ScrollContainer
 
-## The right side of the Emulators screen (emulators_screen.gd): ONE catalog emulator at a time,
+## The right side of the Apps screen (emulators_screen.gd): ONE catalog emulator at a time,
 ## the one focused in the screen's list (show_emulator).
 ##
 ## Its block: who made it (author, homepage, licence and its link:
@@ -15,9 +15,9 @@ extends ScrollContainer
 ## else goes through /usr/bin/retroforge-emu (list / check / install / rollback / remove); the page
 ## never downloads or verifies anything itself.
 ##
-## Steam Client (retroforge-emu's "kind": "steam", installed by steam-install) shows only its rows
-## from emu_state.gd: no Delete and no settings. Its progress comes from the file steam-install writes
-## (the entry's "progress"), and Open starts Steam's own UI.
+## Steam Client (retroforge-emu's "kind": "steam", installed by steam-install) shows its rows from
+## emu_state.gd, then the Steam rows (steam_rows): no Delete and no emulator settings. Its progress
+## comes from the file steam-install writes (the entry's "progress"), and Open starts Steam's own UI.
 ##
 ## Built in code on the pattern of OGUI's own settings pages (library_settings_menu.tscn): a
 ## StateWatcher on this page's State hands focus to the page's FocusGroup, and Back pops the
@@ -56,6 +56,9 @@ var state: State
 var catalog := {}
 ## The emulator shown ("" = none yet).
 var emulator_id := ""
+## Adds the Steam rows (plugin.gd: Proton, DXVK-Sarek, keep running, start without Steam) to the box
+## it gets, under Steam Client's own rows; called at every build of Steam Client's page.
+var steam_rows := Callable()
 var logger := Log.get_logger("RetroForgeEmulators", Log.LEVEL.INFO)
 var _rows: VBoxContainer
 var _focus_group: FocusGroup
@@ -254,6 +257,8 @@ func _add_emulator(id: String, emu: Dictionary) -> void:
 		last = _add_action_row(id, name_text, emu, row)
 	if emu.get("kind") == "steam":
 		last.separator_visible = true
+		if steam_rows.is_valid():
+			steam_rows.call(_rows)
 		return
 	if installed != null:
 		last = row_scene.instantiate()

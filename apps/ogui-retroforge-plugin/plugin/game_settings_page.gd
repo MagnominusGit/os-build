@@ -3,7 +3,7 @@ extends ScrollContainer
 ## Game settings > RetroForge: per-ROM options, in the screen the gear on OGUI's launch menu opens.
 ## For Steam games: their Proton, DXVK-Sarek, FEX TSO, launch option and resolution, which
 ## retroforge-steam-direct keeps and uses when it starts the game without the client.
-## "Run on fast cores": the emulator's default (Main menu > Emulators), On or Off for this game
+## "Run on fast cores": the emulator's default (Main menu > Apps), On or Off for this game
 ## (CPUS=big / all in the game's conf, which retroforge-launch reads; launch_args.gd). Then one
 ## dropdown per option of the game's emulator (options.json, emu_options.gd): "Emulator default
 ## (<its choice>)" or a value for this game only, rebuilt at each visit (another game may run in
@@ -68,7 +68,7 @@ var _resolution: Control
 var _resolution_keys: Array = []  # "default", then WxH: the sizes of Settings > Display > Game resolution
 var _display := DisplaySettings.new()
 var _armv8 := -1  # retroforge-steam-proton manages Proton here (an ARMv8.0 CPU): 1, 0, or -1 not asked yet
-const DIRECT_OFF := " Used only while Settings > Steam > \"Steam: start games without Steam\" is on."
+const DIRECT_OFF := " Used only while Apps > Steam Client > \"Steam: start games without Steam\" is on."
 
 
 ## Add the page and its button to OGUI's game settings screen. False when its layout is not
@@ -130,7 +130,7 @@ func _build_page() -> void:
 
 	_fast_cores = dropdown_scene.instantiate()
 	_fast_cores.title = "Run on fast cores"
-	_fast_cores.description = "Keep the emulator on the fast CPU cores. Helps demanding systems (PS2, PS3, Wii U); PS1 does not need it. The default is set per emulator in Emulators, in the main menu."
+	_fast_cores.description = "Keep the emulator on the fast CPU cores. Helps demanding systems (PS2, PS3, Wii U); PS1 does not need it. The default is set per emulator in Apps, in the main menu."
 	_fast_cores.item_selected.connect(_on_fast_cores_selected)
 	_focus_group = focus_group_scene.instantiate() as FocusGroup
 	_focus_group.focus_stack = focus_stack
@@ -147,7 +147,7 @@ func _build_page() -> void:
 	_scrape.progressed.connect(func(pct: int) -> void: _art.description = "Scraping... %d%%" % pct)
 	_scrape.finished.connect(_on_art_scraped)
 
-	_proton = _steam_dropdown("Proton", "Built for this CPU. Default: the one Steam runs it with (Settings > Steam).", "proton")
+	_proton = _steam_dropdown("Proton", "Built for this CPU. Default: the one Steam runs it with (Apps > Steam Client).", "proton")
 	_sarek = _steam_dropdown("DXVK-Sarek", "Direct3D 8 to 11 for low-end GPUs. Default: Proton's choice.", "sarek")
 	_tso = _steam_dropdown("FEX TSO", TSO_ABOUT, "tso")
 	_launch = _steam_dropdown("Launch option", "Which of the game's programs starts, as in Steam's launch dialog. Default: the one Steam last started.", "launch")
@@ -242,11 +242,11 @@ func _fill_steam_rows() -> void:
 	var entries: Array = data.get("launch", [])
 	# select() does not emit item_selected, so loading never saves.
 	_proton.clear()
-	for text in ["Default (Settings > Steam)", "ARMv8.0 stable", "ARMv8.0 experimental"]:
+	for text in ["Default (Apps > Steam Client)", "ARMv8.0 stable", "ARMv8.0 experimental"]:
 		_proton.add_item(text)
 	_proton.select(maxi(PROTON_CHOICES.find(settings.get("proton", "default")), 0))
 	_sarek.clear()
-	for text in ["Default (Settings > Steam)", "On", "Off"]:
+	for text in ["Default (Apps > Steam Client)", "On", "Off"]:
 		_sarek.add_item(text)
 	_sarek.select(maxi(SAREK_CHOICES.find(settings.get("sarek", "default")), 0))
 	_tso.clear()

@@ -1,6 +1,6 @@
 extends Control
 
-## The Emulators screen, opened from the main menu's Emulators entry (plugin.gd): a full-screen
+## The Apps screen, opened from the main menu's Apps entry (plugin.gd): a full-screen
 ## menu laid out like OGUI's Settings (settings_menu.tscn) -- every catalog emulator on the left,
 ## the focused one's page on the right (emulators_page.gd) under its name.
 ##
@@ -21,7 +21,7 @@ var fade_effect_scene := load("res://core/systems/effects/fade_effect.tscn") as 
 var focus_group_setter_script := load("res://core/systems/input/focus_group_setter.gd") as GDScript
 var state_machine_watcher_script := load("res://core/systems/state/state_machine_watcher.gd") as GDScript
 
-## The screen's state on the menu state machine; the main menu's Emulators entry pushes it.
+## The screen's state on the menu state machine; the main menu's Apps entry pushes it.
 var state: State
 var page: Control  # emulators_page.gd
 var logger := Log.get_logger("RetroForgeEmulators", Log.LEVEL.INFO)
@@ -124,7 +124,7 @@ func _build_layout() -> void:
 	title_panel.add_child(title_margin)
 	_title = section_scene.instantiate()
 	_title.uppercase = true
-	_title.text = "Emulators"
+	_title.text = "Apps"
 	title_margin.add_child(_title)
 	var content_panel := _panel()
 	content_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -183,7 +183,7 @@ func _fill() -> void:
 	_list_focus.recalculate_focus()
 	page.emulator_id = ""  # rebuild the page from the catalog just read
 	_show(focus.get_meta("emulator") if focus else "")
-	logger.info("Emulators screen: %d emulator(s)" % ids.size())
+	logger.info("Apps screen: %d app(s)" % ids.size())
 
 
 func _name(id: String) -> String:
@@ -207,6 +207,6 @@ func _entry(id: String) -> Control:
 
 
 func _show(id: String) -> void:
-	_title.text = _name(id) if id != "" else "Emulators"
+	_title.text = _name(id) if id != "" else "Apps"
 	if id != page.emulator_id:
 		page.show_emulator(id)

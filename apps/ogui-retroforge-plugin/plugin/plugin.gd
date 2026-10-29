@@ -58,8 +58,7 @@ var _os: Resource  # retroforge_os.gd, installed as OGUI's platform.os
 var _sarek: RefCounted  # steam_sarek.gd
 var _keep: RefCounted  # steam_keep.gd
 var _direct: RefCounted  # steam_direct.gd
-var _steam_page: RefCounted  # steam_settings.gd: Settings > Steam, where the Steam rows go
-var _stores_page: RefCounted  # steam_settings.gd again: Settings > Stores
+var _stores_page: RefCounted  # steam_settings.gd: Settings > Stores
 var _store_rows: RefCounted  # store_settings.gd: GOG and Epic sign-in
 var _proton: RefCounted  # steam_proton.gd
 var _watch: RefCounted  # rom_watch.gd
@@ -125,24 +124,17 @@ func _ready() -> void:
 	_art_fetch.other = _scraper.runner
 	_art_fetch.allowed = _scraper.can_fetch
 	_install_os_platform()
-	_steam_page = load(plugin_base.path_join("steam_settings.gd")).new().setup(get_tree())
-	var steam_box: Node = _steam_page.box if _steam_page.attach() else null
-	if not steam_box:
-		logger.warn("OGUI settings menu layout not found; the Steam rows stay in Settings > General")
 	_proton = load(plugin_base.path_join("steam_proton.gd")).new().setup(get_tree())
-	_proton.attach(steam_box)  # only on ARMv8.0 CPUs
 	_sarek = load(plugin_base.path_join("steam_sarek.gd")).new().setup(get_tree())
-	if not _sarek.attach(steam_box):
-		logger.warn("OGUI general settings layout or retroforge-steam-sarek not found; no DXVK-Sarek toggle")
 	_keep = load(plugin_base.path_join("steam_keep.gd")).new().setup(get_tree())
-	if not _keep.attach(steam_box):
-		logger.warn("OGUI general settings layout or retroforge-steam-keep not found; no keep-Steam-running toggle")
 	_direct = load(plugin_base.path_join("steam_direct.gd")).new().setup(get_tree())
-	if not _direct.attach(steam_box):
-		logger.warn("OGUI general settings layout or retroforge-steam-direct not found; no start-without-Steam toggle")
+	if is_instance_valid(_emulators_screen):
+		_emulators_screen.page.steam_rows = _add_steam_rows
+	else:
+		logger.warn("no Apps screen; no Steam rows")
 	_stores_page = load(plugin_base.path_join("steam_settings.gd")).new().setup(get_tree(), "Stores")
 	_store_rows = load(plugin_base.path_join("store_settings.gd")).new().setup(get_tree())
-	if _stores_page.attach("RetroForgeSteamButton") and _store_rows.attach(_stores_page.box):
+	if _stores_page.attach() and _store_rows.attach(_stores_page.box):
 		_store_rows.changed.connect(func(store: String) -> void: library_manager.load_library("retroforge-" + store))
 	else:
 		_stores_page.detach()
@@ -196,8 +188,6 @@ func unload() -> void:
 		_stores_page.detach()
 	if _proton:
 		_proton.detach()
-	if _steam_page:
-		_steam_page.detach()
 	if is_instance_valid(_hardware_card):
 		var qb_card: Node = _hardware_card.find_parent("QuickBarCard*")
 		(qb_card if qb_card else _hardware_card).queue_free()
@@ -229,7 +219,7 @@ func _add_game_settings_page() -> void:
 	logger.info("Game settings > RetroForge added")
 
 
-## Main menu > Emulators: an entry after Library, wired like OGUI's own (main_menu.tscn): it pushes
+## Main menu > Apps: an entry after Library, wired like OGUI's own (main_menu.tscn): it pushes
 ## the screen's state on the menu state machine and the menu state on the global one, and clears
 ## the popup machine, which closes the main menu. The screen (emulators_screen.gd) sits beside
 ## Settings in card_ui.tscn's AboveContextBarMargin.
@@ -239,7 +229,7 @@ func _add_emulators_screen() -> void:
 	var settings: Node = get_tree().get_first_node_in_group("settings_menu")
 	var holder: Node = settings.get_parent() if settings else null
 	if not (buttons and holder):
-		logger.warn("OGUI main menu layout not found; no Emulators screen")
+		logger.warn("OGUI main menu layout not found; no Apps screen")
 		return
 
 	var screen_state := State.new()
@@ -250,7 +240,7 @@ func _add_emulators_screen() -> void:
 
 	_emulators_button = load("res://core/ui/components/card_button.tscn").instantiate()
 	_emulators_button.name = "RetroForgeEmulatorsButton"
-	_emulators_button.text = "Emulators"
+	_emulators_button.text = "Apps"
 	_emulators_button.click_focuses = false
 	for step in [
 		[menu_state_machine, screen_state, 0],  # PUSH
@@ -272,11 +262,19 @@ func _add_emulators_screen() -> void:
 	var focus_group := buttons.find_child("FocusGroup", false, false)
 	if focus_group:
 		focus_group.recalculate_focus()
-	logger.info("Main menu > Emulators added")
+	logger.info("Main menu > Apps added")
 
 
-## Main menu > Steam, under Emulators while Steam Client is installed (looked at each time the main
-## menu opens): Steam's own UI, as Emulators > Steam Client's Open starts it. The launch's in-game
+## Apps > Steam Client's page ends with these, under its own rows (emulators_page.gd builds the page
+## again at each visit, so this runs each time): Proton (ARMv8.0 CPUs only), DXVK-Sarek, keep Steam
+## running, start without Steam. A row whose command is missing is left out.
+func _add_steam_rows(box: Node) -> void:
+	for row in [_proton, _sarek, _keep, _direct]:
+		row.attach(box)
+
+
+## Main menu > Steam, under Apps while Steam Client is installed (looked at each time the main
+## menu opens): Steam's own UI, as Apps > Steam Client's Open starts it. The launch's in-game
 ## state closes the main menu; the popup machine is cleared as OGUI's own buttons do.
 func _add_steam_button(buttons: Node) -> void:
 	_steam_button = load("res://core/ui/components/card_button.tscn").instantiate()

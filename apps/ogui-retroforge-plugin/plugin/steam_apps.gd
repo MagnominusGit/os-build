@@ -1,6 +1,6 @@
 extends RefCounted
 
-## The player's Steam games, from the Steam client they signed into (Main menu > Emulators > Steam
+## The player's Steam games, from the Steam client they signed into (Main menu > Apps > Steam
 ## Client): no sign-in of its own, as the OGUI Steam plugin's steamcmd needs. No OGUI types, so
 ## tests/test-plugin.sh runs it in a stock headless Godot.
 ##

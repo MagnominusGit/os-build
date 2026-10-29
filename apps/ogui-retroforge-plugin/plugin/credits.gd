@@ -1,6 +1,6 @@
 extends RefCounted
 
-## Who made an emulator, as the Emulators page shows it under its name. No OGUI types, so
+## Who made an emulator, as the Apps page shows it under its name. No OGUI types, so
 ## tests/test-plugin.sh runs it in a stock headless Godot.
 
 

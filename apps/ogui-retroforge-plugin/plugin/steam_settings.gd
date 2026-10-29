@@ -1,10 +1,9 @@
 extends RefCounted
-## Settings > Steam: an entry after General in OGUI's Settings menu, and its page. Built as
-## settings_menu.tscn builds General: the button replaces the settings state and, on focus, sets the
-## TabContainer's tab and the section title; the page focuses its FocusGroup when the state is entered,
-## and Back pops it. The Steam rows (steam_proton.gd, steam_sarek.gd, steam_keep.gd, steam_direct.gd)
-## attach to `box`. Settings > Stores (store_settings.gd) is a second one, set up with its own title
-## and placed after Steam's entry.
+## Settings > Stores (store_settings.gd's rows): an entry after General in OGUI's Settings menu, and
+## its page. Built as settings_menu.tscn builds General: the button replaces the settings state and, on
+## focus, sets the TabContainer's tab and the section title; the page focuses its FocusGroup when the
+## state is entered, and Back pops it. The rows attach to `box`. (Settings > Steam was one too; its rows
+## are on Apps > Steam Client's page now.)
 
 var title := "Steam"
 

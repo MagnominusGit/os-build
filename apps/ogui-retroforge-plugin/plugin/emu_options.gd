@@ -10,7 +10,7 @@ extends RefCounted
 ## description and choices (value + label) -- and holds them to the launcher's rules on those, so a
 ## page never saves a line the launcher would not read as that option's value.
 ## A choice is a `<id>=<value>` line in a player conf (launch_args.gd), the same files as CPUS:
-##   - Main menu > Emulators: the emulator's conf. No line = "Emulator's setting": RetroForge leaves
+##   - Main menu > Apps: the emulator's conf. No line = "Emulator's setting": RetroForge leaves
 ##     the emulator's own setting alone (what the player set in the emulator's UI applies).
 ##   - Game settings > RetroForge: the game's conf. No line = "Emulator default": the choice above.
 

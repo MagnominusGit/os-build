@@ -1016,7 +1016,7 @@ func run() -> void:
 		PsnRunner.any_stub([{"status": "ok", "stub": "-"}, {"status": "failed", "stub": "x.psn"}])], [true, false])
 	check("failure: concurrent", PsnRunner.failure_text(3, "retroforge-launch: a PSN install or a PlayStation 3 game is already running"),
 		"A PSN install or a PlayStation 3 game is already running.")
-	check("failure: rpcs3 missing", "Emulators" in PsnRunner.failure_text(3, "retroforge-launch: rpcs3 is not installed (x)"), true)
+	check("failure: rpcs3 missing", "Apps" in PsnRunner.failure_text(3, "retroforge-launch: rpcs3 is not installed (x)"), true)
 
 	var a := await job("ok")
 	check("ok: exit 0, both result lines, stderr noise is not the error",
