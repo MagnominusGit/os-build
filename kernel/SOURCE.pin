@@ -65,7 +65,6 @@ git_commit: 79a907609d53d5cd645b42c11550d295d43abf99
 # Re-run every gate, every time — and note that neither of those two findings came from an
 # offline gate. Both came from hardware.
 #
-=======
 # ============ 7.3.1 — PINNED 2026-10-30, NOT BOOTED ============
 #
 # A series bump (7.2.11 -> 7.3.1), so the stack was REBASED, not re-applied: the 7.2.11 tree plus
