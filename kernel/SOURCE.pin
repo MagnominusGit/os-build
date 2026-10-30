@@ -90,9 +90,19 @@ git_commit: 79a907609d53d5cd645b42c11550d295d43abf99
 #        conf.d/ayaneo-ps2 (the card driver name); the identical KPF profile is gone, and the FIT's
 #        card id becomes SM8650APS2. The upstream topology has no DISPLAY_PORT_RX_0 MultiMedia1
 #        (touching it killed the whole HiFi verb upstream); DP plays on MultiMedia6 / PCM 5.
-#   0820 mainline's sc8280xp_snd_hw_params() (MI2S fmt + set_sysclk) now runs after our card-level
-#        i2s_clk startup; set_sysclk is a no-op without dai-node clocks. 0826's init-time set_fmt
-#        is dropped, hw_params covers SENARY.
+#   0820/0825 DELETED, a new 0820 (port of Nova-Deck b404b61a's MI2S half). Their card-level
+#        "i2s_clk" (enabled in startup, PRIMARY, then every MI2S BE, refcounted) is replaced by
+#        mainline's per-DAI MI2S clocks (088c4404b3d7, cc8495c1d45a): a `bclk` on a dai@<port> node
+#        under &q6apmbedai, rate set and enabled by sc8280xp_snd_hw_params() when the card data has
+#        mi2s_bclk_enable. sm8450/sm8550 data already do; the new 0820 sets it for sm8750. Moved:
+#        Odin 2 family + RP6/Nova dai@10 (PRIMARY_MI2S_RX, SEN IBIT), Odin 3 + FIT Elite dai@12
+#        (SECONDARY_MI2S_RX, SEC IBIT), RG55G1 + RP Classic dai@93 (SENARY_MI2S_RX, QUI IBIT; the
+#        sm4450 card falls back to sm8450 data). The BE is fixed at 48 kHz/2ch/S16, so bclk is the
+#        1536000 the old assigned-clock-rates pinned.
+#   0826 now a delta on mainline's hw_params only: the codec format on every codec DAI of an MI2S
+#        link (both SM4450 amps; mainline sets only the first), the RP Classic mono fixup, and a
+#        bclk counted over max(channels, 2) slots so that mono stream stays at 1536000 (mainline
+#        would halve it). Thor Lite (SM8250) keeps its card clock: sm8250.c, not this driver.
 #   0855 the runtime-PM half landed; only the system-sleep handlers are left.
 #   0994 extended: 7.3 reads the regulator state back at probe at REG_ENABLE; PBS uses offset 0x0.
 #   1090 extended: IRQ re-enabled on the new pm_runtime_force_* error returns.
@@ -131,8 +141,9 @@ git_commit: 79a907609d53d5cd645b42c11550d295d43abf99
 # (302 pins, 0 failed) and tests/test-panel-calibration.sh green against it.
 #
 # WHAT ONLY HARDWARE CAN SETTLE — a whole series moved underneath, so every board, and:
-#   - audio everywhere: MI2S now gets explicit BP_FP + codec formats from mainline hw_params on
-#     every MI2S BE (Odin 2/Thor/Odin 3/Elite/RG55G1/RP Classic amps), S2 + FIT speakers,
+#   - audio everywhere: MI2S formats AND the bit clock now come from mainline hw_params + the
+#     dai@ bclk nodes on every MI2S BE (Odin 2/Thor/Odin 3/Elite/RG55G1/RP Classic amps; a
+#     "pll lock fail" from the aw88xxx amps = no BCLK; upstream HW-checked Odin 3), S2 + FIT speakers,
 #     headphones and DP (mainline card, linux-firmware topology; upstream HW-checked speakers
 #     only), the macros' runtime PM now upstream's (0855), headset jack on MI2S boards (0861).
 #   - display: the ICNA35XX panels (Pocket DS/EVO, Odin 2 Portal, Thor, Odin 3, Pocket Max) now

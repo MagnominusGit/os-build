@@ -223,12 +223,6 @@
 		pinctrl-0 = <&lpi_i2s3_active>;
 		pinctrl-names = "default";
 
-		clocks = <&q6prmcc LPASS_CLK_ID_SEN_MI2S_IBIT LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
-		clock-names = "i2s_clk";
-
-		assigned-clocks = <&q6prmcc LPASS_CLK_ID_SEN_MI2S_IBIT LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
-		assigned-clock-rates = <1536000>;
-
 		model = "AYN-Odin2";
 		audio-routing =
 				"IN1_HPHL", "HPHL_OUT",
@@ -1326,6 +1320,21 @@
 	linux,code = <KEY_VOLUMEDOWN>;
 
 	status = "okay";
+};
+
+/*
+ * The speaker amps are BCLK-slaved on the "Primary MI2S Playback" link, which lands on the
+ * SENARY MI2S pads (lpi_i2s3). sc8280xp_snd_hw_params() sets and enables this clock.
+ */
+&q6apmbedai {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	dai@10 {
+		reg = <PRIMARY_MI2S_RX>;
+		clocks = <&q6prmcc LPASS_CLK_ID_SEN_MI2S_IBIT LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+		clock-names = "bclk";
+	};
 };
 
 &qupv3_id_0 {

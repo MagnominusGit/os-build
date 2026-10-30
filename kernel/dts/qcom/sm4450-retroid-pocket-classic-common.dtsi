@@ -648,6 +648,20 @@
 					q6apmbedai: bedais {
 						compatible = "qcom,q6apm-lpass-dais";
 						#sound-dai-cells = <1>;
+						#address-cells = <1>;
+						#size-cells = <0>;
+
+						/*
+						 * The two speaker amps are BCLK-slaved on the
+						 * "Senary MI2S Playback" link, clocked by the
+						 * QUINARY MI2S IBIT. sc8280xp_snd_hw_params()
+						 * sets and enables it (sm8450 card data).
+						 */
+						dai@93 {
+							reg = <SENARY_MI2S_RX>;
+							clocks = <&q6prmcc LPASS_CLK_ID_QUI_MI2S_IBIT LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+							clock-names = "bclk";
+						};
 					};
 				};
 
@@ -2090,12 +2104,6 @@
 				"IN2_HPHR", "HPHR_OUT",
 				"AMIC2", "MIC BIAS2",
 				"TX SWR_ADC1", "ADC2_OUTPUT";
-
-		clocks = <&q6prmcc LPASS_CLK_ID_QUI_MI2S_IBIT LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
-		clock-names = "i2s_clk";
-
-		assigned-clocks = <&q6prmcc LPASS_CLK_ID_QUI_MI2S_IBIT LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
-		assigned-clock-rates = <1536000>;
 
 		speaker-i2s-dai-link {
 			link-name = "Senary MI2S Playback";
