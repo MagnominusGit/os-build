@@ -725,6 +725,15 @@
 	};
 };
 
+/*
+ * No QCE driver: 7.3 makes CRYPTO_DEV_QCE depend on BROKEN. The sm6115 node lists no
+ * interconnects, but it is still a consumer (rpmcc, cryptobam, apps_smmu) that never binds,
+ * so it goes off like the other SoCs' do.
+ */
+&crypto {
+	status = "disabled";
+};
+
 &gpi_dma0 {
 	status = "okay";
 };

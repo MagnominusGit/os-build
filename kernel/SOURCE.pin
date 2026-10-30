@@ -106,6 +106,18 @@ git_commit: 79a907609d53d5cd645b42c11550d295d43abf99
 # The sm8550 and sm8650 IPA nodes now carry memory-region = <&ipa_fw_mem>, a node our three
 # common dtsi files delete (no modem); they now drop that property too. IPA stays disabled.
 # CONFIG: CRYPTO_DEV_QCOM_RNG is gone (qcom-rng moved to hw_random): now HW_RANDOM_QCOM.
+# CRYPTO_DEV_QCE now `depends on (BROKEN && ARCH_QCOM) || COMPILE_TEST` (it races the secure world
+# for the engine and is slower than the CPU): unsettable, it silently resolved to n, so it is
+# deleted from kernel.config. The ARMv8 CE ciphers do the work.
+# The driver going does NOT take the DT node with it: every SoC's `crypto` node is enabled, and on
+# sm8250/8550/8650/8750 it lists interconnects, so with no driver to bind it fw_devlink holds the
+# interconnect providers' sync_state forever ("sync_state() pending due to 1dfa000.crypto") and
+# every NoC node stays at INT_MAX — saturated BCM votes. Upstream (Nova-Deck 6f40319a) saw it break
+# every Odin 3 panel off->on (the DSI command DMA's read never returned) and power-off hang.
+# `&crypto { status = "disabled"; }` in every board file that reaches a crypto node: upstream's 8
+# plus sm8250-mangmi-air-y-pro.dts and sm6115-mangmi-air-x-base.dtsi (the sm6115 node has no
+# interconnects, but is still a consumer that never binds). sm4450 has no crypto node. Keep the
+# driver and the node in step if QCE ever returns.
 # PATCHES: all 259 apply cumulatively at --fuzz=0, zero rejects, and the result is byte-identical
 # to the rebased tree.
 # BUILD: `make kernel` green in the container: Image + 32 dtbs + modules staged. Final .config:
