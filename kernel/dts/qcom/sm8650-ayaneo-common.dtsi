@@ -24,6 +24,11 @@
 /delete-node/ &hwfence_shbuf;
 
 /delete-node/ &remoteproc_mpss;
+
+/* v7.3 gives &ipa a memory-region on ipa_fw_mem, deleted above; IPA stays disabled here. */
+&ipa {
+	/delete-property/ memory-region;
+};
 /delete-node/ &mpss_mem;
 /delete-node/ &q6_mpss_dtb_mem;
 /delete-node/ &mpss_dsm_mem;

@@ -1,13 +1,16 @@
 From: sunshineinabox <aqemail@gmail.com>
 Subject: [PATCH] serial: qcom-geni: restart RX after the read command terminates itself
 ---
+ drivers/tty/serial/qcom_geni_serial.c | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
 diff --git a/drivers/tty/serial/qcom_geni_serial.c b/drivers/tty/serial/qcom_geni_serial.c
-index ace643589..8aa718051 100644
+index af314055f..120a68597 100644
 --- a/drivers/tty/serial/qcom_geni_serial.c
 +++ b/drivers/tty/serial/qcom_geni_serial.c
-@@ -897,8 +897,21 @@ static void qcom_geni_serial_handle_rx_dma(struct uart_port *uport, bool drop)
+@@ -1039,8 +1039,21 @@ static void qcom_geni_serial_handle_rx_dma(struct uart_port *uport, bool drop)
+ 	struct qcom_geni_serial_port *port = to_dev_port(uport);
  	u32 rx_in;
- 	int ret;
  
 -	if (!qcom_geni_serial_secondary_active(uport))
 +	if (!qcom_geni_serial_secondary_active(uport)) {

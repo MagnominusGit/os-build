@@ -42,7 +42,7 @@ Two rules when editing it:
 pages.** Standardized across all five SoCs.
 
 ## Status (Phase 1)
-- ✅ Source pinned to the 7.2 series — `kernel/SOURCE.pin` is the authority for the exact
+- ✅ Source pinned to the 7.3 series — `kernel/SOURCE.pin` is the authority for the exact
   version (tarball URL + sha256 + dereferenced tag + the bump history). Do not restate the
   version here; one source of truth.
 - ✅ Config symbols validated against that tree (see header of `kernel.config`).

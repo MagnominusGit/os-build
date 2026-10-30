@@ -20,11 +20,18 @@ Combined backport of upstream-track patches:
      WCN devices (Manivannan Sadhasivam)
 
 ---
+ drivers/bluetooth/hci_qca.c                | 23 +++++++--------
+ drivers/power/sequencing/core.c            | 33 ++++++++++++++++++++++
+ drivers/power/sequencing/pwrseq-qcom-wcn.c | 10 +++++++
+ include/linux/pwrseq/consumer.h            |  6 ++++
+ include/linux/pwrseq/provider.h            |  2 ++
+ 5 files changed, 61 insertions(+), 13 deletions(-)
+
 diff --git a/drivers/bluetooth/hci_qca.c b/drivers/bluetooth/hci_qca.c
-index 34500137d..1c0470966 100644
+index da82156d4..68bfdfb57 100644
 --- a/drivers/bluetooth/hci_qca.c
 +++ b/drivers/bluetooth/hci_qca.c
-@@ -2389,7 +2389,7 @@ static int qca_serdev_probe(struct serdev_device *serdev)
+@@ -2463,7 +2463,7 @@ static int qca_serdev_probe(struct serdev_device *serdev)
  	struct hci_dev *hdev;
  	const struct qca_device_data *data;
  	int err;
@@ -33,7 +40,7 @@ index 34500137d..1c0470966 100644
  
  	qcadev = devm_kzalloc(&serdev->dev, sizeof(*qcadev), GFP_KERNEL);
  	if (!qcadev)
-@@ -2452,16 +2452,13 @@ static int qca_serdev_probe(struct serdev_device *serdev)
+@@ -2528,16 +2528,13 @@ static int qca_serdev_probe(struct serdev_device *serdev)
  			qcadev->bt_power->pwrseq = devm_pwrseq_get(&serdev->dev,
  								   "bluetooth");
  
@@ -56,7 +63,7 @@ index 34500137d..1c0470966 100644
  		}
  
  		qcadev->bt_power->dev = &serdev->dev;
-@@ -2485,7 +2482,7 @@ static int qca_serdev_probe(struct serdev_device *serdev)
+@@ -2561,7 +2558,7 @@ static int qca_serdev_probe(struct serdev_device *serdev)
  		    (data->soc_type == QCA_WCN6750 ||
  		     data->soc_type == QCA_WCN6855 ||
  		     data->soc_type == QCA_WCN7850))
@@ -65,7 +72,7 @@ index 34500137d..1c0470966 100644
  
  		qcadev->sw_ctrl = devm_gpiod_get_optional(&serdev->dev, "swctrl",
  					       GPIOD_IN);
-@@ -2523,7 +2520,7 @@ static int qca_serdev_probe(struct serdev_device *serdev)
+@@ -2600,7 +2597,7 @@ static int qca_serdev_probe(struct serdev_device *serdev)
  		}
  
  		if (!qcadev->bt_en)
@@ -74,7 +81,7 @@ index 34500137d..1c0470966 100644
  
  		qcadev->susclk = devm_clk_get_optional_enabled_with_rate(
  					&serdev->dev, NULL, SUSCLK_RATE_32KHZ);
-@@ -2541,7 +2538,7 @@ static int qca_serdev_probe(struct serdev_device *serdev)
+@@ -2618,7 +2615,7 @@ static int qca_serdev_probe(struct serdev_device *serdev)
  
  	hdev = qcadev->serdev_hu.hdev;
  
@@ -84,9 +91,10 @@ index 34500137d..1c0470966 100644
  		hdev->shutdown = qca_hci_shutdown;
  	}
 diff --git a/drivers/power/sequencing/core.c b/drivers/power/sequencing/core.c
+index 3076b3879..929b40d93 100644
 --- a/drivers/power/sequencing/core.c
 +++ b/drivers/power/sequencing/core.c
-@@ -183,12 +183,14 @@
+@@ -183,12 +183,14 @@ static void pwrseq_unit_release(struct kref *ref)
   *               the state lock has been released. It's useful for implementing
   *               boot-up delays without blocking other users from powering up
   *               using the same power sequencer.
@@ -101,7 +109,7 @@ diff --git a/drivers/power/sequencing/core.c b/drivers/power/sequencing/core.c
  };
  
  static struct pwrseq_target *
-@@ -207,6 +209,7 @@
+@@ -207,6 +209,7 @@ pwrseq_target_new(const struct pwrseq_target_data *data)
  	}
  
  	target->post_enable = data->post_enable;
@@ -109,7 +117,7 @@ diff --git a/drivers/power/sequencing/core.c b/drivers/power/sequencing/core.c
  
  	return target;
  }
-@@ -994,6 +997,36 @@
+@@ -994,6 +997,36 @@ struct device *pwrseq_to_device(struct pwrseq_desc *desc)
  }
  EXPORT_SYMBOL_GPL(pwrseq_to_device);
  
@@ -147,10 +155,10 @@ diff --git a/drivers/power/sequencing/core.c b/drivers/power/sequencing/core.c
  
  struct pwrseq_debugfs_count_ctx {
 diff --git a/drivers/power/sequencing/pwrseq-qcom-wcn.c b/drivers/power/sequencing/pwrseq-qcom-wcn.c
-index b55b4317e..56b941cc3 100644
+index 34146d637..ee6008d22 100644
 --- a/drivers/power/sequencing/pwrseq-qcom-wcn.c
 +++ b/drivers/power/sequencing/pwrseq-qcom-wcn.c
-@@ -254,10 +254,18 @@ static int pwrseq_qcom_wcn6855_xo_clk_deassert(struct pwrseq_device *pwrseq)
+@@ -253,10 +253,18 @@ static int pwrseq_qcom_wcn6855_xo_clk_deassert(struct pwrseq_device *pwrseq)
  	return pwrseq_qcom_wcn_pwup_delay(pwrseq);
  }
  
@@ -169,7 +177,7 @@ index b55b4317e..56b941cc3 100644
  };
  
  static const struct pwrseq_target_data pwrseq_qcom_wcn_wlan_target_data = {
-@@ -270,6 +278,7 @@ static const struct pwrseq_target_data pwrseq_qcom_wcn_wlan_target_data = {
+@@ -269,6 +277,7 @@ static const struct pwrseq_target_data pwrseq_qcom_wcn_wlan_target_data = {
  static const struct pwrseq_target_data pwrseq_qcom_wcn3990_bt_target_data = {
  	.name = "bluetooth",
  	.unit = &pwrseq_qcom_wcn3990_unit_data,
@@ -177,7 +185,7 @@ index b55b4317e..56b941cc3 100644
  };
  
  static const struct pwrseq_target_data pwrseq_qcom_wcn3990_wlan_target_data = {
-@@ -281,6 +290,7 @@ static const struct pwrseq_target_data pwrseq_qcom_wcn6855_bt_target_data = {
+@@ -280,6 +289,7 @@ static const struct pwrseq_target_data pwrseq_qcom_wcn6855_bt_target_data = {
  	.name = "bluetooth",
  	.unit = &pwrseq_qcom_wcn6855_bt_unit_data,
  	.post_enable = pwrseq_qcom_wcn6855_xo_clk_deassert,
@@ -186,17 +194,18 @@ index b55b4317e..56b941cc3 100644
  
  static const struct pwrseq_target_data pwrseq_qcom_wcn6855_wlan_target_data = {
 diff --git a/include/linux/pwrseq/consumer.h b/include/linux/pwrseq/consumer.h
+index 16fad5f3e..59368f0d0 100644
 --- a/include/linux/pwrseq/consumer.h
 +++ b/include/linux/pwrseq/consumer.h
-@@ -22,6 +22,7 @@
+@@ -22,6 +22,7 @@ devm_pwrseq_get(struct device *dev, const char *target);
  
- int pwrseq_power_on(struct pwrseq_desc *desc);
- int pwrseq_power_off(struct pwrseq_desc *desc);
+ int pwrseq_enable(struct pwrseq_desc *desc);
+ int pwrseq_disable(struct pwrseq_desc *desc);
 +bool pwrseq_is_fixed(struct pwrseq_desc *desc);
  
  struct device *pwrseq_to_device(struct pwrseq_desc *desc);
  
-@@ -53,6 +54,11 @@
+@@ -53,6 +54,11 @@ static inline int pwrseq_disable(struct pwrseq_desc *desc)
  	return -ENOSYS;
  }
  

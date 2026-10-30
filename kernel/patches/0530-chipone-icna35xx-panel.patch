@@ -51,23 +51,30 @@ DBV back over DSI at every read of actual_brightness, also while the panel
 was off, and reported it unmapped, a different scale from the
 luminance-linear sysfs value (the helper has no inverse). The backlight
 core now reports the set value.
+
+retroforge, 7.3.1 bump: v7.3 ships its own panel-chipone-icna35xx.c (Teguh
+Sobirin's mainline version, f747473a838e) with per-board compatibles that none
+of our DTs use. Ours is renamed to sit beside it, as 0535 was for the CH13726A:
+panel-ddic-icna35xx.c, DRM_PANEL_DDIC_ICNA35XX, driver name panel-ddic-icna35xx.
+The compatibles (chipone,icna3512 / chipone,icna3520 / mangmi,pocket-max-panel)
+and the code are unchanged; 0531-0533 follow the new file name.
 ---
- drivers/gpu/drm/panel/Kconfig                  |  11 +
- drivers/gpu/drm/panel/Makefile                 |   1 +
- drivers/gpu/drm/panel/panel-chipone-icna35xx.c | 815 +++++++++++++++++++++++++
- 3 files changed, 827 insertions(+)
- create mode 100644 drivers/gpu/drm/panel/panel-chipone-icna35xx.c
+ drivers/gpu/drm/panel/Kconfig               |  11 +
+ drivers/gpu/drm/panel/Makefile              |   1 +
+ drivers/gpu/drm/panel/panel-ddic-icna35xx.c | 816 ++++++++++++++++++++
+ 3 files changed, 828 insertions(+)
+ create mode 100644 drivers/gpu/drm/panel/panel-ddic-icna35xx.c
 
 diff --git a/drivers/gpu/drm/panel/Kconfig b/drivers/gpu/drm/panel/Kconfig
-index 2ff01a282..bcdd18b9b 100644
+index 0228fb1a1..9c2edece2 100644
 --- a/drivers/gpu/drm/panel/Kconfig
 +++ b/drivers/gpu/drm/panel/Kconfig
-@@ -156,6 +156,17 @@ config DRM_PANEL_BOE_XM91080G
+@@ -177,6 +177,17 @@ config DRM_PANEL_BOE_XM91080G
  	  Say Y if you want to enable support for panels based on the
  	  Xm-Plus XM91080G controller.
  
-+config DRM_PANEL_CHIPONE_ICNA35XX
-+	tristate "Chipone ICNA35XX panel driver"
++config DRM_PANEL_DDIC_ICNA35XX
++	tristate "Chipone ICNA35XX panel driver (RetroForge boards)"
 +	depends on OF
 +	depends on DRM_MIPI_DSI
 +	depends on BACKLIGHT_CLASS_DEVICE
@@ -81,23 +88,23 @@ index 2ff01a282..bcdd18b9b 100644
  	tristate "EBBG FT8719 panel driver"
  	depends on GPIOLIB
 diff --git a/drivers/gpu/drm/panel/Makefile b/drivers/gpu/drm/panel/Makefile
-index a5b1bb926..2da626232 100644
+index 9d156338a..16edcb4fe 100644
 --- a/drivers/gpu/drm/panel/Makefile
 +++ b/drivers/gpu/drm/panel/Makefile
-@@ -13,6 +13,7 @@ obj-$(CONFIG_DRM_PANEL_BOE_TH101MB31UIG002_28A) += panel-boe-th101mb31ig002-28a.
- obj-$(CONFIG_DRM_PANEL_BOE_TV101WUM_LL2) += panel-boe-tv101wum-ll2.o
+@@ -15,6 +15,7 @@ obj-$(CONFIG_DRM_PANEL_BOE_TV101WUM_LL2) += panel-boe-tv101wum-ll2.o
  obj-$(CONFIG_DRM_PANEL_BOE_TV101WUM_NL6) += panel-boe-tv101wum-nl6.o
+ obj-$(CONFIG_DRM_PANEL_CHIPONE_ICNA35XX) += panel-chipone-icna35xx.o
  obj-$(CONFIG_DRM_PANEL_BOE_XM91080G) += panel-boe-xm91080g.o
-+obj-$(CONFIG_DRM_PANEL_CHIPONE_ICNA35XX) += panel-chipone-icna35xx.o
++obj-$(CONFIG_DRM_PANEL_DDIC_ICNA35XX) += panel-ddic-icna35xx.o
  obj-$(CONFIG_DRM_PANEL_CHIPWEALTH_CH13726A) += panel-chipwealth-ch13726a.o
  obj-$(CONFIG_DRM_PANEL_DSI_CM) += panel-dsi-cm.o
  obj-$(CONFIG_DRM_PANEL_LVDS) += panel-lvds.o
-diff --git a/drivers/gpu/drm/panel/panel-chipone-icna35xx.c b/drivers/gpu/drm/panel/panel-chipone-icna35xx.c
+diff --git a/drivers/gpu/drm/panel/panel-ddic-icna35xx.c b/drivers/gpu/drm/panel/panel-ddic-icna35xx.c
 new file mode 100644
-index 000000000..db0adb5e7
+index 000000000..abe1d2478
 --- /dev/null
-+++ b/drivers/gpu/drm/panel/panel-chipone-icna35xx.c
-@@ -0,0 +1,815 @@
++++ b/drivers/gpu/drm/panel/panel-ddic-icna35xx.c
+@@ -0,0 +1,816 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Chipone ICNA35XX Driver IC panels driver
@@ -117,6 +124,7 @@ index 000000000..db0adb5e7
 +
 +#include <drm/display/drm_dsc.h>
 +#include <drm/display/drm_dsc_helper.h>
++#include <drm/drm_of.h>
 +#include <drm/drm_connector.h>
 +#include <drm/drm_crtc.h>
 +#include <drm/drm_mipi_dsi.h>
@@ -855,7 +863,7 @@ index 000000000..db0adb5e7
 +
 +	pinfo->dsi = dsi;
 +	mipi_dsi_set_drvdata(dsi, pinfo);
-+	ret = of_drm_get_panel_orientation(dev->of_node, &pinfo->orientation);
++	ret = drm_of_get_panel_orientation(dev->of_node, &pinfo->orientation);
 +	if (ret < 0) {
 +		dev_err(dev, "%pOF: failed to get orientation %d\n", dev->of_node, ret);
 +		return ret;
@@ -904,7 +912,7 @@ index 000000000..db0adb5e7
 +	.probe = icna35xx_probe,
 +	.remove = icna35xx_remove,
 +	.driver = {
-+		.name = "panel-chipone-icna35xx",
++		.name = "panel-ddic-icna35xx",
 +		.of_match_table = icna35xx_of_match,
 +	},
 +};

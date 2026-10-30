@@ -72,12 +72,13 @@ Signed-off-by: Philippe Simons <simons.philippe@gmail.com>
  2 files changed, 10 insertions(+), 1 deletion(-)
 
 diff --git a/drivers/clk/qcom/clk-alpha-pll.c b/drivers/clk/qcom/clk-alpha-pll.c
+index f8313f9d0..60173b076 100644
 --- a/drivers/clk/qcom/clk-alpha-pll.c
 +++ b/drivers/clk/qcom/clk-alpha-pll.c
-@@ -2372,6 +2372,15 @@ void clk_lucid_ole_pll_configure(struct clk_alpha_pll *pll, struct regmap *regma
+@@ -2373,6 +2373,15 @@ void clk_lucid_ole_pll_configure(struct clk_alpha_pll *pll, struct regmap *regma
  {
  	u32 lval = config->l;
-
+ 
 +	/*
 +	 * If the bootloader left the PLL enabled it's likely that there are
 +	 * RCGs that will lock up if we disable the PLL below.
@@ -91,6 +92,7 @@ diff --git a/drivers/clk/qcom/clk-alpha-pll.c b/drivers/clk/qcom/clk-alpha-pll.c
  	lval |= TRION_PLL_CAL_VAL << LUCID_OLE_PLL_RINGOSC_CAL_L_VAL_SHIFT;
  	clk_alpha_pll_write_config(regmap, PLL_L_VAL(pll), lval);
 diff --git a/drivers/clk/qcom/dispcc-sm8550.c b/drivers/clk/qcom/dispcc-sm8550.c
+index 418dcea20..778f26920 100644
 --- a/drivers/clk/qcom/dispcc-sm8550.c
 +++ b/drivers/clk/qcom/dispcc-sm8550.c
 @@ -622,7 +622,7 @@ static struct clk_rcg2 disp_cc_mdss_mdp_clk_src = {
@@ -101,3 +103,4 @@ diff --git a/drivers/clk/qcom/dispcc-sm8550.c b/drivers/clk/qcom/dispcc-sm8550.c
 +		.ops = &clk_rcg2_shared_no_init_park_ops,
  	},
  };
+ 

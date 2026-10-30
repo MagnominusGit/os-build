@@ -30,20 +30,23 @@
 # POCKET MAX (SM8250) — with 0330 v4, 1150 (Abel Vesa CX v5) and 0140 on the same card.
 # RE-PINNED 2026-10-15 (7.2.11). Nothing of ours landed, no patch needed a change;
 # ath12k, UFS core and btrfs are the legs. Read the 7.2.11 section below. HW GATE OWED.
-version:    7.2.11
-url:        https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.2.11.tar.xz
-sha256:     fd0fc479f983a8c05313f13e9c36330fe6651cf725396748c40d5cd93fa1e6a4
-git_tag:    v7.2.11
-git_commit: a2de78ee6ed8bf8cd99d177c74865a6e8c3cb6ea
+# RE-PINNED 2026-10-30 (7.3.1) — A NEW SERIES, the first since 7.2. Ten patches landed and are
+# deleted, ~35 were rebased, two DT labels moved. Read the 7.3.1 section below. NOT BOOTED YET:
+# the full per-board HW gate is owed, audio and display first.
+version:    7.3.1
+url:        https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.1.tar.xz
+sha256:     fa595aad93734f829c963c2a90ef7c3673224fd7fdae7b49406e397cde2de231
+git_tag:    v7.3.1
+git_commit: 79a907609d53d5cd645b42c11550d295d43abf99
 
 # The sha256 above is the one kernel.org publishes in the SIGNED sha256sums.asc for v7.x, not a
-# hash of whatever the CDN happened to serve — re-checked 2026-10-15. The .asc itself verifies as
+# hash of whatever the CDN happened to serve — re-checked 2026-10-30. The .asc itself verifies as
 # a GOOD signature from "Kernel.org checksum autosigner <autosigner@kernel.org>", fingerprint
 # B886 8C80 BA62 A1FF FAF5 FDA9 632D 3A06 589D A6B1. That key carries no trust path here, so the
-# load-bearing check is CONTINUITY: the SAME signed file still lists 7.2.10 as
-# 2feaa70453e91f541be6a5c9078d8168e081af45a3d9718054850538cff2ebf3, 7.2.9 as
-# b4c5dfbe51a364a6c7f03869200f88c8e1f77403539005f14b7fc6bc91b8d8ba and 7.2.8 as
-# 12e8d5a973d1ad7c5a5c69882e4022b131ed715db7003fdcd760ddf8c3e51941, byte-for-byte the hashes this
+# load-bearing check is CONTINUITY: the SAME signed file still lists 7.2.11 as
+# fd0fc479f983a8c05313f13e9c36330fe6651cf725396748c40d5cd93fa1e6a4, 7.2.10 as
+# 2feaa70453e91f541be6a5c9078d8168e081af45a3d9718054850538cff2ebf3 and 7.2.9 as
+# b4c5dfbe51a364a6c7f03869200f88c8e1f77403539005f14b7fc6bc91b8d8ba, byte-for-byte the hashes this
 # pin carried and shipped before — so the file describing the version above is the same file that
 # described the releases we already trusted. Roll this list forward on each bump rather than
 # growing it; three back is enough to be a chain. (Note: keys.openpgp.org serves this key STRIPPED
@@ -63,6 +66,61 @@ git_commit: a2de78ee6ed8bf8cd99d177c74865a6e8c3cb6ea
 # offline gate. Both came from hardware.
 #
 =======
+# ============ 7.3.1 — PINNED 2026-10-30, NOT BOOTED ============
+#
+# A series bump (7.2.11 -> 7.3.1), so the stack was REBASED, not re-applied: the 7.2.11 tree plus
+# one commit per patch, git-rebased onto a 7.3.1 tree, so every hunk got a three-way merge and only
+# real conflicts stopped it. 47 of 269 patches failed a plain --fuzz=0 apply; most were context only.
+#
+# DELETED, landed byte-for-byte (their commits went empty in the rebase): 0145 (sm6115 video GDSC
+# HW_CTRL), 0230 (Rob Clark's VM hardening; its last hunk's msm_alloc_stolen_fb() is gone too),
+# 0620 (sy7758), 0800 (DP audio prepare), 1000 (ksmbd pipe transceive), 1063 (qmp-combo runtime
+# PM at boot), 1080 (qce runtime PM), 1155 (sm8650 cpu props), 1165 (sm6115 venus), 1167 (sm8750
+# uart15).
+# REWORKED (each patch header carries a "7.3.1 bump" note):
+#   0530 mainline now has its own panel-chipone-icna35xx.c (per-board compatibles none of our DTs
+#        use). Ours is RENAMED beside it: panel-ddic-icna35xx.c / DRM_PANEL_DDIC_ICNA35XX, driver
+#        name panel-ddic-icna35xx (the 0535 precedent); 0531-0533 follow. kernel.config moved.
+#   0810 mainline computes the WSA mask from the channel map; our WSA2 branch is kept (the mainline
+#        ayaneo,pocket-s2-sndcard entry renames the card driver to ayaneo-ps2, which moves the tplg
+#        firmware and UCM paths), the fallback is mainline's loop.
+#   0820 mainline's sc8280xp_snd_hw_params() (MI2S fmt + set_sysclk) now runs after our card-level
+#        i2s_clk startup; set_sysclk is a no-op without dai-node clocks. 0826's init-time set_fmt
+#        is dropped, hw_params covers SENARY.
+#   0855 the runtime-PM half landed; only the system-sleep handlers are left.
+#   0994 extended: 7.3 reads the regulator state back at probe at REG_ENABLE; PBS uses offset 0x0.
+#   1090 extended: IRQ re-enabled on the new pm_runtime_force_* error returns.
+#   0120 upstream dropped skip_retention_level (retention is skipped for every domain), so our
+#        two .skip_retention_level lines went with it. 0398 sm4450 maps to the new ubwc_2_0_hbb14
+#        preset (same values). 1020 rides the pwrseq_power_on/off -> pwrseq_enable/disable rename.
+#        1062 re-inserted beside upstream's new sm8475 config. 1145 keeps upstream's sm8750 VBIF
+#        0x3000. 1105 shrank (7.3 has the pcie*_port0 labels).
+# API: 7.3 renamed of_drm_get_panel_orientation() to drm_of_get_panel_orientation() (now in
+# <drm/drm_of.h>); the 16 panel drivers our patches add follow it (0505-0590). The IIO consumer
+# API is now in the IIO_CONSUMER namespace: 0910's pm8150b charger module imports it (modpost).
+# DUPLICATE DRIVERS: of every compatible our patches add, only 0540's ayaneo,wt0600-2k and
+# ayaneo,wt0630-2k are also matched by a 7.3 driver (panel-renesas-r63419). DRM_PANEL_RENESAS_R63419
+# defaults n and is not in our config, so ours binds. 0515 coexists with st7703 the same way.
+# DT: sm8550.dtsi renamed pcieport0 -> pcie0_port0; qcs8550-ayn-common.dtsi and
+# qcs8550-ayaneo-pocket-common.dtsi follow. sm8250/sm8650/sm8750 keep pcieport0.
+# The sm8550 and sm8650 IPA nodes now carry memory-region = <&ipa_fw_mem>, a node our three
+# common dtsi files delete (no modem); they now drop that property too. IPA stays disabled.
+# CONFIG: CRYPTO_DEV_QCOM_RNG is gone (qcom-rng moved to hw_random): now HW_RANDOM_QCOM.
+# PATCHES: all 259 apply cumulatively at --fuzz=0, zero rejects, and the result is byte-identical
+# to the rebased tree.
+# BUILD: `make kernel` green in the container: Image + 32 dtbs + modules staged. Final .config:
+# DDIC_ICNA35XX=y, CHIPONE_ICNA35XX and RENESAS_R63419 not set, HW_RANDOM_QCOM=y. tests/test-hw-dtb.sh
+# (302 pins, 0 failed) and tests/test-panel-calibration.sh green against it.
+#
+# WHAT ONLY HARDWARE CAN SETTLE — a whole series moved underneath, so every board, and:
+#   - audio everywhere: MI2S now gets explicit BP_FP + codec formats from mainline hw_params on
+#     every MI2S BE (Odin 2/Thor/Odin 3/Elite/RG55G1/RP Classic amps), S2 + FIT speakers (0810),
+#     the macros' runtime PM now upstream's (0855), headset jack on MI2S boards (0861).
+#   - display: the ICNA35XX panels (Pocket DS/EVO, Odin 2 Portal, Thor, Odin 3, Pocket Max) now
+#     bind panel-ddic-icna35xx; SM4450 UBWC via the preset.
+#   - PCIe Wi-Fi on the qcs8550 boards (label move), the SM6115 Bluetooth (1020), Air X suspend
+#     (1090, 0855), the RNG (hwrng should list qcom).
+#
 # ============ 7.2.11 — PINNED 2026-10-15, HW GATE OWED ============
 #
 # 285 commits, 285 files. Zero drm/msm, zero qcom clk/phy/interconnect/iommu/dts for any SoC we

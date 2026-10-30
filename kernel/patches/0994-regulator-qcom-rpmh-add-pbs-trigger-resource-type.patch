@@ -3,12 +3,20 @@ Subject: [PATCH] regulator: qcom-rpmh: add PBS trigger resource type
 
 Some AOP firmwares sequence rail power through dedicated PBS trigger
 resources. Identical to downstream.
+
+retroforge, 7.3.1 bump: v7.3 reads each regulator's initial state back from
+RPMh at probe (rpmh_regulator_determine_initial_mode(), at REG_ENABLE = 0x4,
+then the VRM mode). A PBS resource has its enable at 0x0 and no mode, so the
+read uses the PBS offset and stops after the enable bit for any non-VRM type.
 ---
+ drivers/regulator/qcom-rpmh-regulator.c | 27 ++++++++++++++++++++-----
+ 1 file changed, 22 insertions(+), 5 deletions(-)
+
 diff --git a/drivers/regulator/qcom-rpmh-regulator.c b/drivers/regulator/qcom-rpmh-regulator.c
-index 19d86a2c6..3e8957041 100644
+index 707f2f4aa..c34bc6b32 100644
 --- a/drivers/regulator/qcom-rpmh-regulator.c
 +++ b/drivers/regulator/qcom-rpmh-regulator.c
-@@ -26,10 +26,14 @@
+@@ -27,10 +27,14 @@
   *		and mode of LDO, SMPS, and BOB type PMIC regulators.
   * @XOB:	RPMh XOB accelerator which supports voting on the enable state
   *		of PMIC regulators.
@@ -23,15 +31,15 @@ index 19d86a2c6..3e8957041 100644
  };
  
  /**
-@@ -62,6 +66,7 @@ static const struct resource_name_formats vreg_rsc_name_lookup[NUM_REGULATOR_TYP
+@@ -66,6 +70,7 @@ static const struct resource_name_formats vreg_rsc_name_lookup[NUM_REGULATOR_TYP
  
- #define RPMH_REGULATOR_REG_VRM_VOLTAGE		0x0
  #define RPMH_REGULATOR_REG_ENABLE		0x4
+ #define RPMH_REGULATOR_ENABLE_MASK		BIT(0)
 +#define RPMH_REGULATOR_REG_PBS_ENABLE		0x0
- #define RPMH_REGULATOR_REG_VRM_MODE		0x8
  
- #define PMIC4_LDO_MODE_RETENTION		4
-@@ -185,6 +190,7 @@ struct rpmh_vreg_init_data {
+ #define RPMH_REGULATOR_REG_VRM_MODE		0x8
+ #define RPMH_REGULATOR_MODE_MASK		GENMASK(2, 0)
+@@ -191,6 +196,7 @@ struct rpmh_vreg_init_data {
  	int				index;
  	const char			*supply_name;
  	const struct rpmh_vreg_hw_data	*hw_data;
@@ -39,7 +47,7 @@ index 19d86a2c6..3e8957041 100644
  };
  
  /**
-@@ -267,7 +273,8 @@ static int rpmh_regulator_set_enable_state(struct regulator_dev *rdev,
+@@ -298,7 +304,8 @@ static int rpmh_regulator_set_enable_state(struct regulator_dev *rdev,
  {
  	struct rpmh_vreg *vreg = rdev_get_drvdata(rdev);
  	struct tcs_cmd cmd = {
@@ -49,7 +57,7 @@ index 19d86a2c6..3e8957041 100644
  		.data = enable,
  	};
  	int ret;
-@@ -470,7 +477,10 @@ static int rpmh_regulator_init_vreg(struct rpmh_vreg *vreg, struct device *dev,
+@@ -517,7 +524,10 @@ static int rpmh_regulator_init_vreg(struct rpmh_vreg *vreg, struct device *dev,
  		return -EINVAL;
  	}
  
@@ -61,7 +69,7 @@ index 19d86a2c6..3e8957041 100644
  		rsc_name = vreg_rsc_name_lookup[rpmh_data->vreg_hw_type].rsc_name_fmt;
  		scnprintf(rpmh_resource_name, sizeof(rpmh_resource_name),
  			  rsc_name, rpmh_data->index, pmic_id);
-@@ -514,7 +524,7 @@ static int rpmh_regulator_init_vreg(struct rpmh_vreg *vreg, struct device *dev,
+@@ -561,7 +571,7 @@ static int rpmh_regulator_init_vreg(struct rpmh_vreg *vreg, struct device *dev,
  	if (!init_data)
  		return -ENOMEM;
  
@@ -70,7 +78,26 @@ index 19d86a2c6..3e8957041 100644
  	    init_data->constraints.min_uV &&
  	    init_data->constraints.min_uV == init_data->constraints.max_uV) {
  		vreg->rdesc.fixed_uV = init_data->constraints.min_uV;
-@@ -780,6 +790,12 @@ static const struct rpmh_vreg_hw_data pmic4_lvs = {
+@@ -590,7 +600,8 @@ static int rpmh_regulator_init_vreg(struct rpmh_vreg *vreg, struct device *dev,
+ static int rpmh_regulator_determine_initial_mode(struct rpmh_vreg *vreg)
+ {
+ 	struct tcs_cmd cmd = {
+-		.addr = vreg->addr + RPMH_REGULATOR_REG_ENABLE,
++		.addr = vreg->addr + (vreg->hw_data->regulator_type == PBS ?
++			RPMH_REGULATOR_REG_PBS_ENABLE : RPMH_REGULATOR_REG_ENABLE),
+ 	};
+ 	int ret, pmic_mode, mode;
+ 	int sts;
+@@ -606,7 +617,7 @@ static int rpmh_regulator_determine_initial_mode(struct rpmh_vreg *vreg)
+ 	if (!sts)
+ 		return 0;
+ 
+-	if (vreg->hw_data->regulator_type == XOB)
++	if (vreg->hw_data->regulator_type != VRM)
+ 		return 0;
+ 
+ 	ret = rpmh_regulator_vrm_get_pmic_mode(vreg, &pmic_mode);
+@@ -894,6 +905,12 @@ static const struct rpmh_vreg_hw_data pmic4_lvs = {
  	/* LVS hardware does not support voltage or mode configuration. */
  };
  

@@ -4,6 +4,10 @@ Subject: [PATCH] drm/panel: chipwealth-ch13726a: per-board init table, vendor ti
 Add both Retroid Pocket Classic boards. Rev Q is the same module as the
 Thor bottom panel. The original board carries a different module.
 ---
+ .../display/panel/chipwealth,ch13726a.yaml    |   5 +-
+ .../gpu/drm/panel/panel-chipwealth-ch13726a.c | 198 ++++++++++++++++--
+ 2 files changed, 190 insertions(+), 13 deletions(-)
+
 diff --git a/Documentation/devicetree/bindings/display/panel/chipwealth,ch13726a.yaml b/Documentation/devicetree/bindings/display/panel/chipwealth,ch13726a.yaml
 index c8d7b6103..b2e19da41 100644
 --- a/Documentation/devicetree/bindings/display/panel/chipwealth,ch13726a.yaml
@@ -21,7 +25,7 @@ index c8d7b6103..b2e19da41 100644
  
    reg:
 diff --git a/drivers/gpu/drm/panel/panel-chipwealth-ch13726a.c b/drivers/gpu/drm/panel/panel-chipwealth-ch13726a.c
-index be76bc825..42dd95c09 100644
+index 562dc5735..6984d98ca 100644
 --- a/drivers/gpu/drm/panel/panel-chipwealth-ch13726a.c
 +++ b/drivers/gpu/drm/panel/panel-chipwealth-ch13726a.c
 @@ -12,6 +12,8 @@
@@ -31,9 +35,9 @@ index be76bc825..42dd95c09 100644
 +#include <drm/drm_connector.h>
 +#include <drm/drm_crtc.h>
  #include <drm/drm_modes.h>
+ #include <drm/drm_of.h>
  #include <drm/drm_panel.h>
- 
-@@ -24,6 +26,13 @@ static const struct regulator_bulk_data ch13726a_supplies[] = {
+@@ -25,6 +27,13 @@ static const struct regulator_bulk_data ch13726a_supplies[] = {
  	{ .supply = "avdd", },
  };
  
@@ -47,7 +51,7 @@ index be76bc825..42dd95c09 100644
  struct ch13726a_panel {
  	struct drm_panel panel;
  	struct mipi_dsi_device *dsi;
-@@ -31,6 +40,7 @@ struct ch13726a_panel {
+@@ -32,6 +41,7 @@ struct ch13726a_panel {
  	struct gpio_desc *reset_gpio;
  	struct ch13726a_desc *desc;
  	enum drm_panel_orientation orientation;
@@ -55,7 +59,7 @@ index be76bc825..42dd95c09 100644
  };
  
  struct ch13726a_desc {
-@@ -40,6 +50,24 @@ struct ch13726a_desc {
+@@ -41,6 +51,24 @@ struct ch13726a_desc {
  
  	const struct drm_display_mode *modes;
  	unsigned int num_modes;
@@ -80,7 +84,7 @@ index be76bc825..42dd95c09 100644
  };
  
  static inline struct ch13726a_panel *to_ch13726a_panel(struct drm_panel *panel)
-@@ -49,26 +77,59 @@ static inline struct ch13726a_panel *to_ch13726a_panel(struct drm_panel *panel)
+@@ -50,26 +78,59 @@ static inline struct ch13726a_panel *to_ch13726a_panel(struct drm_panel *panel)
  
  static void ch13726a_reset(struct ch13726a_panel *ctx)
  {
@@ -145,7 +149,7 @@ index be76bc825..42dd95c09 100644
  
  	return dsi_ctx.accum_err;
  }
-@@ -81,8 +142,9 @@ static int ch13726a_disable(struct drm_panel *panel)
+@@ -82,8 +143,9 @@ static int ch13726a_disable(struct drm_panel *panel)
  	ctx->dsi->mode_flags &= ~MIPI_DSI_MODE_LPM;
  
  	mipi_dsi_dcs_set_display_off_multi(&dsi_ctx);
@@ -156,7 +160,7 @@ index be76bc825..42dd95c09 100644
  
  	return dsi_ctx.accum_err;
  }
-@@ -93,19 +155,20 @@ static int ch13726a_prepare(struct drm_panel *panel)
+@@ -94,19 +156,20 @@ static int ch13726a_prepare(struct drm_panel *panel)
  	struct device *dev = &ctx->dsi->dev;
  	int ret;
  
@@ -179,7 +183,7 @@ index be76bc825..42dd95c09 100644
  		return ret;
  	}
  
-@@ -119,7 +182,7 @@ static int ch13726a_unprepare(struct drm_panel *panel)
+@@ -120,7 +183,7 @@ static int ch13726a_unprepare(struct drm_panel *panel)
  	struct ch13726a_panel *ctx = to_ch13726a_panel(panel);
  
  	gpiod_set_value_cansleep(ctx->reset_gpio, 1);
@@ -188,7 +192,7 @@ index be76bc825..42dd95c09 100644
  
  	return 0;
  }
-@@ -157,6 +220,112 @@ static struct ch13726a_desc thor_bottom_desc = {
+@@ -158,6 +221,112 @@ static struct ch13726a_desc thor_bottom_desc = {
  	.width_mm = 65,
  	.height_mm = 75,
  	.bpc = 8,
@@ -301,7 +305,7 @@ index be76bc825..42dd95c09 100644
  };
  
  static int ch13726a_get_modes(struct drm_panel *panel,
-@@ -164,6 +333,8 @@ static int ch13726a_get_modes(struct drm_panel *panel,
+@@ -165,6 +334,8 @@ static int ch13726a_get_modes(struct drm_panel *panel,
  {
  	struct ch13726a_panel *ctx = to_ch13726a_panel(panel);
  
@@ -310,7 +314,7 @@ index be76bc825..42dd95c09 100644
  	for (uint8_t i = 0; i < ctx->desc->num_modes; i++) {
  		const struct drm_display_mode *m = &ctx->desc->modes[i];
  		struct drm_display_mode *mode;
-@@ -257,8 +428,8 @@ static int ch13726a_probe(struct mipi_dsi_device *dsi)
+@@ -258,8 +429,8 @@ static int ch13726a_probe(struct mipi_dsi_device *dsi)
  		return -ENODEV;
  
  	ret = devm_regulator_bulk_get_const(dev,
@@ -321,7 +325,7 @@ index be76bc825..42dd95c09 100644
  					    &ctx->supplies);
  	if (ret < 0)
  		return dev_err_probe(dev, ret, "Failed to get regulators\n");
-@@ -280,7 +451,8 @@ static int ch13726a_probe(struct mipi_dsi_device *dsi)
+@@ -281,7 +452,8 @@ static int ch13726a_probe(struct mipi_dsi_device *dsi)
  	dsi->lanes = 4;
  	dsi->format = MIPI_DSI_FMT_RGB888;
  	dsi->mode_flags = MIPI_DSI_MODE_VIDEO |
@@ -331,7 +335,7 @@ index be76bc825..42dd95c09 100644
  
  	ctx->panel.prepare_prev_first = true;
  
-@@ -315,6 +487,8 @@ static void ch13726a_remove(struct mipi_dsi_device *dsi)
+@@ -316,6 +488,8 @@ static void ch13726a_remove(struct mipi_dsi_device *dsi)
  
  static const struct of_device_id ch13726a_of_match[] = {
  	{ .compatible = "ayntec,thor-panel-bottom", .data = &thor_bottom_desc },
