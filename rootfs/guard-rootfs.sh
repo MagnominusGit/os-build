@@ -792,7 +792,7 @@ fi
 #     /usr/lib/retroforge/x86-mesa (rootfs/lib-assemble-x86-mesa.sh). Libraries only, run by nothing
 #     on the host.
 #     usr/share/guestos stays listed.
-#   - Proton-CachyOS arm64, on the player's Download (retroforge-steam-cachyos) and for store games,
+#   - Proton-CachyOS arm64, on the player's Download (Apps > Proton, retroforge-proton) and for store games,
 #     with DXVK-Sarek on where the GPU needs it (Adreno 610/613): steam-compat-tools keeps its
 #     newest arm64 release in the Steam library's compatibilitytools.d (proton-cachyos-arm64.pin), or
 #     on ARMv8.0 CPUs our own ARMv8.0 Proton with Sarek (proton-armv8.pin). usr/share/steam/compatibilitytools.d stays listed.

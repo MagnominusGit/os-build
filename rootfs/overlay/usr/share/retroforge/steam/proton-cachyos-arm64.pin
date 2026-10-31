@@ -2,8 +2,7 @@
 # DXVK-Sarek.
 #
 # Read by /usr/lib/retroforge/steam-compat-tools, which runs when the player presses Download or Update
-# in Apps > Steam Client > "CachyOS Proton arm64" (retroforge-steam-cachyos), and when a store game needs
-# a Proton. It downloads the release into the player's home and installs it as
+# in Apps > Proton (retroforge-proton), and when a store game needs a Proton. It downloads the release into the player's home and installs it as
 # <Steam root>/compatibilitytools.d/<dir>/, with DXVK-Sarek on in it where the GPU needs it (the
 # SM4450's Adreno 613; the SM6115 takes proton-armv8.pin).
 # Steam lists it from its next start on. Nothing selects it: the player does, per game or as the Steam

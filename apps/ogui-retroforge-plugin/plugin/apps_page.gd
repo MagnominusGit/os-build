@@ -19,6 +19,10 @@ extends ScrollContainer
 ## emu_state.gd, then the Steam rows (steam_rows): no Delete and no emulator settings. Its progress
 ## comes from the file steam-install writes (the entry's "progress"), and Open starts Steam's own UI.
 ##
+## Proton ("kind": "proton") is no catalog row: the plugin adds it (proton_entry), and its page is only
+## the Proton rows (proton_rows: the channel on ARMv8.0 CPUs, the tool with its Download / Update),
+## which Steam, GOG and Epic games share.
+##
 ## Built in code on the pattern of OGUI's own settings pages (library_settings_menu.tscn): a
 ## StateWatcher on this page's State hands focus to the page's FocusGroup, and Back pops the
 ## screen's state machine to return to the list.
@@ -56,9 +60,13 @@ var state: State
 var catalog := {}
 ## The emulator shown ("" = none yet).
 var emulator_id := ""
-## Adds the Steam rows (plugin.gd: Proton, CachyOS Proton arm64, keep running, start without Steam) to the box
-## it gets, under Steam Client's own rows; called at every build of Steam Client's page.
+## Adds the Steam rows (plugin.gd: keep running, start without Steam) to the box it gets, under Steam
+## Client's own rows; called at every build of Steam Client's page.
 var steam_rows := Callable()
+## Apps > Proton's list entry ({} for none: proton_tool.gd entry()), read with the catalog, and the rows
+## of its page (plugin.gd: channel, tool), called at every build of that page.
+var proton_entry := Callable()
+var proton_rows := Callable()
 var logger := Log.get_logger("RetroForgeEmulators", Log.LEVEL.INFO)
 var _rows: VBoxContainer
 var _focus_group: FocusGroup
@@ -132,6 +140,9 @@ func _build_rows() -> void:
 ## Read the catalog again (`retroforge-emu list`): installed versions, updates.
 func load_catalog() -> void:
 	catalog = _list()
+	var proton: Dictionary = proton_entry.call() if proton_entry.is_valid() else {}
+	if not proton.is_empty() and not catalog.has("proton"):
+		catalog["proton"] = proton
 
 
 ## Show one emulator (focusing its entry in the list).
@@ -248,6 +259,10 @@ func _add_credit(emu: Dictionary) -> void:
 func _add_emulator(id: String, emu: Dictionary) -> void:
 	var name_text := str(emu.get("name", id))
 	_add_credit(emu)
+	if emu.get("kind") == "proton":
+		if proton_rows.is_valid():
+			proton_rows.call(_rows)
+		return
 	var installed = emu.get("installed")
 	var state := EmuState.rows(id, emu, _checks.get(id, {}))
 	var last := _add_action_row(id, name_text, emu, state.main)

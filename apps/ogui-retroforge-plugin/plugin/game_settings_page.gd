@@ -145,7 +145,7 @@ func _build_page() -> void:
 	_scrape.progressed.connect(func(pct: int) -> void: _art.description = "Scraping... %d%%" % pct)
 	_scrape.finished.connect(_on_art_scraped)
 
-	_proton = _steam_dropdown("Proton", "Built for this CPU. Default: the one Steam runs it with (Apps > Steam Client).", "proton")
+	_proton = _steam_dropdown("Proton", "Built for this CPU. Default: the channel in Apps > Proton.", "proton")
 	_tso = _steam_dropdown("FEX TSO", TSO_ABOUT, "tso")
 	_launch = _steam_dropdown("Launch option", "Which of the game's programs starts, as in Steam's launch dialog. Default: the one Steam last started.", "launch")
 	_resolution = _steam_dropdown("Resolution", "The size the game draws at; the display scales it to the panel. Default: its Game resolution in Steam, else Settings > Display.", "resolution")
@@ -239,7 +239,7 @@ func _fill_steam_rows() -> void:
 	var entries: Array = data.get("launch", [])
 	# select() does not emit item_selected, so loading never saves.
 	_proton.clear()
-	for text in ["Default (Apps > Steam Client)", "ARMv8.0 stable", "ARMv8.0 experimental"]:
+	for text in ["Default (Apps > Proton)", "ARMv8.0 stable", "ARMv8.0 experimental"]:
 		_proton.add_item(text)
 	_proton.select(maxi(PROTON_CHOICES.find(settings.get("proton", "default")), 0))
 	_tso.clear()

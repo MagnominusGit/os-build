@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 # steam-compat-tools — Proton-CachyOS's arm64 build as a Steam compatibility tool, kept on its newest
-# release, with DXVK-Sarek on in it where the GPU needs it. Run by /usr/bin/retroforge-steam-cachyos (the
-# player's Download / Update in Apps > Steam Client > "CachyOS Proton arm64"), by
-# /usr/bin/retroforge-steam-proton (ARMv8.0 CPUs, below) and by the store's launcher.
+# release (on ARMv8.0 CPUs our ARMv8.0 build instead, below), with DXVK-Sarek on in it where the GPU
+# needs it. Run by /usr/bin/retroforge-proton (the player's Download / Update in Apps > Proton), by
+# /usr/bin/retroforge-steam-proton (ARMv8.0 CPUs, at each `steam` start and channel switch) and by
+# the store's launcher.
 #
 #   steam-compat-tools install  install or update the tool, and DXVK-Sarek on or off in every tool of
 #                               ours as the GPU needs it (below)
+#   steam-compat-tools status   print (JSON) the tool this device takes and what is installed of it:
+#                               {"name", "display_name", "author", "homepage", "installed": tag or
+#                               null, "armv8": true on an ARMv8.0 CPU}. Never touches the network.
 #
 # WHICH GPUS NEED SAREK. The a6xx_gen1_low Adreno 610 (SM6115) and 613 (SM4450): no hardware
 # multiview, so no multiViewport, which every upstream DXVK requires; Turnip fakes it only under
@@ -717,9 +721,28 @@ def locked_install(pin, need):
     return final
 
 
+def status(pin):
+    """What `status` prints: the pin's tool, its maker (the releases' GitHub owner) and the release
+    installed of it."""
+    m = re.match(r"https://api\.github\.com/repos/([^/]+)/([^/]+)/releases$", pin["releases"])
+    final = os.path.join(TOOLS, pin["dir"])
+    have = marker(final) if ours(final, pin) and complete(final) else None
+    return {"name": pin["name"], "display_name": pin["display_name"],
+            "author": m.group(1) if m else None,
+            "homepage": f"https://github.com/{m.group(1)}/{m.group(2)}" if m else None,
+            "installed": have["tag"] if have and have["tag"] else None, "armv8": lacks_atomics()}
+
+
 def main(argv):
+    if argv[1:] == ["status"]:
+        try:
+            print(json.dumps(status(read_pin())))
+        except Failed as err:
+            log(str(err))
+            return 1
+        return 0
     if argv[1:] != ["install"]:
-        log("usage: steam-compat-tools install")
+        log("usage: steam-compat-tools install|status")
         return 2
     need = needs_sarek()
     rc, path = 0, None

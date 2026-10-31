@@ -1,7 +1,11 @@
 extends RefCounted
-## Apps > Steam Client > "Proton": the default Proton on ARMv8.0 CPUs (no LSE atomics, e.g. the SM6115), our
-## ARMv8.0 build's stable or experimental channel, kept by /usr/bin/retroforge-steam-proton. Shown only on
-## those CPUs: elsewhere the command answers "steam" and Steam's own default stays.
+## Apps > Proton > "Channel": on ARMv8.0 CPUs (no LSE atomics, e.g. the SM6115), our ARMv8.0 build's stable
+## or experimental channel, kept by /usr/bin/retroforge-steam-proton: Steam's default Proton and each
+## Windows game's, and the one GOG and Epic games run with (steam-compat-tools reads the channel). Shown
+## only on those CPUs: elsewhere the command answers "steam" and there is no channel to pick.
+
+## The channel was switched: the tool row below installs the other build (proton_tool.gd install()).
+signal changed
 
 const TOOL := "/usr/bin/retroforge-steam-proton"
 const CHANNELS := ["stable", "experimental"]
@@ -27,8 +31,8 @@ func attach(box: Node) -> bool:
 		return false
 	_dropdown = dropdown_scene.instantiate()
 	_dropdown.name = "RetroForgeSteamProton"
-	_dropdown.title = "Proton"
-	_dropdown.description = "Built for this CPU. Steam uses it for every game not set to another tool. Experimental follows Valve's Proton Experimental."
+	_dropdown.title = "Channel"
+	_dropdown.description = "Stable follows Valve's Proton releases, Experimental its Proton Experimental, rebuilt for this CPU."
 	box.add_child(_dropdown)
 	_dropdown.add_item("ARMv8.0 stable")
 	_dropdown.add_item("ARMv8.0 experimental")
@@ -58,9 +62,10 @@ func _on_selected(index: int) -> void:
 		code = await cmd.finished as int
 	var now := status()
 	if code == 0 and now == want:
-		logger.info("Steam's Proton: " + want)
+		logger.info("Proton channel: " + want)
+		changed.emit()
 		return
 	logger.warn("retroforge-steam-proton set %s exited %d (now %s): %s" % [want, code, now, cmd.stderr])
-	notification_manager.show(Notification.new("Could not switch Steam's Proton to " + want))
+	notification_manager.show(Notification.new("Could not switch Proton to " + want))
 	if is_instance_valid(_dropdown) and now in CHANNELS:
 		_dropdown.select(CHANNELS.find(now))

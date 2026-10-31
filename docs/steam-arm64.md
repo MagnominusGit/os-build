@@ -620,16 +620,27 @@ ignores it anyway). Until 2026-10-31 there was a `DXVK_SAREK` setting (`retrofor
 Sarek on, but only downloaded a tool nothing selected. A leftover `DXVK_SAREK=` line in `steam.conf`
 is ignored, and a `user_settings.py` that toggle wrote is still recognised as ours.
 
-**Downloading it: Apps > Steam Client > "CachyOS Proton arm64".** A row with a Download button
-(Update once installed) and the download's percentage, on CPUs with LSE atomics (ARMv8.0 CPUs get the
-Proton row instead). It runs `/usr/bin/retroforge-steam-cachyos install`, which runs
-`steam-compat-tools install` as the user unit `retroforge-steam-compat-tools` and waits for it (a run of
-that unit already going is waited for first). A user unit is not under OGUI's reaper, and the download
-goes on if OGUI restarts. `install` puts the newest release in place as below, and never selects it.
-The percentage is `~/.local/share/retroforge/steam-compat-tools.progress` (0-100, then `unpacking`; gone
-when the run ends). `retroforge-steam-cachyos status` says `armv8`, `missing` or `installed <tag>`. The
-store launcher (GOG, Epic) uses the same tool, with the same `install`, when a game has no Proton of its
-own: one download serves both. Log: `~/.local/share/retroforge/steam-compat-tools.log`.
+**Apps > Proton (2026-10-31).** One entry of the Apps list for the Proton RetroForge keeps for
+Windows games, because Steam, GOG and Epic share it: on a CPU with LSE atomics Proton-CachyOS arm64, on
+an ARMv8.0 CPU our ARMv8.0 build (below). The plugin adds the entry itself (`proton_tool.gd`; no
+`retroforge-emu` catalog row), credited to the releases' GitHub owner (CachyOS, sunshineinabox). Its
+page: on ARMv8.0 CPUs the **Channel** dropdown (stable or experimental, `steam_proton.gd`,
+`retroforge-steam-proton set`), then the tool's row, with its installed release and a Download button
+(Update once installed) that shows the download's percentage. A channel switch starts the other
+build's download and the row follows it. Steam Client's page keeps only Steam's own rows (keep it
+running, start games without it). Until 2026-10-31 the channel and a "CachyOS Proton arm64" row sat
+under Apps > Steam Client, where a GOG- or Epic-only player would not look.
+
+The row runs `/usr/bin/retroforge-proton install`, which runs `steam-compat-tools install` as the user
+unit `retroforge-steam-compat-tools` and waits for it (a run of that unit already going, a `steam`
+start's or a channel switch's, is waited for first). A user unit is not under OGUI's reaper, and the
+download goes on if OGUI restarts. `install` puts the newest release in place as below, and never
+selects it in Steam. The percentage is `~/.local/share/retroforge/steam-compat-tools.progress` (0-100,
+then `unpacking`; gone when the run ends). `retroforge-proton status` (`steam-compat-tools status`)
+prints the tool this device takes as JSON: `name`, `display_name`, `author`, `homepage`, `installed`
+(the release tag, or null) and `armv8`. The store launcher (GOG, Epic) uses the same tool, with the same
+`install`, at a game's first install and each launch when the game has no Proton of its own: one
+download serves both. Log: `~/.local/share/retroforge/steam-compat-tools.log`.
 
 **Which release: a channel.** `/usr/share/retroforge/steam/proton-cachyos-arm64.pin` names a channel,
 not a version: the device resolves what is published now. Each `install` makes one request to GitHub's

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Offline test for Proton-CachyOS arm64 and our ARMv8.0 Proton as Steam compatibility tools:
 # /usr/lib/retroforge/steam-compat-tools (the tool, DXVK-Sarek where the GPU needs it) and
-# /usr/bin/retroforge-steam-cachyos (the plugin's "CachyOS Proton arm64" Download row).
+# /usr/bin/retroforge-proton (the plugin's Apps > Proton).
 #
 #   tests/test-steam-compat-tools.sh
 #
@@ -37,9 +37,10 @@
 #     (lock);
 #   - its progress file goes 0, percentages, 100, unpacking, and is gone at the end, but not when
 #     another run holds the lock;
-#   retroforge-steam-cachyos: status says armv8, missing or installed <tag> (only for a folder
-#   RetroForge installed); install runs the helper as the user unit with --wait after any run of it
-#   already going, else in the foreground, never on an ARMv8.0 CPU, and fails with the log's last line.
+#   status: the tool this CPU takes (Proton-CachyOS, or our ARMv8.0 build), credited to its GitHub
+#   owner, and its installed release (only from a folder RetroForge installed), as JSON;
+#   retroforge-proton: status is the helper's; install runs the helper as the user unit with --wait
+#   after any run of it already going, else in the foreground, and fails with the log's last line.
 # GitHub's API is a local fake (a pin's releases: points at it) and the downloads are file:// URLs;
 # device-env, systemd-run and systemctl are stubs.
 set -uo pipefail
@@ -682,7 +683,7 @@ SAREK=off tools8 "$T/cpuinfo-v80" - install
   && ok "Sarek off in it and in a Proton-CachyOS left on the device; the tools stay" || bad "rc=$RC err=$ERR"
 
 # ================================================================================================
-# install (what the plugin's "CachyOS Proton arm64" Download runs), and retroforge-steam-cachyos.
+# install (what Apps > Proton's Download runs), status, and retroforge-proton.
 PROGRESS="$T/home/.local/share/retroforge/steam-compat-tools.progress"
 CASE="helper: progress"
 rm -rf "$SROOT"; mkdir -p "${PROGRESS%/*}"
@@ -746,9 +747,8 @@ tools install
 exec 9>&-; rm -f "$PROGRESS"
 rm -f "$TOOL/user_settings.py"
 
-CCLI="$ROOT/rootfs/overlay/usr/bin/retroforge-steam-cachyos"
-C="$T/c"; mkdir -p "$C/bin" "$C/pins"
-cp "$PIN" "$C/pins/proton-cachyos-arm64.pin"
+CCLI="$ROOT/rootfs/overlay/usr/bin/retroforge-proton"
+C="$T/c"; mkdir -p "$C/bin"
 cat >"$C/bin/systemctl" <<EOF
 #!/usr/bin/env bash
 echo "\$*" >>"$C/systemctl.calls"
@@ -765,29 +765,46 @@ printf '%s\n' "\$@" >"$C/systemd-run.args"
 exec "\${@: -2}"
 EOF
 chmod +x "$C/bin/systemctl" "$C/bin/systemd-run"
-cachyos() {  # cachyos <cpuinfo> <user manager: 0 yes, 1 no> <args>
-  rm -f "$C/systemctl.calls" "$C/systemd-run.args"; echo "$2" >"$C/manager"; echo "${ACTIVE:-0}" >"$C/active"
+proton() {  # proton <user manager: 0 yes, 1 no> <args>: retroforge-proton with the test's pin (a CPU with atomics)
+  rm -f "$C/systemctl.calls" "$C/systemd-run.args"; echo "$1" >"$C/manager"; echo "${ACTIVE:-0}" >"$C/active"
   COUT="$("${NOPROXY[@]}" -u XDG_DATA_HOME -u RETROFORGE_STEAM_ROOT HOME="$T/home" PATH="$C/bin:$PATH" \
-          RETROFORGE_CPUINFO="$1" RETROFORGE_STEAM_PINS="$C/pins" RETROFORGE_STEAM_COMPAT_TOOLS="$HELPER" \
-          RETROFORGE_STEAM_COMPAT_PIN="$PIN" RETROFORGE_DEVICE_ENV="$T/no-device-env" bash "$CCLI" "${@:3}" 2>"$T/cerr")"; CRC=$?
+          RETROFORGE_CPUINFO="$T/cpuinfo-v82" RETROFORGE_STEAM_COMPAT_TOOLS="$HELPER" \
+          RETROFORGE_STEAM_COMPAT_PIN="$PIN" RETROFORGE_DEVICE_ENV="$T/no-device-env" bash "$CCLI" "${@:2}" 2>"$T/cerr")"; CRC=$?
   CERR="$(cat "$T/cerr")"
 }
+field() { python3 -c 'import json, sys; v = json.loads(sys.argv[1]).get(sys.argv[2]); print("null" if v is None else str(v).lower() if isinstance(v, bool) else v)' "$1" "$2" 2>/dev/null; }
 
-CASE="cachyos: status"
-cachyos "$T/cpuinfo-v82" 0 status
-[ "$CRC" = 0 ] && [ "$COUT" = "installed $R2" ] && ok "installed <tag>" || bad "rc=$CRC out=$COUT err=$CERR"
-cachyos "$T/cpuinfo-v80" 0 status
-[ "$COUT" = armv8 ] && ok "armv8 on an ARMv8.0 CPU (no row)" || bad "out=$COUT"
+CASE="proton: status"
+proton 0 status
+[ "$CRC" = 0 ] && [ "$(field "$COUT" installed)" = "$R2" ] && [ "$(field "$COUT" name)" = proton-cachyos-arm64 ] \
+  && [ "$(field "$COUT" display_name)" = "$SHOWN" ] && [ "$(field "$COUT" armv8)" = false ] \
+  && ok "the tool, its name and the installed release, as JSON" || bad "rc=$CRC out=$COUT err=$CERR"
 rm -rf "$SROOT"
-cachyos "$T/cpuinfo-v82" 0 status
-[ "$COUT" = missing ] && ok "missing on a fresh card" || bad "out=$COUT"
-mkdir -p "$TOOL"; touch "$TOOL/proton"; printf 'tag: x\n' >"$TOOL/.retroforge-pin"
-cachyos "$T/cpuinfo-v82" 0 status
-[ "$COUT" = missing ] && ok "missing for a folder RetroForge did not install" || bad "out=$COUT"
+proton 0 status
+[ "$(field "$COUT" installed)" = null ] && ok "installed null on a fresh card" || bad "out=$COUT"
+mkdir -p "$TOOL"; touch "$TOOL/proton" "$TOOL/toolmanifest.vdf" "$TOOL/compatibilitytool.vdf"; printf 'tag: x\n' >"$TOOL/.retroforge-pin"
+proton 0 status
+[ "$(field "$COUT" installed)" = null ] && ok "installed null for a folder RetroForge did not install" || bad "out=$COUT"
 rm -rf "$SROOT"
+OUT8="$("${NOPROXY[@]}" HOME="$T/home8" RETROFORGE_STEAM_ROOT="$S8" RETROFORGE_STEAM_PINS="$PINS8" RETROFORGE_CPUINFO="$T/cpuinfo-v80" \
+        RETROFORGE_STEAM_COMPAT_TOOLS="$HELPER" bash "$CCLI" status 2>&1)"
+[ "$(field "$OUT8" name)" = proton-armv8 ] && [ "$(field "$OUT8" armv8)" = true ] && [ "$(field "$OUT8" installed)" = armv8-proton-11.0-2e ] \
+  && ok "an ARMv8.0 CPU: our ARMv8.0 build, armv8 true" || bad "out=$OUT8"
+python3 - "$PIN_REAL" "$PIN8_REAL" "$HELPER" <<'PY' && ok "the real pins credit CachyOS and sunshineinabox, with their GitHub pages" || bad "author/homepage from the real pins"
+import importlib.machinery, importlib.util, os, sys
+os.environ["RETROFORGE_STEAM_ROOT"] = "/nonexistent"
+loader = importlib.machinery.SourceFileLoader("helper", sys.argv[3])
+m = importlib.util.module_from_spec(importlib.util.spec_from_loader("helper", loader))
+loader.exec_module(m)
+for pin, author, home in ((sys.argv[1], "CachyOS", "https://github.com/CachyOS/proton-cachyos"),
+                          (sys.argv[2], "sunshineinabox", "https://github.com/sunshineinabox/proton-armv8")):
+    m.PIN = pin
+    st = m.status(m.read_pin())
+    assert (st["author"], st["homepage"], st["installed"]) == (author, home, None), st
+PY
 
-CASE="cachyos: install, with a user manager"
-ACTIVE=1 cachyos "$T/cpuinfo-v82" 0 install
+CASE="proton: install, with a user manager"
+ACTIVE=1 proton 0 install
 [ "$CRC" = 0 ] && [ "$(tag_of "$TOOL")" = "$R2" ] && [ ! -e "$TOOL/user_settings.py" ] \
   && ok "installs it (no Sarek: no device-env here)" || bad "rc=$CRC err=$CERR"
 grep -qx -- --wait "$C/systemd-run.args" && grep -qx -- --unit=retroforge-steam-compat-tools "$C/systemd-run.args" \
@@ -795,23 +812,21 @@ grep -qx -- --wait "$C/systemd-run.args" && grep -qx -- --unit=retroforge-steam-
   && [ "$(tail -1 "$C/systemd-run.args")" = install ] && ok "as the user unit, waited for" || bad "$(cat "$C/systemd-run.args" 2>&1)"
 [ "$(grep -c is-active "$C/systemctl.calls")" = 2 ] && ok "after the unit's run already going" || bad "$(cat "$C/systemctl.calls")"
 
-CASE="cachyos: install, no user manager"
+CASE="proton: install, no user manager"
 rm -rf "$SROOT"
-cachyos "$T/cpuinfo-v82" 1 install
+proton 1 install
 [ "$CRC" = 0 ] && [ -x "$TOOL/proton" ] && [ ! -e "$C/systemd-run.args" ] && ok "in the foreground" || bad "rc=$CRC err=$CERR"
 
-CASE="cachyos: install fails"
+CASE="proton: install fails"
 rm -rf "$SROOT"
 mkpin "" "" "http://127.0.0.1:1/repos/CachyOS/proton-cachyos/releases"
-cachyos "$T/cpuinfo-v82" 0 install
+proton 0 install
 [ "$CRC" = 1 ] && grep -q "^steam-compat-tools: could not ask GitHub's API" <<<"$CERR" && ok "exit 1, the helper's last log line on stderr" || bad "rc=$CRC err=$CERR"
 mkpin
 
-CASE="cachyos: refused"
-cachyos "$T/cpuinfo-v80" 0 install
-[ "$CRC" = 2 ] && [ ! -e "$C/systemd-run.args" ] && ok "install on an ARMv8.0 CPU: exit 2, nothing run" || bad "rc=$CRC err=$CERR"
-cachyos "$T/cpuinfo-v82" 0
-[ "$CRC" = 2 ] && grep -q usage <<<"$CERR" && ok "no verb: exit 2 with the usage" || bad "rc=$CRC err=$CERR"
+CASE="proton: bad invocation"
+proton 0
+[ "$CRC" = 2 ] && grep -q usage <<<"$CERR" && [ ! -e "$C/systemd-run.args" ] && ok "no verb: exit 2 with the usage, nothing run" || bad "rc=$CRC err=$CERR"
 
 echo
 echo "$PASS passed, $FAIL failed"

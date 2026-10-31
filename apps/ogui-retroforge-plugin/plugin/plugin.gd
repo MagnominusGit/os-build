@@ -56,7 +56,7 @@ var _scraper: RefCounted  # scraper_settings.gd
 var _psn: RefCounted  # psn_settings.gd
 var _art_fetch: RefCounted  # art_fetch.gd: new ROMs' art, fetched when their card asks for it
 var _os: Resource  # retroforge_os.gd, installed as OGUI's platform.os
-var _cachyos: RefCounted  # steam_cachyos.gd
+var _tool: RefCounted  # proton_tool.gd
 var _keep: RefCounted  # steam_keep.gd
 var _direct: RefCounted  # steam_direct.gd
 var _stores_page: RefCounted  # steam_settings.gd: Settings > Stores
@@ -126,13 +126,16 @@ func _ready() -> void:
 	_art_fetch.allowed = _scraper.can_fetch
 	_install_os_platform()
 	_proton = load(plugin_base.path_join("steam_proton.gd")).new().setup(get_tree())
-	_cachyos = load(plugin_base.path_join("steam_cachyos.gd")).new().setup(get_tree())
+	_tool = load(plugin_base.path_join("proton_tool.gd")).new().setup(get_tree())
+	_proton.changed.connect(_tool.install)
 	_keep = load(plugin_base.path_join("steam_keep.gd")).new().setup(get_tree())
 	_direct = load(plugin_base.path_join("steam_direct.gd")).new().setup(get_tree())
 	if is_instance_valid(_emulators_screen):
 		_emulators_screen.page.steam_rows = _add_steam_rows
+		_emulators_screen.page.proton_entry = _tool.entry
+		_emulators_screen.page.proton_rows = _add_proton_rows
 	else:
-		logger.warn("no Apps screen; no Steam rows")
+		logger.warn("no Apps screen; no Steam rows, no Proton")
 	_stores_page = load(plugin_base.path_join("steam_settings.gd")).new().setup(get_tree(), "Stores")
 	_store_rows = load(plugin_base.path_join("store_settings.gd")).new().setup(get_tree())
 	if _stores_page.attach() and _store_rows.attach(_stores_page.box):
@@ -177,8 +180,8 @@ func unload() -> void:
 		_art_fetch.runner.cancel()
 	if _os:
 		_os.detach()
-	if _cachyos:
-		_cachyos.detach()
+	if _tool:
+		_tool.detach()
 	if _keep:
 		_keep.detach()
 	if _direct:
@@ -270,10 +273,17 @@ func _add_emulators_screen() -> void:
 
 
 ## Apps > Steam Client's page ends with these, under its own rows (apps_page.gd builds the page
-## again at each visit, so this runs each time): Proton (ARMv8.0 CPUs only), CachyOS Proton arm64 (other CPUs), keep Steam
-## running, start without Steam. A row whose command is missing is left out.
+## again at each visit, so this runs each time): keep Steam running, start without Steam. A row whose
+## command is missing is left out.
 func _add_steam_rows(box: Node) -> void:
-	for row in [_proton, _cachyos, _keep, _direct]:
+	for row in [_keep, _direct]:
+		row.attach(box)
+
+
+## Apps > Proton's page, built at each visit: the channel (ARMv8.0 CPUs only), then the tool with its
+## Download / Update. Steam, GOG and Epic games share both.
+func _add_proton_rows(box: Node) -> void:
+	for row in [_proton, _tool]:
 		row.attach(box)
 
 
