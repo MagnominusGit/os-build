@@ -2,9 +2,9 @@
 # retroforge initramfs init — Phase 5: mount the booted slot's root (ro) + var, mount the slot's
 # efi partition at /efi, stack the /etc overlay, then hand off to systemd.
 #
-# WHAT PICKED THE SLOT IS NOT HERE. Slot selection moved out of the initramfs in Phase 5
-# (docs/phase5.md): the bootloader chain — ABL -> steamcl (stage 1, on the ESP) -> per-slot GRUB
-# (stage 2) — picks the image and appends the full cmdline. This init merely carries out what
+# WHAT PICKED THE SLOT IS NOT HERE. The bootloader chain — ABL -> the ESP GRUB (on the ESP; it
+# picks the slot from RAUC's state) -> the slot's stage-2 grub.cfg (it picks the board) — picks the
+# image and appends the full cmdline. This init merely carries out what
 # the cmdline says:
 #
 #   root=PARTUUID=...                   the slot's btrfs root, mounted ro
@@ -27,9 +27,9 @@
 #                                       so it knows the partition). See docs/phase5.md.
 #
 # The old design-C machinery — the /RETROFORGE/STATE.* read/write, slot selection, failover,
-# kernel-mismatch warning and KERNEL.BAK rollback — is gone. The stage-2 boot-attempts counter + stock
-# steamcl's failsafe own "did a slot come up", and the OS owns "is this slot OK" via
-# retroforge-boot-good.service (set-mode booted / set-state bad). Nothing here chooses anything.
+# kernel-mismatch warning and KERNEL.BAK rollback — is gone. The ESP GRUB's try count owns "did a
+# slot come up", and the OS owns "is this slot OK" via retroforge-boot-good.service (RAUC's
+# mark-good / mark-bad). Nothing here chooses anything.
 #
 # WHY THE /ETC OVERLAY IS IN THE INITRAMFS AT ALL: it cannot be assembled after PID1 starts.
 # systemd reads /etc/fstab (via generators), /etc/machine-id, /etc/hostname and system.conf
@@ -45,7 +45,7 @@
 # Layout (image/partition-table.txt):
 #   root  <- PARTUUID=... (root=)             btrfs, ro
 #   var   <- PARTUUID=... (retroforge.var=)     ext4, rw   (overlay upper+work; /lib/retroforge/slot)
-#   efi   <- PARTUUID=... (retroforge.efi=)     vfat, rw   (the SLOT's efi-a/b: SteamOS/partsets)
+#   efi   <- PARTUUID=... (retroforge.efi=)     vfat, rw   (the SLOT's efi-a/b: stage 2 + parts.env)
 #   /etc  <- overlay(lower=/sysroot/etc, upper=/sysroot/var/lib/overlays/etc/upper)
 #
 # The efi mountpoint is INSIDE the btrfs root ($SYSROOT/efi), so the mount survives switch_root:
@@ -176,8 +176,8 @@ resolve() {
 # The PARTLABEL match is kept for one boot: an OLD stage-2 grub.cfg on the other slot's efi
 # partition, which has not been rewritten yet because post-install.sh only touches the slot it
 # just installed. Without it, booting back into a not-yet-updated slot reports slot='' and
-# retroforge-bootctl mark-good treats a real slot boot as a dev boot — so boot-attempts is never
-# cleared and a healthy image gets marked bad.
+# retroforge-bootctl mark-good treats a real slot boot as a dev boot — so the boot is never
+# confirmed and a healthy slot gets marked bad.
 #
 # Empty on any other root (a dev boot) — which is exactly what mark-good needs to know.
 SLOT=''
@@ -242,10 +242,9 @@ fi
 # ---------------------------------------------------------------------------------------------
 # The slot's efi partition at /efi (retroforge.efi=PARTLABEL=, or SteamOS's steamos.efi=PARTUUID=)
 # ---------------------------------------------------------------------------------------------
-# Either form names the partition the stage-2 GRUB was chainloaded from, so this mounts the
-# partition whose partsets name THIS image. post-install.sh
-# and retroforge-bootctl need it (this-image reads partsets/self), and the mount persists across
-# switch_root because it is on the new root's filesystem.
+# Either form names the partition the stage-2 grub.cfg was read from, so this mounts THIS slot's
+# efi partition. post-install.sh and retroforge-bootctl read parts.env off it, and the mount
+# persists across switch_root because it is on the new root's filesystem.
 efi_ok=0
 if [ -z "$EFISPEC" ]; then
   warn "no steamos.efi=PARTUUID= on the kernel cmdline — /efi will not be mounted (post-install needs it)"

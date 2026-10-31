@@ -27,7 +27,7 @@ kernel (`kernel/build.sh`), fetched firmware (`firmware/fetch-qcom-fw.sh` +
 
 | File | Purpose |
 |---|---|
-| `make-sdcard.sh` | Lay the **full** GPT from the table and populate **both** slots (Phase 5): the ESP carries the stage-1 steamcl + `SteamOS/conf` + a seeded grubenv; each slot's `efi-*` partition carries its stage-2 GRUB + partsets; root-A/B + var-A/B + home. `/home` is pre-seeded with the native arm64 Steam client. → `out/images/sdcard.img`. Unprivileged (mtools + sgdisk + `dd`, no loop). |
+| `make-sdcard.sh` | Lay the **full** GPT from the table and populate **both** slots (Phase 5): the ESP carries the ESP GRUB + a grubenv seeded with RAUC's slot state + `parts.env` + OpenABL's `/dtbs/qcom`; each slot's `efi-*` partition carries its stage-2 `grub.cfg`; root-A/B + var-A/B + home. `/home` is pre-seeded with the native arm64 Steam client. → `out/images/sdcard.img`. Unprivileged (mtools + sgdisk + `dd`, no loop). |
 | `lib-homestage.sh` | Sourced, never executed. The player user's `/home`, built once and used by two writers — `make-sdcard.sh` at build time and `installer/retroforge-install` on the device — because the two must produce the same tree. The parts that drift silently are the `~/.steam` compat symlinks: a missing sdk64 does not stop Steam starting, it makes an x86 title's `SteamAPI_Init()` fail at launch, on that medium only. |
 | `verify-card.sh` | Read the built card back and assert what actually landed: the GPT against the table, each slot's stage-2 config, the seeded grubenv. `make verify-card`. |
 | `card-meta.sh` | Emit the card's own metadata (version, git, mode, sizes) for the release workflows. |
@@ -52,7 +52,7 @@ docker run --rm -v "$PWD":/src -w /src retroforge-build image/make-sdcard.sh
 ```
 
 **Done (Phase 5 assembly):** partition layout, read-only Btrfs root, SteamDeck-style boot
-(steamcl stage 1 + per-slot GRUB stage 2 + kernel in the slot root), initramfs `/efi` mount,
+(the ESP GRUB picks the slot + the per-slot stage-2 config picks the board + kernel in the slot root), initramfs `/efi` mount,
 both slots populated by `make-sdcard.sh`, and the offline suites in `make test`
 (`tests/test-stage2-grub.sh`, `tests/test-units.sh`, `tests/test-bootctl.sh`,
 `tests/test-post-install.sh`) plus `make verify-card` against the built image.

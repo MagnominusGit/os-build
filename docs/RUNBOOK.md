@@ -56,11 +56,11 @@ dead card. That is a setting, not a fault.
 `image/partition-table.txt` is the single source of truth for sizes, typecodes and labels;
 `image/genpart.sh` emits the `sgdisk` script from it. Three facts drive most of what follows:
 
-- **The shared ESP carries the bootconf, not a kernel.** SteamOS/conf/{A,B}.conf on the ESP decide
-  which image boots and how many failed attempts it is allowed; the stage-1 steamcl (as
-  `/EFI/BOOT/bootaa64.efi`) is what ABL chainloads. Each slot's *own* efi partition (efi-a/efi-b)
-  carries that slot's stage-2 GRUB and its identity partset (`SteamOS/partsets/self`). ABL reads
-  partition 1 only.
+- **The shared ESP carries the slot state, not a kernel.** RAUC's `ORDER`, `A_OK`/`A_TRY` and
+  `B_OK`/`B_TRY` in `/EFI/steamos/grubenv` decide which slot boots; the ESP GRUB (as
+  `/EFI/BOOT/bootaa64.efi`) is what ABL starts, and it gives a slot three tries. Each slot's *own*
+  efi partition (efi-a/efi-b) carries that slot's stage-2 `grub.cfg`, which picks the board. ABL
+  reads partition 1 only.
 - **`/var` is per-slot, and `/etc` rides on it** (an overlayfs whose upper dir is
   `/var/lib/overlays/etc/upper`). A slot switch therefore carries `/etc` with it.
 - **`/home` is shared and survives everything** — including the paired SSH keys in
@@ -123,39 +123,34 @@ cat work/repo/aarch64/.stamps/gamescope.hash  # what was built, vs. inputhash.sh
 
 `make-sdcard.sh` lays the **full** GPT — ESP + root-A/-B + var-A/-B + home, with `/home` carrying an
 empty `player` home (`image/lib-homestage.sh`, shared with the internal installer) that grows to fill
-the card on first boot. Each `efi-*` partition carries that slot's stage-2 GRUB, its `grub.cfg` and
-the partsets that identify it.
+the card on first boot. Each `efi-*` partition carries that slot's stage-2 `grub.cfg` and
+`parts.env`; the ESP carries the ESP GRUB, the grubenv, `parts.env` and OpenABL's Device model list
+(`/dtbs/qcom`).
 
 **Whether slot B is populated follows the build mode**, and `RETROFORGE_SLOT_B=0|1` overrides it:
 
 * **Dev card** (`RETROFORGE_DEV=1`): B is populated, carrying a distinct btrfs fsid, because a slot
   switch cannot be proven against a slot that does not boot. Set `RETROFORGE_SLOT_B=0` for a faster
   local loop, at the cost of a card whose first slot switch can only exercise the failover path.
-* **Release card**: B is left empty **and no `B.conf` is written**. B would be a byte-identical copy
-  of an already-compressed root, surviving release compression whole — a second root's worth of
-  download for a failover window that closes the first time RAUC writes the slot. Omitting the conf is what keeps steamcl from
-  offering the empty slot as a boot candidate; see the seeding site in `image/make-sdcard.sh` for
-  the `SUPERMAX_BOOT_FAILURES` path it closes. The first update writes B in full and creates its
-  conf.
+* **Release card**: B is left empty **and the grubenv says `B_OK=0`**. B would be a byte-identical
+  copy of an already-compressed root, surviving release compression whole — a second root's worth of
+  download for a failover window that closes the first time RAUC writes the slot. `B_OK=0` (and the
+  ESP GRUB's check for a kernel) is what keeps it from being tried. The first update writes B in
+  full and RAUC marks it OK.
 
 Run `verify-card` before you commit a card to a device — it asserts the built image rather than
 the source tree, which is the only place the GPT, the ESP contents and the per-slot filesystem
 identities are checked at all.
 
-**The first boot stops at the stage-2 board menu and waits.** One image serves every supported
-board (the README's table is the roster), so the DTB is the one thing the card cannot know. The
-choice is written to `/EFI/steamos/grubenv` on the shared ESP, and every boot after that takes it
-automatically behind a 3-second visible menu — including across a slot switch and an update, since
-the grubenv is on the ESP rather than in a slot. Picking the wrong board gives a card that does
-not come up; the menu stays visible (rather than hidden) precisely so there is a way back on a
-device with no keyboard.
-
-To install a freshly built stage-1 steamcl onto an already-flashed card's ESP without rebuilding
-the image:
-
-```sh
-make deploy ESP=/run/media/$USER/RETROFORGE
-```
+**The board comes from OpenABL's Device model when it is set.** One image serves every supported
+board (the README's table is the roster), so the DTB is the one thing the card cannot know.
+OpenABL installs the DTB of its Device model (it lists the ones in the ESP's `/dtbs/qcom`) before it
+starts the ESP GRUB, and the stage-2 config boots the entry for that model with the slot's own DTB.
+With no Device model, **the first boot stops at the stage-2 board menu and waits**; the choice is
+written to `/EFI/steamos/grubenv` and every boot after that takes it with the menu hidden. The menu
+comes back for 3 seconds when a board that has never had a boot confirmed is tried again — which is
+how a wrong board shows itself and how to get back from it — and when no slot has tries left. With a
+Device model set, change the board in OpenABL's menu instead.
 
 ## Reach the device
 
@@ -276,18 +271,19 @@ so budget minutes of SD-card writes for a one-package bump.
 
 The post-install hook makes the freshly written slot bootable: it re-randomises the target's btrfs
 fsid (both slots otherwise share an fsid *and* `devid=1`, and mounting one can hand you the other),
-copies `/var` across, installs this build's stage-2 GRUB + grub.cfg + font onto the target's efi
-partition and re-points its partsets, refreshes the shared ESP's stage-1 steamcl if it changed, and
-finally arms the target for its trial boot through steamos-bootconf. Reboot to land on the new slot.
+copies `/var` across, installs this build's stage-2 grub.cfg + font onto the target's efi
+partition, refreshes the shared ESP's `parts.env`, `/dtbs/qcom` and ESP GRUB if they changed, and
+finally arms the target for its trial boot in the grubenv (first in `ORDER`, OK, `TRY=0`). Reboot to
+land on the new slot.
 
 ## Read and steer the boot state
 
 ```sh
-retroforge-bootctl status               # what booted, and what the ESP/efi say
-retroforge-bootctl get-state B          # is slot B fit to boot? (good|bad)
-retroforge-bootctl set-primary B        # boot slot B next (starts its trial boot)
-retroforge-bootctl set-state B bad      # demote B; the next boot goes to the other slot
-retroforge-bootctl mark-good            # confirm THIS boot — ends its trial, clears boot-attempts
+retroforge-bootctl status               # what booted, RAUC's slot state, what boots next
+retroforge-bootctl get-state B          # is slot B fit to boot? (good|bad, RAUC's rule)
+retroforge-bootctl set-primary B        # boot slot B next (rauc status mark-active; starts its trial)
+retroforge-bootctl set-state B bad      # demote B (rauc status mark-bad); the next boot goes to the other slot
+retroforge-bootctl mark-good            # confirm THIS boot (rauc status mark-good booted) — ends its trial
 ```
 
 **All of these need root, and a release image ships no `sudo`.** As `player` the tool cannot answer
@@ -295,47 +291,21 @@ any of it. On a dev card, `ssh -i work/dev-ssh/id_ed25519 root@<device>`; on a r
 read the state off the card offline (below). `rauc install` is the deliberate exception — it goes
 through rauc's D-Bus service and its open bus policy, which is why it works as `player`.
 
-These are Valve's SteamOS semantics, surfaced through the same steamos-bootconf that RAUC uses, so
-`retroforge-bootctl` and `rauc status` agree by construction. The state that decides a boot lives in
-the ESP conf of each image:
+The slot state is RAUC's own (`bootloader=grub`), so `retroforge-bootctl` and `rauc status` agree
+by construction. It lives in the ESP's grubenv:
 
-- **`image-invalid`** — a hard demote. `set-state <slot> bad` sets it (and the boot-health unit's
-  failure path does exactly that, via `retroforge-boot-bad.service`); only a completed install clears
-  it, because the post-install hook is the only place that knows an install completed. **This is
-  the only rollback trigger that is live today.**
-- **`boot-attempts`** — the trial counter. The stage-2 `retroforge` module bumps it on every kernel
-  boot (`retroforge_bootattempts <slot>` in the generated `grub.cfg`), `mark-good` clears it after a
-  healthy session, and steamcl's failsafe offers a menu at ≥3 and auto-picks the other slot at ≥6.
-  **HW-validated 2026-08-02.** Two traps when checking it by hand: a healthy boot runs `set-mode
-  booted`, which *clears* the counter — so mask `retroforge-boot-good.{path,service}` before the test
-  reboot or a working counter and a dead one both read `0`. And GRUB prints
-  `retroforge: A boot-attempts 0 -> 1` just before the board menu paints over it, so on a 3s boot you
-  will usually miss it; the conf is the evidence, not the panel.
+- **`<slot>_OK`** — a hard demote when 0. `set-state <slot> bad` clears it (and the boot-health unit's
+  failure path does exactly that, via `retroforge-boot-bad.service`); RAUC's set-primary and a
+  completed install set it again.
+- **`<slot>_TRY`** — the trial count. The ESP GRUB bumps it before every boot of that slot,
+  `mark-good` clears it after a healthy session, and after three tries without one the ESP GRUB
+  boots the other slot. A healthy boot *clears* it, so mask `retroforge-boot-good.{path,service}`
+  before a test reboot if you want to watch it count.
 
 > **What that means in practice.** A slot that boots but comes up broken IS demoted — the health
 > unit fails and the next boot goes to the other slot. A slot that never gets far enough to run
-> systemd at all is demoted by the counter above, at ≥6 attempts. Recovery is the stage-2 board
-> menu, which is why
-> it stays visible rather than hidden.
-
-Three traps, each of which has inverted a conclusion on real hardware:
-
-- **`rauc status` cannot tell promoted from still-on-trial.** It reports the slot `good` in both
-  states. Only the ESP conf distinguishes them — and while `boot-attempts` is unwired, not even
-  that does: read `image-invalid` and whether the health unit succeeded this boot
-  (`systemctl status retroforge-boot-good`).
-- **A slot that never booted answers `good`.** `get-state` reads `boot-attempts ≥ 1` or
-  `image-invalid > 0`; a freshly installed slot has neither, so it is indistinguishable from a
-  confirmed one until its first boot. That is by design — a new slot must not report bad before it
-  has ever tried.
-- **A trial that is never confirmed does not revert on its own.** With the counter unwired, the
-  automatic revert is the health unit failing and demoting the running image. If the session never
-  comes up at all, nothing fires; `set-primary` back to the good slot by hand.
-
-`set-primary` is the manual equivalent of the old `try`: it arms the other slot for its trial boot.
-There is no manual `rollback` — `set-primary` back to the good slot is it. `self` is accepted anywhere an image name is, and resolves to
-the booted image; that is what the boot-health unit's failure path uses to demote (`set-state self
-bad`).
+> systemd at all is skipped after its third try. Each retry and each fall-back shows the stage-2
+> board menu for 3 seconds.
 
 ## Recovery: when it does not boot
 
@@ -382,28 +352,24 @@ sudo journalctl -D /mnt/.retroforge/offload/var/log/journal --list-boots
 sudo journalctl -D /mnt/.retroforge/offload/var/log/journal _BOOT_ID=<id>
 ```
 
-The ESP carries the bootconf that decided the boot, and the booted slot's efi partition carries
-its identity:
+The ESP carries the slot state that decided the boot:
 
 ```sh
 sudo mount /dev/sdX1 /mnt-esp                 # RETROFORGE-ESP
-cat /mnt-esp/SteamOS/conf/A.conf /mnt-esp/SteamOS/conf/B.conf
-sudo mount /dev/sdX2 /mnt-efi                 # retroforge-efi-A (the booted slot's efi)
-cat /mnt-efi/SteamOS/partsets/self            # which image this efi partition IS
+grub-editenv /mnt-esp/EFI/steamos/grubenv list   # ORDER, A_OK/A_TRY, B_OK/B_TRY, saved_entry
 ```
 
-`image-invalid: 1` on the conf of the image that just failed means it was demoted — by the health
-unit's failure path, by hand, or by an interrupted install. `boot-attempts:` will read 0 whatever
-happened, until the stage-2 counter is wired up.
-`steamos-bootconf` is the authoritative tool; `tests/test-bootctl.sh` documents the semantics.
+`<slot>_OK=0` on the slot that just failed means it was demoted — by the health unit's failure path,
+by hand, or by an interrupted install. `<slot>_TRY=3` means it used its three tries without a
+healthy session. `tests/test-bootctl.sh` and `tests/test-stage2-grub.sh` document the semantics.
 
 The initramfs is written to **degrade loudly rather than brick**: if it cannot assemble the
 `/etc` overlay it falls back to a writable un-overlaid root and says so via `/dev/kmsg`. A device
 that boots to a shell with a strange `/etc` is that path, not a corrupt image.
 
-A torn write to the ESP or to a slot's efi partition — a lost partset, a missing stage-2 GRUB — is
-a **reflash**; the post-install hook refuses to update a card whose booted efi has no partsets.
-That is the acknowledged failure mode of the design, not a bug to work around.
+A torn write to the ESP or to a slot's efi partition — a lost grubenv, a missing stage-2 config —
+is a **reflash**; the post-install hook refuses to update a card whose ESP has no grubenv. That is
+the acknowledged failure mode of the design, not a bug to work around.
 
 ## Before a push
 

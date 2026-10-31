@@ -3,17 +3,16 @@
 #
 # Lays the FULL SteamOS-style 8-partition GPT from image/partition-table.txt and populates
 # BOTH slots: ESP + rootfs-a/-b + var-a/-b + home, and each slot's efi-a/efi-b partition with
-# that slot's STAGE-2 GRUB (Phase 5; docs/archive/phase5.md).
+# that slot's STAGE-2 grub.cfg.
 #
-# The boot chain this card boots is SteamOS's three-stage one:
+# The boot chain this card boots:
 #
-#   ABL -> /EFI/BOOT/bootaa64.efi (steamcl, stage 1, shared ESP)
-#       -> \EFI\steamos\grubaa64.efi on the SLOT's efi partition (stage 2)
+#   ABL -> /EFI/BOOT/bootaa64.efi (the ESP GRUB, shared ESP: picks the slot from the grubenv)
+#       -> \EFI\steamos\grub.cfg on the SLOT's efi partition (stage 2: picks the board)
 #       -> kernel in the slot's root /boot
 #
-# The ESP carries the stage-1 software + the boot state (SteamOS/conf/A.conf|B.conf + the
-# grubenv); each efi partition carries its own stage-2 GRUB + identity partsets. There is no
-# /KERNEL and no /RETROFORGE/STATE.0 — that was design C; the slot state IS the confs now.
+# The ESP carries the ESP GRUB, the grubenv (RAUC's slot state + the saved board), parts.env and
+# OpenABL's Device model DTBs; each efi partition carries its slot's stage-2 grub.cfg.
 #
 # WHY B IS POPULATED ON A DEV CARD AND EMPTY ON A RELEASE CARD. The default follows RETROFORGE_DEV;
 # RETROFORGE_SLOT_B=0|1 overrides it in either direction.
@@ -38,12 +37,12 @@
 # lays the GPT with sgdisk via image/genpart.sh, and dd's each filesystem into its partition
 # byte offset — no loop mounts, no root.
 #
-# Run inside the build image (needs sgdisk + mkfs.vfat + mtools + mkfs.ext4 + grub-editenv):
+# Run inside the build image (needs sgdisk + mkfs.vfat + mtools + mkfs.ext4 + grub-editenv + fdtput):
 #   docker run --rm -v "$PWD":/src -w /src retroforge-build image/make-sdcard.sh
 #
-# Prereqs: boot/steamcl.sh + boot/grub.sh (-> out/boot/{steamcl.efi,steamcl-version,holo-bootconf,
-# fonts/default.pf2, grubaa64.efi, grub-a.cfg, grub-b.cfg, fonts/dejavu-mono.pf2}) and
-# rootfs/build-image.sh (-> out/images/{rootfs,var}.img) have run.
+# Prereqs: boot/grub.sh (-> out/boot/{grub-esp.efi, grubaa64.efi, grub-a.cfg, grub-b.cfg,
+# fonts/dejavu-mono.pf2, grubenv}), kernel/build.sh (-> out/dtbs) and rootfs/build-image.sh
+# (-> out/images/{rootfs,var}.img) have run.
 set -euo pipefail
 export MTOOLS_SKIP_CHECK=1   # mtools on a file image has no geometry; silence the warning
 
@@ -62,16 +61,13 @@ ROOTFS_B="$IMGDIR/rootfs-b.img"   # built here from $ROOTFS with a fresh fsid; s
 IMG="$IMGDIR/sdcard.img"
 TABLE="$ROOT/image/partition-table.txt"
 
-# Phase 5 boot-stage artifacts, all staged to out/boot by boot/steamcl.sh + boot/grub.sh:
-STEAMCL="$BOOT/steamcl.efi"
-STEAMCL_VER="$BOOT/steamcl-version"
-BOOTCONF="$BOOT/holo-bootconf"          # installed on the ESP as steamos-bootconf
-STAGE_FONT="$BOOT/fonts/default.pf2"    # steamcl's boot menu font
+# Boot artifacts, all staged to out/boot by boot/grub.sh:
+GRUB_ESP="$BOOT/grub-esp.efi"           # the ESP GRUB (\EFI\BOOT\bootaa64.efi)
 GRUB_EFI="$BOOT/grubaa64.efi"
 GRUB_CFG_A="$BOOT/grub-a.cfg"           # per-slot grub.cfg (stage 2, A)
 GRUB_CFG_B="$BOOT/grub-b.cfg"
 GRUB_FONT="$BOOT/fonts/dejavu-mono.pf2" # stage-2 boot font ($prefix/fonts/ in grub.cfg)
-GRUBENV="$BOOT/grubenv"                 # pristine stage-2 env block (saved_entry lives here)
+GRUBENV="$BOOT/grubenv"                 # pristine env block (RAUC's slot state + saved_entry)
 
 # Populate the B slot too: on for a dev card, off for a release card. See the header for why.
 # Read the mode rather than defaulting to 1, so that forgetting to forward RETROFORGE_DEV produces a
@@ -84,15 +80,15 @@ END_SLACK_MIB=2   # tail room for the backup GPT (well over its ~17 KiB)
 # /home (ext4) carries a ready /home/player from image-build time (see below). The partition is
 # flashed small; on first boot retroforge-grow-home extends the partition + its ext4 to fill the card.
 
-for t in sgdisk mkfs.vfat mcopy mmd mkfs.ext4 grub-editenv; do
+for t in sgdisk mkfs.vfat mcopy mmd mkfs.ext4 grub-editenv fdtget fdtput; do
   command -v "$t" >/dev/null 2>&1 || { echo "$t not found — run inside retroforge-build" >&2; exit 1; }
 done
 [ "$SLOT_B" = 1 ] && { command -v btrfstune >/dev/null 2>&1 || {
   echo "btrfstune not found — run inside retroforge-build (or set RETROFORGE_SLOT_B=0)" >&2; exit 1; }; }
-for f in "$STEAMCL" "$STEAMCL_VER" "$BOOTCONF" "$STAGE_FONT" \
-         "$GRUB_EFI" "$GRUB_CFG_A" "$GRUB_CFG_B" "$GRUB_FONT" "$GRUBENV"; do
-  [ -f "$f" ] || { echo "no boot artifact: ${f#"$ROOT"/} (run boot/steamcl.sh + boot/grub.sh)" >&2; exit 1; }
+for f in "$GRUB_ESP" "$GRUB_EFI" "$GRUB_CFG_A" "$GRUB_CFG_B" "$GRUB_FONT" "$GRUBENV"; do
+  [ -f "$f" ] || { echo "no boot artifact: ${f#"$ROOT"/} (run boot/grub.sh)" >&2; exit 1; }
 done
+compgen -G "$OUT/dtbs/*.dtb" >/dev/null || { echo "no DTBs in ${OUT#"$ROOT"/}/dtbs (run kernel/build.sh)" >&2; exit 1; }
 [ -f "$ROOTFS" ] || { echo "no rootfs: ${ROOTFS#"$ROOT"/} (run rootfs/build-image.sh)" >&2; exit 1; }
 [ -f "$VARIMG" ] || { echo "no var image: ${VARIMG#"$ROOT"/} (run rootfs/build-image.sh)" >&2; exit 1; }
 
@@ -189,23 +185,7 @@ truncate -s "${total_mib}M" "$IMG"
 "$ROOT/image/genpart.sh" "$IMG" >/dev/null
 sgdisk -p "$IMG"
 
-# 4b. Partition uuids (Phase 5). sgdisk assigns these at GPT-lay time; the ESP confs and the efi
-# partsets are keyed by them (steamcl matches a partset's `efi` value against the uuid of the
-# partition it was loaded from, and reads partsets/all for the ESP; bootconf reads partsets/self).
-# Stage 2 reads none of them: retroforge_bootattempts takes the image name as an ARGUMENT, which is
-# what let its ~2000-line predecessor go. Lowercased — PARTUUID= on the kernel cmdline and the EFI
-# guid strings are lowercase.
-part_uuid() { sgdisk -i "$1" "$IMG" | sed -n 's/^Partition unique GUID: \(.*\)/\1/p' | tr '[:upper:]' '[:lower:]'; }
-ESP_UUID="$(part_uuid "$P_ESP")"
-EFIA_UUID="$(part_uuid "$P_EFIA")"
-EFIB_UUID="$(part_uuid "$P_EFIB")"
-[ -n "$ESP_UUID" ] && [ -n "$EFIA_UUID" ] && [ -n "$EFIB_UUID" ] || {
-  echo "cannot read esp/efi-a/efi-b partition uuids from ${IMG#"$ROOT"/}" >&2; exit 1; }
-echo "  esp  $ESP_UUID"
-echo "  efi-a $EFIA_UUID"
-echo "  efi-b $EFIB_UUID"
-
-# 4c. ESP filesystem (FAT32) — the stage-1 home:
+# 4b. ESP filesystem (FAT32) — the ESP GRUB's home:
 #
 # mtools has no mkdir -p: create each directory level (an existing dir is fine to re-touch).
 fatdir() {  # <img> <msdos path, no leading '::'>
@@ -216,20 +196,15 @@ fatdir() {  # <img> <msdos path, no leading '::'>
   done
 }
 #
-#   /EFI/BOOT/bootaa64.efi           ABL chainloads this (steamcl); with /KERNEL gone it is the
-#                                    only way onto the card
-#   /EFI/BOOT/{steamcl-version,      companion files resolved by steamcl's resolve_path() relative
-#     steamcl-restricted,            to the chainloader location
-#     fonts/default.pf2}
-#   /EFI/steamos/grubenv             stage-2 env block (saved_entry), seeded on ESP so the
-#                                    user's board choice survives slot updates
-#   /SteamOS/conf/A.conf[|B.conf]    the per-image boot state (bootconf's home). A is seeded with
-#                                    the newest boot-requested-at so the FIRST boot picks A. B.conf
-#                                    exists only when slot B is populated -- see the seeding site
+#   /EFI/BOOT/bootaa64.efi           ABL starts this (the ESP GRUB); it is the only way onto the card
+#   /EFI/steamos/grubenv             RAUC's slot state (ORDER, A_OK/A_TRY, B_OK/B_TRY) and the
+#                                    saved board choice, seeded so the FIRST boot picks A
+#   /EFI/steamos/parts.env           where our eight partitions are (see 4c)
+#   /dtbs/qcom/*.dtb                 OpenABL's Device model list (boot/esp-dtbs.sh)
 #
 # NOTHING RESOLVES THE ESP BY THIS LABEL. ABL finds it by type GUID (ef00), the OS mounts it by
 # PARTLABEL from /etc/fstab, and the stage-2 grub.cfg addresses it by partition index (falling back
-# to a search for /SteamOS/conf/<slot>.conf, i.e. by content). The label is a human convenience on
+# to a search for /EFI/steamos/grubenv, i.e. by content). The label is a human convenience on
 # a mounted card, and it is deliberately NOT the GPT name: a FAT label caps at 11 characters and
 # RETROFORGE-ESP is fourteen. An earlier version of this script had grub.cfg searching for a FAT label
 # this line had stopped writing, and nothing failed -- the saved board choice just never persisted.
@@ -237,81 +212,24 @@ esp="$(mktemp)"
 truncate -s "${ESP_SIZE_MIB}M" "$esp"
 mkfs.vfat -F 32 -n RETROFORGE "$esp" >/dev/null
 fatdir "$esp" /EFI/BOOT
-fatdir "$esp" /EFI/BOOT/fonts
 fatdir "$esp" /EFI/steamos
-fatdir "$esp" /SteamOS/conf
-mcopy -i "$esp" "$STEAMCL" ::/EFI/BOOT/bootaa64.efi
-mcopy -i "$esp" "$STEAMCL_VER" ::/EFI/BOOT/steamcl-version
-flag="$(mktemp)"; : >"$flag"
-mcopy -i "$esp" "$flag" ::/EFI/BOOT/steamcl-restricted
-mcopy -i "$esp" "$STAGE_FONT" ::/EFI/BOOT/fonts/default.pf2
-# The pristine env block comes from out/boot, not from a `grub-editenv create` here. It used to be
-# minted on the spot, which was fine while a card was the only thing that had one -- but the internal
-# installer writes an ESP too and cannot run grub-editenv (not on the shipped image), so it ships as
-# a build artifact and gets copied. Two writers of the same constant is how a card and an install end
-# up carrying subtly different objects; one writer, two copies, cannot.
-mcopy -i "$esp" "$GRUBENV" ::/EFI/steamos/grubenv
+fatdir "$esp" /dtbs/qcom
+# The pristine env block comes from out/boot, not from a `grub-editenv create` here: the internal
+# installer starts from the same file, so a card and an install carry the same object. The slot
+# state is seeded on a copy: A is the only slot a fresh card is sure to have, and B is OK only when
+# this card populates it. RAUC makes B OK itself the first time it writes it.
+envtmp="$(mktemp)"
+cp "$GRUBENV" "$envtmp"
+grub-editenv "$envtmp" set "ORDER=A B" "A_OK=1" "A_TRY=0" "B_OK=$SLOT_B" "B_TRY=0"
+mcopy -i "$esp" "$envtmp" ::/EFI/steamos/grubenv
+espdtbs="$(mktemp -d)"
+"$ROOT/boot/esp-dtbs.sh" "$espdtbs" "$OUT"/dtbs/*.dtb >/dev/null
+mcopy -i "$esp" "$espdtbs"/*.dtb ::/dtbs/qcom/
+mcopy -i "$esp" "$GRUB_ESP" ::/EFI/BOOT/bootaa64.efi
 
-# The confs: key: value lines (bootconf's format). boot-requested-at is a YYYYmmDDHHMMSS UTC
-# datestamp; the chainloader picks the image with the newest one as the default. A gets now,
-# B gets 0, so a fresh card's first boot lands on A.
-mkconf() {  # <outfile> <ident> <stamp>
-  cat >"$1" <<EOF
-title: retroforge $2
-boot-requested-at: $3
-boot-other: 0
-boot-other-disabled: 0
-boot-attempts: 0
-boot-count: 0
-boot-time: 0
-image-invalid: 0
-verbose: 0
-update: 0
-update-disabled: 1
-update-window-start: 0
-update-window-end: 0
-loader:
-partitions:
-comment: seeded by image/make-sdcard.sh
-EOF
-}
-conf_a="$(mktemp)"; conf_b="$(mktemp)"
-mkconf "$conf_a" A "$(date -u +%Y%m%d%H%M%S)"
-mcopy -i "$esp" "$conf_a" ::/SteamOS/conf/A.conf
-
-# NO B.conf WHEN B IS EMPTY, and this is load-bearing rather than tidiness. steamcl honours
-# image-invalid only as a SORT DEMOTION -- chainloader/bootload.c reads it into found[].disabled and
-# earlier_entry_is_newer() sorts disabled below enabled, but the steamos-efi README says it outright:
-# "This does not disable booting, it lowers this image's priority". A marked-invalid B is still a
-# candidate. Worse, set_menu_conf() deliberately picks the OTHER entry once the selected one passes
-# SUPERMAX_BOOT_FAILURES (6), and that pick is guarded ONLY by `found[alt_opt].tries <= tries` -- it
-# never consults the disabled flag, and a slot nothing has ever booted reports boot-attempts 0, so it
-# passes every time. Marking B invalid would not have closed that path.
-#
-# Omitting the conf closes it at the source. steamcl builds its candidate list by walking the EFI
-# partition handles (skipping the ESP), resolving each one's partsets/self to an image name, and then
-# requiring a config for that name: <esp>\SteamOS\conf\<name>.conf, falling back to SteamOS\bootconf
-# on the efi partition itself. With NEITHER present it does `continue` and the partition never enters
-# found[] at all. So efi-b can keep its full stage-2 GRUB and partsets (mkefi below runs
-# unconditionally, and nothing here writes the legacy SteamOS\bootconf) and B is still not a
-# candidate. found_cfg_count is then 1, def_opt is 0, and BOTH branches of the alt pick are false
-# (`def_opt > 0`, and `def_opt < found_cfg_count - 1` = `0 < 0`) -- so alt_opt stays def_opt and
-# nothing is switched. A is retried behind the failsafe menu, which is the right answer for a device
-# that genuinely has one populated slot, instead of being handed a slot with no kernel.
-#
-# It returns on its own the first time B becomes real: retroforge-bootctl's ensure_exists() runs
-# `bc config --image B || bc create --image B`, bootconf's create_missing defaults to on, RAUC's
-# set-primary goes through it, and post-install.sh then clears image-invalid on the slot it wrote.
-if [ "$SLOT_B" = 1 ]; then
-  mkconf "$conf_b" B 0
-  mcopy -i "$esp" "$conf_b" ::/SteamOS/conf/B.conf
-fi
-
-# 4d. efi-a / efi-b (p2/p3): each slot's STAGE-2 home. Per docs/archive/phase5.md and the post-install
-# hook's refresh shape, both carry the same /EFI/steamos/{grubaa64.efi, grub.cfg, fonts, parts.env}
-# and the same /SteamOS/partsets/{A,B,all,shared}; only self/other differ, naming THIS partition and
-# the other one. steamcl chainloads \EFI\steamos\grubaa64.efi; the module's grub.cfg is the A or B
-# variant; the partsets are the identity steamcl matches the booted efi uuid against.
+# 4c. efi-a / efi-b (p2/p3): each slot's STAGE-2 home. In the post-install hook's refresh shape,
+# both carry /EFI/steamos/{grubaa64.efi, grub.cfg, fonts, parts.env}; grub.cfg is the A or B
+# variant, which the ESP GRUB hands over to.
 #
 # parts.env is where our eight partitions ARE on this medium. The stage-2 grub.cfg carries the same
 # numbers as build-time defaults, so on a card the file changes nothing — it is seeded anyway, and
@@ -319,42 +237,29 @@ fi
 # every boot, instead of shipping that path untested until the installer exists. On an internal
 # install our eight are APPENDED to the OEM's GPT and land at per-vendor indices, and the installer
 # writes this file with the real ones. It is the one map of the layout, so it goes on both slots
-# identically; the reader picks the keys for the slot it is.
+# and the ESP identically; each reader picks the keys it needs.
 partsenv="$(mktemp)"
 grub-editenv "$partsenv" create
 grub-editenv "$partsenv" set \
   "nd_esp=$P_ESP" "nd_efi_a=$P_EFIA" "nd_efi_b=$P_EFIB" \
   "nd_root_a=$P_ROOTA" "nd_root_b=$P_ROOTB" \
   "nd_var_a=$P_VARA" "nd_var_b=$P_VARB" "nd_home=$P_HOME"
-mkpartset() {  # <img> <name> <token...>
-  local img="$1" name="$2"; shift 2
-  local tmp; tmp="$(mktemp)"
-  printf '%s\n' "$*" >"$tmp"
-  mcopy -i "$img" "$tmp" "::/SteamOS/partsets/$name"
-  rm -f "$tmp"
-}
-mkefi() {  # <img> <grub.cfg> <self-efi-uuid> <other-efi-uuid> <label-suffix>
-  local img="$1" cfg="$2" self="$3" other="$4" label_suffix="$5"
+mcopy -i "$esp" "$partsenv" ::/EFI/steamos/parts.env
+mkefi() {  # <img> <grub.cfg> <label-suffix>
+  local img="$1" cfg="$2" label_suffix="$3"
   truncate -s "${EFI_SIZE_MIB}M" "$img"
   mkfs.vfat -F 32 -n "GRUB-${label_suffix}" "$img" >/dev/null
   fatdir "$img" /EFI/steamos/fonts
-  fatdir "$img" /SteamOS/partsets
   mcopy -i "$img" "$GRUB_EFI" ::/EFI/steamos/grubaa64.efi
   mcopy -i "$img" "$cfg" ::/EFI/steamos/grub.cfg
   mcopy -i "$img" "$GRUB_FONT" ::/EFI/steamos/fonts/dejavu-mono.pf2
   mcopy -i "$img" "$partsenv" ::/EFI/steamos/parts.env
-  mkpartset "$img" A      "efi $EFIA_UUID"
-  mkpartset "$img" B      "efi $EFIB_UUID"
-  mkpartset "$img" all    "esp $ESP_UUID"
-  mkpartset "$img" shared "esp $ESP_UUID"
-  mkpartset "$img" self   "efi $self"
-  mkpartset "$img" other  "efi $other"
 }
 efi_a="$(mktemp)"; efi_b="$(mktemp)"
-mkefi "$efi_a" "$GRUB_CFG_A" "$EFIA_UUID" "$EFIB_UUID" "A"
-echo "  efi-a  grubaa64.efi + grub.cfg(A) + parts.env + partsets (self=A)"
-mkefi "$efi_b" "$GRUB_CFG_B" "$EFIB_UUID" "$EFIA_UUID" "B"
-echo "  efi-b  grubaa64.efi + grub.cfg(B) + parts.env + partsets (self=B)"
+mkefi "$efi_a" "$GRUB_CFG_A" "A"
+echo "  efi-a  grubaa64.efi + grub.cfg(A) + parts.env"
+mkefi "$efi_b" "$GRUB_CFG_B" "B"
+echo "  efi-b  grubaa64.efi + grub.cfg(B) + parts.env"
 
 # 5. write each filesystem into its partition's byte offset (notrunc; no loop device).
 write_part() {  # <partnum> <file> <label>
@@ -363,9 +268,9 @@ write_part() {  # <partnum> <file> <label>
   dd if="$2" of="$IMG" bs=512 seek="$start" conv=notrunc status=none
   echo "  p$1  $3"
 }
-write_part "$P_ESP"   "$esp"    "RETROFORGE-ESP (steamcl + boot confs + grubenv)"
-write_part "$P_EFIA"  "$efi_a"  "retroforge-efi-A (stage-2 GRUB A + partsets)"
-write_part "$P_EFIB"  "$efi_b"  "retroforge-efi-B (stage-2 GRUB B + partsets)"
+write_part "$P_ESP"   "$esp"    "RETROFORGE-ESP (ESP GRUB + grubenv + parts.env + dtbs)"
+write_part "$P_EFIA"  "$efi_a"  "retroforge-efi-A (stage-2 grub.cfg A)"
+write_part "$P_EFIB"  "$efi_b"  "retroforge-efi-B (stage-2 grub.cfg B)"
 write_part "$P_ROOTA" "$ROOTFS"   "retroforge-root-A (btrfs, ro)"
 write_part "$P_VARA"  "$VARIMG" "retroforge-var-A (ext4)"
 if [ "$SLOT_B" = 1 ]; then
@@ -384,21 +289,21 @@ echo "  ok   $(du -h "$IMG" | cut -f1) -> ${IMG#"$ROOT"/}"
 cat <<EOF
 Done. Write it to the card (replace sdX with your device, ALL DATA LOST):
   sudo dd if=${IMG#"$ROOT"/} of=/dev/sdX bs=4M conv=fsync status=progress
-ABL chainloads /EFI/BOOT/bootaa64.efi (steamcl, stage 1) off the ESP; steamcl reads the boot state
-at /SteamOS/conf/{A,B}.conf, then chainloads \EFI\steamos\grubaa64.efi on the SLOT's efi-A/B
-partition (stage 2, per-slot grub.cfg + partsets), which boots the kernel in the slot root's /boot.
+ABL starts /EFI/BOOT/bootaa64.efi (the ESP GRUB) off the ESP; it picks the slot from RAUC's state in
+/EFI/steamos/grubenv and hands over to \EFI\steamos\grub.cfg on that slot's efi-A/B partition,
+which boots the kernel in the slot root's /boot.
 /home (last partition) holds the player home and grows to fill the card.
 $([ "$SLOT_B" = 1 ] \
   && echo "Both slots carry a full system, so a switch is testable: retroforge-bootctl set-primary B" \
-  || echo "The B slots are empty and there is no B.conf, so steamcl sees ONE image and retries A
-rather than switching. The first update writes B in full and creates its conf.")
+  || echo "The B slots are empty and B_OK=0, so the ESP GRUB only ever tries A. The first update
+writes B in full and RAUC marks it OK.")
 
-The FIRST boot stops at the stage-2 board menu and waits: one image serves every board, so the DTB
-is the one thing the card cannot know. The choice is written to /EFI/steamos/grubenv on the ESP and
-every boot after that takes it automatically (3s visible menu), including across a slot switch.
+The board: OpenABL's Device model names it when it is set (the ESP's /dtbs/qcom lists our boards);
+otherwise the FIRST boot stops at the stage-2 board menu and waits, and the choice is saved in
+/EFI/steamos/grubenv. Once the board is known the menu is hidden.
 
-ESP layout: /EFI/BOOT/{bootaa64.efi, steamcl-version, steamcl-restricted, fonts/default.pf2}
-            /EFI/steamos/grubenv (shared stage-2 env — the saved board choice)
-            /SteamOS/conf/$([ "$SLOT_B" = 1 ] && echo '{A,B}' || echo 'A').conf (the per-image boot state)
+ESP layout: /EFI/BOOT/bootaa64.efi (the ESP GRUB)
+            /EFI/steamos/{grubenv, parts.env}
+            /dtbs/qcom/*.dtb (OpenABL's Device model list)
 Filesystem labels: ESP RETROFORGE | efi-A GRUB-A | efi-B GRUB-B (cosmetic; nothing resolves by them)
 EOF

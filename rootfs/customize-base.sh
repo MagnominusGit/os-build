@@ -117,7 +117,7 @@ BOOTSTRAP_PKGS=(base)
 #                       selects one only when the user picks it. Needs CONFIG_SCHED_CLASS_EXT. Overlay.
 #   rauc                A/B update client, the snapshot's 1.15.2 (must be >= 1.15.1: 1.14 cannot
 #                       install a dm-verity bundle on a kernel >= 6.19).
-#                       Reads /etc/rauc/system.conf, which points bootloader=custom at retroforge-bootctl.
+#                       Reads /etc/rauc/system.conf: bootloader=grub over the ESP's grubenv.
 #   btrfs-progs         `btrfstune -U` in the post-install hook, so the two slots never share an fsid.
 #   rsync               the post-install hook copies the running /var into the new slot's /var.
 #   earlyoom            userspace OOM killer, acting before allocation fails (policy in

@@ -15,31 +15,28 @@
 # itself good on its first iteration. --require-marker re-tests the marker after the sleep, and
 # retroforge-session's EXIT trap removes it, so "still there" means "the same session stayed up".
 #
-# THE CONFIRMATION IS STEAMOS-STYLE NOW (Phase 5): mark-good runs `steamos-bootconf set-mode
-# booted`, which clears the image's boot-attempts counter (the stage-2 retroforge module bumped it
-# before the kernel booted), so stock steamcl's failsafe and RAUC get-state stop counting this
-# boot as a failure.
+# THE CONFIRMATION IS RAUC'S: mark-good runs `rauc status mark-good booted`, which sets the booted
+# slot's TRY back to 0 in the ESP's grubenv (the ESP GRUB bumped it before handing over), so the
+# ESP GRUB stops counting this boot as a failed try.
 #
 # THE FAILURE PATH DEMOTES, through OnFailure= in [Unit]. If this unit fails -- the marker vanished
 # under the 30s re-check, or the confirmation could not be written -- retroforge-boot-bad.service
-# marks the RUNNING image bad (`set-state self bad` -> set-mode reboot-other + image-invalid=1), so
+# marks the RUNNING slot bad (`set-state self bad` -> rauc status mark-bad booted, <slot>_OK=0), so
 # the NEXT boot tries the other slot. That is the OS half of "is this slot OK?"; the bootloader
-# never decides it. (set-mode booted on a later, recovered session re-promotes the image --
-# mark-good clears image-invalid too, since `booted` itself does not.)
+# never decides it.
 #
 # It is a separate unit rather than an Exec*= line here because systemd has no per-service
 # "run this on failure" verb. The obvious-looking ExecOnFailure= does not exist: systemd logs
 # "Unknown key name" and ignores it, and the demote silently never happens. That is exactly how
 # this shipped once already.
 #
-# THIS IS ONE OF TWO ROLLBACK TRIGGERS, both live. The other is the stage-2 boot-attempts counter
-# that steamcl's failsafe acts on: our grub.cfg calls `retroforge_bootattempts <slot>` on every boot
-# (docs/phase5.md), HW-validated 2026-08-02, so a slot that never reaches this unit at all -- no
-# session, no path unit firing -- is still demoted, at >=6 attempts.
+# THIS IS ONE OF TWO ROLLBACK TRIGGERS, both live. The other is the ESP GRUB's try count
+# (boot/gen-esp-cfg.sh): a slot that never reaches this unit at all -- no session, no path unit
+# firing -- has used its three tries after three boots, and the fourth goes to the other slot.
 #
-# NOTE FOR ANYONE TESTING THAT COUNTER: this unit's set-mode booted CLEARS boot-attempts, so a
-# healthy boot erases the evidence. Mask this unit before the test reboot, or the counter reads 0
-# whether or not the bootloader is counting.
+# NOTE FOR ANYONE TESTING THAT COUNT: this unit's mark-good CLEARS the TRY, so a healthy boot
+# erases the evidence. Mask this unit before the test reboot, or `retroforge-bootctl status` shows
+# TRY=0 whether or not the bootloader is counting.
 #
 # THERE IS DELIBERATELY NO TIMEOUT THAT MARKS GOOD ANYWAY. If the session never comes up, the
 # path unit never fires and the image is never confirmed. That is the property this whole

@@ -7,12 +7,12 @@
 # Everything runs on the host with no root, no device and no cross-build. Run via `make test`.
 #
 # WHAT IS ACTUALLY AT RISK HERE. parts.env is a GRUB environment block we write BY HAND, because its
-# contents are per-disk and grub-editenv is not on the shipped image. Hand-rolling a binary format
-# another program parses is the kind of thing that works until it does not, and the failure is
-# silent in the worst way: grub_envblk_open only requires the 25-byte signature to fit, so a block
-# that is the wrong LENGTH still reads back perfectly with grub-editenv while differing from what
-# make-sdcard.sh writes on a card. So this asserts two independent things -- that GRUB's own tool
-# reads back every key, and that the bytes match the card's shape exactly.
+# contents are per-disk (lib-slotwrite.sh says why that is not grub-editenv's job). Hand-rolling a
+# binary format another program parses is the kind of thing that works until it does not, and the
+# failure is silent in the worst way: grub_envblk_open only requires the 25-byte signature to fit,
+# so a block that is the wrong LENGTH still reads back perfectly with grub-editenv while differing
+# from what make-sdcard.sh writes on a card. So this asserts two independent things -- that GRUB's
+# own tool reads back every key, and that the bytes match the card's shape exactly.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -136,9 +136,9 @@ if command -v grub-editenv >/dev/null 2>&1; then
     || bad "differs from what grub-editenv writes for the same keys"
 
   # The EMPTY case, which is a different artifact with a different owner: boot/grub.sh runs
-  # `grub-editenv create` to emit out/boot/grubenv, the shared ESP's stage-2 env block, and ships it
-  # into the root so the internal installer can cp it onto an ESP it just made (the device has no
-  # grub-editenv). Asserting our writer reproduces that block with NO keys says the shipped constant
+  # `grub-editenv create` to emit out/boot/grubenv, the shared ESP's env block, and ships it into
+  # the root so the internal installer can cp it onto an ESP it just made and arm RAUC's slot state
+  # in it. Asserting our writer reproduces that block with NO keys says the shipped constant
   # is not opaque: if grub-editenv ever left the build container, parts_env_block emits the same
   # bytes, and nothing about the card or an install would change.
   pristine="$T/pristine.env"
@@ -174,25 +174,37 @@ CASE="write_parts_env with no mountpoint"
   || ok "refuses when the efi partition is not mounted"
 
 # --- 5. the primitives shared with the OTA path -------------------------------------------------
-# write_efi_partition and refresh_esp_stage1 came OUT of post-install.sh, and that hook's suite
-# (tests/test-post-install.sh) is what proves the extraction did not change what an UPDATE does.
+# write_efi_partition, refresh_esp_extras and refresh_esp_stage1 are what post-install.sh calls
+# too, and that hook's suite (tests/test-post-install.sh) is what proves an UPDATE gets them right.
 # What it cannot cover is the installer's side of the same functions: it always calls them with the
-# OTA path's arguments, on a target chosen by bootconf. These cases drive them directly, with plain
-# directories standing in for mountpoints, which is all either function needs.
+# OTA path's arguments, on a slot RAUC chose and an ESP that is already populated. These cases drive
+# them directly, with plain directories standing in for mountpoints, which is all any of them needs.
 
-# A stand-in for /usr/lib/retroforge/boot of a freshly written root.
+# A stand-in for /usr/lib/retroforge/boot of a freshly written root. Two DTBs, so a copy that took
+# only the first would show.
 mkboot() {  # <dir> <tag>
   local d="$1" tag="$2"
-  mkdir -p "$d/fonts"
+  mkdir -p "$d/fonts" "$d/dtbs"
   printf 'GRUB-%s\n'    "$tag" >"$d/grubaa64.efi"
   printf 'CFG-a-%s\n'   "$tag" >"$d/grub-a.cfg"
   printf 'CFG-b-%s\n'   "$tag" >"$d/grub-b.cfg"
   printf 'MONO-%s\n'    "$tag" >"$d/fonts/dejavu-mono.pf2"
-  printf 'DEFAULT-%s\n' "$tag" >"$d/fonts/default.pf2"
-  printf 'STEAMCL-%s\n' "$tag" >"$d/steamcl.efi"
-  printf 'VER-%s\n'     "$tag" >"$d/steamcl-version"
+  printf 'ESPGRUB-%s\n' "$tag" >"$d/grub-esp.efi"
+  printf 'DTB-ace-%s\n' "$tag" >"$d/dtbs/qcs8550-ayaneo-pocketace.dtb"
+  printf 'DTB-g1-%s\n'  "$tag" >"$d/dtbs/sm4450-anbernic-rg55g1.dtb"
 }
 BOOT="$T/boot"; mkboot "$BOOT" 1
+
+# Whether a file was rewritten, without stat: `stat -c` is GNU and `stat -f` is BSD, and a case that
+# read an empty mtime twice would pass on the host where the flag does not exist. `cp -f` truncates
+# in place and keeps the inode, so the mtime is the only witness. Age the file to 2001, and it was
+# rewritten iff it is now newer than a marker from 2002.
+age_file() { touch -t 200101010000 "$@"; }
+rewritten() {  # <file>
+  local m="$T/mtime-marker"
+  touch -t 200201010000 "$m"
+  [ "$1" -nt "$m" ]
+}
 
 CASE="write_efi_partition"
 efimnt="$T/efimnt"; mkdir -p "$efimnt"
@@ -245,60 +257,11 @@ CASE="write_efi_partition with a bad slot name"
   && bad "accepted an image name that is not A or B" \
   || ok "refuses an image name that is not A or B"
 
-# --- 6. mint_partsets ---------------------------------------------------------------------------
-# Installer-only: the OTA path COPIES the partsets off the running /efi, because they describe the
-# disk it already booted from. The installer is writing a disk with no retroforge on it, so nothing
-# exists to copy and the uuids come from the GPT it just laid down. Nothing else covers this.
-U_ESP=1a2b3c4d-1111-2222-3333-444455556666
-U_EFIA=2b3c4d5e-1111-2222-3333-444455556667
-U_EFIB=3c4d5e6f-1111-2222-3333-444455556668
-
-CASE="mint_partsets"
-ps="$T/ps-b"; mkdir -p "$ps"
-mint_partsets "$ps" B "$U_ESP" "$U_EFIA" "$U_EFIB" \
-  && ok "mints without error" \
-  || bad "mint_partsets failed"
-expect_partset() {  # <file> <content>
-  [ "$(cat "$ps/SteamOS/partsets/$1" 2>/dev/null)" = "$2" ] \
-    && ok "partsets/$1 = '$2'" \
-    || bad "partsets/$1: expected '$2', got '$(cat "$ps/SteamOS/partsets/$1" 2>/dev/null)'"
-}
-expect_partset A      "efi $U_EFIA"
-expect_partset B      "efi $U_EFIB"
-expect_partset all    "esp $U_ESP"
-expect_partset shared "esp $U_ESP"
-# self/other are the only two that depend on which image this partition is. steamcl matches the
-# booted efi partition's uuid against partsets/self to name the image, so a swapped pair makes each
-# efi partition claim to be the other one.
-expect_partset self   "efi $U_EFIB"
-expect_partset other  "efi $U_EFIA"
-
-CASE="mint_partsets for slot A"
-ps="$T/ps-a"; mkdir -p "$ps"
-mint_partsets "$ps" A "$U_ESP" "$U_EFIA" "$U_EFIB" >/dev/null 2>&1
-expect_partset self  "efi $U_EFIA"
-expect_partset other "efi $U_EFIB"
-
-CASE="mint_partsets rejects an upper-case uuid"
-# sgdisk PRINTS partition GUIDs in upper case, and steamcl compares these strings. A set minted from
-# raw sgdisk output is well-formed, matches nothing, and the symptom is a disk that does not boot --
-# visible only on hardware. image/make-sdcard.sh lowercases at the same seam.
-( mint_partsets "$T/ps-upper" B "${U_ESP^^}" "$U_EFIA" "$U_EFIB" >/dev/null 2>&1 ) \
-  && bad "an upper-case partition uuid was accepted" \
-  || ok "refuses an upper-case partition uuid"
-
-CASE="mint_partsets rejects a non-uuid and a bad image name"
-( mint_partsets "$T/ps-junk" B "not-a-uuid" "$U_EFIA" "$U_EFIB" >/dev/null 2>&1 ) \
-  && bad "a non-uuid was accepted" \
-  || ok "refuses a value that is not a partition uuid"
-( mint_partsets "$T/ps-c" C "$U_ESP" "$U_EFIA" "$U_EFIB" >/dev/null 2>&1 ) \
-  && bad "accepted an image name that is not A or B" \
-  || ok "refuses an image name that is not A or B"
-
-# --- 7. refresh_esp_stage1 ----------------------------------------------------------------------
-# The OTA suite covers this against the running ESP. What it never does is call it on an ESP that is
-# EMPTY, which is the installer's case: every file is new, so every comparison takes the "not
-# present" arm rather than the digest arm.
+# --- 6. refresh_esp_stage1 ----------------------------------------------------------------------
+# Stage 1 is the ESP GRUB, and this copies it to the one name ABL starts. The OTA suite covers it
+# against the running ESP. What it never does is call it on an ESP that is EMPTY, which is the
+# installer's case: the file is new, so the comparison takes the "not present" arm rather than the
+# digest arm.
 CASE="refresh_esp_stage1 onto an empty ESP"
 esp="$T/esp"; mkdir -p "$esp"
 refresh_esp_stage1 "$esp" "$BOOT" >/dev/null \
@@ -309,49 +272,131 @@ expect_esp_file() {  # <path> <content>
     && ok "/$1 = '$2'" \
     || bad "/$1: expected '$2', got '$(cat "$esp/$1" 2>/dev/null)'"
 }
-# ABL chainloads bootaa64.efi by that name; the source is called steamcl.efi. A copy that kept the
+# ABL starts bootaa64.efi by that name; the source is called grub-esp.efi. A copy that kept the
 # source name would leave a disk ABL cannot boot at all.
-expect_esp_file EFI/BOOT/bootaa64.efi 'STEAMCL-1'
-expect_esp_file EFI/BOOT/steamcl-version 'VER-1'
-expect_esp_file EFI/BOOT/fonts/default.pf2 'DEFAULT-1'
-[ -f "$esp/EFI/BOOT/steamcl-restricted" ] \
-  && ok "steamcl-restricted exists (chainloading stays on this physical device)" \
-  || bad "steamcl-restricted was not created"
+expect_esp_file EFI/BOOT/bootaa64.efi 'ESPGRUB-1'
+# And nothing else. The steamcl chain put steamcl-version, fonts/default.pf2 and steamcl-restricted
+# beside it; the ESP GRUB reads none of them, and a stage 1 that still wrote one would be writing
+# after the byte that has to be last.
+got="$(cd "$esp" && find . -type f | sort | tr '\n' ' ')"
+[ "$got" = "./EFI/BOOT/bootaa64.efi " ] \
+  && ok "bootaa64.efi is the only file it writes" \
+  || bad "refresh_esp_stage1 wrote more than bootaa64.efi: $got"
 
 CASE="refresh_esp_stage1 skips identical files"
 # Not an optimisation: the shared ESP is the only write with no A/B copy behind it, so every
-# needless rewrite of the file ABL chainloads is a power-cut window with nothing to roll back to.
-# By mtime, because `cp -f` truncates in place and keeps the inode.
-touch -d '2001-01-01 00:00:00' "$esp/EFI/BOOT/bootaa64.efi"
-before=$(stat -c %Y "$esp/EFI/BOOT/bootaa64.efi")
+# needless rewrite of the file ABL starts is a power-cut window with nothing to roll back to.
+age_file "$esp/EFI/BOOT/bootaa64.efi"
 refresh_esp_stage1 "$esp" "$BOOT" >/dev/null
-[ "$before" = "$(stat -c %Y "$esp/EFI/BOOT/bootaa64.efi")" ] \
-  && ok "an unchanged bootaa64.efi is not rewritten" \
-  || bad "bootaa64.efi was rewritten despite identical content"
+rewritten "$esp/EFI/BOOT/bootaa64.efi" \
+  && bad "bootaa64.efi was rewritten despite identical content" \
+  || ok "an unchanged bootaa64.efi is not rewritten"
 
 CASE="refresh_esp_stage1 still refreshes what changed"
 # A skip that skipped everything would pass the case above and be just as wrong.
 mkboot "$T/boot2" 2
 refresh_esp_stage1 "$esp" "$T/boot2" >/dev/null
-expect_esp_file EFI/BOOT/bootaa64.efi 'STEAMCL-2'
-expect_esp_file EFI/BOOT/steamcl-version 'VER-2'
+expect_esp_file EFI/BOOT/bootaa64.efi 'ESPGRUB-2'
+rewritten "$esp/EFI/BOOT/bootaa64.efi" \
+  && ok "and the rewrite is a real one, not a stale file with the right name" \
+  || bad "bootaa64.efi carries the new bytes but was not rewritten"
 
-CASE="refresh_esp_stage1 with no steamcl in the root"
-mkboot "$T/boot-nocl" 4; rm -f "$T/boot-nocl/steamcl.efi"
-( refresh_esp_stage1 "$T/esp-x" "$T/boot-nocl" >/dev/null 2>&1 ) \
-  && bad "refreshed the ESP from a root with no steamcl" \
-  || ok "refuses a root carrying no steamcl.efi"
+CASE="refresh_esp_stage1 with no ESP GRUB in the root"
+# The steamcl.efi left beside it is the trap: a root from the steamcl chain carries one, and a
+# stage 1 that fell back to it would put that chain back on the ESP.
+mkboot "$T/boot-noesp" 4; rm -f "$T/boot-noesp/grub-esp.efi"
+printf 'STEAMCL\n' >"$T/boot-noesp/steamcl.efi"
+out="$( ( refresh_esp_stage1 "$T/esp-x" "$T/boot-noesp" ) 2>&1 )" \
+  && bad "refreshed the ESP from a root with no ESP GRUB" \
+  || ok "refuses a root carrying no grub-esp.efi"
+printf '%s\n' "$out" | grep -q 'no ESP GRUB at /usr/lib/retroforge/boot/grub-esp.efi' \
+  && ok "and names the file the root is missing, as the operator sees it" \
+  || bad "the refusal does not name grub-esp.efi: $out"
+[ ! -e "$T/esp-x/EFI/BOOT/bootaa64.efi" ] \
+  && ok "and writes no bootaa64.efi, from steamcl.efi or anything else" \
+  || bad "a bootaa64.efi was written from a root with no ESP GRUB"
 
 CASE="refresh_esp_stage1 with a missing hasher"
 # The two ways of losing the comparator fail in OPPOSITE directions and only one is survivable. A
 # comparator that EXITS non-zero degrades to always-copy: wasteful, bytes right. A comparator that
 # is ABSENT yields two empty strings inside $(...) that compare EQUAL, so nothing is ever refreshed
-# and a new root boots against the old stage 1. Callers assert the tool before touching anything;
-# this proves the seam they assert through is the one the function reads.
+# and a new root boots against the old stage 1. Callers assert the tool before touching anything
+# (the spine's recon, below); this proves the seam they assert through is the one the function
+# reads.
 ( SHA256=retroforge-no-such-hasher refresh_esp_stage1 "$T/esp-h" "$BOOT" >/dev/null 2>&1
-  [ "$(cat "$T/esp-h/EFI/BOOT/bootaa64.efi" 2>/dev/null)" = "STEAMCL-1" ] ) \
+  [ "$(cat "$T/esp-h/EFI/BOOT/bootaa64.efi" 2>/dev/null)" = "ESPGRUB-1" ] ) \
   && ok "a first write still lands (the not-present arm does not consult the hasher)" \
   || bad "the empty-ESP write depends on the hasher"
+
+# --- 7. refresh_esp_extras ----------------------------------------------------------------------
+# What the ESP GRUB reads besides the grubenv: parts.env, copied off a slot's efi partition, and
+# OpenABL's Device model list in \dtbs\qcom. Both callers run this BEFORE refresh_esp_stage1, so on
+# an internal install everything here lands while the device still boots the medium.
+CASE="refresh_esp_extras onto an empty ESP"
+xefi="$T/xefi"; mkdir -p "$xefi/EFI/steamos"
+cp "$block" "$xefi/EFI/steamos/parts.env"
+xesp="$T/xesp"; mkdir -p "$xesp"
+refresh_esp_extras "$xesp" "$xefi" "$BOOT" >/dev/null \
+  && ok "populates an ESP with nothing on it" \
+  || bad "refresh_esp_extras failed on an empty ESP"
+# The ESP GRUB looks on the ESP first, so this copy is what spares an internal install the scan of
+# every partition for one.
+cmp -s "$xesp/EFI/steamos/parts.env" "$block" \
+  && ok "parts.env is the efi partition's, byte for byte" \
+  || bad "the ESP's parts.env is not the efi partition's"
+for d in qcs8550-ayaneo-pocketace sm4450-anbernic-rg55g1; do
+  cmp -s "$xesp/dtbs/qcom/$d.dtb" "$BOOT/dtbs/$d.dtb" \
+    && ok "dtbs/qcom/$d.dtb is the root's" \
+    || bad "dtbs/qcom/$d.dtb is missing or differs from the root's"
+done
+# bootaa64.efi is refresh_esp_stage1's alone. Written from here, it would land before the files
+# that are meant to precede it.
+[ ! -e "$xesp/EFI/BOOT" ] \
+  && ok "it writes nothing under /EFI/BOOT" \
+  || bad "refresh_esp_extras wrote under /EFI/BOOT: $(cd "$xesp" && find EFI/BOOT | tr '\n' ' ')"
+
+CASE="refresh_esp_extras skips identical files"
+# The same power-cut argument as stage 1: these are on the shared ESP too.
+age_file "$xesp/EFI/steamos/parts.env" "$xesp/dtbs/qcom/qcs8550-ayaneo-pocketace.dtb"
+refresh_esp_extras "$xesp" "$xefi" "$BOOT" >/dev/null
+rewritten "$xesp/EFI/steamos/parts.env" \
+  && bad "an unchanged parts.env was rewritten" \
+  || ok "an unchanged parts.env is not rewritten"
+rewritten "$xesp/dtbs/qcom/qcs8550-ayaneo-pocketace.dtb" \
+  && bad "an unchanged DTB was rewritten" \
+  || ok "an unchanged DTB is not rewritten"
+
+CASE="refresh_esp_extras still refreshes what changed"
+refresh_esp_extras "$xesp" "$xefi" "$T/boot2" >/dev/null
+[ "$(cat "$xesp/dtbs/qcom/qcs8550-ayaneo-pocketace.dtb" 2>/dev/null)" = "DTB-ace-2" ] \
+  && ok "a changed DTB is refreshed" \
+  || bad "a changed DTB was left stale"
+
+CASE="refresh_esp_extras with no parts.env on the efi partition"
+# A medium from before parts.env existed has none to copy, and the ESP GRUB's built-in indices are
+# right for it -- so this is a log line, not a refusal. Refusing would fail every update off one.
+nefi="$T/nefi"; mkdir -p "$nefi"
+nesp="$T/nesp"; mkdir -p "$nesp"
+out="$(refresh_esp_extras "$nesp" "$nefi" "$BOOT" 2>&1)" \
+  && ok "an efi partition with no parts.env is not an error" \
+  || bad "refresh_esp_extras failed for want of a parts.env: $out"
+printf '%s\n' "$out" | grep -q 'no parts.env on' \
+  && ok "and it says so" \
+  || bad "a missing parts.env passed silently: $out"
+[ ! -e "$nesp/EFI/steamos/parts.env" ] \
+  && ok "and writes none" \
+  || bad "a parts.env appeared from nowhere"
+[ -f "$nesp/dtbs/qcom/qcs8550-ayaneo-pocketace.dtb" ] \
+  && ok "the DTBs are still copied" \
+  || bad "a missing parts.env also cost the DTBs"
+# And a root with no DTBs at all: the glob matches nothing, which must not become a copy of the
+# literal '*.dtb'.
+mkdir -p "$T/boot-nodtb"; cp -R "$BOOT/." "$T/boot-nodtb/"; rm -f "$T/boot-nodtb/dtbs"/*.dtb
+ndesp="$T/ndesp"; mkdir -p "$ndesp"
+refresh_esp_extras "$ndesp" "$nefi" "$T/boot-nodtb" >/dev/null 2>&1 \
+  && [ -z "$(ls -A "$ndesp/dtbs/qcom" 2>/dev/null)" ] \
+  && ok "a root with no DTBs copies nothing and is not an error" \
+  || bad "a root with no DTBs failed or left something in dtbs/qcom: $(ls -A "$ndesp/dtbs/qcom" 2>/dev/null)"
 
 # mkfs_esp is NOT covered here and cannot be: it needs a block device and root. It is one
 # mkfs.vfat with the label and -F 32 fixed, and the installer's hardware bring-up is where it gets
@@ -976,38 +1021,44 @@ printf '%s\n' "$calls" | grep -q "^tar .*$FRESH_SEED_REL" \
   && ok "seeds /var from the tarball inside the root RAUC just wrote, not from the installer medium" \
   || bad "the /var seed did not come from the new root: $calls"
 
-# --- 14. refresh_esp_stage1 writes bootaa64.efi LAST (Phase 4c) ----------------------------------
-# THE ORDER INSIDE THIS FUNCTION IS A HARDWARE FINDING, not a style. ABL's test is content-based:
-# it chainloads /EFI/BOOT/bootaa64.efi off an internal ESP if that file is there, and an internal
-# ESP that exists but is EMPTY does not divert it at all (measured, Pocket ACE 2026-08-21). So on an
-# internal install this one copy is the byte that flips the device off the installer medium, and
-# every interruption before it leaves a device that still boots the card and can simply be re-run.
-# Write it first and an install interrupted a second later boots internal steamcl with no
-# steamcl-version, no font and no restricted flag beside it -- the files steamcl resolves relative
-# to the chainloader. Nothing else in this suite would notice the difference, which is why it is
-# asserted directly against write order rather than against the resulting directory.
+# --- 14. bootaa64.efi is written LAST (Phase 4c) --------------------------------------------------
+# THE ORDER ON THE ESP IS A HARDWARE FINDING, not a style. ABL's test is content-based: it starts
+# /EFI/BOOT/bootaa64.efi off an internal ESP if that file is there, and an internal ESP that exists
+# but is EMPTY does not divert it at all (measured, Pocket ACE 2026-08-21). So on an internal
+# install this one copy is the byte that flips the device off the installer medium, and every
+# interruption before it leaves a device that still boots the card and can simply be re-run. Write
+# it first and an install interrupted a second later boots the internal ESP GRUB with no parts.env
+# beside it (it scans for one, then falls back to a card's 1..8) and no DTBs for OpenABL to list.
+# Nothing else in this suite would notice the difference, which is why it is asserted directly
+# against write order rather than against the resulting directory.
+#
+# Both callers run refresh_esp_extras and then refresh_esp_stage1 (the spine's order is asserted
+# against the real run in section 17). What makes that sequence leave bootaa64.efi last is that
+# stage 1 writes NOTHING but it and the extras never write it -- which is what this checks.
 CASE="refresh_esp_stage1: bootaa64.efi is the last write"
-espt="$T/esp-order"; bootd="$T/esp-order-boot"
-mkdir -p "$espt" "$bootd/fonts"
-printf 'steamcl\n'      >"$bootd/steamcl.efi"
-printf 'version\n'      >"$bootd/steamcl-version"
-printf 'font\n'         >"$bootd/fonts/default.pf2"
+espt="$T/esp-order"; mkdir -p "$espt"
 # The observation seam: refresh_if_diff is what actually copies, so wrapping it records the order
-# the primitive asked for rather than the order the filesystem happened to produce.
+# the primitives asked for rather than the order the filesystem happened to produce.
 ESP_ORDER="$T/esp-order.log"; : >"$ESP_ORDER"
 eval "orig_refresh_if_diff() $(declare -f refresh_if_diff | tail -n +2)"
 refresh_if_diff() { printf '%s\n' "${2##*/}" >>"$ESP_ORDER"; orig_refresh_if_diff "$@"; }
-refresh_esp_stage1 "$espt" "$bootd"
+refresh_esp_extras "$espt" "$xefi" "$BOOT" >/dev/null
+extras_writes="$(cat "$ESP_ORDER")"; : >"$ESP_ORDER"
+refresh_esp_stage1 "$espt" "$BOOT" >/dev/null
+stage1_writes="$(cat "$ESP_ORDER")"
 refresh_if_diff() { orig_refresh_if_diff "$@"; }
-[ "$(tail -1 "$ESP_ORDER")" = bootaa64.efi ] \
-  && ok "bootaa64.efi is written last (an interrupted install still boots the medium)" \
-  || bad "bootaa64.efi is not the last write: $(tr '\n' ' ' <"$ESP_ORDER")"
-grep -qx steamcl-version "$ESP_ORDER" && grep -qx default.pf2 "$ESP_ORDER" \
-  && ok "the companions steamcl resolves relative to itself are written before it" \
-  || bad "a companion file was not written: $(tr '\n' ' ' <"$ESP_ORDER")"
-[ -f "$espt/EFI/BOOT/steamcl-restricted" ] \
-  && ok "the restricted flag is still written" \
-  || bad "steamcl-restricted is missing"
+[ "$stage1_writes" = bootaa64.efi ] \
+  && ok "refresh_esp_stage1 writes bootaa64.efi and nothing after it" \
+  || bad "refresh_esp_stage1 wrote: $(printf '%s' "$stage1_writes" | tr '\n' ' ')"
+if printf '%s\n' "$extras_writes" | grep -qx bootaa64.efi; then
+  bad "refresh_esp_extras writes bootaa64.efi -- it would land before the files meant to precede it"
+else
+  ok "refresh_esp_extras never writes it"
+fi
+printf '%s\n' "$extras_writes" | grep -qx parts.env \
+  && printf '%s\n' "$extras_writes" | grep -qx qcs8550-ayaneo-pocketace.dtb \
+  && ok "parts.env and the DTBs are the extras' writes, so they go first" \
+  || bad "the extras did not write parts.env and the DTBs: $(printf '%s' "$extras_writes" | tr '\n' ' ')"
 
 # --- 15. part_uuid / part_dev — the index-to-device rule (Phase 4c) ------------------------------
 # The rule every write in the install depends on: an index becomes a device path through the
@@ -1027,7 +1078,7 @@ EOF
 chmod +x "$sgstub/sgdisk"
 uuid="$(PATH="$sgstub:$PATH" part_uuid /dev/anything 12)"
 [ "$uuid" = 6f2a1b3c-4d5e-6789-abcd-ef0123456789 ] \
-  && ok "part_uuid lower-cases sgdisk's upper-case GUID (steamcl string-compares these)" \
+  && ok "part_uuid lower-cases sgdisk's upper-case GUID (the by-partuuid links udev makes are lower case)" \
   || bad "part_uuid returned '$uuid'"
 if PATH="$sgstub:$PATH" part_dev "$T/not-a-block-device" 12 >/dev/null 2>&1; then
   bad "part_dev answered for something that is not a block device -- a caller would open a path that names nothing"
@@ -1180,29 +1231,52 @@ EOF
            gdbus partprobe udevadm sfdisk curl df; do
     printf '#!/usr/bin/env bash\nprintf "%%s\\n" "%s $*" >>"$SP_CALLS"\nexit 0\n' "$i" >"$SP_STUBS/$i"
   done
-  # The one stub that must produce a file, because the spine asserts the file afterwards.
-  cat >"$SP_STUBS/steamos-bootconf" <<'EOF'
-#!/usr/bin/env bash
-printf '%s\n' "steamos-bootconf $*" >>"$SP_CALLS"
-conf=""; img=""
-while [ $# -gt 0 ]; do
-  case "$1" in --conf-dir) conf="$2"; shift 2 ;; --image) img="$2"; shift 2 ;; *) shift ;; esac
-done
-[ -n "$conf" ] && [ -n "$img" ] && { mkdir -p "$conf"; printf 'title: retroforge %s\n' "$img" >"$conf/$img.conf"; }
-exit 0
-EOF
   chmod +x "$SP_STUBS"/*
 
+  # grub-editenv, the one stub that must produce a file, because the spine asserts the file
+  # afterwards. It MODELS the tool rather than obliging the caller: `<file> set K=V...` edits the
+  # key=value lines of a block that must already exist -- so a spine that armed the slot state
+  # before copying the pristine grubenv onto the ESP fails here -- and `<file> list` prints them,
+  # which is how the cases below read the result back with the same call the real tool answers.
+  # It records its own path, so a case can tell WHICH grub-editenv the spine ran. NOT on $SP_STUBS:
+  # the installer image's copy on PATH is the fallback, and a case has to be able to take it away.
+  SP_EDITENV_TOOL="$SP/grub-editenv"
+  cat >"$SP_EDITENV_TOOL" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "grub-editenv $0 $*" >>"${SP_CALLS:-/dev/null}"
+f="${1:-}"; cmd="${2:-}"
+[ $# -ge 2 ] && shift 2 || exit 2
+[ -f "$f" ] || { printf 'grub-editenv: error: cannot open `%s'"'"': No such file or directory.\n' "$f" >&2; exit 1; }
+kv="$(LC_ALL=C grep -av '^#' "$f" || true)"
+case "$cmd" in
+  list) [ -z "$kv" ] || printf '%s\n' "$kv"; exit 0 ;;
+  set)  for a in "$@"; do
+          case "$a" in *=*) ;; *) printf 'grub-editenv: error: invalid parameter %s\n' "$a" >&2; exit 1 ;; esac
+          kv="$(printf '%s\n' "$kv" | grep -v "^${a%%=*}=" || true)"$'\n'"$a"
+        done
+        body="$(head -2 "$f")"$'\n'"$(printf '%s\n' "$kv" | sed '/^$/d')"$'\n'
+        pad=$(( 1024 - ${#body} ))
+        { printf '%s' "$body"; if [ "$pad" -gt 0 ]; then printf '%*s' "$pad" '' | tr ' ' '#'; fi; } \
+          >"$f.new" && mv -f "$f.new" "$f"
+        exit ;;
+esac
+exit 2
+EOF
+  chmod +x "$SP_EDITENV_TOOL"
+
   # The freshly written root, as it will look mounted read-only: the boot software the efi and ESP
-  # steps take their files from, plus the bootconf binary. Pre-seeded rather than produced by the
-  # mount stub, so the real primitives copy real bytes.
-  mkdir -p "$SP_RUN/root-a/usr/lib/retroforge/boot/fonts" "$SP_RUN/root-a/usr/bin"
-  for i in steamcl.efi steamcl-version grubaa64.efi grub-a.cfg grub-b.cfg grubenv; do
-    printf '%s\n' "$i" >"$SP_RUN/root-a/usr/lib/retroforge/boot/$i"
+  # steps take their files from, and the root's own grub-editenv, which is the one the spine runs
+  # first. Pre-seeded rather than produced by the mount stub, so the real primitives copy real bytes.
+  # The grubenv is a real pristine block (parts_env_block with no keys is byte-identical to
+  # `grub-editenv create`, section 3), so the real tool can arm it in the case that has one.
+  local b="$SP_RUN/root-a/usr/lib/retroforge/boot"
+  mkdir -p "$b/fonts" "$b/dtbs" "$SP_RUN/root-a/usr/bin"
+  for i in grub-esp.efi grubaa64.efi grub-a.cfg grub-b.cfg fonts/dejavu-mono.pf2 \
+           dtbs/qcs8550-ayaneo-pocketace.dtb dtbs/sm4450-anbernic-rg55g1.dtb; do
+    printf '%s\n' "$i" >"$b/$i"
   done
-  printf 'font\n' >"$SP_RUN/root-a/usr/lib/retroforge/boot/fonts/default.pf2"
-  printf 'font\n' >"$SP_RUN/root-a/usr/lib/retroforge/boot/fonts/dejavu-mono.pf2"
-  cp "$SP_STUBS/steamos-bootconf" "$SP_RUN/root-a/usr/bin/steamos-bootconf"
+  parts_env_block >"$b/grubenv"
+  cp "$SP_EDITENV_TOOL" "$SP_RUN/root-a/usr/bin/grub-editenv"
 
   # The partition "devices". DEVTEST is -e in the sandbox, so a regular file stands in for a block
   # device; PARTUUID_DIR is what points part_dev at them instead of /dev.
@@ -1254,10 +1328,19 @@ spine_run() {  # extra args passed through to the spine
       RETROFORGE_SELECT_TARGET="$SP_STUBS/select-target.sh" \
       RETROFORGE_CARVE="$SP_STUBS/carve.sh" \
       RETROFORGE_RAUC_SESSION="$SP_STUBS/rauc-session.sh" \
-      RETROFORGE_SLOTWRITE="$LIB" \
+      RETROFORGE_SLOTWRITE="${SP_SLOTWRITE:-$LIB}" \
       RETROFORGE_HOMESTAGE="$ROOT/image/lib-homestage.sh" \
+      ${SP_SHA256:+SHA256="$SP_SHA256"} \
+      ${SP_EDITENV:+EDITENV="$SP_EDITENV"} \
       "$SPINE" --bundle https://example.invalid/b.raucb \
       --userdata-gib 16 "$@" 2>&1
+}
+
+# What the ESP's grubenv says, read back with `<file> list` -- the stub's or, in the case that has
+# one, the real tool's -- so one assertion serves both.
+sp_env_has() {  # <key=value> [grubenv] [lister]
+  SP_CALLS=/dev/null "${3:-$SP_EDITENV_TOOL}" "${2:-$SP_RUN/esp/EFI/steamos/grubenv}" list 2>/dev/null \
+    | grep -qx -- "$1"
 }
 
 # The order of two recorded calls, by first occurrence. Returns non-zero if either never happened,
@@ -1293,24 +1376,52 @@ sp_before 'carve.sh fresh' 'mkfs.vfat' \
 sp_before 'mkfs.vfat' 'rauc-session install' \
   && ok "the filesystems exist before the root is streamed" \
   || bad "the root was streamed before the filesystems existed"
-sp_before 'rauc-session install' 'steamos-bootconf' \
-  && ok "the boot state is armed after there is a root to boot" \
-  || bad "A.conf was armed before the root existed"
+sp_before 'rauc-session install' 'grub-editenv .* set ' \
+  && ok "the slot state is armed after there is a root to boot" \
+  || bad "the grubenv was armed before the root existed"
 
-CASE="spine: bootaa64.efi is the last byte written"
-# Asserted against the ESP the run actually produced: the file exists, and every other artifact the
-# install writes was in place before it. Its position INSIDE refresh_esp_stage1 is case 14's; this
-# is the same property one level up, where the ordering of the whole install decides it.
-esp="$SP_RUN/esp"
-[ -f "$esp/EFI/BOOT/bootaa64.efi" ] \
-  && ok "the ESP carries the stage-1 loader ABL chainloads" \
-  || bad "no bootaa64.efi on the ESP -- the device would not boot internally at all"
-[ -f "$esp/EFI/steamos/grubenv" ] && [ -f "$esp/SteamOS/conf/A.conf" ] \
-  && ok "the grubenv and A.conf were in place before it" \
-  || bad "the ESP is missing the grubenv or A.conf"
-[ ! -e "$esp/SteamOS/conf/B.conf" ] \
-  && ok "NO B.conf -- steamcl requires a config for an image before that partition enters found[], so slot B is not a candidate at all" \
-  || bad "a B.conf exists; a never-booted B reports boot-attempts 0 and wins steamcl's alt pick"
+CASE="spine: the ESP carries what the ESP GRUB reads"
+# Asserted against the ESP the run actually produced: the ESP GRUB under the one name ABL starts,
+# and everything it reads -- the grubenv RAUC's grub backend keeps the slot state in, parts.env, and
+# OpenABL's DTBs. That they all land BEFORE bootaa64.efi is the ordering case further down.
+esp="$SP_RUN/esp"; rootboot="$SP_RUN/root-a/usr/lib/retroforge/boot"
+cmp -s "$esp/EFI/BOOT/bootaa64.efi" "$rootboot/grub-esp.efi" \
+  && ok "bootaa64.efi is the root's grub-esp.efi" \
+  || bad "no bootaa64.efi on the ESP, or not the root's ESP GRUB -- the device would not boot internally at all"
+# All five, because RAUC fails any call that reads one that is missing. B_OK=0 is what keeps the
+# ESP GRUB off a slot with nothing in it; RAUC sets it itself the first time it installs B.
+for kv in 'ORDER=A B' A_OK=1 A_TRY=0 B_OK=0 B_TRY=0; do
+  sp_env_has "$kv" \
+    && ok "the ESP grubenv says $kv" \
+    || bad "the ESP grubenv does not say $kv: $(SP_CALLS=/dev/null "$SP_EDITENV_TOOL" "$esp/EFI/steamos/grubenv" list 2>&1 | tr '\n' ' ')"
+done
+# On a device the root is mounted read-only, so arming its copy would fail there and pass here.
+parts_env_block | cmp -s - "$rootboot/grubenv" \
+  && ok "the root's pristine grubenv is copied, never armed in place" \
+  || bad "the root's grubenv was edited -- the slot state belongs on the ESP's copy"
+cmp -s "$esp/EFI/steamos/parts.env" "$SP_RUN/efi-a/EFI/steamos/parts.env" \
+  && ok "parts.env is efi-a's, so the ESP GRUB needs no partition scan on this disk" \
+  || bad "the ESP carries no parts.env, or not efi-a's"
+for d in qcs8550-ayaneo-pocketace sm4450-anbernic-rg55g1; do
+  cmp -s "$esp/dtbs/qcom/$d.dtb" "$rootboot/dtbs/$d.dtb" \
+    && ok "dtbs/qcom/$d.dtb is the root's, for OpenABL's Device model list" \
+    || bad "dtbs/qcom/$d.dtb is missing or not the root's"
+done
+# Nothing on this ESP reads a boot conf: the ESP GRUB follows an OLDER root's confs, and a fresh
+# install has no older root.
+[ ! -e "$esp/SteamOS" ] \
+  && ok "no /SteamOS on the ESP -- no boot conf, no steamos-bootconf" \
+  || bad "the ESP carries $(cd "$esp" && find SteamOS | tr '\n' ' ')"
+grep -q 'boot: grubenv ORDER=A B, A_OK=1, B_OK=0' "$SP_RUN/install.log" 2>/dev/null \
+  && ok "the install record says which slot state it armed" \
+  || bad "the install record does not name the slot state: $(grep '^boot:' "$SP_RUN/install.log" 2>/dev/null)"
+
+CASE="spine: grub-editenv comes out of the root it just wrote"
+# The tool and the block shipped together, so the root's copy is the one to run; the installer
+# image's is only the fallback (the case after the ordering one). And it is run on the ESP's copy.
+grep -qF "grub-editenv $SP_RUN/root-a/usr/bin/grub-editenv $esp/EFI/steamos/grubenv set " "$SP/calls" \
+  && ok "the root's /usr/bin/grub-editenv arms the ESP's grubenv" \
+  || bad "the slot state was not armed by the root's grub-editenv on the ESP: $(grep '^grub-editenv' "$SP/calls")"
 
 CASE="spine: the efi partitions carry the map of THIS disk"
 for slot in a b; do
@@ -1325,19 +1436,12 @@ for slot in a b; do
   [ -f "$SP_RUN/efi-$slot/EFI/steamos/grubaa64.efi" ] \
     && ok "efi-$slot carries stage 2 out of the root that was just written" \
     || bad "efi-$slot has no stage-2 GRUB"
+  # The steamcl chain matched the booted efi partition's uuid against SteamOS/partsets/self. The
+  # ESP GRUB addresses slots by parts.env, so nothing reads a partset and none is written.
+  [ ! -e "$SP_RUN/efi-$slot/SteamOS" ] \
+    && ok "efi-$slot carries no SteamOS/partsets" \
+    || bad "efi-$slot still carries $(cd "$SP_RUN/efi-$slot" && find SteamOS | tr '\n' ' ')"
 done
-
-CASE="spine: partsets are minted from the new GPT, and only self/other differ"
-a_self="$(cat "$SP_RUN/efi-a/SteamOS/partsets/self" 2>/dev/null || true)"
-b_self="$(cat "$SP_RUN/efi-b/SteamOS/partsets/self" 2>/dev/null || true)"
-[ -n "$a_self" ] && [ "$a_self" != "$b_self" ] \
-  && ok "efi-a and efi-b resolve to different images (steamcl matches the booted uuid against these)" \
-  || bad "the two partsets/self are the same or missing"
-if printf '%s' "$a_self" | grep -q '[A-Z]'; then
-  bad "the partset uuid is not lower-cased -- steamcl string-compares it and would match nothing"
-else
-  ok "the partset uuid is lower-cased"
-fi
 
 CASE="spine: var-a is the handler's and var-b is never touched"
 grep -q 'rauc-session install .* var=' "$SP/calls" \
@@ -1383,6 +1487,88 @@ fi
 grep -q "mkfs.vfat .*$SP_PART/" "$SP/calls" \
   && ok "the filesystems were created on by-partuuid paths" \
   || bad "a filesystem was created on something that is not a partuuid path"
+
+# --- the last byte -------------------------------------------------------------------------------
+CASE="spine: bootaa64.efi is the last byte written"
+# Case 14 shows the two ESP primitives cannot put bootaa64.efi anywhere but last when they are
+# called extras-then-stage-1. This is the same property one level up, where the spine's own order
+# decides it: the slot state, parts.env and the DTBs all land first. The observation is the real
+# lib with refresh_if_diff recording each write into the call log -- the copies are still the lib's
+# -- and grub-editenv records itself, so the one log orders all four. The grubenv's own cp needs no
+# entry: the stub refuses a file that is not there, so an armed grubenv proves it came first.
+{ printf '. %q\n' "$LIB"; cat <<'EOF'
+eval "orig_refresh_if_diff() $(declare -f refresh_if_diff | tail -n +2)"
+refresh_if_diff() { printf 'refresh %s\n' "${2#"$RETROFORGE_INSTALL_RUN"/}" >>"$SP_CALLS"; orig_refresh_if_diff "$@"; }
+EOF
+} >"$T/lib-slotwrite-observed.sh"
+spine_dir esporder
+SP_SLOTWRITE="$T/lib-slotwrite-observed.sh"
+out="$(spine_run)" || bad "the observed run failed: $out"
+unset SP_SLOTWRITE
+last="$(grep -E '^(refresh |grub-editenv )' "$SP/calls" | tail -1)"
+[ "$last" = "refresh esp/EFI/BOOT/bootaa64.efi" ] \
+  && ok "bootaa64.efi is the last write to the ESP (an interrupted install still boots the medium)" \
+  || bad "the last ESP write is not bootaa64.efi: $last"
+sp_before 'grub-editenv .* set ' 'refresh esp/EFI/BOOT/bootaa64.efi' \
+  && ok "the slot state is armed before it" \
+  || bad "bootaa64.efi was written before the grubenv was armed"
+sp_before 'refresh esp/EFI/steamos/parts.env' 'refresh esp/EFI/BOOT/bootaa64.efi' \
+  && ok "parts.env lands before it" \
+  || bad "bootaa64.efi was written before parts.env (or parts.env never was)"
+sp_before 'refresh esp/dtbs/qcom/' 'refresh esp/EFI/BOOT/bootaa64.efi' \
+  && ok "the DTBs land before it" \
+  || bad "bootaa64.efi was written before the DTBs (or they never were)"
+
+# --- which grub-editenv --------------------------------------------------------------------------
+CASE="spine: with no grub-editenv in the root, the installer image's is the fallback"
+spine_dir editenv_path
+rm -f "$SP_RUN/root-a/usr/bin/grub-editenv"
+cp "$SP_EDITENV_TOOL" "$SP_STUBS/grub-editenv"
+out="$(spine_run)" \
+  && ok "an older root with no grub-editenv still installs" \
+  || bad "the PATH fallback did not complete the install: $out"
+grep -qF "grub-editenv $SP_STUBS/grub-editenv $SP_RUN/esp/EFI/steamos/grubenv set " "$SP/calls" \
+  && ok "and it is the one on PATH that armed the ESP's grubenv" \
+  || bad "the PATH grub-editenv was not the one run: $(grep '^grub-editenv' "$SP/calls")"
+sp_env_has 'B_OK=0' \
+  && ok "and the slot state is the same" \
+  || bad "the fallback armed a different slot state"
+
+CASE="spine: no grub-editenv anywhere is fatal, before the last byte"
+# The host's own grub-editenv is on PATH for every spine run, and an offline suite cannot make it
+# absent, so on a host that has one the "none" answer is unreachable.
+if command -v grub-editenv >/dev/null 2>&1; then
+  skip "this host has grub-editenv on PATH, so the spine would find it -- the refusal did not run"
+else
+  spine_dir noeditenv
+  rm -f "$SP_RUN/root-a/usr/bin/grub-editenv"
+  out="$(spine_run)" \
+    && bad "installed with no grub-editenv to arm the slot state" \
+    || ok "refuses"
+  printf '%s\n' "$out" | grep -q 'no grub-editenv' \
+    && ok "and names the missing tool" \
+    || bad "the refusal does not name grub-editenv: $out"
+  [ ! -e "$SP_RUN/esp/EFI/BOOT/bootaa64.efi" ] \
+    && ok "and no bootaa64.efi was written, so the device still boots the medium and a re-run is free" \
+    || bad "bootaa64.efi was written with no slot state behind it"
+fi
+
+CASE="spine: the real grub-editenv arms what the ESP GRUB reads"
+# The stub models the tool; this is the tool. It settles the one thing a model cannot: that the
+# spine's arguments -- "ORDER=A B" with its space -- are what grub-editenv itself stores and lists.
+if command -v grub-editenv >/dev/null 2>&1; then
+  spine_dir realeditenv
+  SP_EDITENV="$(command -v grub-editenv)"
+  out="$(spine_run)" || bad "the run with the real grub-editenv failed: $out"
+  for kv in 'ORDER=A B' A_OK=1 A_TRY=0 B_OK=0 B_TRY=0; do
+    sp_env_has "$kv" "" "$SP_EDITENV" \
+      && ok "grub-editenv list reads back $kv" \
+      || bad "grub-editenv list does not read back $kv: $(grub-editenv "$SP_RUN/esp/EFI/steamos/grubenv" list 2>&1 | tr '\n' ' ')"
+  done
+  unset SP_EDITENV
+else
+  skip "grub-editenv is not installed -- the real-tool arming did not run"
+fi
 
 # --- the consent gate ---------------------------------------------------------------------------
 CASE="spine: it refuses without a completed confirm"
@@ -1683,6 +1869,20 @@ printf '%s' "$out" | grep -q 'retroforge-no-such-tool' \
   || bad "the error does not name the missing tool: $out"
 if carve_wrote; then bad "the carve ran anyway"; else ok "and nothing was written"; fi
 unset SP_SGDISK
+
+CASE="spine: a missing hasher is fatal at recon"
+# The caller's half of refresh_esp_stage1's missing-hasher case: an ABSENT comparator makes every
+# ESP refresh a silent no-op, so the spine has to find it at second zero rather than let the lib
+# meet it on the ESP.
+spine_dir nohasher
+SP_SHA256=retroforge-no-such-hasher
+out="$(spine_run)" && bad "ran with the hasher absent" \
+  || ok "refuses before anything is read"
+printf '%s' "$out" | grep -q 'retroforge-no-such-hasher' \
+  && ok "and names it" \
+  || bad "the error does not name the missing hasher: $out"
+if carve_wrote; then bad "the carve ran anyway"; else ok "and nothing was written"; fi
+unset SP_SHA256
 
 # --- confirm-tty, the renderer behind the seam ---------------------------------------------------
 # It is one implementation of the contract; §5's gamepad screen is another. What is asserted here is

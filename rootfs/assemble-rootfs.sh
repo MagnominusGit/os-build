@@ -99,7 +99,7 @@ fi
 
 # STAGE boot-mountpoints — /esp + /efi (Phase 5). The two boot homes the OS must see are the shared ESP
 # and the booted slot's own efi partition:
-#   /esp  the shared ESP (p1, the only ef00) — SteamOS/conf + steamcl. Mounted HERE by /etc/fstab
+#   /esp  the shared ESP (p1, the only ef00) — the ESP GRUB + grubenv. Mounted HERE by /etc/fstab
 #         (below); gpt-auto is switched off for it by GPT bit 63 in partition-table.txt, because
 #         gpt-auto would otherwise mount it at /efi — which is the name the initramfs reserves for
 #         the slot's efi partition. The root is read-only, so the mountpoint must pre-exist.

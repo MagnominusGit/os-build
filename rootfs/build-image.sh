@@ -7,8 +7,8 @@
 #   3. assemble the read-only Btrfs root              (rootfs/assemble-rootfs.sh)
 #
 # Prereq: unified kernel already built (kernel/build.sh) so out/ has Image + modroot,
-# plus the initramfs (image/mkinitramfs.sh) and the stage-1/2 boot artifacts (boot/steamcl.sh +
-# boot/grub.sh) — the assembler now bakes all three into the root (Phase 5).
+# plus the initramfs (image/mkinitramfs.sh) and the boot artifacts (boot/grub.sh) — the assembler
+# bakes all three into the root.
 # Device firmware is fetched from the pinned retroforge-linux/qcom-firmwares repo — no proprietary
 # blobs ship in-repo. Steps 3-4 run in the retroforge-build image.
 #
@@ -52,7 +52,7 @@ cat <<EOF
 
 Image flow done. Read-only root at out/images/rootfs.img.
 The root carries its own boot half (Phase 5): /boot/{Image, initramfs-retroforge.img, dtbs} and the
-/usr/lib/retroforge/boot stage-1/2 mirror (run boot/steamcl.sh + boot/grub.sh for out/boot/* first).
+/usr/lib/retroforge/boot mirror (run boot/grub.sh for out/boot/* first).
 Next — the flashable card:
   image/make-sdcard.sh             # -> out/images/sdcard.img (or `make sdcard`)
 EOF

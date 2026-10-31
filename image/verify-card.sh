@@ -6,11 +6,10 @@
 # the ESP contents, or the filesystem identities the A/B switch depends on. This closes that gap
 # for the parts a slot switch can be silently wrong about.
 #
-# Phase 5 shape (docs/archive/phase5.md): the card boots ABL → steamcl (stage 1, on the ESP) → per-slot
-# GRUB (stage 2, on the slot's efi-a/b partition) → kernel. So beyond the filesystem identities
-# this asserts the two boot homes: the ESP carries steamcl + the boot confs + the grubenv, and
-# each efi partition carries its stage-2 GRUB + identity partsets keyed to the disk's partuuids.
-# There is deliberately no /KERNEL and no /RETROFORGE/ to check anymore.
+# The card boots ABL → the ESP GRUB (on the ESP; it picks the slot) → the slot's stage-2 grub.cfg
+# (on its efi-a/b partition; it picks the board) → kernel. So beyond the filesystem identities this
+# asserts the two boot homes: the ESP carries the ESP GRUB + the grubenv with RAUC's seeded slot
+# state + parts.env + OpenABL's Device model DTBs, and each efi partition carries its stage-2 config.
 #
 # It matters most for one thing that is invisible until hardware contradicts you: the two roots
 # are content-identical by design, so if they also share a btrfs fsid then mounting slot B can
@@ -29,7 +28,7 @@ TABLE="$ROOT/image/partition-table.txt"
 INITRAMFS="$ROOT/out/initramfs.cpio.gz"
 
 [ -f "$IMG" ] || { echo "no card image: $IMG (run make sdcard)" >&2; exit 1; }
-for t in sgdisk blkid debugfs mdir mtype mlabel cpio; do
+for t in sgdisk blkid debugfs mdir mtype mlabel cpio cmp; do
   command -v "$t" >/dev/null 2>&1 || { echo "$t not found — run inside retroforge-build" >&2; exit 1; }
 done
 
@@ -114,8 +113,8 @@ check_slot "$P_VARA" A
 [ "$SLOT_B" = 1 ] && check_slot "$P_VARB" B
 
 # ----------------------------------------------------------------------------------------------
-# 3. The ESP (stage 1 home). steamcl at /EFI/BOOT/bootaa64.efi is the only thing ABL can find,
-# so a card with no /KERNEL still boots. The boot state is the confs + the seeded grubenv.
+# 3. The ESP. The ESP GRUB at /EFI/BOOT/bootaa64.efi is the only thing ABL can find. The slot state
+# is RAUC's, in the seeded grubenv.
 # ----------------------------------------------------------------------------------------------
 echo "  3. ESP (stage 1)"
 espoff=$(( $(start "$P_ESP") * 512 ))
@@ -123,7 +122,7 @@ need_file() {  # <msdos path> <what>
   mtype -i "$IMG@@$espoff" "$1" >"$T/f" 2>/dev/null && ok "$2 present" || bad "$2 missing"
 }
 # The FAT label. Nothing in the boot chain RESOLVES by it (stage 2 goes by partition index, with a
-# content search for /SteamOS/conf/<slot>.conf as the fallback), which is exactly why it is worth
+# content search for /EFI/steamos/grubenv as the fallback), which is exactly why it is worth
 # asserting: when it did matter, it drifted from what grub.cfg searched for and nothing failed.
 # mlabel, not blkid: a FAT32 volume label lives in a root-directory entry out in the data area,
 # so probing a short dd of the superblock reports nothing at all.
@@ -134,60 +133,54 @@ esp_fslabel=$(mlabel -i "$IMG@@$espoff" -s :: 2>/dev/null \
 [ -n "$esp_fslabel" ] && [ "${#esp_fslabel}" -le 11 ] \
   && ok "ESP FAT label '$esp_fslabel' (<= 11 chars)" \
   || bad "ESP FAT label is empty or over the 11-char FAT limit: '$esp_fslabel'"
-need_file ::/EFI/BOOT/bootaa64.efi         "steamcl at /EFI/BOOT/bootaa64.efi"
-need_file ::/EFI/BOOT/steamcl-version     "/EFI/BOOT/steamcl-version"
-need_file ::/EFI/BOOT/steamcl-restricted  "/EFI/BOOT/steamcl-restricted"
-need_file ::/EFI/BOOT/fonts/default.pf2   "/EFI/BOOT/fonts/default.pf2"
+need_file ::/EFI/BOOT/bootaa64.efi         "the ESP GRUB at /EFI/BOOT/bootaa64.efi"
 need_file ::/EFI/steamos/grubenv          "/EFI/steamos/grubenv"
-need_file ::/SteamOS/conf/A.conf          "/SteamOS/conf/A.conf"
-# B.conf must be PRESENT when B is populated and ABSENT when it is not -- the absence is what stops
-# steamcl's set_menu_conf() alt-entry pick from handing a 6-times-failed A over to a slot with no
-# kernel (image/make-sdcard.sh documents the mechanism). A B.conf on a card with an empty B is a
-# real defect, not a leftover, so assert it rather than skipping the check.
-if [ "$SLOT_B" = 1 ]; then
-  need_file ::/SteamOS/conf/B.conf        "/SteamOS/conf/B.conf"
-else
-  mtype -i "$IMG@@$espoff" ::/SteamOS/conf/B.conf >/dev/null 2>&1 \
-    && bad "B.conf present on a card with an empty slot B — steamcl would offer B as a boot candidate" \
-    || ok "no B.conf (empty slot B is not a boot candidate)"
+need_file ::/EFI/steamos/parts.env        "/EFI/steamos/parts.env"
+# bootaa64.efi must be THIS build's ESP GRUB, not the stage-2 binary: only the ESP GRUB carries the
+# slot picker, and the plain one would read a grub.cfg the ESP does not have.
+mtype -i "$IMG@@$espoff" ::/EFI/BOOT/bootaa64.efi >"$T/bootaa64.efi" 2>/dev/null || true
+BOOTDIR="$ROOT/out/boot"
+if [ -f "$BOOTDIR/grub-esp.efi" ]; then
+  cmp -s "$T/bootaa64.efi" "$BOOTDIR/grub-esp.efi" \
+    && ok "bootaa64.efi is out/boot/grub-esp.efi" \
+    || bad "bootaa64.efi is not this build's ESP GRUB (out/boot/grub-esp.efi)"
 fi
-# steamcl-restricted must be present and EMPTY (it gates steamcl's own-device-only behaviour;
-# presence matters, content does not).
-mtype -i "$IMG@@$espoff" ::/EFI/BOOT/steamcl-restricted >"$T/f" 2>/dev/null \
-  && { [ -s "$T/f" ] && bad "steamcl-restricted should be empty" || ok "steamcl-restricted present and empty"; } \
-  || bad "/EFI/BOOT/steamcl-restricted missing"
-# A stale /KERNEL or /RETROFORGE would mean this card was laid by the pre-Phase-5 assembler; catch it here so it cannot be flashed by habit.
-mdir -i "$IMG@@$espoff" ::/KERNEL >/dev/null 2>&1 && bad "/KERNEL present on a Phase 5 card" \
+
+mdir -i "$IMG@@$espoff" ::/KERNEL >/dev/null 2>&1 && bad "/KERNEL present on the card" \
                                                    || ok "no /KERNEL"
-mdir -i "$IMG@@$espoff" ::/RETROFORGE >/dev/null 2>&1 && bad "/RETROFORGE present on a Phase 5 card" \
-                                                      || ok "no /RETROFORGE"
-# confs: A is seeded with the newest boot-requested-at so the first boot picks A; B is 0. Both
-# must be the bootconf key: value format (any non-empty value line parses; these are the seeds).
-mtype -i "$IMG@@$espoff" ::/SteamOS/conf/A.conf >"$T/conf_a" 2>/dev/null || true
-a_stamp=$(sed -n 's/^boot-requested-at: //p' "$T/conf_a")
-case "$a_stamp" in [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9])
-  ok "A.conf boot-requested-at = $a_stamp" ;;
-*) bad "A.conf has no valid boot-requested-at (got '$a_stamp')" ;; esac
-if [ "$SLOT_B" = 1 ]; then
-  mtype -i "$IMG@@$espoff" ::/SteamOS/conf/B.conf >"$T/conf_b" 2>/dev/null || true
-  b_stamp=$(sed -n 's/^boot-requested-at: //p' "$T/conf_b")
-  [ "$b_stamp" = 0 ] && ok "B.conf boot-requested-at = 0" || bad "B.conf boot-requested-at should be 0, got '$b_stamp'"
-  [ "$a_stamp" -gt "$b_stamp" ] 2>/dev/null && ok "A is the newer image (first boot picks A)" \
-                                            || bad "A is not the newer image"
-fi
-# the seeded grubenv is a real GRUB env block, so GRUB's first save_env has a file to write.
+mdir -i "$IMG@@$espoff" ::/SteamOS >/dev/null 2>&1 && bad "/SteamOS present: the boot confs belong to the steamcl chain" \
+                                                   || ok "no /SteamOS (no boot confs)"
+mdir -i "$IMG@@$espoff" ::/EFI/BOOT/steamcl-version >/dev/null 2>&1 && bad "steamcl's companion files are on the ESP" \
+                                                                    || ok "no steamcl files"
+
+# The grubenv is a real GRUB env block carrying RAUC's slot state, seeded so the first boot picks
+# A and an empty B is never tried.
 mtype -i "$IMG@@$espoff" ::/EFI/steamos/grubenv >"$T/grubenv" 2>/dev/null || true
 grep -aq "GRUB Environment Block" "$T/grubenv" && ok "grubenv is a valid GRUB env block" \
                                               || bad "grubenv has no GRUB magic header"
+[ "$(wc -c <"$T/grubenv")" = 1024 ] && ok "grubenv is 1024 bytes" || bad "grubenv is $(wc -c <"$T/grubenv") bytes, not 1024"
+want_b_ok=0; [ "${SLOT_B:-1}" = 1 ] && want_b_ok=1
+for kv in "ORDER=A B" "A_OK=1" "A_TRY=0" "B_OK=$want_b_ok" "B_TRY=0"; do
+  grep -aqx -- "$kv" "$T/grubenv" && ok "grubenv $kv" || bad "grubenv does not carry $kv"
+done
+grep -aq '^saved_entry=' "$T/grubenv" && bad "grubenv carries a saved_entry -- this card would pin one board" \
+                                       || ok "grubenv has no saved board"
+
+# OpenABL's Device model list: one DTB per shipped board, each with the splash region that keeps
+# OpenABL 1.2 from powering the panel down (boot/esp-dtbs.sh).
+n_esp_dtbs=$(mdir -b -i "$IMG@@$espoff" ::/dtbs/qcom 2>/dev/null | grep -c '\.dtb$' || true)
+n_dtbs=$(find "$ROOT/out/dtbs" -maxdepth 1 -name '*.dtb' 2>/dev/null | wc -l | tr -d ' ')
+[ "$n_esp_dtbs" -gt 0 ] && [ "$n_esp_dtbs" = "$n_dtbs" ] \
+  && ok "/dtbs/qcom carries all $n_dtbs DTBs" \
+  || bad "/dtbs/qcom carries $n_esp_dtbs DTBs, out/dtbs has $n_dtbs"
 
 # ----------------------------------------------------------------------------------------------
-# 4. efi-a / efi-b (stage 2 homes). steamcl chainloads \EFI\steamos\grubaa64.efi on the slot's
-# efi partition, matching its own partition uuid against partsets/self and reading the ESP uuid
-# from partsets/all. A wrong uuid anywhere here breaks the boot handoff.
+# 4. efi-a / efi-b (stage 2 homes). The ESP GRUB hands over to \EFI\steamos\grub.cfg on the slot's
+# efi partition, which reads parts.env beside it before it can address anything.
 # ----------------------------------------------------------------------------------------------
 echo "  4. efi-a / efi-b (stage 2)"
-check_efi() {  # <partnum> <letter> <self> <other>
-  local p=$1 letter=$2 self=$3 other=$4 off
+check_efi() {  # <partnum> <letter>
+  local p=$1 letter=$2 off
   off=$(( $(start "$p") * 512 ))
   for f in ::/EFI/steamos/grubaa64.efi ::/EFI/steamos/grub.cfg \
            ::/EFI/steamos/fonts/dejavu-mono.pf2 ::/EFI/steamos/parts.env; do
@@ -226,22 +219,9 @@ check_efi() {  # <partnum> <letter> <self> <other>
     ok "p$p grub.cfg content check skipped (no boot/gen-grub-cfg.sh)"
   fi
 
-  # partsets are 'key value' whitespace-separated (steamcl's format).
-  partset() { mtype -i "$IMG@@$off" "::/SteamOS/partsets/$1" 2>/dev/null; }
-  for n in A B all shared self other; do
-    partset "$n" >/dev/null 2>&1 && ok "p$p partsets/$n present" || bad "p$p partsets/$n missing"
-  done
-  # The identity matrix. self must name THIS partition; other the sibling; all/shared the ESP;
-  # A/B the two efi uuids — on both slots, so the partsets are slot-invariant except self/other.
-  [ "$(partset self)"  = "efi $self" ]  && ok "p$p self = $self"  || bad "p$p self: expected 'efi $self', got '$(partset self)'"
-  [ "$(partset other)" = "efi $other" ] && ok "p$p other = $other" || bad "p$p other: expected 'efi $other', got '$(partset other)'"
-  [ "$(partset all)"   = "esp $ESP_UUID" ] && ok "p$p all = esp $ESP_UUID"  || bad "p$p all is wrong"
-  [ "$(partset shared)" = "esp $ESP_UUID" ] && ok "p$p shared = esp $ESP_UUID" || bad "p$p shared is wrong"
-  [ "$(partset A)"      = "efi $EFIA_UUID" ] && ok "p$p A = $EFIA_UUID" || bad "p$p A is wrong"
-  [ "$(partset B)"      = "efi $EFIB_UUID" ] && ok "p$p B = $EFIB_UUID" || bad "p$p B is wrong"
 }
-check_efi "$P_EFIA" A "$EFIA_UUID" "$EFIB_UUID"
-check_efi "$P_EFIB" B "$EFIB_UUID" "$EFIA_UUID"
+check_efi "$P_EFIA" A
+check_efi "$P_EFIB" B
 
 # ----------------------------------------------------------------------------------------------
 # 5. The initramfs actually carries what the boot path needs. The phase-5 init mounts root (ro) +

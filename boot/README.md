@@ -1,29 +1,74 @@
 # boot/
 
-The two-stage UEFI boot chain (Phase 5; `docs/archive/phase5.md`):
+The UEFI boot chain:
 
 ```
-ABL  →  steamcl (stage 1, shared ESP)  →  GRUB (stage 2, the slot's efi-a/b)  →  kernel in the slot root
-        picks the image (A|B) from            picks the BOARD from its menu,
-        /SteamOS/conf/{A,B}.conf              loads Image + initramfs + that board's DTB
+ABL (OpenABL)  →  the ESP GRUB (\EFI\BOOT\bootaa64.efi)  →  stage-2 grub.cfg (the slot's efi-A/B)  →  kernel in the slot root
+                  picks the SLOT from RAUC's state in        picks the BOARD (OpenABL's Device
+                  \EFI\steamos\grubenv, counts its tries     model, else the saved choice, else
+                                                             a menu), loads Image + initramfs +
+                                                             that board's DTB from the slot root
 ```
 
-Two independent choices, made by two different stages. Which **slot** boots is stage 1's, driven
-by the boot confs on the shared ESP and steered by `retroforge-bootctl` / RAUC. Which **board** this
-is — one image serves all 15 — is stage 2's, and it is the one thing the card cannot work out for
-itself, so it is a menu on first boot and a saved answer afterwards.
+Two choices, made in two places. Which **slot** boots is RAUC's state (`bootloader=grub`:
+`ORDER`, `A_OK`/`A_TRY`, `B_OK`/`B_TRY` in the ESP's grubenv), read by the ESP GRUB, which gives a
+slot three tries before it boots the other one. Which **board** this is — one image serves all of
+them — comes from OpenABL's Device model when it is set, and otherwise from the stage-2 menu,
+asked once and saved.
 
 | File | Purpose |
 |---|---|
-| `steamos-efi.pin` | Pinned source for stage 1: Valve's own `steamos-efi` source package (holo-main), a tag inside its bare clone. |
-| `patches/steamos-efi/` | Our arm64 port on it: chainloader PE machine + `grubaa64.efi` paths, the cross-build `configure.ac`/`Makefile.am` fixes, the removable-media name, an `ftruncate` check. Applied lexically. |
-| `steamcl.sh` | Cross-build it → `out/boot/{steamcl.efi, holo-bootconf, steamcl-version, fonts/default.pf2}`. `holo-bootconf` ships on-device as `/usr/bin/steamos-bootconf`. |
-| `grub.pin` | Pinned source for stage 2: the **GNU GRUB 2.14 release tarball** from ftp.gnu.org. |
-| `patches/grub/` | Our delta on it: framebuffer rotation, the `retroforge` boot-attempts module, and the `Makefile.core.def` stanza that builds it. Applied lexically, like `kernel/patches/`. |
-| `grub.sh` | Cross-build stage 2 → `out/boot/grubaa64.efi` + `fonts/dejavu-mono.pf2`, then generate both configs. |
-| `gen-grub-cfg.sh <A\|B> <out>` | Generate one slot's `grub.cfg`. No toolchain — `tests/test-stage2-grub.sh` runs it directly. |
+| `grub.pin` | Pinned source: the **GNU GRUB 2.14 release tarball** from ftp.gnu.org. |
+| `patches/grub/` | Our delta on it: framebuffer rotation, the `retroforge` module, and the `Makefile.core.def` stanza that builds it. Applied lexically, like `kernel/patches/`. |
+| `grub.sh` | Cross-build → `out/boot/{grub-esp.efi, grubaa64.efi, grub-a.cfg, grub-b.cfg, fonts/, grubenv, grub-editenv, steamcl-version}`. |
+| `gen-esp-cfg.sh <out>` | Generate the slot picker embedded in `grub-esp.efi`. No toolchain. |
+| `gen-grub-cfg.sh <A\|B> <out>` | Generate one slot's stage-2 `grub.cfg`. No toolchain — `tests/test-stage2-grub.sh` runs both generators directly. |
 | `boards.map` | Build-time board catalog: `id⇥name⇥dtb⇥bootargs`. Cross-checked against the runtime device profiles by that test. |
-| `deploy.sh <esp>` | Dev helper: write the stage-1 tree to a mounted ESP. Stage 2 comes from `make sdcard` or a RAUC install. |
+| `esp-dtbs.sh <out> <dtb>...` | The DTBs the ESP carries in `\dtbs\qcom` for OpenABL's Device model list (see below). |
+
+## The ESP GRUB
+
+`grub-esp.efi` is GRUB with `gen-esp-cfg.sh`'s config in a memdisk; its embedded config is the one
+plain command `normal (memdisk)/esp.cfg` (an embedded config runs under the rescue parser, which has
+no `if`). The config reads the grubenv, picks the first slot in `ORDER` that is OK, has tries left
+(`TRY` 0, 1 or 2) and has both a stage-2 config and a kernel, counts the try, sets `$root`/`$prefix`
+to that slot's efi partition and sources the stage-2 `grub.cfg` there, as if it had been loaded off
+that partition.
+It tells the stage-2 config, through `rf_retry`/`rf_fallback`, whether this boot is another try or
+a fall-back, which is when the stage-2 menu is shown.
+
+RAUC reads any `TRY` above 0 as "not good", and its `set-primary`, `mark-good` and `mark-bad`
+write `TRY=0`, so the three-try count means nothing to it. `retroforge-boot-good.service` confirms a
+healthy boot with `rauc status mark-good booted`; a failed health check demotes with `mark-bad`.
+
+Where the slots are comes from `\EFI\steamos\parts.env` on the ESP, else from the first partition
+on the boot disk that carries one, else the card layout's indices.
+
+**Roots from before the ESP GRUB.** The first update into a root that has it is installed by the
+older root's hook, which copies `/usr/lib/retroforge/boot/steamcl.efi` onto the ESP — so that name
+is a link to `grub-esp.efi`, and the hook installs the ESP GRUB without knowing it. Such roots arm
+a slot by writing `\SteamOS\conf\<slot>.conf`; the ESP GRUB follows a change there once
+(`rf_bcsync`), and boots an older root through its own stage-2 config. Roots with the ESP GRUB never
+write those files, so once no older root is left this never fires. The post-install hook refuses
+to install a root without `grub-esp.efi`: going back past the switch is a reflash.
+
+## The board, and OpenABL's Device model
+
+OpenABL installs the DTB of its Device model setting, read from the boot drive, before it starts
+an EFI program. `retroforge_dt_model` reads that tree's root `model`, and the stage-2 config maps it
+to the entry for that board (every board .dts's root model). A model we know wins over the saved
+choice and replaces it, so once a Device model is set the board is changed in OpenABL's menu. Only
+the name is used: the entry boots the slot's own DTB.
+
+The ESP's `\dtbs\qcom` copies are what OpenABL lists and installs. They are the real DTBs plus a
+`/reserved-memory/splash_region` where a tree has none, because OpenABL 1.2 powers the display down
+at the hand-over when the tree it installed has no splash region.
+
+With no Device model, the first boot stops at the stage-2 board menu and waits; the choice is
+saved in the grubenv (`saved_entry`) and the menu is hidden from then on. It comes back for 3s on a
+retry of a board that has never had a boot confirmed (`mark-good` records `rf_board_ok`), and when no
+slot has tries left — not on every retry, because a device shut down before its confirmation is not
+a wrong board.
 
 ## The kernel command line
 
@@ -37,55 +82,35 @@ which is why the board args moved out of the DTS `/chosen/bootargs` too. They co
 | common args | `BOOT_CMDLINE` in `gen-grub-cfg.sh` |
 | board args | the fourth column of `boards.map` |
 | `root=` `retroforge.var=` `retroforge.efi=` | per slot, as `PARTUUID=` read out of the GPT at boot with `probe --part-uuid`; `PARTLABEL=` from `image/partition-table.txt` is the announced fallback |
-| `retroforge.slot=` | per slot, stated outright — a PARTUUID carries no slot letter for the initramfs to match |
+| `retroforge.slot=` `rauc.slot=` | per slot, stated outright — a PARTUUID carries no slot letter, and RAUC finds the booted slot from `rauc.slot=` |
 
 The specs are `PARTUUID=` because every retroforge medium carries the same eight GPT names: with a
 card inserted on a device installed to internal storage, `PARTLABEL=` resolves to whichever disk
-enumerates first. The UUIDs are derived from the disk stage 2 was chainloaded off, at boot, so
-they name that disk by construction and no update has to rewrite them. This needs `probe` in the
-embedded `MODULES` — an unembedded module is an "unknown command" that leaves the variable unset
-and takes the fallback on every boot, so `tests/test-stage2-grub.sh` asserts the module list.
+enumerates first. The UUIDs are derived from the disk at boot, so they name that disk by
+construction and no update has to rewrite them. This needs `probe` in the embedded `MODULES` — an
+unembedded module is an "unknown command" that leaves the variable unset and takes the fallback on
+every boot, so `tests/test-stage2-grub.sh` asserts the module list.
 
 ## The retroforge module
 
-`grubaa64.efi` embeds one module of ours, providing one command:
+`grub-esp.efi` and `grubaa64.efi` embed one module of ours:
 
 ```
-retroforge_bootattempts <image-name>       # e.g. retroforge_bootattempts A
+retroforge_dt_model VAR                 # VAR := the root model of the devicetree the firmware installed
+retroforge_conf_get FILE KEY VAR        # VAR := the value of `KEY:` in FILE (an older root's boot conf)
+retroforge_bootattempts <image-name>    # only older roots' stage-2 configs still call this
 ```
 
-It opens `\SteamOS\conf\<image-name>.conf` on the ESP through the firmware's `EFI_FILE_PROTOCOL`,
-increments `boot-attempts:` and writes it back. `retroforge-boot-good` clears the counter once the
-session proves healthy; `retroforge-bootctl` and RAUC read it to decide a slot is bad. That is the
-whole module — it touches no GRUB variable, no video mode and no kernel command line.
-
-**It needs to be a module because GRUB's own `fat` driver is read-only.** The EFI file protocol is
-the only way to write the ESP from stage 2.
-
-Three things to know before changing it:
-
-* **It does not do its own `ConnectController` sweep, on purpose.** steamcl does one over `BLOCK_IO`
-  handles for firmware that skips FAT driver binding under fastboot, and it cannot reach efi-A to
-  chainload us without the resulting filesystem handles. Those bindings persist into us — it uses
-  `LoadImage`/`StartImage` and never calls `ExitBootServices` — so repeating the sweep would be
-  dead code. That is also why the ESP is reachable at all from a binary loaded off efi-A.
-* **The image name is an argument, not a discovery.** `gen-grub-cfg.sh` emits one config per slot
-  and already knows the slot, so the module never has to work out which image it is.
-* **The call sits AFTER `terminal_output gfxterm`,** which its predecessor could not. That
-  predecessor was Valve's `steamenv`, whose `steamenv_init` bumped the same counter but overwrote
-  `timeout`/`timeout_style` afterwards — so it had to run before any `menuentry` existed, and when
-  it wedged on this hardware nothing had been painted and nothing could be. The post-mortem, and
-  the three failure modes this module was shaped to avoid, are in `docs/archive/phase5-bootattempts.md`.
+The first two only read, through GRUB's own drivers, and leave `VAR` unset when there is nothing to
+report. The third writes `\SteamOS\conf\<image>.conf` through the firmware's `EFI_FILE_PROTOCOL`
+(GRUB's `fat` driver is read-only); it stays for as long as older roots' stage-2 configs exist.
 
 ## Building
 
-Both stages run in the build container:
-
 ```sh
-make steamcl      # stage 1
-make grub         # stage 2 + both grub.cfg files
+make grub
 ```
 
-The stage-1/2 binaries reach a card through `image/make-sdcard.sh`, and reach an updated slot
-through the RAUC post-install hook, which takes them from `/usr/lib/retroforge/boot/` inside the root
-it just installed — so a root and the software that boots it always come from one build.
+The binaries reach a card through `image/make-sdcard.sh`, and reach an updated slot through the
+RAUC post-install hook, which takes them from `/usr/lib/retroforge/boot/` inside the root it just
+installed — so a root and the software that boots it always come from one build.

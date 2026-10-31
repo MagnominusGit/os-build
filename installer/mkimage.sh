@@ -20,9 +20,9 @@
 # what lets the whole medium be assembled in a container with no privileged flags.
 #
 # THE BOOT CHAIN IS SHORTER THAN THE CARD'S, BY ONE LINK. The shipped card is
-# ABL -> steamcl.efi -> stage-2 GRUB on the slot's efi partition -> kernel in the slot root. steamcl
-# is the A/B SLOT CHOOSER: it reads /SteamOS/conf/{A,B}.conf, matches partsets, and picks. This
-# medium has one root, so there is nothing for it to choose and its conf files would be fiction.
+# ABL -> the ESP GRUB -> stage-2 grub.cfg on the slot's efi partition -> kernel in the slot root.
+# The ESP GRUB is the A/B SLOT CHOOSER: it reads RAUC's state from the grubenv and picks. This
+# medium has one root, so there is nothing for it to choose and a slot state would be fiction.
 # GRUB goes straight in at \EFI\BOOT\bootaa64.efi, which is the path ABL loads by CONTENT (not by
 # partition type) — see [[abl-internal-efi-path-works]]. boot/grub.sh builds the binary with
 # `-p /EFI/steamos`, and that prefix is relative to the partition it was loaded FROM, so the config

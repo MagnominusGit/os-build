@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# retroforge RAUC post-install handler — Phase 5 (SteamDeck-style boot; docs/archive/phase5.md).
+# retroforge RAUC post-install handler.
 #
 # Runs after RAUC has written and unmounted the target slot. A freshly written slot is NOT usable
 # until this has run: the bytes are an exact copy of the running slot, so it shares an fsid, it has
@@ -14,27 +14,26 @@
 #                    the first having MOVED, so mounting the target can silently hand you the
 #                    RUNNING root. Every later step here mounts the target, so this is step 1.
 #   2. /var       -- per-slot identity. Without it the updated slot boots as a different device.
-#   3. stage 2    -- the target's efi partition gets this build's grubaa64.efi + grub.cfg + boot
-#                    font and the partsets (self/other re-pointed at the target), and the shared
-#                    ESP gets this build's steamcl (content-identical when unchanged).
-#   4. bootconf   -- the target image's conf exists and is unmarked; the ESP points at it (re-arm).
+#   3. boot files -- the target's efi partition gets this build's stage-2 grub.cfg + boot font, and
+#                    the shared ESP gets parts.env, OpenABL's \dtbs\qcom and this build's ESP GRUB
+#                    (content-identical when unchanged), the ESP GRUB last.
+#   4. re-arm     -- the grubenv names the target first, OK and with all three tries.
 #
-# WHY THE STAGE-2 FILES COME OUT OF THE NEW ROOT AND NOT THE BUNDLE: /EFI/steamos/grubaa64.efi and
-# grub-<slot>.cfg are boot software owned by the same build that ships /boot/Image and
-# /lib/modules/<ver> inside the rootfs. Taking them from the root makes the pairing true by
-# construction -- there is no bundle layout to keep in sync, and no way to install a root whose
-# stage 2 does not boot it.
+# WHY THE BOOT FILES COME OUT OF THE NEW ROOT AND NOT THE BUNDLE: grub-esp.efi and grub-<slot>.cfg
+# are boot software owned by the same build that ships /boot/Image and /lib/modules/<ver> inside the
+# rootfs. Taking them from the root makes the pairing true by construction -- there is no bundle
+# layout to keep in sync, and no way to install a root whose stage 2 does not boot it.
 #
-# WHO AM I: slot identity is the SteamOS image name now, not a handoff letter. The booted image is
-# `steamos-bootconf this-image` (holo-bootconf reading /efi/SteamOS/partsets/self), and the target
-# is the other one. RAUC's exported slot names are used only to cross-check, and a disagreement is
-# fatal rather than resolved by preference.
+# THE SLOT STATE IS RAUC'S (bootloader=grub): ORDER, A_OK/A_TRY and B_OK/B_TRY in the ESP's grubenv.
+# This hook writes it directly, with the same grub-editenv RAUC uses, because RAUC is mid-install
+# and cannot be asked; it only ever moves the TARGET's two values and ORDER.
 #
-# PREREQUISITE (landed with the phase-5 initramfs rework): /esp (the shared ESP, with
-# SteamOS/conf) and /efi (the RUNNING slot's efi partition, with SteamOS/partsets) must be
-# mounted when this runs. steamos-bootconf needs both, and the partsets this hook copies out of
-# /efi are the disk-derived ones -- there is no way to rebuild them from nothing here, which is
-# why a card that somehow lost /efi's partsets is a reflash, not an update.
+# WHO AM I: the booted slot is the initramfs handoff's slot= (retroforge.slot= on the command line
+# the stage-2 entry booted), and the target is the other one. RAUC's exported slot names are used
+# only to cross-check, and a disagreement is fatal rather than resolved by preference.
+#
+# A ROOT FROM BEFORE THE ESP GRUB IS REFUSED: it has no grub-esp.efi to install, and its own userspace
+# drives a boot conf the ESP GRUB only follows. Going back past the switch is a reflash.
 set -euo pipefail
 
 PROG=${0##*/}
@@ -48,8 +47,8 @@ die()  { printf '[%s] ERROR: %s\n' "$PROG" "$1" >&2; exit 1; }
 # invocation uses. DEVTEST is the one assertion the sandbox cannot keep: an unprivileged test has
 # no block devices to offer, so it relaxes -b to -e. Everything a wrong answer here would destroy
 # lives behind DEVDIR, so treat both as the pair they are.
-ESP=${ESP:-/esp}              # the shared ESP (SteamOS/conf + steamcl); mounted by fstab
-EFI=${EFI:-/efi}              # the RUNNING slot's efi partition (SteamOS/partsets); initramfs mount
+ESP=${ESP:-/esp}              # the shared ESP (ESP GRUB + grubenv); mounted by fstab
+EFI=${EFI:-/efi}              # the RUNNING slot's efi partition (parts.env); initramfs mount
 MNT=${MNT:-/run/retroforge/rauc-target}
 EFIMNT=${EFIMNT:-/run/retroforge/rauc-efi}
 VAR=${VAR:-/var}
@@ -60,10 +59,12 @@ VAR=${VAR:-/var}
 # etc/rauc/system.conf names its slot devices through the same links, so the two cannot disagree.
 DEVDIR=${DEVDIR:-/dev/retroforge}
 DEVTEST=${DEVTEST:--b}
-BC=${BC:-steamos-bootconf}
-BC_ARGS=(--conf-dir "$ESP/SteamOS/conf" --efi-dir "$EFI")
-bc() { "$BC" "${BC_ARGS[@]}" "$@"; }
-# The hasher, a seam for the same reason BC is one: the suite runs this script with the HOST's PATH
+# The slot-state editor RAUC itself runs, and the block it edits (system.conf `grubenv=`). BOOTINFO
+# is the initramfs handoff that names the booted slot.
+EDITENV=${EDITENV:-grub-editenv}
+GRUBENV=${GRUBENV:-$ESP/EFI/steamos/grubenv}
+BOOTINFO=${BOOTINFO:-/run/retroforge/boot}
+# The hasher, a seam for the same reason EDITENV is one: the suite runs this script with the HOST's PATH
 # appended, so it cannot make a tool absent, and the assertion below would be untestable as a bare
 # command name. Overriding it with a name that does not exist is how the offline suite reaches the
 # die() -- there is no other way in, and an assertion nothing can exercise is what put a dead `cmp`
@@ -86,15 +87,14 @@ SLOTWRITE="$SELFDIR/../retroforge/install/lib-slotwrite.sh"
 . "$SLOTWRITE"
 
 # --- which slot did we just write? --------------------------------------------------------------
-# The booted image comes from bootconf (partsets/self), NOT from RAUC: RAUC names slots as they
-# appear in system.conf, and this must not depend on a value that could be misnamed. The target is
-# simply the other image. RAUC's value is used only to cross-check.
-booted=$(bc this-image 2>/dev/null) \
-  || die "cannot identify the booted image (is the booted slot's efi partition mounted at $EFI?)"
+# The booted slot comes from the initramfs handoff, NOT from RAUC: RAUC names slots as they appear
+# in system.conf, and this must not depend on a value that could be misnamed. The target is simply
+# the other slot. RAUC's value is used only to cross-check.
+booted=$(sed -n 's/^slot=//p' "$BOOTINFO" 2>/dev/null || true)
 case "$booted" in
   A) target=B ;;
   B) target=A ;;
-  *) die "booted image '$booted' has no counterpart slot -- refusing to guess a target" ;;
+  *) die "this boot did not come from a slot (no slot= in $BOOTINFO) -- refusing to guess a target" ;;
 esac
 
 if [ -n "${RAUC_TARGET_SLOTS:-}" ]; then
@@ -130,24 +130,24 @@ log "target slot $target ($dev_root, $dev_efi)"
 # randomised and its /var reformatted, so the slot is already unbootable and the run cannot be
 # retried cleanly. Fail while nothing has been touched.
 command -v "$SHA256" >/dev/null || die "$SHA256 is missing -- cannot compare the ESP boot files"
+command -v "$EDITENV" >/dev/null || die "$EDITENV is missing -- cannot write the slot state"
+ls "$ESP" >/dev/null 2>&1 || true         # trigger the fstab automount if it is not up
+[ -f "$GRUBENV" ] || die "no grubenv at $GRUBENV -- is the ESP mounted at $ESP?"
 
 # --- 0. DISARM ----------------------------------------------------------------------------------
 # RAUC has ALREADY armed this slot by the time we run. Its order is fixed and not ours to change:
-# it calls the bootloader backend's set-primary (-> `--image <target> set-mode reboot`, making the
-# target the highest-priority image) and only THEN starts the post-install handler. So on entry the
-# ESP says "boot the target next" while the target is not yet bootable -- its /var is the previous
-# install's or freshly mkfs'd, and its efi partition still holds the other build's stage 2.
+# it calls the bootloader's set-primary (ORDER with the target first, <target>_OK=1, <target>_TRY=0)
+# and only THEN starts the post-install handler. So on entry the grubenv says "boot the target next"
+# while the target is not yet bootable -- its /var is the previous install's or freshly mkfs'd, and
+# its efi partition still holds the other build's stage 2.
 #
 # So: take the arming back for the duration of the work, and re-arm at the very end once the slot
 # is genuinely bootable. An interrupted post-install then leaves nothing pointing at a
-# half-prepared slot, and the failure mode becomes "the install failed, run it again" instead of
-# "one bad boot, hope the failsafe fires".
-#
-# Making the BOOTED image the highest-priority one is precisely this operation. (There is no
-# concept of "clearing a trial" in the SteamOS model -- a trial IS a priority bump, enforced by the
-# stage-2 boot-attempts counter and stock steamcl's failsafe, so this is the closest equivalent.)
-bc --image "$booted" set-mode reboot >/dev/null \
+# half-prepared slot: the ESP GRUB skips a slot that is not OK, and the failure mode becomes "the
+# install failed, run it again" instead of "one bad boot, hope the fall-back fires".
+"$EDITENV" "$GRUBENV" set "${target}_OK=0" "${target}_TRY=0" \
   || die "cannot disarm the target slot before preparing it"
+sync
 log "disarmed slot $target for the duration of the install (re-armed at the end)"
 
 # --- 1. fsid ------------------------------------------------------------------------------------
@@ -172,12 +172,15 @@ log "fsid randomised, label set to retroforge-root-${target^^}"
 # because on a fresh disk there is no running system whose /var describes the device).
 seed_var "$dev_var" "$target" "$MNT" "$VAR"
 
-# --- 3. stage 2: the target's efi partition + the shared ESP ------------------------------------
+# --- 3. boot files: the target's efi partition + the shared ESP ---------------------------------
 # Safe to mount the root now: the fsid was re-randomised in step 1, so this cannot alias the
-# running root. The efi partition is mounted so the partsets can be written after the boot files
-# from the same mounted tree.
+# running root.
 mount -o ro "$dev_root" "$MNT" || die "cannot mount the target root to read its boot files"
 trap 'umount "$MNT" 2>/dev/null || true; umount "$EFIMNT" 2>/dev/null || true' EXIT
+
+BOOTDIR="$MNT/usr/lib/retroforge/boot"
+[ -f "$BOOTDIR/grub-esp.efi" ] \
+  || die "the installed root has no ESP GRUB (/usr/lib/retroforge/boot/grub-esp.efi): it predates the GRUB boot chain, and going back past it is a reflash"
 
 mkdir -p "$EFIMNT"
 mount "$dev_efi" "$EFIMNT" || die "cannot mount the target efi partition ($dev_efi)"
@@ -186,68 +189,26 @@ mount "$dev_efi" "$EFIMNT" || die "cannot mount the target efi partition ($dev_e
 # the bundle carries only rootfs.img), so the only thing that ever writes them on an update is this
 # block. write_efi_partition carries the rest of the reasoning, including why it copies onto the
 # partition rather than wiping it -- parts.env lives there and an update cannot rebuild it.
-BOOTDIR="$MNT/usr/lib/retroforge/boot"
 write_efi_partition "$EFIMNT" "$target" "$BOOTDIR"
-log "stage-2 GRUB + grub.cfg + font installed on $dev_efi"
+log "stage-2 grub.cfg + font installed on $dev_efi"
 
-# Partsets: copied from the RUNNING efi partition -- they are disk-derived (partition uuids), so
-# both efi partitions carry the same A/B/all/shared files and only self/other change, re-pointed at
-# the target so steamcl identifies this partition as its own image. This is Valve's
-# configure_other_efi shape (cp all/shared verbatim, swap self/other), always run rather than only
-# on a missing dir: an install must leave the target efi naming the RIGHT image.
-partsets="$EFI/SteamOS/partsets"
-[ -d "$partsets" ] || die "the booted slot's efi partition has no $EFI/SteamOS/partsets -- this card needs a reflash"
-mkdir -p "$EFIMNT/SteamOS/partsets"
-for f in all shared A B; do
-  cp "$partsets/$f" "$EFIMNT/SteamOS/partsets/$f" || die "cannot copy partsets/$f"
-done
-cp "$partsets/$target" "$EFIMNT/SteamOS/partsets/self"  || die "cannot write partsets/self"
-cp "$partsets/$booted" "$EFIMNT/SteamOS/partsets/other" || die "cannot write partsets/other"
-if [ -e "$partsets/dev" ]; then cp "$partsets/dev" "$EFIMNT/SteamOS/partsets/dev"; fi
-log "partsets refreshed on $dev_efi (self=$target other=$booted)"
+umount "$EFIMNT"; rmdir "$EFIMNT" 2>/dev/null || true; trap 'umount "$MNT" 2>/dev/null || true' EXIT
 
-umount "$EFIMNT"; rm -rf "$EFIMNT"; trap 'umount "$MNT" 2>/dev/null || true' EXIT
-
-# The shared ESP's steamcl (stage 1) is refreshed from the installed root too, so it is the same
-# build that owns the stage 2 written above. The mountpoint check is the OTA path's own: the ESP
-# comes up through an fstab automount here, whereas the installer mounts it itself.
-ls "$ESP" >/dev/null 2>&1 || true         # trigger the fstab automount if it is not up
+# The shared ESP is refreshed from the installed root too, so the ESP GRUB is the same build that
+# owns the stage 2 written above.
 mountpoint -q "$ESP" || die "the ESP is not mounted at $ESP"
+refresh_esp_extras "$ESP" "$EFI" "$BOOTDIR"
 refresh_esp_stage1 "$ESP" "$BOOTDIR"
 
 umount "$MNT"; trap - EXIT
 
-# --- 4. bootconf write + re-arm -----------------------------------------------------------------
-# The ESP must name the target image: it is the highest-priority, unmarked image on the next boot.
-# Two statements, in this order:
-#
-#   create/ensure the conf   -- the target's conf exists (RAUC's backend set-primary already
-#                              created it via ensure_exists, but a handler that ran outside RAUC
-#                              may be the first writer).
-#   set image-invalid 0      -- RAUC's pre-write `set-state <target> bad` marked it invalid; only
-#                              a COMPLETED install may take that back, and this is the only place
-#                              that knows the install completed. Miss it and the slot stays
-#                              disabled and never boots.
-#   set boot-attempts 0      -- the counter measures attempts at THE TRIAL WE ARE ARMING, so it has
-#                              to start at zero. `set-mode reboot` does not clear it (only
-#                              `set-mode booted`, i.e. mark-good, does), and nothing else ever
-#                              clears a slot that is not booting -- so whatever the target
-#                              accumulated while it sat idle is still there, and the trial inherits
-#                              it. Observed on HW 2026-09-01: a healthy internal slot A sat at 2
-#                              from counts landing on it under issue #84, which would put its next
-#                              trial boot at 3 -- steamcl's failsafe menu threshold -- and a slot
-#                              at 5 would reach 6 and be auto-rejected in favour of the other one.
-#                              A perfect install, rolled back on its first boot, for history.
-#   set-mode reboot          -- the re-arm, the direct inverse of step 0: the target gets the
-#                              highest boot-requested-at so the next boot goes there.
-conf="$ESP/SteamOS/conf/$target.conf"
-if [ ! -f "$conf" ]; then
-  mkdir -p "$ESP/SteamOS/conf"
-  bc create --image "$target" --set title "$target" || die "cannot create the bootconf for $target"
-  log "created $conf"
-fi
-bc --image "$target" config --set image-invalid 0 || die "cannot clear the invalid mark on $target"
-bc --image "$target" config --set boot-attempts 0 || die "cannot reset the attempt counter on $target"
-bc --image "$target" set-mode reboot || die "cannot re-arm slot $target for its trial boot"
+# --- 4. re-arm ----------------------------------------------------------------------------------
+# The direct inverse of step 0, plus ORDER: RAUC's set-primary already put the target first, but a
+# handler run outside RAUC has no such step, and the order is the one thing the next boot reads
+# before anything else. TRY=0 gives the trial all three of its tries: whatever the target counted
+# while it sat idle belongs to the root that was there before.
+"$EDITENV" "$GRUBENV" set "ORDER=$target $booted" "${target}_OK=1" "${target}_TRY=0" \
+  || die "cannot re-arm slot $target for its trial boot"
+sync
 
 log "slot $target re-armed for a trial boot; reboot to try it"

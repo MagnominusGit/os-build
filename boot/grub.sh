@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# retroforge GRUB (stage 2) build.
+# retroforge GRUB build: the ESP GRUB that picks the slot, and the per-slot stage-2 configs.
 #
-# Builds the per-slot stage-2 bootloader for arm64-efi from the pinned GNU GRUB 2.14 release
-# tarball plus boot/patches/grub/ (the retroforge boot-attempts module), and generates the two
-# per-slot grub.cfg files that go with it. Emits:
-#   out/boot/grubaa64.efi
+# Builds GRUB for arm64-efi from the pinned GNU GRUB 2.14 release tarball plus boot/patches/grub/
+# (the retroforge module), and generates the configs that go with it. Emits:
+#   out/boot/grub-esp.efi            \EFI\BOOT\bootaa64.efi, the slot picker embedded
+#   out/boot/grubaa64.efi            the same modules, no embedded config (the installer medium)
 #   out/boot/grub-a.cfg, out/boot/grub-b.cfg
 #   out/boot/fonts/dejavu-mono.pf2
 #   out/boot/grubenv
+#   out/boot/grub-editenv            static aarch64, for RAUC's grub backend on the device
+#   out/boot/steamcl-version, out/boot/fonts/default.pf2   what an older root's hook expects
 #
 #   boot/grub.sh
 #
@@ -102,7 +104,9 @@ make -j"$(nproc)" AWK=gawk
 #                           cmdline names. Stock GRUB builds it and we simply never embedded it;
 #                           without it here the generated config's probe calls are "unknown
 #                           command" and every boot silently takes the PARTLABEL fallback.
-#   retroforge                retroforge_bootattempts, called once per boot by the generated grub.cfg
+#   retroforge              retroforge_dt_model (the board OpenABL names) and retroforge_conf_get
+#                           (an older root's boot conf), plus retroforge_bootattempts, which only
+#                           older roots' stage-2 configs still call
 MODULES="boot linux part_gpt fat btrfs loadenv search search_fs_file \
 search_fs_uuid search_label chain reboot halt sleep test true echo read \
 configfile regexp probe normal minicmd gfxterm efi_gop font all_video retroforge"
@@ -111,6 +115,24 @@ echo "[grub] grub-mkimage"
 test -f grub-core/retroforge.mod || { echo "retroforge.mod was not built — is patch 0003 applied?" >&2; exit 1; }
 ./grub-mkimage -d grub-core -O arm64-efi -p /EFI/steamos $MODULES \
   -o "$OUT/grubaa64.efi"
+
+# The ESP GRUB: the same modules with the slot picker embedded (boot/gen-esp-cfg.sh). OpenABL starts
+# it as \EFI\BOOT\bootaa64.efi; it picks the slot, points $root/$prefix at that slot's efi partition
+# and GRUB's normal mode reads the stage-2 grub.cfg there. Embedded rather than a file beside it
+# because the first update into this build is installed by an older root's hook, which copies one
+# stage-1 binary onto the ESP and nothing else.
+#
+# IN A MEMDISK, NOT AS THE EMBEDDED CONFIG. A `-c` config runs under the RESCUE parser, before normal
+# mode exists: plain commands only, so every `if`, `for` and comment in esp.cfg is "Unknown command"
+# and the boot ends at a grub> prompt (seen under QEMU/AAVMF). The embedded config is one plain
+# command that enters normal mode on the memdisk's esp.cfg, the pattern distribution images use.
+"$ROOT/boot/gen-esp-cfg.sh" "$WORK/esp.cfg"
+rm -rf "$WORK/memdisk"; mkdir -p "$WORK/memdisk"
+cp "$WORK/esp.cfg" "$WORK/memdisk/esp.cfg"
+tar -C "$WORK/memdisk" --mtime=@0 --owner=0 --group=0 --numeric-owner -cf "$WORK/memdisk.tar" esp.cfg
+printf 'normal (memdisk)/esp.cfg\n' >"$WORK/early.cfg"
+./grub-mkimage -d grub-core -O arm64-efi -p /EFI/steamos -c "$WORK/early.cfg" -m "$WORK/memdisk.tar" \
+  $MODULES memdisk tar -o "$OUT/grub-esp.efi"
 
 # Boot font. Prefer the tree-built grub-mkfont (needs libfreetype-dev in the container); fall back
 # to the distro grub-common one, which is the same GRUB 2.14.
@@ -133,8 +155,16 @@ MKFONT="$BUILDDIR/grub-mkfont"
 "$MKFONT" -s 32 /usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf \
   -o "$OUT/fonts/dejavu-mono.pf2"
 
-file "$OUT/grubaa64.efi" "$OUT/fonts/dejavu-mono.pf2"
-file "$OUT/grubaa64.efi" | grep -q "ARM64" || { echo "grubaa64.efi not ARM64" >&2; exit 1; }
+file "$OUT/grubaa64.efi" "$OUT/grub-esp.efi" "$OUT/fonts/dejavu-mono.pf2"
+for f in grubaa64.efi grub-esp.efi; do
+  file "$OUT/$f" | grep -q "ARM64" || { echo "$f not ARM64" >&2; exit 1; }
+done
+
+# What an older root's RAUC hook copies onto the ESP next to its stage 1 (lib-slotwrite.sh's
+# refresh_esp_stage1 in those roots): it refuses to run without a version file and a font beside
+# the binary. Neither is read by anything here, so they are a name and the boot font.
+printf 'retroforge grub-esp %s\n' "$GRUBVER" >"$OUT/steamcl-version"
+cp -f "$OUT/fonts/dejavu-mono.pf2" "$OUT/fonts/default.pf2"
 
 # A pristine stage-2 env block, built HERE by grub-editenv and shipped as an artifact, because the
 # two places that need one cannot make it themselves. It goes to the shared ESP as
@@ -144,11 +174,8 @@ file "$OUT/grubaa64.efi" | grep -q "ARM64" || { echo "grubaa64.efi not ARM64" >&
 #   image/make-sdcard.sh  mcopy's this file rather than running `grub-editenv create` a second time
 #   the internal installer  cp's it out of /usr/lib/retroforge/boot/ of the root it just wrote
 #
-# THE INSTALLER IS WHY IT IS AN ARTIFACT AT ALL. grub-editenv is not on the shipped image -- no grub
-# in customize-base.sh's PKGS -- so the device cannot create one, and adding grub to the installer's
-# package list to write 1024 bytes of constant is a dependency for nothing. Everything else the
-# installer writes is per-disk and has to be generated there (see lib-slotwrite.sh's parts.env, which
-# is hand-rolled for exactly that reason); this one is a constant, so it ships as a constant.
+# The installer seeds RAUC's slot variables into its copy with the image's own grub-editenv (built
+# below); starting from this constant keeps the block it writes byte-identical to a card's.
 #
 # EMPTY IS THE ASSERTION THAT MATTERS. grub-editenv is being run on a build host, and a block that
 # arrived carrying a `saved_entry` would pin every device flashed or installed from this build to
@@ -161,6 +188,33 @@ grub-editenv "$OUT/grubenv" create
   || { echo "grubenv is $(wc -c <"$OUT/grubenv") bytes, not 1024 -- grub_envblk_open only requires the signature to FIT, so a wrong-length block reads back fine and is not the object a card carries" >&2; exit 1; }
 [ -z "$(grub-editenv "$OUT/grubenv" list)" ] \
   || { echo "grubenv is not pristine -- it carries: $(grub-editenv "$OUT/grubenv" list | tr '\n' ' ')" >&2; exit 1; }
+
+# grub-editenv for the DEVICE. RAUC's grub backend (bootloader=grub in etc/rauc/system.conf) runs
+# `grub-editenv <grubenv> list|set` for every slot-state call, and nothing in the base image ships
+# it. Built from the same source as the GRUB that reads the block, as a static aarch64 binary: the
+# cross toolchain's glibc is newer than the image's, so a dynamic one would not load there.
+echo "[grub] grub-editenv for the device (static aarch64)"
+UTILDIR="$WORK/build-util"
+rm -rf "$UTILDIR"; mkdir -p "$UTILDIR"
+( cd "$UTILDIR" && "$SRCDIR/configure" \
+    --host=aarch64-linux-gnu \
+    --with-platform=efi \
+    --disable-nls \
+    --disable-werror \
+    --disable-device-mapper \
+    --disable-liblzma \
+    --disable-libzfs \
+    --disable-grub-mkfont \
+    --disable-grub-mount \
+    --disable-grub-themes \
+    LDFLAGS=-static )
+# gnulib first: it is a SUBDIRS member the top level builds on the way to `all`, and naming the one
+# utility skips that, so its libgnu.a has no rule.
+make -C "$UTILDIR/grub-core/lib/gnulib" -j"$(nproc)" AWK=gawk
+make -C "$UTILDIR" -j"$(nproc)" AWK=gawk grub-editenv
+aarch64-linux-gnu-strip -o "$OUT/grub-editenv" "$UTILDIR/grub-editenv"
+file "$OUT/grub-editenv" | grep -q 'ARM aarch64.*statically linked' \
+  || { echo "grub-editenv is not a static aarch64 binary: $(file -b "$OUT/grub-editenv")" >&2; exit 1; }
 
 # The per-slot configs. Generation is a separate script on purpose: it needs no toolchain, so
 # tests/test-stage2-grub.sh can produce and assert them on a bare host with no cross-build.

@@ -4,12 +4,10 @@
 # a shared ESP, A/B boot partitions, A/B read-only Btrfs roots, A/B /var, and a shared
 # /home. RAUC writes the inactive rootfs/var slot, then the bootloader switches on success.
 #
-# efi-a/efi-b are each a slot's STAGE 2 home (Phase 5; docs/phase5.md): steamcl.efi on the
-# shared ESP chainloads \EFI\steamos\grubaa64.efi on the slot's efi partition, whose per-slot
-# grub.cfg boots the kernel in the slot root's /boot. Each carries the stage-2 GRUB + its
-# identity partsets (/SteamOS/partsets/{A,B,all,shared,self,other}); steamcl matches the efi
-# uuid of the partition it was loaded from against partsets/self. The stage-2 tree is ~2.3M; these
-# are 128M for a filesystem reason, not a capacity one -- see the FAT block near the rows.
+# efi-a/efi-b are each a slot's STAGE 2 home: the ESP GRUB on the shared ESP picks a slot and hands
+# over to \EFI\steamos\grub.cfg on that slot's efi partition, which boots the kernel in the slot
+# root's /boot. Each carries the stage-2 config + parts.env. The stage-2 tree is ~2.3M; these are
+# 128M for a filesystem reason, not a capacity one -- see the FAT block near the rows.
 #
 # All 8 partitions mirror the SteamOS layout exactly (esp, efi-A/B, rootfs-A/B, var-A/B, home).
 #
@@ -21,8 +19,8 @@
 #
 # efi-a/efi-b are typed 0700 (Microsoft basic data), NOT ef00 — exactly as SteamOS types
 # them. Only p1 is an EFI System partition, and keeping exactly one avoids handing a
-# firmware scan two candidates. The stage-2 grubaa64.efi is reached by steamcl, not by a
-# UEFI firmware scan, so it does not need ef00.
+# firmware scan two candidates. The stage-2 config is reached by the ESP GRUB, not by a UEFI
+# firmware scan, so it does not need ef00.
 #
 # CORRECTION 2026-08-24: this block used to say "the ROCKNIX ABL finds the ESP by type GUID".
 # That is WRONG, and it is load-bearing enough to correct rather than leave — it is the only
@@ -101,8 +99,9 @@
 #   esp at 256M   ABL's own FatPkg refuses the volume (EFI_VOLUME_CORRUPTED, EnhancedFatDxe/Init.c
 #                 checks MaxCluster < 65525), never produces a SimpleFileSystem handle for it, and
 #                 LoadEFI reports "Failed to load EFI: Not Found" without reading a byte of it.
-#   efi at 64M    the ESP is fine, ABL loads stage 1, and steamcl then cannot mount efi-A/B for the
-#                 same reason -- so it finds no boot candidate and prints "Boot failed, waiting 5s".
+#   efi at 64M    the ESP is fine, ABL loads stage 1, and steamcl (stage 1 then) could not mount
+#                 efi-A/B for the same reason -- so it found no boot candidate and printed "Boot
+#                 failed, waiting 5s".
 # Both are the same defect. The fix is the filesystem TYPE, not the partition size: growing the ESP
 # to 512M also worked, and was reverted, because it wasted space to buy what FAT16 gives for free.
 #

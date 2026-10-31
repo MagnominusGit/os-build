@@ -28,8 +28,8 @@
 #   rauc               root-a streamed and verified; the handler randomises its fsid and seeds var-a
 #   /home              the empty player home, staged into the partition just created exactly as
 #                      the card stages it
-#   efi-a / efi-b      stage-2 GRUB, minted partsets, parts.env -- the map of THIS disk
-#   ESP                grubenv, then A.conf, then stage 1
+#   efi-a / efi-b      stage-2 grub.cfg, parts.env -- the map of THIS disk
+#   ESP                grubenv with RAUC's slot state, parts.env, \dtbs\qcom, then the ESP GRUB
 #   bootaa64.efi       THE LAST BYTE WRITTEN. See below
 #
 # WHY bootaa64.efi IS LAST, and it is a hardware finding rather than a convention. ABL's test is
@@ -617,10 +617,9 @@ seed_home() {
 # =================================================================================================
 # 10. the efi partitions
 # =================================================================================================
-# Both of them, both fully populated, and B populated even though nothing will boot it yet: steamcl
-# builds its candidate list by walking efi partitions and requiring a CONFIG for the image each one
-# resolves to, so B stays a non-candidate purely by having no B.conf. Its stage 2 being ready means
-# the first OTA has nothing to lay down but a root and a var.
+# Both of them, both fully populated, and B populated even though nothing will boot it yet: B stays
+# out of the ESP GRUB's way because the grubenv says B_OK=0 (arm_esp), and its stage 2 being ready
+# means the first OTA has nothing to lay down but a root and a var.
 #
 # THE FILES COME OUT OF THE ROOT WE JUST WROTE, never off the installer medium. grubaa64.efi and
 # grub-<slot>.cfg are boot software owned by the same build that ships /boot/Image and
@@ -650,27 +649,17 @@ write_efi_partitions() {
     done | parts_env_from_genpart_map
   )
 
-  local esp_uuid efia_uuid efib_uuid
-  esp_uuid="$(part_uuid "$DISK" "${PART[RETROFORGE-ESP]}")"
-  efia_uuid="$(part_uuid "$DISK" "${PART[retroforge-efi-A]}")"
-  efib_uuid="$(part_uuid "$DISK" "${PART[retroforge-efi-B]}")"
-
   local slot mnt
   for slot in A B; do
     mnt="$RUNDIR/efi-${slot,,}"
     mount_at "${DEV[retroforge-efi-$slot]}" "$mnt"
     write_efi_partition "$mnt" "$slot" "$bootdir"
-    # MINTED, not copied. post-install.sh copies the partsets off the running /efi because they
-    # describe the disk it is already running from; here there is no such disk, so they come from
-    # the GPT that was laid down twenty seconds ago.
-    mint_partsets "$mnt" "$slot" "$esp_uuid" "$efia_uuid" "$efib_uuid"
     write_parts_env "$mnt" "${envkv[@]}"
     sync
-    log "efi-${slot,,}: stage 2, partsets (self=$slot), parts.env"
+    log "efi-${slot,,}: stage 2, parts.env"
   done
   record "efi: parts.env ${envkv[*]}"
-  # efi-a stays mounted: steamos-bootconf needs an --efi-dir with SteamOS/partsets/self in it, which
-  # only exists now, and that is what makes arm_boot_conf() run after this and not beside it.
+  # efi-a stays mounted: arm_esp copies its parts.env onto the ESP.
   unmount_at "$RUNDIR/efi-b"
 }
 
@@ -678,57 +667,43 @@ write_efi_partitions() {
 # 11. the shared ESP, and the last byte
 # =================================================================================================
 # Ordered inside the step as carefully as the steps are ordered against each other:
-#   grubenv       the pristine stage-2 env block, copied from the root (not minted with
-#                 grub-editenv, which the shipped image does not carry)
-#   A.conf        via steamos-bootconf, which needs partsets/self on an efi partition to exist --
-#                 hence efi-a still being mounted from the previous step
-#   NO B.conf     load-bearing. steamcl honours image-invalid only as a sort demotion, and its
-#                 alt-entry pick never consults the disabled flag, so a marked-invalid B is still a
-#                 candidate and a never-booted slot reports boot-attempts 0 and wins that pick.
-#                 Omitting the conf makes efi-b fail the "is there a config for this image?" test
-#                 and the partition never enters found[] at all.
+#   grubenv       the pristine env block from the root, with RAUC's slot state set in it by the
+#                 root's own grub-editenv: A first and OK, B not OK. RAUC makes B OK itself the
+#                 first time it writes it.
+#   extras        parts.env (from efi-a, still mounted) and OpenABL's \dtbs\qcom
 #   stage 1       refresh_esp_stage1, whose own last write is bootaa64.efi -- the byte that flips
 #                 ABL from the installer medium to this disk.
-BC=${BC:-}
+EDITENV=${EDITENV:-}
 arm_esp() {
   step "ESP"
   local esp="$RUNDIR/esp" bootdir="$ROOTMNT/usr/lib/retroforge/boot"
   mount_at "${DEV[RETROFORGE-ESP]}" "$esp"
 
-  mkdir -p "$esp/EFI/steamos" "$esp/SteamOS/conf" || die "cannot create the ESP directories"
+  mkdir -p "$esp/EFI/steamos" || die "cannot create the ESP directories"
   [ -f "$bootdir/grubenv" ] \
     || die "the installed root carries no pristine grubenv at /usr/lib/retroforge/boot/grubenv"
   cp -f "$bootdir/grubenv" "$esp/EFI/steamos/grubenv" || die "cannot install the grubenv"
-  sync
 
-  # steamos-bootconf comes out of the ROOT WE JUST WROTE by preference, so the tool and the format
-  # it writes are the pair that shipped together; the installer image's own copy is the fallback.
-  local bc="${BC:-$ROOTMNT/usr/bin/steamos-bootconf}"
-  [ -x "$bc" ] || bc="$(command -v steamos-bootconf 2>/dev/null || true)"
-  [ -n "$bc" ] && [ -x "$bc" ] || die "no steamos-bootconf to arm the boot state with"
-
-  local bcargs=(--conf-dir "$esp/SteamOS/conf" --efi-dir "$RUNDIR/efi-a")
-  "$bc" "${bcargs[@]}" create --image A || die "steamos-bootconf could not create A.conf"
-  # first-boot rather than reboot: it sets the highest boot-requested-at AND clears image-invalid,
-  # boot-other, boot-attempts and boot-count, which is exactly the state of a slot that has never
-  # run. `create` already produces a skeleton with those at zero, so this is belt to that brace and
-  # says what it means.
-  "$bc" "${bcargs[@]}" --image A set-mode first-boot \
-    || die "steamos-bootconf could not arm A.conf"
-  [ -f "$esp/SteamOS/conf/A.conf" ] || die "steamos-bootconf reported success but wrote no A.conf"
-  [ ! -e "$esp/SteamOS/conf/B.conf" ] \
-    || die "a B.conf exists -- slot B is empty and must not be a boot candidate"
+  # grub-editenv comes out of the ROOT WE JUST WROTE by preference, so the tool and the block are
+  # the pair that shipped together; the installer image's own copy is the fallback.
+  local editenv="${EDITENV:-$ROOTMNT/usr/bin/grub-editenv}"
+  [ -x "$editenv" ] || editenv="$(command -v grub-editenv 2>/dev/null || true)"
+  [ -n "$editenv" ] && [ -x "$editenv" ] || die "no grub-editenv to arm the slot state with"
+  "$editenv" "$esp/EFI/steamos/grubenv" set "ORDER=A B" "A_OK=1" "A_TRY=0" "B_OK=0" "B_TRY=0" \
+    || die "grub-editenv could not arm the slot state"
   sync
-  log "A.conf armed, no B.conf"
-  record "boot: A.conf armed, B left absent"
+  log "slot state armed: A first, B not OK"
+  record "boot: grubenv ORDER=A B, A_OK=1, B_OK=0"
+
+  refresh_esp_extras "$esp" "$RUNDIR/efi-a" "$bootdir"
 
   # THE LAST WRITE OF THE INSTALL.
   refresh_esp_stage1 "$esp" "$bootdir"
   unmount_at "$esp"
   unmount_at "$RUNDIR/efi-a"
   unmount_at "$ROOTMNT"
-  record "esp: stage 1 written; the device now boots internally"
-  log "stage 1 written -- this disk is now what ABL chainloads"
+  record "esp: ESP GRUB written; the device now boots internally"
+  log "ESP GRUB written -- this disk is now what ABL starts"
 }
 
 # =================================================================================================

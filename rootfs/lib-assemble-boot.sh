@@ -19,37 +19,47 @@
 #    the committed CA so there is ONE copy in the repo (ota/rauc/retroforge-ca.pem, which
 #    ota/gen-signing-ca.sh also signs bundles against) rather than a duplicate under rootfs/overlay that could drift.
 #
-# 2. The boot software, mirrored under /usr/lib/retroforge/boot (Phase 5; docs/archive/phase5.md). The stage-1
-#    steamcl and both per-slot stage-2 GRUB builds are owned by the same build that ships /boot/Image
-#    and /lib/modules/<ver> inside this root, so carrying them here makes the pairing true by
+# 2. The boot software, mirrored under /usr/lib/retroforge/boot. The ESP GRUB that picks the slot
+#    and both per-slot stage-2 configs are owned by the same build that ships /boot/Image and
+#    /lib/modules/<ver> inside this root, so carrying them here makes the pairing true by
 #    construction: the RAUC post-install hook refreshes the ESP and the slot's efi partition FROM
-#    this directory, so an update can never install a root whose boot chain does not boot it. This
-#    directory replaces the old /usr/lib/retroforge/boot.img (Phase 1 /KERNEL flow).
-#    steamos-bootconf (holo-bootconf) is installed as /usr/bin/steamos-bootconf — the boot state
-#    reader both the RAUC backend (retroforge-bootctl) and the health service call.
+#    this directory, so an update can never install a root whose boot chain does not boot it.
+#
+#    steamcl.efi IS THE ESP GRUB, as a symlink. A root from before the ESP GRUB installs the first
+#    update into this one with ITS hook, which copies /usr/lib/retroforge/boot/steamcl.efi onto the
+#    ESP as \EFI\BOOT\bootaa64.efi (with steamcl-version and fonts/default.pf2 beside it, and
+#    grubaa64.efi + grub-<slot>.cfg + the boot font onto the slot's efi partition). Under those names
+#    it installs this build's chain without knowing it, and the ESP GRUB then follows the boot conf
+#    that hook re-armed (boot/gen-esp-cfg.sh). The hook reads through the link with cp and sha256sum.
+#
+#    /usr/bin/grub-editenv is RAUC's: bootloader=grub runs it for every slot-state call. It is built
+#    with the GRUB above (boot/grub.sh); nothing in the package set ships one.
 CA_SRC="$ROOT/ota/rauc/retroforge-ca.pem"
 BOOTDIR_SRC="$OUT/boot"
 [ -f "$CA_SRC" ] || { echo "no RAUC CA at ${CA_SRC#"$ROOT"/} (run ota/gen-signing-ca.sh)" >&2; exit 1; }
-for f in steamcl.efi steamcl-version holo-bootconf fonts/default.pf2 \
-         grubaa64.efi grub-a.cfg grub-b.cfg fonts/dejavu-mono.pf2 grubenv; do
-  [ -f "$BOOTDIR_SRC/$f" ] || { echo "no boot artifact: ${BOOTDIR_SRC#"$ROOT"/}/$f (run boot/steamcl.sh + boot/grub.sh)" >&2; exit 1; }
+for f in grub-esp.efi grubaa64.efi grub-a.cfg grub-b.cfg fonts/dejavu-mono.pf2 grubenv \
+         grub-editenv steamcl-version fonts/default.pf2; do
+  [ -f "$BOOTDIR_SRC/$f" ] || { echo "no boot artifact: ${BOOTDIR_SRC#"$ROOT"/}/$f (run boot/grub.sh)" >&2; exit 1; }
 done
 install -D -m0444 "$CA_SRC"      "$stage/etc/rauc/keyring.pem"
-install -D -m0755 "$BOOTDIR_SRC/holo-bootconf" "$stage/usr/bin/steamos-bootconf"
+install -D -m0755 "$BOOTDIR_SRC/grub-editenv" "$stage/usr/bin/grub-editenv"
 install -d -m0755 "$stage/usr/lib/retroforge/boot/fonts"
-install -D -m0444 "$BOOTDIR_SRC/steamcl.efi"      "$stage/usr/lib/retroforge/boot/steamcl.efi"
+install -D -m0444 "$BOOTDIR_SRC/grub-esp.efi"     "$stage/usr/lib/retroforge/boot/grub-esp.efi"
+ln -sfn grub-esp.efi                              "$stage/usr/lib/retroforge/boot/steamcl.efi"
 install -D -m0444 "$BOOTDIR_SRC/steamcl-version"  "$stage/usr/lib/retroforge/boot/steamcl-version"
 install -D -m0444 "$BOOTDIR_SRC/fonts/default.pf2" "$stage/usr/lib/retroforge/boot/fonts/default.pf2"
 install -D -m0444 "$BOOTDIR_SRC/grubaa64.efi"     "$stage/usr/lib/retroforge/boot/grubaa64.efi"
 install -D -m0444 "$BOOTDIR_SRC/grub-a.cfg"       "$stage/usr/lib/retroforge/boot/grub-a.cfg"
 install -D -m0444 "$BOOTDIR_SRC/grub-b.cfg"       "$stage/usr/lib/retroforge/boot/grub-b.cfg"
 install -D -m0444 "$BOOTDIR_SRC/fonts/dejavu-mono.pf2" "$stage/usr/lib/retroforge/boot/fonts/dejavu-mono.pf2"
-# The pristine stage-2 env block. Unlike everything above it, no A/B update ever reads this: the ESP
-# is shared, so its grubenv survives updates by not being touched, and overwriting it would throw
-# away the board choice the user saved. It is here for the INTERNAL INSTALLER, which writes an ESP
-# that does not exist yet and cannot create one -- grub-editenv is not on this image (see
-# boot/grub.sh, which emits it for exactly this).
+# The pristine env block. No A/B update reads this: the ESP is shared, so its grubenv survives
+# updates by not being touched, and overwriting it would throw away RAUC's slot state and the board
+# choice. It is here for the INTERNAL INSTALLER, which writes an ESP that does not exist yet.
 install -D -m0444 "$BOOTDIR_SRC/grubenv"          "$stage/usr/lib/retroforge/boot/grubenv"
+# OpenABL's Device model list, for the ESP's \dtbs\qcom (boot/esp-dtbs.sh says why these are not
+# simply /boot/dtbs).
+"$ROOT/boot/esp-dtbs.sh" "$stage/usr/lib/retroforge/boot/dtbs" "$OUT"/dtbs/*.dtb
+chmod 0444 "$stage/usr/lib/retroforge/boot/dtbs"/*.dtb
 
 # The GPT, shipped VERBATIM beside the slot-write primitives (Phase 2 of
 # .claude/plans/internal-install.plan.md). image/genpart.sh --append lays our eight partitions into
@@ -68,5 +78,5 @@ install -D -m0444 "$ROOT/image/partition-table.txt" "$stage/usr/lib/retroforge/i
 # lib-gpt.sh is sourced by the script genpart.sh emits, so it ships beside it or the append mode
 # refuses. 0444: sourced, never executed, like lib-slotwrite.sh.
 install -D -m0444 "$ROOT/image/lib-gpt.sh"          "$stage/usr/lib/retroforge/install/lib-gpt.sh"
-echo "  RAUC: keyring.pem + stage-1/2 boot software + /usr/bin/steamos-bootconf installed"
+echo "  RAUC: keyring.pem + ESP GRUB + stage-2 configs + /usr/bin/grub-editenv installed"
 

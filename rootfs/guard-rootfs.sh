@@ -382,9 +382,10 @@ fi
 #
 # Every part of an A/B update is inert until something needs it, and each missing piece fails at a
 # different and unhelpful moment: no `rauc` binary is a missing command at install time; a missing
-# keyring means bundles verify against NOTHING while still reporting success; a missing stage-1/2
-# boot mirror under /usr/lib/retroforge/boot means the post-install hook cannot refresh the ESP and
-# the slot's efi partition, so the updated slot boots a boot chain that does not match it.
+# keyring means bundles verify against NOTHING while still reporting success; a missing ESP GRUB or
+# stage-2 config under /usr/lib/retroforge/boot means the post-install hook cannot refresh the ESP
+# and the slot's efi partition, so the updated slot boots a boot chain that does not match it; and a
+# missing grub-editenv fails every slot-state call RAUC's grub backend makes.
 #
 # lib-slotwrite.sh is on the list because the hook SOURCES it: since the primitives were factored out
 # for the internal installer to share, a root without it has a post-install that dies on its first
@@ -398,10 +399,11 @@ fi
 echo "  7. RAUC update path"
 rauc_ok=1
 for f in usr/bin/rauc etc/rauc/keyring.pem etc/rauc/system.conf \
-         usr/bin/steamos-bootconf \
+         usr/bin/grub-editenv \
          usr/lib/systemd/system/retroforge-boot-good.service \
          usr/lib/systemd/system/retroforge-boot-bad.service \
-         usr/lib/retroforge/boot/steamcl.efi usr/lib/retroforge/boot/steamcl-version \
+         usr/lib/retroforge/boot/grub-esp.efi usr/lib/retroforge/boot/steamcl.efi \
+         usr/lib/retroforge/boot/steamcl-version usr/lib/retroforge/boot/fonts/default.pf2 \
          usr/lib/retroforge/boot/grubaa64.efi usr/lib/retroforge/boot/grub-a.cfg \
          usr/lib/retroforge/boot/grub-b.cfg \
          usr/lib/retroforge/boot/fonts/dejavu-mono.pf2 \
@@ -417,6 +419,17 @@ if [ -e "$STAGE/usr/lib/rauc/post-install.sh" ] && [ ! -x "$STAGE/usr/lib/rauc/p
   rauc_ok=0
   bad "/usr/lib/rauc/post-install.sh is not executable — RAUC would report a successful install of a slot that was never finished"
 fi
+# steamcl.efi is what an older root's hook copies onto the ESP when it installs this root, so it has
+# to BE the ESP GRUB; anything else there would put the steamcl chain back.
+if [ -e "$STAGE/usr/lib/retroforge/boot/steamcl.efi" ] \
+   && [ "$(readlink "$STAGE/usr/lib/retroforge/boot/steamcl.efi")" != grub-esp.efi ]; then
+  rauc_ok=0
+  bad "/usr/lib/retroforge/boot/steamcl.efi is not a link to grub-esp.efi — an older root's update hook would install something other than the ESP GRUB"
+fi
+if ! grep -qx 'bootloader=grub' "$STAGE/etc/rauc/system.conf" 2>/dev/null; then
+  rauc_ok=0
+  bad "/etc/rauc/system.conf does not say bootloader=grub — RAUC would not drive the grubenv the ESP GRUB reads"
+fi
 # btrfstune is what re-randomises the target slot's fsid. Without it the hook dies mid-install,
 # and a slot that shares an fsid with the running root can silently hand you the wrong filesystem.
 if [ ! -s "$STAGE/usr/bin/btrfstune" ]; then
@@ -430,17 +443,25 @@ fi
 # recovery medium, which writes an ESP that does not exist yet: the constants it cannot mint on the
 # device, out of the root whose boot chain they belong to.
 #
-# grubenv is the shared ESP's stage-2 env block, where `save_env` puts the user's board choice. It
-# ships prebuilt because grub-editenv is not on this image and 1024 bytes of constant do not justify
-# putting it there (boot/grub.sh emits it and asserts it is pristine). The 1024 is re-checked here
-# because it is the length nothing downstream complains about: grub_envblk_open only requires the
-# signature to FIT, so a short block reads back perfectly and is simply not the object a card carries.
+# grubenv is the shared ESP's env block: RAUC's slot state and the user's board choice. The installer
+# starts from this pristine copy so an install and a card carry the same object (boot/grub.sh emits
+# it and asserts it is pristine). The 1024 is re-checked here because it is the length nothing
+# downstream complains about: grub_envblk_open only requires the signature to FIT, so a short block
+# reads back perfectly and is simply not the object a card carries.
 if [ ! -s "$STAGE/usr/lib/retroforge/boot/grubenv" ]; then
-  bad "/usr/lib/retroforge/boot/grubenv is missing — an internal install cannot seed the ESP's stage-2 env block, and the device has no grub-editenv to mint one"
+  bad "/usr/lib/retroforge/boot/grubenv is missing — an internal install cannot seed the ESP's env block"
 elif [ "$(wc -c <"$STAGE/usr/lib/retroforge/boot/grubenv")" != 1024 ]; then
   bad "/usr/lib/retroforge/boot/grubenv is $(wc -c <"$STAGE/usr/lib/retroforge/boot/grubenv") bytes, not 1024 — it would read back fine and still not match what a card carries"
 else
   echo "    ok  installer artifacts: grubenv (1024 B, pristine)"
+fi
+# OpenABL's Device model list for the ESP's \dtbs\qcom: one per DTB the root boots.
+n_esp_dtbs=$(find "$STAGE/usr/lib/retroforge/boot/dtbs" -maxdepth 1 -name '*.dtb' 2>/dev/null | wc -l | tr -d ' ')
+n_dtbs=$(find "$STAGE/boot/dtbs" -maxdepth 1 -name '*.dtb' 2>/dev/null | wc -l | tr -d ' ')
+if [ "$n_esp_dtbs" -gt 0 ] && [ "$n_esp_dtbs" = "$n_dtbs" ]; then
+  echo "    ok  installer artifacts: $n_esp_dtbs ESP DTBs for OpenABL's Device model list"
+else
+  bad "/usr/lib/retroforge/boot/dtbs has $n_esp_dtbs DTBs for $n_dtbs in /boot/dtbs — OpenABL could not list every board"
 fi
 
 # var-seed.tar.zst is the /var a freshly installed slot starts from. The OTA path has no use for it
@@ -531,34 +552,6 @@ if ! find "$STAGE/lib/modules" -name 'nbd.ko*' -print -quit 2>/dev/null | grep -
   rauc_ok=0
   bad "nbd.ko is not in the module tree — rauc cannot stream, so adaptive updates are dead"
 fi
-# The hook drives the boot state through steamos-bootconf (the bc() seam), and the backend tool
-# does the same, so the cross-file consistency claim moved from "hook → bootctl" to "both files →
-# bootconf's real subcommand set". bootconf is external — holo-bootconf ships as
-# /usr/bin/steamos-bootconf — so a subcommand either file invokes that bootconf does not have fails
-# at the LAST step of an install, and the card is left with a new root, refreshed stage 2 and a
-# bootconf that never re-armed it: the worst shape available. Both files live in this tree, which
-# is precisely why a rename in one is easy to miss in the other.
-if [ "$rauc_ok" = 1 ] && [ -s "$STAGE/usr/bin/retroforge-bootctl" ]; then
-  known="dump-config selected-image this-image list-images set-mode config create"
-  for f in "$STAGE/usr/lib/rauc/post-install.sh" "$STAGE/usr/bin/retroforge-bootctl"; do
-    [ -s "$f" ] || continue
-    # Comment lines are stripped first: this file's prose names bootconf commands too. The
-    # extraction catches both `bc <cmd>` and `bc --image <img> <cmd>` call shapes.
-    while read -r sub; do
-      [ -n "$sub" ] || continue
-      case " $known " in
-        *" $sub "*) ;;
-        *)
-          rauc_ok=0
-          bad "$f calls steamos-bootconf '$sub', which bootconf does not have"
-          ;;
-      esac
-    done < <(grep -vE '^[[:space:]]*#' "$f" \
-               | grep -oE 'bc( +--image +[^ ]+)? +[a-z][a-z-]*' \
-               | awk '{print $NF}' | sort -u)
-  done
-fi
-
 # --- the OTA client -----------------------------------------------------------------------------
 #
 # The shell drives updates through /usr/bin/retroforge-update. It has to survive the copy into $STAGE

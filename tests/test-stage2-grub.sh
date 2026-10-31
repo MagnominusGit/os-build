@@ -332,30 +332,54 @@ for slot in A B; do
     && ok "grub-$lc.cfg loads the ESP grubenv" || bad "grub-$lc.cfg does not load the grubenv"
   grep -q 'save_env -f (\$esp)/EFI/steamos/grubenv' "$cfg" \
     && ok "grub-$lc.cfg saves to the ESP grubenv" || bad "grub-$lc.cfg does not save the grubenv"
-  # A config that never sets a timeout waits forever (GRUB treats unset as -1); one that sets only
-  # a hidden timeout gives a keyboard-less device no way back to the menu.
-  grep -q '^  set timeout=3$' "$cfg" && ok "grub-$lc.cfg boots the saved entry after 3s" \
-                                     || bad "grub-$lc.cfg has no timeout for the saved-entry path"
-  grep -q '^  set timeout=-1$' "$cfg" && ok "grub-$lc.cfg waits when no board is saved" \
+  # A config that never sets a timeout waits forever (GRUB treats unset as -1). With a known board
+  # the menu is hidden with no wait, and it comes back for 3s exactly when the ESP GRUB says this
+  # boot is a retry or a fall-back -- the only way back from a wrong board on a keyboard-less device.
+  grep -q '^    set timeout=0$' "$cfg" && grep -q '^    set timeout_style=hidden$' "$cfg" \
+    && ok "grub-$lc.cfg boots a known board with the menu hidden" \
+    || bad "grub-$lc.cfg has no hidden, no-wait path for a known board"
+  grep -q '^  if \[ -n "\$rf_fallback" \]; then set rf_menu=1; fi$' "$cfg" \
+    && grep -q '^  if \[ -n "\$rf_retry" -a "\${saved_entry}" != "\$rf_board_ok" \]; then set rf_menu=1; fi$' "$cfg" \
+    && grep -q '^    set timeout=3$' "$cfg" \
+    && ok "grub-$lc.cfg shows the menu for 3s on a fall-back, or a retry of a board never confirmed" \
+    || bad "grub-$lc.cfg does not gate the retry menu on an unconfirmed board"
+  grep -q '^load_env -f (\$esp)/EFI/steamos/grubenv saved_entry rf_board_ok$' "$cfg" \
+    && ok "grub-$lc.cfg loads the confirmed board" || bad "grub-$lc.cfg never loads rf_board_ok"
+  grep -q '^  set timeout=-1$' "$cfg" && ok "grub-$lc.cfg waits when no board is known" \
                                       || bad "grub-$lc.cfg does not wait on a fresh card"
 
-  # boot-attempts. The counter is per-IMAGE state, so slot A's config must bump A's conf and only
-  # A's: a config that counted the other slot's attempts would mark a healthy image bad and,
-  # worse, let a failing one retry forever.
-  other_uc="${other^^}"
-  grep -q "^if retroforge_bootattempts $slot; then\$" "$cfg" \
-    && ok "grub-$lc.cfg counts a boot attempt against image $slot" \
-    || bad "grub-$lc.cfg does not call retroforge_bootattempts $slot"
-  grep -q "retroforge_bootattempts $other_uc" "$cfg" \
-    && bad "grub-$lc.cfg counts a boot attempt against the OTHER image ($other_uc)" \
-    || ok "grub-$lc.cfg never names image $other_uc to retroforge_bootattempts"
-  # It has to run where its errors can be seen. Its predecessor ran before the terminal was up and
-  # a total failure was indistinguishable from success — which is the whole reason it was replaced.
+  # Tries are the ESP GRUB's to count now (boot/gen-esp-cfg.sh). A stage-2 config that still
+  # bumped the old boot conf would write a file only older roots read.
+  grep -q 'retroforge_bootattempts' "$cfg" \
+    && bad "grub-$lc.cfg still counts boot attempts in the old boot conf" \
+    || ok "grub-$lc.cfg leaves the try count to the ESP GRUB"
+  # RAUC's grub backend knows the booted slot only from rauc.slot= on the command line.
+  n_rauc=$(grep -c "^  linux .* rauc.slot=$slot\$" "$cfg")
+  [ "$n_rauc" = "$n_entries" ] && ok "grub-$lc.cfg: every entry tells RAUC it is slot $slot" \
+                               || bad "grub-$lc.cfg: $n_rauc of $n_entries entries carry rauc.slot=$slot"
+
+  # OpenABL's Device model. Every board .dts's root model must map to the entry that boots it, and
+  # the mapping must come before the saved choice is used, or the model never wins.
+  grep -q '^retroforge_dt_model abl_model$' "$cfg" \
+    && ok "grub-$lc.cfg reads OpenABL's Device model" || bad "grub-$lc.cfg never reads OpenABL's Device model"
+  for dts in "$DTS"/*.dts; do
+    base=$(basename "$dts" .dts)
+    mdl=$(sed -n 's/^[[:space:]]*model = "\(.*\)";.*/\1/p' "$dts" | head -1)
+    [ -n "$mdl" ] || continue
+    want="$base"
+    while IFS=$'\t' read -r rid rname rdtb rba; do
+      [ -n "$rid" ] && [[ $rid != \#* ]] && [ "$rdtb" = "$base" ] && { want="$rid"; break; }
+    done <"$BOARDS"
+    grep -qxF "if [ \"\$abl_model\" = \"$mdl\" ]; then set abl_board=$want; fi" "$cfg" \
+      && ok "grub-$lc.cfg maps model '$mdl' to $want" \
+      || bad "grub-$lc.cfg does not map OpenABL's model '$mdl' to $want"
+  done
+  ln_map=$(grep -n '^retroforge_dt_model abl_model$' "$cfg" | cut -d: -f1)
+  ln_def=$(grep -n '^  set default="\${saved_entry}"$' "$cfg" | cut -d: -f1)
+  [ -n "$ln_map" ] && [ -n "$ln_def" ] && [ "$ln_map" -lt "$ln_def" ] \
+    && ok "grub-$lc.cfg applies OpenABL's model before it picks the default" \
+    || bad "grub-$lc.cfg picks the default before it reads OpenABL's model"
   ln_term=$(grep -n '^terminal_output gfxterm$' "$cfg" | cut -d: -f1)
-  ln_att=$(grep -n '^if retroforge_bootattempts ' "$cfg" | cut -d: -f1)
-  [ -n "$ln_term" ] && [ -n "$ln_att" ] && [ "$ln_att" -gt "$ln_term" ] \
-    && ok "grub-$lc.cfg counts the attempt after terminal_output gfxterm" \
-    || bad "grub-$lc.cfg calls retroforge_bootattempts before the terminal is up"
 
   # Console. rotation is read once, when the video driver builds the framebuffer render target, so
   # a `set rotation=` that lands AFTER terminal_output parses fine, ships, and does nothing — the
@@ -406,8 +430,8 @@ for slot in A B; do
   [ "$n_short" -eq 0 ] && ok "grub-$lc.cfg holds every diagnostic for 10s or more" \
     || bad "grub-$lc.cfg has $n_short arm(s) pausing under 10s — unreadable on a handheld panel"
   n_sleep=$(grep -cE '^ *sleep 10$' "$cfg")
-  [ "$n_sleep" -eq 4 ] && ok "grub-$lc.cfg: all 4 diagnostic arms pause 10s" \
-    || bad "grub-$lc.cfg has $n_sleep 10s pauses, expected 4 (an arm lost its dwell, or gained one)"
+  [ "$n_sleep" -eq 3 ] && ok "grub-$lc.cfg: all 3 diagnostic arms pause 10s" \
+    || bad "grub-$lc.cfg has $n_sleep 10s pauses, expected 3 (an arm lost its dwell, or gained one)"
 
   if command -v grub-script-check >/dev/null 2>&1; then
     grub-script-check "$cfg" 2>"$T/gscerr" \
@@ -418,7 +442,65 @@ for slot in A B; do
   fi
 done
 
-# --- 6. the board bootargs left the device trees ------------------------------------------------
+# --- 6. the ESP GRUB's slot picker ---------------------------------------------------------------
+# boot/gen-esp-cfg.sh, embedded in grub-esp.efi. It reads RAUC's slot state the way RAUC's reference
+# grub.cfg does, follows an older root's boot conf when it changes, and hands over by setting $root
+# and $prefix to the chosen slot's efi partition.
+CASE="ESP slot picker"
+espcfg="$T/esp.cfg"
+if "$ROOT/boot/gen-esp-cfg.sh" "$espcfg" >/dev/null; then
+  ok "generated"
+  grep -q '^load_env -f "\$env" ORDER A_OK A_TRY B_OK B_TRY rf_bcsync$' "$espcfg" \
+    && ok "reads RAUC's ORDER/OK/TRY and its boot-conf note" || bad "does not load RAUC's slot state"
+  grep -q '^set env="(\$esp)/EFI/steamos/grubenv"$' "$espcfg" \
+    && ok "uses the grubenv system.conf names" || bad "reads some other grubenv"
+  sysconf="$ROOT/rootfs/overlay/etc/rauc/system.conf"
+  grep -qx 'bootloader=grub' "$sysconf" && grep -qx 'grubenv=/esp/EFI/steamos/grubenv' "$sysconf" \
+    && ok "system.conf drives the same block (bootloader=grub, grubenv=/esp/EFI/steamos/grubenv)" \
+    || bad "system.conf does not point RAUC's grub backend at the ESP grubenv"
+  # Three tries, then the slot is skipped: TRY values 0, 1 and 2 still boot; anything else does not.
+  grep -q '^  if \[ -n "\$t" -a "\$t" != 0 -a "\$t" != 1 -a "\$t" != 2 \]; then continue; fi$' "$espcfg" \
+    && ok "a slot is skipped once its three tries are used" || bad "the try limit is not 0/1/2"
+  grep -q '^  if \[ "\$try" = 2 \]; then set nt=3; elif \[ "\$try" = 1 \]; then set nt=2; else set nt=1; fi$' "$espcfg" \
+    && ok "each boot counts one try" || bad "the try is not counted up one at a time"
+  # Only the chosen slot's TRY is written: save_env deletes a variable that is unset, and RAUC fails
+  # every call that reads a missing one.
+  grep -q 'save_env -f "\$env" \$tryvar' "$espcfg" && ! grep -q 'save_env -f "\$env" A_TRY B_TRY' "$espcfg" \
+    && ok "writes only the chosen slot's TRY" || bad "writes TRY variables it did not set"
+  # A slot is a candidate only with a stage-2 config and a kernel, so an empty B is never chosen.
+  grep -q '/EFI/steamos/grub.cfg -a -f (\$bootdisk,gpt\$ri)/boot/Image' "$espcfg" \
+    && ok "checks the slot's grub.cfg and kernel before choosing it" || bad "chooses a slot without checking it is there"
+  grep -q '^set prefix="(\$root)/EFI/steamos"$' "$espcfg" && tail -1 "$espcfg" | grep -qx 'source \$prefix/grub.cfg' \
+    && ok "hands over by sourcing the slot's grub.cfg from its efi partition" || bad "does not source \$prefix/grub.cfg for the hand-over"
+  # The old boot conf: only a CHANGE since the last look moves ORDER, so a device with no older root
+  # left never has RAUC's state overridden.
+  grep -q '^  if \[ "\$bc_sel:\$bc_at" != "\$rf_bcsync" \]; then$' "$espcfg" \
+    && ok "follows the old boot conf only when it changed" || bad "follows the old boot conf unconditionally"
+  # Partition indices: the build-time ones must be the card's, and parts.env must override them.
+  for kv in "efi_a_idx=$(awk '/^[[:space:]]*#/||/^[[:space:]]*$/{next} {i++; if ($1=="efi-a") print i}' "$TABLE")" \
+            "efi_b_idx=$(awk '/^[[:space:]]*#/||/^[[:space:]]*$/{next} {i++; if ($1=="efi-b") print i}' "$TABLE")" \
+            "root_a_idx=$(awk '/^[[:space:]]*#/||/^[[:space:]]*$/{next} {i++; if ($1=="rootfs-a") print i}' "$TABLE")" \
+            "root_b_idx=$(awk '/^[[:space:]]*#/||/^[[:space:]]*$/{next} {i++; if ($1=="rootfs-b") print i}' "$TABLE")"; do
+    grep -qx "set $kv" "$espcfg" && ok "built-in $kv" || bad "built-in index is not $kv"
+  done
+  grep -q '^  load_env -f "\$pe" nd_efi_a nd_efi_b nd_root_a nd_root_b$' "$espcfg" \
+    && ok "parts.env overrides the built-in indices" || bad "does not read parts.env"
+  # The commands it calls have to be embedded (boot/grub.sh MODULES).
+  for m in loadenv regexp btrfs retroforge; do
+    printf '%s' "$MODLINE" | grep -qw -- "$m" && ok "$m is embedded" || bad "$m is not in boot/grub.sh MODULES"
+  done
+  if command -v grub-script-check >/dev/null 2>&1; then
+    grub-script-check "$espcfg" 2>"$T/gscerr" \
+      && ok "parses under grub-script-check" \
+      || bad "does not parse: $(head -1 "$T/gscerr")"
+  else
+    skip "grub-script-check not installed (it is in the build container)"
+  fi
+else
+  bad "boot/gen-esp-cfg.sh failed"
+fi
+
+# --- 7. the board bootargs left the device trees ------------------------------------------------
 # They live on the `linux` line now. They have to: the EFI stub OVERWRITES /chosen/bootargs with
 # the loader's command line, so anything still in a dtsi is silently dropped.
 CASE="dtsi bootargs stripped"

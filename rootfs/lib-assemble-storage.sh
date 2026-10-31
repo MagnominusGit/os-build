@@ -28,13 +28,13 @@ mkdir -p "$stage/etc"
 # names whichever disk udev enumerated first — and udev publishes ONE symlink per duplicate name, so
 # the loser gets none at all. /dev/retroforge/* is the same set of links scoped to the disk we booted
 # from (usr/lib/udev/rules.d/69-retroforge-bootdisk.rules + usr/lib/retroforge/on-boot-disk), which is
-# the only disk either of these mounts can correctly mean. It matters most for the ESP: stage 2
-# INCREMENTS boot-attempts on the booted disk's ESP, and mark-good clears it through this mount — on
-# the wrong ESP the counter climbs every boot until steamcl's failsafe fires, and the other
-# install's A.conf is stamped over. Both confs are named A.conf, so nothing downstream can notice.
+# the only disk either of these mounts can correctly mean. It matters most for the ESP: the ESP GRUB
+# counts tries in the booted disk's grubenv, and RAUC's mark-good clears them through this mount — on
+# the wrong ESP the count climbs every boot until the ESP GRUB fails over a healthy slot, and the
+# other install's slot state is stamped over. Both grubenvs look alike, so nothing downstream can notice.
 if ! grep -q '/dev/retroforge/RETROFORGE-ESP' "$stage/etc/fstab" 2>/dev/null; then
   printf '%s\n' \
-    '# retroforge shared ESP — SteamOS/conf + steamcl (stage 1). Mounted here at /esp; GPT bit 63' \
+    '# retroforge shared ESP — the ESP GRUB + its grubenv (RAUC slot state). Mounted here at /esp; GPT bit 63' \
     '# keeps gpt-auto away so the initramfs can mount the slot efi partition at /efi instead.' \
     '/dev/retroforge/RETROFORGE-ESP  /esp  vfat  defaults,nofail,noatime  0 2' \
     >>"$stage/etc/fstab"

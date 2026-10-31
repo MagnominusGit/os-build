@@ -29,7 +29,7 @@ if ! declare -F log >/dev/null 2>&1; then
   log() { printf '[lib-slotwrite] %s\n' "$1"; }
 fi
 
-# The hasher used by refresh_if_diff below, a seam for the same reason post-install.sh's BC is one:
+# The hasher used by refresh_if_diff below, a seam for the same reason post-install.sh's EDITENV is one:
 # an offline suite runs with the HOST's PATH appended and so cannot make a tool absent, which would
 # leave the "the comparator is missing" path untestable. post-install.sh defines this before it
 # sources us and asserts the tool exists ahead of anything destructive; the default here is for
@@ -46,10 +46,9 @@ SHA256=${SHA256:-sha256sum}
 # disk whose userdata is already gone. Nothing on the device concatenates a disk and an index today
 # and nothing new may start.
 #
-# LOWER-CASED, and that is not cosmetic either: sgdisk prints partition GUIDs upper case, steamcl
-# string-compares them against the partsets, and mint_partsets below refuses anything else. One
-# lowercasing site, so a uuid used as a device path and the same uuid written into a partset cannot
-# disagree.
+# LOWER-CASED, and that is not cosmetic either: sgdisk prints partition GUIDs upper case, and the
+# by-partuuid links udev makes are lower case. One lowercasing site, so a uuid used as a device path
+# cannot disagree with one compared against it.
 #
 # TWO SEAMS, and they are the same pair every script in this install documents: an unprivileged
 # offline suite has no block device to offer and no /dev/disk/by-partuuid to populate, so the
@@ -85,11 +84,9 @@ part_dev() {  # <disk> <index> -> /dev/disk/by-partuuid/<uuid>
 # WRITTEN BY HAND rather than with grub-editenv, and that is deliberate. Unlike every other artifact
 # in the install, parts.env's CONTENTS ARE PER-DISK -- they come from what --append just laid down on
 # this specific device -- so the trick used for the ESP's grubenv (build a pristine block at image
-# build time, have the device cp it) does not transfer. It has to be generated on the device, and
-# grub-editenv is not on the shipped image: no grub in customize-base.sh's PKGS, no
-# /usr/bin/grub-editenv in the built base (confirmed 2026-08-06). Adding it to the INSTALLER's
-# package list would be free, but the format is trivial and fixed, and the installer already has to
-# add gptfdisk and dosfstools -- this is one fewer.
+# build time, have the device cp it) does not transfer. It has to be generated on the device. The
+# image carries a grub-editenv now (RAUC's grub backend needs it), but this block predates it, the
+# format is trivial and fixed, and CI checks it byte for byte against the real tool.
 #
 # The format, verified against grub-editenv's own output rather than from the docs:
 #
@@ -325,47 +322,9 @@ write_efi_partition() {  # <mnt> <slot> <bootdir>
   cp "$grub_font" "$mnt/EFI/steamos/fonts/dejavu-mono.pf2" || die "cannot install the boot font"
 }
 
-# --- partsets -------------------------------------------------------------------------------------
-# The identity files steamcl matches against: it resolves the efi partition it was loaded from to an
-# image name via SteamOS/partsets/self, reads partsets/all for the ESP, and bootconf reads self too.
-# all/shared/A/B are disk-derived and identical on both efi partitions; only self/other name THIS
-# partition and the other one.
-#
-# The OTA path does NOT use this -- it copies the partsets off the running /efi, because they
-# describe the disk it is already running from and cannot be rebuilt from nothing there. The
-# installer must MINT them: it is writing a disk that has no retroforge on it, so the uuids come from
-# the GPT it just laid down. Same file format, and this is where it is written down once.
-mint_partsets() {  # <mnt> <self-image> <esp-uuid> <efi-a-uuid> <efi-b-uuid>
-  local mnt="$1" self="$2" esp_uuid="$3" efia="$4" efib="$5"
-  local self_uuid other_uuid u
-
-  case "${self^^}" in
-    A) self_uuid="$efia"; other_uuid="$efib" ;;
-    B) self_uuid="$efib"; other_uuid="$efia" ;;
-    *) die "mint_partsets: '$self' is not an image name (A or B)" ;;
-  esac
-
-  # LOWERCASE, and asserted. sgdisk prints partition GUIDs in upper case and steamcl compares these
-  # strings against the uuid of the partition it booted from; a set minted from raw sgdisk output
-  # would be well-formed, would match nothing, and the symptom is a disk that does not boot -- found
-  # only on hardware. image/make-sdcard.sh lowercases at the same seam for the same reason.
-  for u in "$esp_uuid" "$efia" "$efib"; do
-    [[ "$u" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
-      || die "mint_partsets: '$u' is not a lowercase partition uuid"
-  done
-
-  mkdir -p "$mnt/SteamOS/partsets" || die "cannot create $mnt/SteamOS/partsets"
-  printf 'efi %s\n' "$efia"       >"$mnt/SteamOS/partsets/A"      || die "cannot write partsets/A"
-  printf 'efi %s\n' "$efib"       >"$mnt/SteamOS/partsets/B"      || die "cannot write partsets/B"
-  printf 'esp %s\n' "$esp_uuid"   >"$mnt/SteamOS/partsets/all"    || die "cannot write partsets/all"
-  printf 'esp %s\n' "$esp_uuid"   >"$mnt/SteamOS/partsets/shared" || die "cannot write partsets/shared"
-  printf 'efi %s\n' "$self_uuid"  >"$mnt/SteamOS/partsets/self"   || die "cannot write partsets/self"
-  printf 'efi %s\n' "$other_uuid" >"$mnt/SteamOS/partsets/other"  || die "cannot write partsets/other"
-}
-
 # --- the shared ESP ---------------------------------------------------------------------------
-# Stage 1. ABL chainloads /EFI/BOOT/bootaa64.efi, so that is the copy that matters; the companions
-# in /EFI/BOOT/ are resolved by steamcl's resolve_path() relative to the chainloader location.
+# Stage 1 is the ESP GRUB (boot/gen-esp-cfg.sh), which picks the slot. ABL starts
+# /EFI/BOOT/bootaa64.efi, so that is the copy that matters.
 #
 # WHY sha256sum AND NOT cmp: cmp(1) is diffutils, which this image does not carry and never has. The
 # skip below is not an optimisation -- the shared ESP is the only write in an update with no A/B
@@ -386,32 +345,41 @@ refresh_if_diff() {  # <src> <dst>
 
 refresh_esp_stage1() {  # <esp> <bootdir>
   local esp="$1" bootdir="$2"
-  local steamcl="$bootdir/steamcl.efi"
-  local steamcl_ver="$bootdir/steamcl-version"
-  local stage_font="$bootdir/fonts/default.pf2"
-  [ -f "$steamcl" ] || die "the installed root carries no /usr/lib/retroforge/boot/steamcl.efi"
+  local loader="$bootdir/grub-esp.efi"
+  [ -f "$loader" ] || die "the installed root carries no ESP GRUB at /usr/lib/retroforge/boot/grub-esp.efi"
 
-  mkdir -p "$esp/EFI/BOOT" "$esp/EFI/BOOT/fonts" || die "cannot create $esp/EFI/BOOT"
-  refresh_if_diff "$steamcl_ver" "$esp/EFI/BOOT/steamcl-version"
-  refresh_if_diff "$stage_font" "$esp/EFI/BOOT/fonts/default.pf2"
-  # An empty flag file; steamcl reads its existence, not its contents. It restricts chainloading to
-  # the same physical device, which is what stops an installer medium from being used to boot
-  # something off another disk.
-  : >"$esp/EFI/BOOT/steamcl-restricted" || die "cannot write $esp/EFI/BOOT/steamcl-restricted"
-  sync
+  mkdir -p "$esp/EFI/BOOT" || die "cannot create $esp/EFI/BOOT"
   # bootaa64.efi LAST, and the order is the whole point rather than tidiness. ABL's test is
-  # CONTENT-based -- it chainloads /EFI/BOOT/bootaa64.efi if that file is there -- so on an internal
+  # CONTENT-based -- it starts /EFI/BOOT/bootaa64.efi if that file is there -- so on an internal
   # install this one copy is what flips the device from booting the installer medium to booting the
-  # disk being built (measured 2026-08-21: an empty internal ESP does not divert ABL at all). Write
-  # it first and an install interrupted a second later leaves a device that boots internal steamcl
-  # with no steamcl-version, no font and no restricted flag beside it; write it last and every
-  # earlier interruption still boots the medium and a re-run is free. The companions are resolved by
-  # steamcl's resolve_path() relative to the chainloader, so they must already be there when it runs.
+  # disk being built (measured 2026-08-21: an empty internal ESP does not divert ABL at all). Write it
+  # last and every earlier interruption still boots the medium and a re-run is free; callers write
+  # the grubenv, parts.env and \dtbs\qcom before they get here.
   #
   # The OTA path gets the same property for the same reason: the shared ESP is the one write in an
   # update with no A/B copy behind it, so the file with nothing to roll back to goes last.
-  refresh_if_diff "$steamcl" "$esp/EFI/BOOT/bootaa64.efi"
+  refresh_if_diff "$loader" "$esp/EFI/BOOT/bootaa64.efi"
   sync
+}
+
+# What the ESP GRUB reads besides the grubenv, from the running system: parts.env (where this
+# medium's partitions are -- copied from a slot's efi partition, where whoever laid the disk out
+# wrote it) and OpenABL's Device model list in \dtbs\qcom (boot/esp-dtbs.sh). Both have a fall-back
+# in the ESP GRUB, so a medium without them still boots; with them, an internal install needs no
+# partition scan and OpenABL can name the board. A medium from before parts.env existed has none
+# to copy, which is not an error: the built-in indices are a card's.
+refresh_esp_extras() {  # <esp> <efi-dir> <bootdir>
+  local esp="$1" efi="$2" bootdir="$3" d
+  mkdir -p "$esp/EFI/steamos" "$esp/dtbs/qcom" || die "cannot create the ESP directories"
+  if [ -f "$efi/EFI/steamos/parts.env" ]; then
+    refresh_if_diff "$efi/EFI/steamos/parts.env" "$esp/EFI/steamos/parts.env"
+  else
+    log "no parts.env on $efi -- the ESP GRUB keeps its built-in partition indices"
+  fi
+  for d in "$bootdir"/dtbs/*.dtb; do
+    [ -e "$d" ] || continue
+    refresh_if_diff "$d" "$esp/dtbs/qcom/${d##*/}"
+  done
 }
 
 # NOTHING RESOLVES THE ESP BY THIS LABEL: ABL finds it by type GUID (ef00), the OS mounts it by
@@ -429,9 +397,9 @@ ESP_FAT_LABEL=RETROFORGE
 #
 # MEASURED on an AYANEO Pocket ACE, 2026-08-21. It surfaces twice, and the two look unrelated:
 # the ESP fails inside ABL (its FatPkg returns EFI_VOLUME_CORRUPTED, never publishes a
-# SimpleFileSystem handle, and LoadEFI reports "Failed to load EFI: Not Found"), and efi-A/B fail
-# one layer later inside steamcl, which mounts them through the SAME EFI FAT driver and so finds no
-# boot candidate at all. See the block above the rows in image/partition-table.txt.
+# SimpleFileSystem handle, and LoadEFI reports "Failed to load EFI: Not Found"), and efi-A/B failed
+# one layer later inside steamcl (stage 1 then), which mounted them through the SAME EFI FAT driver
+# and so found no boot candidate at all. See the block above the rows in image/partition-table.txt.
 #
 # The rule is deliberately OURS rather than mkfs.fat's. Dropping the flag entirely also produces a
 # valid filesystem, but the width would then be picked by a size-threshold table inside the tool,
@@ -493,9 +461,8 @@ mkfs_esp() {  # <dev>
 # to mkfs_esp and to the writers that fill them, so that a card and an internal install produce the
 # same objects: image/make-sdcard.sh is the other writer, and its labels are what these repeat.
 #
-# NOTHING RESOLVES AN efi PARTITION BY THIS LABEL either -- steamcl matches the partition uuid it
-# booted from against SteamOS/partsets/self, and the stage-2 grub.cfg addresses partitions by the
-# index parts.env gives it. `GRUB-A`/`GRUB-B` is a human convenience on a mounted disk, and it is
+# NOTHING RESOLVES AN efi PARTITION BY THIS LABEL either -- the ESP GRUB and the stage-2 grub.cfg
+# address partitions by the index parts.env gives them. `GRUB-A`/`GRUB-B` is a human convenience on a mounted disk, and it is
 # again not the GPT name: a FAT label caps at 11 characters.
 mkfs_efi() {  # <dev> <slot>
   local dev="$1" slot="${2^^}"

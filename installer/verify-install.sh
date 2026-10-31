@@ -193,50 +193,33 @@ else
 fi
 
 # --- 4. the ESP (stage 1) ------------------------------------------------------------------------
-# ABL boots /EFI/BOOT/bootaa64.efi from here. The boot confs and the shared grubenv live here too,
-# because they are per-DISK rather than per-slot.
+# ABL boots /EFI/BOOT/bootaa64.efi (the ESP GRUB) from here. RAUC's slot state and the shared board
+# choice live here too, in the grubenv, because they are per-DISK rather than per-slot.
 echo "  3. ESP (stage 1)"
 if use_fs "${DEV[RETROFORGE-ESP]}" "$T/esp"; then
   esp="$USE_PATH"
-  for f in /EFI/BOOT/bootaa64.efi /EFI/BOOT/steamcl-version /EFI/BOOT/fonts/default.pf2 \
-           /EFI/steamos/grubenv /SteamOS/conf/A.conf; do
+  for f in /EFI/BOOT/bootaa64.efi /EFI/steamos/grubenv /EFI/steamos/parts.env; do
     [ -s "$esp$f" ] && ok "$f present" || bad "$f missing or empty"
   done
-  [ -e "$esp/EFI/BOOT/steamcl-restricted" ] \
-    && { [ -s "$esp/EFI/BOOT/steamcl-restricted" ] \
-           && bad "steamcl-restricted should be empty" \
-           || ok "steamcl-restricted present and empty"; } \
-    || bad "/EFI/BOOT/steamcl-restricted missing"
-
-  # B.conf is what makes steamcl offer B as a boot candidate. On a fresh install slot B holds
-  # nothing, so a B.conf here points the bootloader at an empty partition.
-  if [ "${RETROFORGE_SLOT_B:-0}" = 1 ]; then
-    [ -s "$esp/SteamOS/conf/B.conf" ] && ok "B.conf present (slot B is populated)" \
-                                        || bad "B.conf missing though slot B is populated"
-  else
-    [ -e "$esp/SteamOS/conf/B.conf" ] \
-      && bad "B.conf present with an empty slot B -- steamcl would offer B as a boot candidate" \
-      || ok "no B.conf (empty slot B is not a boot candidate)"
-  fi
-
   grep -aq "GRUB Environment Block" "$esp/EFI/steamos/grubenv" \
     && ok "grubenv is a valid GRUB env block" || bad "grubenv has no GRUB magic header"
 
-  # A.conf must be armed for a first boot: a stamp to order it against B, and a clean attempt
-  # count. `boot-attempts` non-zero here would mean the slot arrives already part-way through its
-  # trial, with fewer tries than it is owed.
-  a_stamp="$(sed -n 's/^boot-requested-at: *//p' "$esp/SteamOS/conf/A.conf" | head -1)"
-  case "$a_stamp" in
-    [0-9]*) ok "A.conf boot-requested-at = $a_stamp" ;;
-    *)      bad "A.conf has no valid boot-requested-at (got '${a_stamp:-<none>}')" ;;
-  esac
-  for k in boot-attempts image-invalid; do
-    v="$(sed -n "s/^$k: *//p" "$esp/SteamOS/conf/A.conf" | head -1)"
-    [ "$v" = 0 ] && ok "A.conf $k = 0" || bad "A.conf $k = '${v:-<none>}', expected 0"
+  # The slot state a first boot needs: A first and OK with every try left, and B OK only when it is
+  # populated. B_OK=1 over an empty slot B would point the ESP GRUB at a partition with no kernel.
+  want_b_ok=0; [ "${RETROFORGE_SLOT_B:-0}" = 1 ] && want_b_ok=1
+  for kv in "ORDER=A B" "A_OK=1" "A_TRY=0" "B_OK=$want_b_ok" "B_TRY=0"; do
+    grep -aqx -- "$kv" "$esp/EFI/steamos/grubenv" && ok "grubenv $kv" || bad "grubenv does not carry $kv"
   done
+  # The ESP's parts.env is the one the ESP GRUB reads to find the slots, so it must be the disk's map.
+  for kv in "nd_efi_a=${IDX[retroforge-efi-A]}" "nd_efi_b=${IDX[retroforge-efi-B]}"             "nd_root_a=${IDX[retroforge-root-A]}" "nd_root_b=${IDX[retroforge-root-B]}"; do
+    grep -aqx -- "$kv" "$esp/EFI/steamos/parts.env"       && ok "ESP parts.env $kv"       || bad "ESP parts.env does not carry $kv -- the ESP GRUB would look for the slots elsewhere"
+  done
+  ls "$esp/dtbs/qcom/"*.dtb >/dev/null 2>&1 \
+    && ok "/dtbs/qcom carries OpenABL's Device model list" \
+    || bad "/dtbs/qcom is empty -- OpenABL cannot name the board"
 
-  for junk in /KERNEL /RETROFORGE; do
-    [ -e "$esp$junk" ] && bad "$junk present on a Phase 5 ESP" || ok "no $junk"
+  for junk in /KERNEL /RETROFORGE /SteamOS /EFI/BOOT/steamcl-version; do
+    [ -e "$esp$junk" ] && bad "$junk present on the ESP" || ok "no $junk"
   done
   release_fs
 else
@@ -266,10 +249,6 @@ if use_fs "${DEV[retroforge-efi-A]}" "$T/efi"; then
     grep -aqx -- "$kv" "$efi/EFI/steamos/parts.env" \
       && ok "parts.env $kv" \
       || bad "parts.env does not carry $kv -- the map disagrees with the GPT it sits on"
-  done
-  # steamos-bootconf errors and EXITS without these, so their absence is not cosmetic.
-  for s in A B all other self shared; do
-    [ -e "$efi/SteamOS/partsets/$s" ] && ok "partsets/$s present" || bad "partsets/$s missing"
   done
   release_fs
 else
