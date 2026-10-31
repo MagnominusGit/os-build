@@ -1,27 +1,23 @@
 #!/usr/bin/env bash
-# Offline test for the DXVK-Sarek setting: /usr/bin/retroforge-steam-sarek (the setting),
-# /usr/lib/retroforge/steam-compat-tools (Proton-CachyOS arm64 as a Steam compatibility tool) and the
-# block of /usr/bin/steam that applies it.
+# Offline test for Proton-CachyOS arm64 and our ARMv8.0 Proton as Steam compatibility tools:
+# /usr/lib/retroforge/steam-compat-tools (the tool, DXVK-Sarek where the GPU needs it) and
+# /usr/bin/retroforge-steam-cachyos (the plugin's "CachyOS Proton arm64" Download row).
 #
 #   tests/test-steam-compat-tools.sh
 #
 # WHY THIS EXISTS. Nothing here runs before a player picks a Windows game, and each rule below fails
-# as a game without a working DXVK, a half tool Steam lists, a tool a game loses, a setting that does
-# not stick, or a player's own tool gone:
-#   setting (retroforge-steam-sarek):
-#   - never set: on for SoC class SM6115, off elsewhere and on an unknown board;
-#   - the player's DXVK_SAREK=on|off in ~/.config/retroforge/steam.conf wins over that (last line;
-#     anything else ignored), and RETROFORGE_STEAM_SAREK=on|off over both;
-#   - on/off rewrites that one line and keeps the rest; off also stops a download in progress;
-#   - on starts the download detached (a user unit, else setsid), off never downloads and turns
-#     Sarek off in an installed tool before the client starts.
-#   helper (steam-compat-tools):
+# as a game without a working DXVK, a half tool Steam lists, a tool a game loses, or a player's own
+# tool gone:
+#   which GPUs need Sarek: SoC class SM6115 and SM4450 (device-env), nothing else, an unknown board
+#   neither; RETROFORGE_STEAM_SAREK=on|off overrides it;
+#   helper (steam-compat-tools install):
 #   - the image's pin follows the channel (no tag), and names one folder for the tool;
-#   - on: one API request picks the newest release with the arm64 tarball and its .sha512sum (highest
+#   - one API request picks the newest release with the arm64 tarball and its .sha512sum (highest
 #     Proton version, then latest published), skipping releases without them, drafts, prereleases
 #     and uploads in progress; refuses a tarball unless its sha512 (and GitHub's sha256) match;
 #     installs it whole as compatibilitytools.d/<dir> (symlinks kept), its compatibilitytool.vdf
-#     naming the tool <dir>, with its .retroforge-pin and the Sarek user_settings.py;
+#     naming the tool <dir>, with its .retroforge-pin, and the Sarek user_settings.py where the GPU
+#     needs it;
 #   - the release already installed: no download, nothing said;
 #   - GitHub unreachable, rate limited, answering nonsense or with no arm64 build: the installed
 #     release stays (exit 0); on a fresh card, exit 1 and no tool;
@@ -32,23 +28,26 @@
 #     runs from it (working folder), and a player's user_settings.py in one comes along;
 #   - a tag in the pin holds that release (asked by tag, then not at all), and a sha512 with it is
 #     checked instead of the .sha512sum;
-#   - off: deletes only its own user_settings.py, keeps the tool, never downloads;
+#   - on a GPU that does not need Sarek, deletes only its own user_settings.py (also the old toggle's
+#     text) from every tool of ours, keeps the tools; where it is needed, writes it into each, over
+#     the old text;
 #   - never touches a folder it did not install, or a user_settings.py the player edited;
 #   - sweeps what a killed run left, replaces a broken folder of its own, refuses a tarball without
 #     its folder, proton or a compatibilitytool.vdf it can rename, and leaves a running install alone
-#     (lock).
-#   wrapper (/usr/bin/steam): exports PROTON_DXVK_SAREK=1 exactly when the setting is on (keeping a
-#   value the session already has), and runs the client either way.
+#     (lock);
+#   - its progress file goes 0, percentages, 100, unpacking, and is gone at the end, but not when
+#     another run holds the lock;
+#   retroforge-steam-cachyos: status says armv8, missing or installed <tag> (only for a folder
+#   RetroForge installed); install runs the helper as the user unit with --wait after any run of it
+#   already going, else in the foreground, never on an ARMv8.0 CPU, and fails with the log's last line.
 # GitHub's API is a local fake (a pin's releases: points at it) and the downloads are file:// URLs;
 # device-env, systemd-run and systemctl are stubs.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 HELPER="$ROOT/rootfs/overlay/usr/lib/retroforge/steam-compat-tools"
-CLI="$ROOT/rootfs/overlay/usr/bin/retroforge-steam-sarek"
-WRAP="$ROOT/rootfs/overlay/usr/bin/steam"
 PIN_REAL="$ROOT/rootfs/overlay/usr/share/retroforge/steam/proton-cachyos-arm64.pin"
-for f in "$HELPER" "$CLI" "$WRAP" "$PIN_REAL"; do [ -f "$f" ] || { echo "missing: $f" >&2; exit 1; }; done
+for f in "$HELPER" "$PIN_REAL"; do [ -f "$f" ] || { echo "missing: $f" >&2; exit 1; }; done
 
 PASS=0; FAIL=0; CASE=""
 ok()  { PASS=$((PASS+1)); printf '  ok   %s -- %s\n' "$CASE" "$1"; }
@@ -202,9 +201,11 @@ mkpin() {  # mkpin [tag] [sha512] [releases url]
     [ -n "${2-}" ] && printf 'sha512: %s\n' "$2"; } >"$PIN"
 }
 NOPROXY=(env -u http_proxy -u HTTP_PROXY -u https_proxy -u HTTPS_PROXY -u all_proxy -u ALL_PROXY)
-tools() {  # tools <args>: the helper against the test's Steam root and pin. REQS: its API requests.
+tools() {  # tools <args>: the helper against the test's Steam root and pin, on a GPU that needs Sarek
+           # unless SAREK=off. REQS: its API requests.
   : >"$API/requests.log"
   OUT="$("${NOPROXY[@]}" HOME="$T/home" RETROFORGE_STEAM_ROOT="$SROOT" RETROFORGE_STEAM_COMPAT_PIN="$PIN" \
+         RETROFORGE_DEVICE_ENV="$T/no-device-env" RETROFORGE_STEAM_SAREK="${SAREK:-on}" \
          python3 "$HELPER" "$@" 2>"$T/err")"; RC=$?
   ERR="$(cat "$T/err")"; REQS="$(cat "$API/requests.log")"
 }
@@ -259,7 +260,7 @@ $R1 2026-10-04T21:30:56Z $D1
 $R0 2026-07-22T00:57:55Z $D0
 EOF
 mkpin
-tools on
+tools install
 [ "$RC" = 0 ] && [ "$OUT" = "$TOOL" ] && ok "exit 0, prints the tool's folder" || bad "rc=$RC out=$OUT err=$ERR"
 [ "$REQS" = "/repos/CachyOS/proton-cachyos/releases?per_page=20" ] && ok "one API request, for the newest 20 releases" || bad "requests: $REQS"
 [ -f "$TOOL/compatibilitytool.vdf" ] && [ -f "$TOOL/toolmanifest.vdf" ] && [ -x "$TOOL/proton" ] \
@@ -283,25 +284,25 @@ cp "$TOOL/user_settings.py" "$T/sarek.py"
 
 CASE="helper: already installed"
 mv "$DL/$D1.tar.xz" "$DL/$D1.away"   # a download would fail
-tools on
+tools install
 [ "$RC" = 0 ] && [ "$OUT" = "$TOOL" ] && [ -z "$ERR" ] && [ "$(asked)" = 1 ] && ok "one API request, no download, says nothing" || bad "rc=$RC out=$OUT err=$ERR requests=$REQS"
 mv "$DL/$D1.away" "$DL/$D1.tar.xz"
 
-CASE="helper: off"
-tools off
+CASE="helper: a GPU that does not need Sarek"
+SAREK=off tools install
 [ "$RC" = 0 ] && [ ! -e "$TOOL/user_settings.py" ] && [ -x "$TOOL/proton" ] && grep -q "turned off in $STABLE" <<<"$ERR" \
-  && [ "$(asked)" = 0 ] && ok "deletes its user_settings.py, keeps the tool, asks nothing" || bad "rc=$RC err=$ERR requests=$REQS"
-tools on
-[ "$RC" = 0 ] && [ -f "$TOOL/user_settings.py" ] && ok "on writes it again" || bad "rc=$RC err=$ERR"
+  && ok "deletes its user_settings.py, keeps the tool" || bad "rc=$RC err=$ERR requests=$REQS"
+tools install
+[ "$RC" = 0 ] && [ -f "$TOOL/user_settings.py" ] && ok "one that needs it gets it again" || bad "rc=$RC err=$ERR"
 
 CASE="helper: the player's user_settings.py"
 printf 'user_settings = {"PROTON_LOG": "1", "PROTON_DXVK_SAREK": "1"}\n' >"$TOOL/user_settings.py"
-tools off
+SAREK=off tools install
 [ "$RC" = 0 ] && grep -q PROTON_LOG "$TOOL/user_settings.py" && grep -q "player's own" <<<"$ERR" \
-  && ok "off leaves an edited one alone, and says so" || bad "rc=$RC err=$ERR"
-tools on
-[ "$RC" = 0 ] && grep -q PROTON_LOG "$TOOL/user_settings.py" && ok "on does not write over it" || bad "rc=$RC err=$ERR"
-rm -f "$TOOL/user_settings.py"; tools on
+  && ok "a GPU without the need leaves an edited one alone, and says so" || bad "rc=$RC err=$ERR"
+tools install
+[ "$RC" = 0 ] && grep -q PROTON_LOG "$TOOL/user_settings.py" && ok "one with the need does not write over it" || bad "rc=$RC err=$ERR"
+rm -f "$TOOL/user_settings.py"; tools install
 
 CASE="helper: other tools"
 mkdir -p "$TOOLS/GE-Proton10-1" "$TOOLS/proton-cachyos-10.0-arm64" "$TOOLS/other-family"
@@ -309,26 +310,26 @@ echo player >"$TOOLS/GE-Proton10-1/compatibilitytool.vdf"
 echo player >"$TOOLS/proton-cachyos-10.0-arm64/compatibilitytool.vdf"
 cp "$T/sarek.py" "$TOOLS/proton-cachyos-10.0-arm64/user_settings.py"
 printf 'name: something-else\ntag: 1\nsha256: %s\n' "$(printf 'b%.0s' {1..64})" >"$TOOLS/other-family/.retroforge-pin"
-tools off
-[ -f "$TOOLS/proton-cachyos-10.0-arm64/user_settings.py" ] && ok "off never touches a folder it did not install" || bad "the player's tool lost its user_settings.py"
-tools on
+SAREK=off tools install
+[ -f "$TOOLS/proton-cachyos-10.0-arm64/user_settings.py" ] && ok "never touches a folder it did not install" || bad "the player's tool lost its user_settings.py"
+tools install
 
 CASE="helper: GitHub cannot be asked"
 echo 500 >"$API/status"
-tools on
+tools install
 [ "$RC" = 0 ] && [ "$OUT" = "$TOOL" ] && grep -q "answered 500" <<<"$ERR" && grep -q "keeping $R1" <<<"$ERR" && [ "$(tag_of "$TOOL")" = "$R1" ] \
   && ok "an API error: the installed release stays, exit 0, says so" || bad "rc=$RC out=$OUT err=$ERR"
 echo 403 >"$API/status"
-tools on
+tools install
 [ "$RC" = 0 ] && grep -q "allows no more requests from this network until" <<<"$ERR" && [ "$(tag_of "$TOOL")" = "$R1" ] \
   && ok "the rate limit used up: the same, and says until when" || bad "rc=$RC err=$ERR"
 echo garbage >"$API/status"
-tools on
+tools install
 [ "$RC" = 0 ] && grep -q "could not ask GitHub's API" <<<"$ERR" && [ "$(tag_of "$TOOL")" = "$R1" ] \
   && ok "an answer that is not JSON: the same" || bad "rc=$RC err=$ERR"
 rm -f "$API/status"
 mkpin "" "" "http://127.0.0.1:1/repos/CachyOS/proton-cachyos/releases"
-tools on
+tools install
 [ "$RC" = 0 ] && [ "$OUT" = "$TOOL" ] && grep -q "could not ask GitHub's API" <<<"$ERR" && [ "$(tag_of "$TOOL")" = "$R1" ] \
   && ok "no network: the same" || bad "rc=$RC out=$OUT err=$ERR"
 mkpin
@@ -336,7 +337,7 @@ releases <<EOF
 $R2 2026-11-05T00:00:00Z -
 $R1 2026-10-04T21:30:56Z -
 EOF
-tools on
+tools install
 [ "$RC" = 0 ] && grep -q "none of the newest 2 releases has proton-cachyos-\*-slr-arm64.tar.xz" <<<"$ERR" && [ "$(tag_of "$TOOL")" = "$R1" ] \
   && [ -x "$TOOL/proton" ] && ok "no release with an arm64 build: the same" || bad "rc=$RC err=$ERR"
 
@@ -346,7 +347,7 @@ releases <<EOF
 $R2 2026-11-05T00:00:00Z $D2 badsidecar
 $R1 2026-10-04T21:30:56Z $D1
 EOF
-tools on
+tools install
 [ "$RC" = 1 ] && grep -q "sha512 mismatch" <<<"$ERR" && [ -z "$OUT" ] && ok "refused (exit 1, nothing on stdout)" || bad "rc=$RC out=$OUT err=$ERR"
 [ "$(tag_of "$TOOL")" = "$R1" ] && grep -q v1 "$TOOL/proton" && ours_only && ok "the installed release stays, nothing half-installed" || bad "$(ls -A "$TOOLS")"
 [ -z "$(leftovers)" ] && [ ! -e "$NEXT" ] && ok "no temporary folders left" || bad "left: $(leftovers)"
@@ -356,7 +357,7 @@ releases <<EOF
 $R2 2026-11-05T00:00:00Z $D2 baddigest
 $R1 2026-10-04T21:30:56Z $D1
 EOF
-tools on
+tools install
 [ "$RC" = 1 ] && grep -q "sha256 mismatch.*GitHub lists" <<<"$ERR" && [ "$(tag_of "$TOOL")" = "$R1" ] && [ -z "$(leftovers)" ] \
   && ok "refused, the installed release stays" || bad "rc=$RC err=$ERR"
 
@@ -372,7 +373,7 @@ $RS 2026-11-20T00:00:00Z $DS
 $R1 2026-10-04T21:30:56Z $D1
 $R2 2026-11-05T00:00:00Z $D2
 EOF
-tools on
+tools install
 [ "$RC" = 0 ] && [ "$OUT" = "$TOOL" ] && [ "$(tag_of "$TOOL")" = "$R2" ] && grep -q v2 "$TOOL/proton" \
   && ok "$R2: not one without an arm64 build or a .sha512sum, still uploading, a draft, a prerelease, or 10.0-sunset published after it" \
   || bad "rc=$RC out=$OUT tag=$(tag_of "$TOOL") err=$ERR"
@@ -392,7 +393,7 @@ $R2 2026-11-05T00:00:00Z $D2
 EOF
 printf 'user_settings = {"PROTON_LOG": "1"}\n' >"$TOOL/user_settings.py"
 hold map "$TOOL/files/lib/libfoo.so.1"
-tools on
+tools install
 [ "$RC" = 0 ] && [ "$OUT" = "$TOOL" ] && [ "$(tag_of "$TOOL")" = "$R2" ] && grep -q v2 "$TOOL/proton" \
   && ok "the release in use stays in place" || bad "rc=$RC out=$OUT tag=$(tag_of "$TOOL") err=$ERR"
 [ "$(tag_of "$NEXT")" = "$R3" ] && [ -x "$NEXT/proton" ] && grep -q "a game runs from $TOOL: $R3 is ready" <<<"$ERR" \
@@ -400,17 +401,17 @@ tools on
 releases <<EOF
 $R2 2026-11-05T00:00:00Z $D2
 EOF
-tools on
+tools install
 [ "$RC" = 0 ] && [ ! -e "$NEXT" ] && [ "$(tag_of "$TOOL")" = "$R2" ] && ok "withdrawn upstream meanwhile: dropped" || bad "rc=$RC err=$ERR $(ls -A "$SROOT")"
 releases <<EOF
 $R3 2026-12-15T00:00:00Z $D3
 $R2 2026-11-05T00:00:00Z $D2
 EOF
-tools on
+tools install
 [ "$(tag_of "$NEXT")" = "$R3" ] && [ "$(tag_of "$TOOL")" = "$R2" ] && ok "published again: it waits again" || bad "not waiting again: $(tag_of "$NEXT") $(tag_of "$TOOL") err=$ERR"
 release
 mv "$DL/$D3.tar.xz" "$DL/$D3.away"   # a second download would fail
-tools on
+tools install
 [ "$RC" = 0 ] && [ "$(tag_of "$TOOL")" = "$R3" ] && grep -q v3 "$TOOL/proton" && [ ! -e "$NEXT" ] \
   && grep -q "$R3 was downloaded and checked before" <<<"$ERR" && ok "with nothing running from it, the next run puts it in without downloading" \
   || bad "rc=$RC tag=$(tag_of "$TOOL") err=$ERR"
@@ -418,7 +419,7 @@ tools on
 grep -q PROTON_LOG "$TOOL/user_settings.py" && grep -q "keeping the player's own user_settings.py" <<<"$ERR" \
   && ok "the player's user_settings.py came along" || bad "settings: $(cat "$TOOL/user_settings.py" 2>&1) err=$ERR"
 mv "$DL/$D3.away" "$DL/$D3.tar.xz"
-rm -f "$TOOL/user_settings.py"; tools on
+rm -f "$TOOL/user_settings.py"; tools install
 
 CASE="helper: folders of the earlier per-release scheme"
 rm -rf "$SROOT"; mkdir -p "$TOOLS"
@@ -433,7 +434,7 @@ $R2 2026-11-05T00:00:00Z $D2
 $R1 2026-10-04T21:30:56Z $D1
 EOF
 hold cwd "$TOOLS/$D1/files"
-tools on
+tools install
 [ "$RC" = 0 ] && [ "$OUT" = "$TOOL" ] && [ "$(tag_of "$TOOL")" = "$R2" ] && [ "$(vdf_strings "$TOOL")" = "$VDF_OURS" ] \
   && ok "the one-name folder is installed" || bad "rc=$RC out=$OUT err=$ERR"
 [ ! -e "$TOOLS/$D0" ] && grep -q "removing $D0, of the earlier per-release scheme" <<<"$ERR" && ok "an earlier folder goes once it is in" || bad "$(ls -A "$TOOLS") err=$ERR"
@@ -441,9 +442,9 @@ tools on
   && ok "one a process works in stays" || bad "$(ls -A "$TOOLS") err=$ERR"
 grep -q PROTON_LOG "$TOOL/user_settings.py" && ok "the player's user_settings.py from an earlier folder came along" || bad "settings: $(cat "$TOOL/user_settings.py" 2>&1)"
 release
-tools on
+tools install
 [ "$RC" = 0 ] && [ "$(ls -A "$TOOLS")" = "$STABLE" ] && grep -q "removing $D1" <<<"$ERR" && ok "and goes at the next run" || bad "rc=$RC $(ls -A "$TOOLS") err=$ERR"
-rm -f "$TOOL/user_settings.py"; tools on
+rm -f "$TOOL/user_settings.py"; tools install
 
 CASE="helper: a tag in the pin"
 releases <<EOF
@@ -452,41 +453,41 @@ $R2 2026-11-05T00:00:00Z $D2 badsidecar
 $R1 2026-10-04T21:30:56Z $D1
 EOF
 mkpin "$R1"
-tools on
+tools install
 [ "$RC" = 0 ] && [ "$(tag_of "$TOOL")" = "$R1" ] && grep -q v1 "$TOOL/proton" && [ "$(vdf_strings "$TOOL")" = "$VDF_OURS" ] \
   && ok "installs that release, under the same name, though the channel has newer" || bad "rc=$RC tag=$(tag_of "$TOOL") err=$ERR"
 [ "$REQS" = "/repos/CachyOS/proton-cachyos/releases/tags/$R1" ] && ok "asking GitHub for it alone" || bad "requests: $REQS"
 echo 500 >"$API/status"
-tools on
+tools install
 [ "$RC" = 0 ] && [ "$(asked)" = 0 ] && [ -z "$ERR" ] && ok "once it is in, asks nothing" || bad "rc=$RC requests=$REQS err=$ERR"
 rm -f "$API/status"
 mkpin "$R2" "$(printf '0%.0s' {1..128})"
-tools on
+tools install
 [ "$RC" = 1 ] && grep -q "sha512 mismatch" <<<"$ERR" && [ "$(tag_of "$TOOL")" = "$R1" ] && ok "with a sha512 the tarball does not have: refused" || bad "rc=$RC err=$ERR"
 mkpin "$R2" "$(digest sha512 "$DL/$D2.tar.xz")"
-tools on
+tools install
 [ "$RC" = 0 ] && [ "$(tag_of "$TOOL")" = "$R2" ] && ok "with its sha512: installed, its own (bad) .sha512sum not used" || bad "rc=$RC err=$ERR"
 mkpin cachyos-11.0-20990101-slr
-tools on
+tools install
 [ "$RC" = 0 ] && grep -q "answered 404" <<<"$ERR" && [ "$(tag_of "$TOOL")" = "$R2" ] && ok "a tag GitHub does not have: the installed release stays" || bad "rc=$RC err=$ERR"
 mkpin
 printf 'name: proton-cachyos-arm64\n' >"$T/bad.pin"
-OUT="$(RETROFORGE_STEAM_ROOT="$SROOT" RETROFORGE_STEAM_COMPAT_PIN="$T/bad.pin" python3 "$HELPER" on 2>&1)"; RC=$?
+OUT="$(RETROFORGE_STEAM_ROOT="$SROOT" RETROFORGE_STEAM_COMPAT_PIN="$T/bad.pin" python3 "$HELPER" install 2>&1)"; RC=$?
 [ "$RC" = 1 ] && grep -q "needs name, releases, asset, dir, display_name" <<<"$OUT" && ok "a pin without the channel's fields: exit 1" || bad "rc=$RC out=$OUT"
 
 CASE="helper: a killed run"
 mkdir -p "$SROOT/.retroforge-compat-tools-dead/tree/$D3"; echo x >"$SROOT/.retroforge-compat-tools-dead/tool.tar.xz"
-tools on
+tools install
 [ "$RC" = 0 ] && [ -z "$(leftovers)" ] && [ "$(tag_of "$TOOL")" = "$R3" ] && ok "what it left is swept on the next run" || bad "rc=$RC left: $(leftovers) err=$ERR"
 
 CASE="helper: our folder, broken"
 rm -f "$TOOL/proton"
-tools on
+tools install
 [ "$RC" = 0 ] && [ -x "$TOOL/proton" ] && grep -q v3 "$TOOL/proton" && ok "a folder of ours without proton is installed again" || bad "rc=$RC err=$ERR"
 
 CASE="helper: the tool's name is the player's"
 rm -rf "$TOOL"; mkdir -p "$TOOL"; echo player >"$TOOL/proton"
-tools on
+tools install
 [ "$RC" = 0 ] && [ "$OUT" = "$TOOL" ] && [ "$(cat "$TOOL/proton")" = player ] \
   && [ ! -e "$TOOL/.retroforge-pin" ] && [ ! -e "$TOOL/user_settings.py" ] && [ "$(asked)" = 0 ] \
   && grep -q "not installed by RetroForge" <<<"$ERR" && ok "left alone, nothing asked or downloaded, and said so" || bad "rc=$RC out=$OUT err=$ERR"
@@ -497,18 +498,18 @@ mktool "$DX" vx no-dir
 releases <<EOF
 $RX 2026-12-31T00:00:00Z $DX
 EOF
-tools on
+tools install
 [ "$RC" = 1 ] && grep -q "has no $DX/" <<<"$ERR" && [ ! -e "$TOOL" ] && [ ! -e "$TOOLS/$DX-renamed" ] && [ -z "$(leftovers)" ] \
   && ok "refused, nothing installed or left" || bad "rc=$RC err=$ERR $(ls -A "$TOOLS")"
 
 CASE="helper: tarball without proton"
 mktool "$DX" vx no-proton; releases <<<"$RX 2026-12-31T00:00:00Z $DX"
-tools on
+tools install
 [ "$RC" = 1 ] && [ ! -e "$TOOL" ] && ok "refused, nothing installed" || bad "rc=$RC err=$ERR"
 
 CASE="helper: a compatibilitytool.vdf it cannot rename"
 mktool "$DX" vx bad-vdf; releases <<<"$RX 2026-12-31T00:00:00Z $DX"
-tools on
+tools install
 [ "$RC" = 1 ] && grep -q "could not name $DX's compatibilitytool.vdf $STABLE" <<<"$ERR" && [ ! -e "$TOOL" ] && [ -z "$(leftovers)" ] \
   && ok "two tools in it: refused, nothing installed" || bad "rc=$RC err=$ERR"
 
@@ -519,21 +520,19 @@ f = open(sys.argv[1], "w"); fcntl.flock(f, fcntl.LOCK_EX); open(sys.argv[2], "w"
   "$SROOT/.retroforge-compat-tools.lock" "$T/locked" &
 HOLDER=$!
 for _ in $(seq 50); do [ -e "$T/locked" ] && break; sleep 0.1; done
-tools on
+tools install
 [ "$RC" = 0 ] && [ -z "$OUT" ] && [ ! -e "$TOOL" ] && [ "$(asked)" = 0 ] && grep -q "already running" <<<"$ERR" \
   && ok "exits at once, asks and installs nothing" || bad "rc=$RC out=$OUT err=$ERR"
 release
-tools on
+tools install
 [ "$RC" = 0 ] && [ -x "$TOOL/proton" ] && ok "and the next run installs" || bad "rc=$RC err=$ERR"
 
 CASE="helper: offline on a fresh card"
 rm -rf "$SROOT"
 mkpin "" "" "http://127.0.0.1:1/repos/CachyOS/proton-cachyos/releases"
-tools on
+tools install
 [ "$RC" = 1 ] && [ -z "$OUT" ] && grep -q "could not ask GitHub's API.*no proton-cachyos-arm64 is installed" <<<"$ERR" && [ -z "$(ls -A "$TOOLS")" ] \
   && ok "exit 1, says what it could not ask, no tool" || bad "rc=$RC out=$OUT err=$ERR"
-tools off
-[ "$RC" = 0 ] && ok "off with no tool is nothing to do" || bad "rc=$RC err=$ERR"
 mkpin
 
 CASE="helper: bad arguments"
@@ -541,213 +540,34 @@ tools
 [ "$RC" = 2 ] && grep -q usage <<<"$ERR" && ok "no mode: exit 2 with the usage" || bad "rc=$RC err=$ERR"
 tools --sarek
 [ "$RC" = 2 ] && ok "an unknown mode: exit 2" || bad "rc=$RC err=$ERR"
+for verb in on off sarek; do
+  tools "$verb"
+  [ "$RC" = 2 ] && ok "$verb (gone with the DXVK-Sarek setting): exit 2" || bad "$verb: rc=$RC err=$ERR"
+done
 
 # ================================================================================================
-# The setting, with device-env, the helper, systemd-run and systemctl stubbed.
-W="$T/w"; mkdir -p "$W/bin"
-cat >"$W/device-env" <<EOF
+# Which GPUs need Sarek: device-env's SoC class.
+cat >"$T/device-env" <<EOF
 #!/usr/bin/env bash
-printf 'RETROFORGE_DEVICE_ID=%q\nRETROFORGE_SOC_CLASS=%q\n' test "\$(cat "$W/soc")"
+printf 'RETROFORGE_DEVICE_ID=%q\nRETROFORGE_SOC_CLASS=%q\n' test "\$(cat "$T/soc")"
 EOF
-cat >"$W/helper" <<EOF
-#!/usr/bin/env bash
-{ echo "args: \$*"; echo "root: \${RETROFORGE_STEAM_ROOT-unset}"; echo "sid: \$(ps -o sid= -p \$\$ | tr -d ' ')"; } >"$W/helper.call"
-echo "helper \$1" >>"$W/sequence"
-echo "helper stdout"; echo "helper stderr" >&2
-sleep "\$(cat "$W/helper-sleep")"
-touch "$W/helper.done"
-EOF
-cat >"$W/bin/systemd-run" <<EOF
-#!/usr/bin/env bash
-printf '%s\n' "\$@" >"$W/systemd-run.args"
-exit "\$(cat "$W/systemd-run.rc")"
-EOF
-cat >"$W/bin/systemctl" <<EOF
-#!/usr/bin/env bash
-echo "\$*" >"$W/systemctl.args"
-EOF
-chmod +x "$W/device-env" "$W/helper" "$W/bin/systemd-run" "$W/bin/systemctl"
-WHOME="$W/home"
-WROOT="$WHOME/.local/share/Steam"
-WLOG="$WHOME/.local/share/retroforge/steam-compat-tools.log"
-WCONF="$WHOME/.config/retroforge/steam.conf"
-echo 0 >"$W/helper-sleep"
-# Every run of the setting or the wrapper: the stubs, a clean environment, and VAR=value extras.
-# RETROFORGE_STEAM_X86_GUEST=0: the wrapper's FEX guest block has its own suite (test-steam-x86-guest.sh);
-# here it would reach the real helper (and on a device start a real 1.4 GB download).
-STUBS=(env -u RETROFORGE_STEAM_ROOT -u XDG_DATA_HOME -u XDG_CONFIG_HOME -u PROTON_DXVK_SAREK -u RETROFORGE_STEAM_SAREK
-       -u RETROFORGE_SOC_CLASS HOME="$WHOME" PATH="$W/bin:$PATH" RETROFORGE_DEVICE_ENV="$W/device-env"
-       RETROFORGE_STEAM_COMPAT_TOOLS="$W/helper" RETROFORGE_STEAM_X86_GUEST=0 RETROFORGE_STEAM_DIRECT_CLI="$W/no-direct-cli")
-reset() {  # reset <SoC class> <systemd-run exit>
-  echo "$1" >"$W/soc"; echo "$2" >"$W/systemd-run.rc"
-  rm -f "$W/client" "$W/helper.call" "$W/helper.done" "$W/systemd-run.args" "$W/systemctl.args" "$W/sequence"
+chmod +x "$T/device-env"
+needs() {  # needs <SoC class> [VAR=value...]: what needs_sarek() answers there
+  echo "$1" >"$T/soc"
+  env -u RETROFORGE_STEAM_SAREK RETROFORGE_DEVICE_ENV="$T/device-env" "${@:2}" python3 -I -c '
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("helper", sys.argv[1])
+m = importlib.util.module_from_spec(importlib.util.spec_from_loader("helper", loader))
+loader.exec_module(m)
+print("on" if m.needs_sarek() else "off")' "$HELPER"
 }
-sarek() {  # sarek <SoC class> <args...> [-- VAR=value...]: run the setting command
-  local soc="$1"; shift; local args=() extra=()
-  while [ $# -gt 0 ] && [ "$1" != -- ]; do args+=("$1"); shift; done
-  [ "${1-}" = -- ] && { shift; extra=("$@"); }
-  reset "$soc" 1
-  SOUT="$("${STUBS[@]}" ${extra[@]+"${extra[@]}"} bash "$CLI" "${args[@]}" 2>"$W/err")"; SRC=$?
-  SERR="$(cat "$W/err")"
-}
-settle() { for _ in $(seq 100); do [ -e "$W/helper.done" ] && return 0; sleep 0.1; done; return 1; }
-
-CASE="setting: never set"
-sarek SM6115 status
-[ "$SRC" = 0 ] && [ "$SOUT" = on ] && grep -q "the default on SM6115" <<<"$SERR" && ok "on for the SM6115, and says it is the default" || bad "rc=$SRC out=$SOUT err=$SERR"
-sarek SM8250 status
-[ "$SOUT" = off ] && ok "off for the SM8250" || bad "out=$SOUT err=$SERR"
-sarek SM8550 status
-[ "$SOUT" = off ] && ok "off for the SM8550" || bad "out=$SOUT err=$SERR"
-reset SM6115 1
-SOUT="$("${STUBS[@]}" RETROFORGE_DEVICE_ENV="$W/missing" bash "$CLI" status 2>"$W/err")"
-[ "$SOUT" = off ] && grep -q "an unknown board" "$W/err" && ok "off when device-env cannot say" || bad "out=$SOUT err=$(cat "$W/err")"
-[ ! -e "$WCONF" ] && ok "status writes nothing" || bad "status created $WCONF"
-
-CASE="setting: off on the SM6115"
-sarek SM6115 off
-[ "$SRC" = 0 ] && [ "$SOUT" = off ] && ok "prints off" || bad "rc=$SRC out=$SOUT err=$SERR"
-[ "$(grep -v '^#' "$WCONF")" = "DXVK_SAREK=off" ] && head -1 "$WCONF" | grep -q '^# ' && ok "saved as DXVK_SAREK=off, under a comment" || bad "conf: $(cat "$WCONF" 2>&1)"
-grep -qx -- "--user stop retroforge-steam-compat-tools.service" "$W/systemctl.args" && ok "a download in progress is stopped" || bad "systemctl: $(cat "$W/systemctl.args" 2>&1)"
-[ ! -e "$W/systemd-run.args" ] && [ ! -e "$W/helper.call" ] && ok "nothing is downloaded" || bad "the helper was started"
-sarek SM6115 status
-[ "$SOUT" = off ] && grep -q "$WCONF" <<<"$SERR" && ok "it sticks, and status says where it comes from" || bad "out=$SOUT err=$SERR"
-
-CASE="setting: on on the SM8250"
-printf '# mine\nOTHER=1\nDXVK_SAREK=off\nDXVK_SAREK=off\n' >"$WCONF"
-sarek SM8250 on
-[ "$SRC" = 0 ] && [ "$SOUT" = on ] && ok "prints on" || bad "rc=$SRC out=$SOUT err=$SERR"
-[ "$(cat "$WCONF")" = "$(printf '# mine\nOTHER=1\nDXVK_SAREK=on')" ] && ok "one DXVK_SAREK line, the rest of the file kept" || bad "conf: $(cat "$WCONF")"
-settle && grep -qx "args: on" "$W/helper.call" && ok "the download starts at once (setsid here)" || bad "the helper was not started"
-[ ! -e "$W/systemctl.args" ] && ok "nothing is stopped" || bad "systemctl: $(cat "$W/systemctl.args")"
-sarek SM8250 status
-[ "$SOUT" = on ] && ok "it sticks on a board whose default is off" || bad "out=$SOUT err=$SERR"
-
-CASE="setting: what the file can say"
-printf 'DXVK_SAREK=on\nDXVK_SAREK=yes\n' >"$WCONF"
-sarek SM8250 status
-[ "$SOUT" = off ] && ok "a value other than on/off (last line) falls back to the default" || bad "out=$SOUT"
-printf 'DXVK_SAREK=off\nDXVK_SAREK=on' >"$WCONF"   # no newline at the end
-sarek SM8250 status
-[ "$SOUT" = on ] && ok "the last line counts, with or without a newline" || bad "out=$SOUT"
-
-CASE="setting: RETROFORGE_STEAM_SAREK"
-printf 'DXVK_SAREK=on\n' >"$WCONF"
-sarek SM6115 status -- RETROFORGE_STEAM_SAREK=off
-[ "$SOUT" = off ] && grep -q RETROFORGE_STEAM_SAREK <<<"$SERR" && ok "off beats the saved on" || bad "out=$SOUT err=$SERR"
-rm -f "$WCONF"
-sarek SM8250 status -- RETROFORGE_STEAM_SAREK=on
-[ "$SOUT" = on ] && ok "on beats the board's default" || bad "out=$SOUT"
-sarek SM8250 off -- RETROFORGE_STEAM_SAREK=on
-[ "$SOUT" = on ] && grep -q "saved off, but RETROFORGE_STEAM_SAREK says on" <<<"$SERR" && grep -qx DXVK_SAREK=off "$WCONF" \
-  && ok "saving off under it saves, and says the override still wins" || bad "out=$SOUT err=$SERR"
-sarek SM8250 status -- RETROFORGE_STEAM_SAREK=maybe
-[ "$SOUT" = off ] && ok "an override other than on/off is ignored" || bad "out=$SOUT"
-
-CASE="setting: cannot save"
-rm -rf "$WHOME/.config"; mkdir -p "$WHOME"; echo file >"$WHOME/.config"
-sarek SM6115 off
-[ "$SRC" = 1 ] && grep -q "could not save" <<<"$SERR" && [ -z "$SOUT" ] && ok "exit 1, says so" || bad "rc=$SRC out=$SOUT err=$SERR"
-rm -f "$WHOME/.config"
-
-CASE="setting: bad invocation"
-sarek SM6115
-[ "$SRC" = 2 ] && grep -q usage <<<"$SERR" && ok "no command: exit 2 with the usage" || bad "rc=$SRC err=$SERR"
-sarek SM6115 on extra
-[ "$SRC" = 2 ] && ok "an extra argument: exit 2" || bad "rc=$SRC"
-
-CASE="setting: off with the real helper"
-# A tool the real helper installed with Sarek on, then off: the real helper deletes its file.
-mkpin; releases <<<"$R3 2026-12-15T00:00:00Z $D3"
-"${NOPROXY[@]}" HOME="$WHOME" RETROFORGE_STEAM_ROOT="$WROOT" RETROFORGE_STEAM_COMPAT_PIN="$PIN" python3 "$HELPER" on >/dev/null 2>&1
-[ -f "$WROOT/compatibilitytools.d/$STABLE/user_settings.py" ] || bad "fixture: no user_settings.py to turn off"
-reset SM6115 1
-SOUT="$("${STUBS[@]}" RETROFORGE_STEAM_COMPAT_TOOLS="$HELPER" RETROFORGE_STEAM_COMPAT_PIN="$PIN" bash "$CLI" off 2>"$W/err")"
-[ "$SOUT" = off ] && [ ! -e "$WROOT/compatibilitytools.d/$STABLE/user_settings.py" ] && [ -x "$WROOT/compatibilitytools.d/$STABLE/proton" ] \
-  && ok "Sarek is off in the installed tool, which stays" || bad "out=$SOUT err=$(cat "$W/err")"
-rm -f "$WCONF"
-
-# ================================================================================================
-# The wrapper, with the bootstrap and the client stubbed too, and the real setting command.
-mkdir -p "$W/rt"
-cat >"$W/rt/run" <<EOF
-#!/usr/bin/env bash
-echo "sarek: \${PROTON_DXVK_SAREK-unset}" >"$W/client"
-echo client >>"$W/sequence"
-EOF
-cat >"$W/bootstrap" <<EOF
-#!/usr/bin/env bash
-mkdir -p "\$RETROFORGE_STEAM_ROOT/steamrtarm64"; echo "$W/rt/run"
-EOF
-chmod +x "$W/rt/run" "$W/bootstrap"
-wrap() {  # wrap <SoC class> <systemd-run exit> [VAR=value...]
-  reset "$1" "$2"; shift 2
-  "${STUBS[@]}" RETROFORGE_STEAM_BOOTSTRAP="$W/bootstrap" RETROFORGE_STEAM_SAREK_CLI="$CLI" "$@" \
-    bash "$WRAP" steam://rungameid/1 2>"$W/err"; WRC=$?
-  WERR="$(cat "$W/err")"
-}
-
-CASE="wrapper: SM6115, user manager"
-wrap SM6115 0
-[ "$WRC" = 0 ] && [ -e "$W/client" ] && ok "the client runs" || bad "rc=$WRC err=$WERR"
-grep -qx "sarek: 1" "$W/client" && ok "with PROTON_DXVK_SAREK=1" || bad "$(cat "$W/client" 2>&1)"
-args="$(cat "$W/systemd-run.args" 2>/dev/null)"
-grep -qx -- --user <<<"$args" && grep -qx -- --unit=retroforge-steam-compat-tools <<<"$args" && grep -qx -- --collect <<<"$args" \
-  && ok "the download is a collected user unit with a fixed name" || bad "systemd-run: $args"
-grep -qx -- "--setenv=RETROFORGE_STEAM_ROOT=$WROOT" <<<"$args" && ok "told where the Steam root is" || bad "systemd-run: $args"
-grep -qx "StandardOutput=append:$WLOG" <<<"$args" && grep -qx "StandardError=append:$WLOG" <<<"$args" && [ -d "${WLOG%/*}" ] \
-  && ok "logging to ~/.local/share/retroforge/steam-compat-tools.log" || bad "systemd-run: $args"
-[ "$(tail -n 2 <<<"$args" | tr '\n' ' ')" = "$W/helper on " ] && ok "running steam-compat-tools on" || bad "systemd-run: $args"
-sleep 0.3; [ ! -e "$W/helper.call" ] && ok "and nothing else runs it" || bad "the helper ran directly too"
-
-CASE="wrapper: SM6115, no user manager"
-echo 3 >"$W/helper-sleep"; : >"$WLOG"
-wrap SM6115 1
-[ "$WRC" = 0 ] && [ -e "$W/client" ] && [ ! -e "$W/helper.done" ] && ok "the client runs without waiting for the download" || bad "rc=$WRC err=$WERR"
-settle && ok "the helper still finishes after the wrapper is gone" || bad "the helper never finished"
-grep -qx "args: on" "$W/helper.call" && grep -qx "root: $WROOT" "$W/helper.call" && ok "with on and the Steam root" || bad "$(cat "$W/helper.call" 2>&1)"
-[ "$(sed -n 's/^sid: //p' "$W/helper.call")" != "$(ps -o sid= -p $$ | tr -d ' ')" ] && ok "in a session of its own (setsid)" || bad "same session"
-grep -qx "helper stdout" "$WLOG" && grep -qx "helper stderr" "$WLOG" && ok "its output goes to the log" || bad "log: $(cat "$WLOG")"
-echo 0 >"$W/helper-sleep"
-
-CASE="wrapper: SM6115, turned off"
-printf 'DXVK_SAREK=off\n' >"$WCONF"
-wrap SM6115 1
-sleep 0.3
-[ ! -e "$W/systemd-run.args" ] && [ ! -e "$W/helper.call" ] && ok "no download, and no helper while no tool of ours has Sarek on" || bad "the helper was started: $(cat "$W/helper.call" 2>&1)"
-grep -qx "sarek: unset" "$W/client" && ok "no PROTON_DXVK_SAREK" || bad "$(cat "$W/client" 2>&1)"
-mkdir -p "$WROOT/compatibilitytools.d/$STABLE"; touch "$WROOT/compatibilitytools.d/$STABLE/.retroforge-pin" "$WROOT/compatibilitytools.d/$STABLE/user_settings.py"
-wrap SM6115 1
-[ "$(tr '\n' ' ' <"$W/sequence")" = "helper off client " ] && ok "with Sarek on in a tool of ours, steam-compat-tools off runs before the client" \
-  || bad "sequence: $(cat "$W/sequence" 2>&1)"
-rm -rf "$WROOT/compatibilitytools.d/$STABLE"
-
-CASE="wrapper: SM6115, the session's PROTON_DXVK_SAREK"
-rm -f "$WCONF"
-wrap SM6115 0 PROTON_DXVK_SAREK=0
-grep -qx "sarek: 0" "$W/client" && ok "a PROTON_DXVK_SAREK=0 the session already has is kept" || bad "$(cat "$W/client" 2>&1)"
-
-CASE="wrapper: SM8250"
-wrap SM8250 1
-sleep 0.3
-[ ! -e "$W/systemd-run.args" ] && [ ! -e "$W/helper.call" ] && ok "no download" || bad "the helper was started"
-grep -qx "sarek: unset" "$W/client" && ok "no PROTON_DXVK_SAREK" || bad "$(cat "$W/client" 2>&1)"
-
-CASE="wrapper: SM8250, turned on"
-printf 'DXVK_SAREK=on\n' >"$WCONF"
-wrap SM8250 1
-settle && grep -qx "args: on" "$W/helper.call" && ok "the download starts" || bad "$(cat "$W/helper.call" 2>&1)"
-grep -qx "sarek: 1" "$W/client" && ok "and PROTON_DXVK_SAREK=1" || bad "$(cat "$W/client" 2>&1)"
-rm -f "$WCONF"
-
-CASE="wrapper: RETROFORGE_STEAM_SAREK=off"
-wrap SM6115 0 RETROFORGE_STEAM_SAREK=off
-[ ! -e "$W/systemd-run.args" ] && grep -qx "sarek: unset" "$W/client" && ok "the SM6115 gets neither" || bad "$(cat "$W/client" 2>&1)"
-
-CASE="wrapper: no setting command"
-reset SM6115 0
-"${STUBS[@]}" RETROFORGE_STEAM_BOOTSTRAP="$W/bootstrap" RETROFORGE_STEAM_SAREK_CLI="$W/missing" bash "$WRAP" 2>"$W/err"; WRC=$?
-[ "$WRC" = 0 ] && grep -qx "sarek: unset" "$W/client" && [ ! -s "$W/err" ] && ok "the client runs, nothing exported, no error" || bad "rc=$WRC err=$(cat "$W/err")"
+CASE="which GPUs need Sarek"
+[ "$(needs SM6115)" = on ] && [ "$(needs SM4450)" = on ] && ok "the Adreno 610 (SM6115) and 613 (SM4450)" || bad "SM6115=$(needs SM6115) SM4450=$(needs SM4450)"
+[ "$(needs SM8250)" = off ] && [ "$(needs SM8550)" = off ] && [ "$(needs SM8650)" = off ] && ok "not the A650, A740, A750" || bad "SM8250=$(needs SM8250)"
+[ "$(needs "")" = off ] && ok "not an unknown board" || bad "unknown=$(needs "")"
+[ "$(needs SM6115 RETROFORGE_DEVICE_ENV="$T/missing")" = off ] && ok "not when device-env cannot run" || bad "no device-env: on"
+[ "$(needs SM8250 RETROFORGE_STEAM_SAREK=on)" = on ] && [ "$(needs SM6115 RETROFORGE_STEAM_SAREK=off)" = off ] \
+  && [ "$(needs SM6115 RETROFORGE_STEAM_SAREK=maybe)" = on ] && ok "RETROFORGE_STEAM_SAREK=on|off overrides it, anything else does not" || bad "override"
 
 # ================================================================================================
 # ARMv8.0: proton-armv8.pin (sunshineinabox/proton-armv8), taken when /proc/cpuinfo has no `atomics`:
@@ -803,6 +623,7 @@ tools8() {  # tools8 <cpuinfo> <pin|-> <args>: the helper against $S8, its pin c
   [ "$2" != - ] && pin=(RETROFORGE_STEAM_COMPAT_PIN="$2")
   : >"$API/requests.log"
   OUT="$("${NOPROXY[@]}" HOME="$T/home8" RETROFORGE_STEAM_ROOT="$S8" RETROFORGE_STEAM_PINS="$PINS8" \
+         RETROFORGE_DEVICE_ENV="$T/no-device-env" RETROFORGE_STEAM_SAREK="${SAREK:-on}" \
          RETROFORGE_CPUINFO="$1" "${pin[@]}" python3 "$HELPER" "${@:3}" 2>"$T/err")"; RC=$?
   ERR="$(cat "$T/err")"
 }
@@ -814,7 +635,7 @@ armv8-proton-11.0-2c 2026-10-01T12:00:00Z proton-armv8-proton-11.0-2c
 EOF
 
 CASE="armv8: an ARMv8.0 CPU"
-tools8 "$T/cpuinfo-v80" - on
+tools8 "$T/cpuinfo-v80" - install
 [ "$RC" = 0 ] && [ "$OUT" = "$TOOLS8/$DIR8" ] && [ "$(tag_of "$TOOLS8/$DIR8")" = armv8-proton-11.0-2e ] \
   && ok "proton-armv8.pin: the newest stable .tar.zst, checked by its .sha512" || bad "rc=$RC out=$OUT err=$ERR"
 grep -q "armv8 proton-11.0-2e" "$TOOLS8/$DIR8/proton" && [ -L "$TOOLS8/$DIR8/files/lib/libfoo.so" ] \
@@ -825,17 +646,17 @@ grep -q "armv8 proton-11.0-2e" "$TOOLS8/$DIR8/proton" && [ -L "$TOOLS8/$DIR8/fil
 
 CASE="armv8: a CPU with atomics"
 rm -rf "$T/home8"
-tools8 "$T/cpuinfo-v82" - on
+tools8 "$T/cpuinfo-v82" - install
 [ "$RC" = 1 ] && grep -q "proton-cachyos-\*-slr-arm64.tar.xz" <<<"$ERR" && [ ! -e "$TOOLS8/$DIR8" ] \
   && ok "keeps proton-cachyos-arm64.pin" || bad "rc=$RC err=$ERR"
 
 CASE="armv8: experimental"
 rm -rf "$T/home8"
-tools8 "$T/cpuinfo-v80" "$PINS8/exp.pin" on
+tools8 "$T/cpuinfo-v80" "$PINS8/exp.pin" install
 [ "$RC" = 0 ] && [ "$(tag_of "$TOOLS8/proton-armv8-experimental-retroforge")" = armv8-experimental-11.0-20261014 ] \
   && ok "prereleases: yes takes the prerelease" || bad "rc=$RC err=$ERR"
 rm -rf "$T/home8"
-tools8 "$T/cpuinfo-v80" "$PINS8/exp-noprerelease.pin" on
+tools8 "$T/cpuinfo-v80" "$PINS8/exp-noprerelease.pin" install
 [ "$RC" = 1 ] && grep -q "with its checksum" <<<"$ERR" && ok "without it, a prerelease is skipped" || bad "rc=$RC err=$ERR"
 
 CASE="armv8: a bad .sha512"
@@ -843,22 +664,154 @@ rm -rf "$T/home8"
 releases8 <<EOF
 armv8-proton-11.0-2e 2026-10-22T12:00:00Z proton-armv8-proton-11.0-2e badsidecar
 EOF
-tools8 "$T/cpuinfo-v80" - on
+tools8 "$T/cpuinfo-v80" - install
 [ "$RC" = 1 ] && grep -q "sha512 mismatch" <<<"$ERR" && [ ! -e "$TOOLS8/$DIR8" ] && [ -z "$(find "$S8" -maxdepth 1 -name '.retroforge-compat-tools-*')" ] \
   && ok "refused, nothing installed, nothing left" || bad "rc=$RC err=$ERR"
 
-CASE="armv8: off"
+CASE="armv8: a GPU without the need"
 rm -rf "$T/home8"
 releases8 <<EOF
 armv8-proton-11.0-2e 2026-10-22T12:00:00Z proton-armv8-proton-11.0-2e
 EOF
-tools8 "$T/cpuinfo-v80" - on
+tools8 "$T/cpuinfo-v80" - install
 mkdir -p "$TOOLS8/$STABLE"
 printf 'name: proton-cachyos-arm64\ntag: %s\n' "$R1" >"$TOOLS8/$STABLE/.retroforge-pin"
 cp "$TOOLS8/$DIR8/user_settings.py" "$TOOLS8/$STABLE/user_settings.py"
-tools8 "$T/cpuinfo-v80" - off
+SAREK=off tools8 "$T/cpuinfo-v80" - install
 [ "$RC" = 0 ] && [ ! -e "$TOOLS8/$DIR8/user_settings.py" ] && [ ! -e "$TOOLS8/$STABLE/user_settings.py" ] && [ -e "$TOOLS8/$DIR8/proton" ] \
   && ok "Sarek off in it and in a Proton-CachyOS left on the device; the tools stay" || bad "rc=$RC err=$ERR"
+
+# ================================================================================================
+# install (what the plugin's "CachyOS Proton arm64" Download runs), and retroforge-steam-cachyos.
+PROGRESS="$T/home/.local/share/retroforge/steam-compat-tools.progress"
+CASE="helper: progress"
+rm -rf "$SROOT"; mkdir -p "${PROGRESS%/*}"
+echo 42 >"$PROGRESS"   # a killed run's
+releases <<EOF
+$R1 2026-10-04T21:30:56Z $D1
+EOF
+mkpin
+SEEN="$("${NOPROXY[@]}" HOME="$T/home" RETROFORGE_STEAM_ROOT="$SROOT" RETROFORGE_STEAM_COMPAT_PIN="$PIN" RETROFORGE_STEAM_SAREK=off \
+        python3 -I -c '
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("helper", sys.argv[1])
+m = importlib.util.module_from_spec(importlib.util.spec_from_loader("helper", loader))
+loader.exec_module(m)
+seen, write = [], m.progress
+def progress(value):
+    seen.append(str(value)); write(value)
+m.progress = progress
+rc = m.main(["steam-compat-tools", "install"])
+print(rc, " ".join(seen))' "$HELPER" 2>"$T/err")"
+ERR="$(cat "$T/err")"; SEEN="${SEEN##*$'\n'}"   # after the tool's folder, on the helper's stdout
+[ "${SEEN%% *}" = 0 ] && [ -x "$TOOL/proton" ] && [ "$(tag_of "$TOOL")" = "$R1" ] && [ ! -e "$TOOL/user_settings.py" ] \
+  && ok "installs the newest release; no user_settings.py on a GPU without the need" || bad "seen=$SEEN err=$ERR"
+grep -qE '^0 0( [0-9]+)* 100 unpacking$' <<<"$SEEN" && ok "0, percentages, 100, then unpacking" || bad "progress: $SEEN"
+[ ! -e "$PROGRESS" ] && ok "the progress file is gone once it ends (a stale one too)" || bad "left: $(cat "$PROGRESS")"
+
+CASE="helper: the old toggle's user_settings.py"
+legacy() {  # legacy <file>: what the DXVK-Sarek toggle's releases wrote
+  python3 -I -c '
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("helper", sys.argv[1])
+m = importlib.util.module_from_spec(importlib.util.spec_from_loader("helper", loader))
+loader.exec_module(m)
+open(sys.argv[2], "w").write(m.LEGACY_SETTINGS[0])' "$HELPER" "$1"
+  grep -q "Settings > General" "$1" || bad "the old text is not the toggle's"
+}
+legacy "$TOOL/user_settings.py"
+tools install
+[ "$RC" = 0 ] && ! grep -q "Settings > General" "$TOOL/user_settings.py" && [ "$(settings "$TOOL")" = '{"PROTON_DXVK_SAREK": "1"}' ] \
+  && ok "a GPU that needs Sarek: ours, rewritten in today's text" || bad "rc=$RC err=$ERR $(cat "$TOOL/user_settings.py")"
+legacy "$TOOL/user_settings.py"
+SAREK=off tools install
+[ "$RC" = 0 ] && [ ! -e "$TOOL/user_settings.py" ] && ok "one without the need: ours, deleted" || bad "rc=$RC err=$ERR"
+
+CASE="helper: an update"
+tools install
+mktool "$D2" v2
+releases <<EOF
+$R2 2026-11-05T12:00:00Z $D2
+$R1 2026-10-04T21:30:56Z $D1
+EOF
+tools install
+[ "$RC" = 0 ] && [ "$(tag_of "$TOOL")" = "$R2" ] && [ "$(settings "$TOOL")" = '{"PROTON_DXVK_SAREK": "1"}' ] \
+  && ok "keeps Sarek on in the new tree" || bad "rc=$RC err=$ERR"
+
+CASE="helper: another run going"
+exec 9>"$SROOT/.retroforge-compat-tools.lock"; flock 9
+echo 7 >"$PROGRESS"
+tools install
+[ "$RC" = 0 ] && [ -z "$OUT" ] && [ "$(cat "$PROGRESS")" = 7 ] && ok "exits at once and leaves that run's progress alone" || bad "rc=$RC out=$OUT progress=$(cat "$PROGRESS" 2>&1)"
+exec 9>&-; rm -f "$PROGRESS"
+rm -f "$TOOL/user_settings.py"
+
+CCLI="$ROOT/rootfs/overlay/usr/bin/retroforge-steam-cachyos"
+C="$T/c"; mkdir -p "$C/bin" "$C/pins"
+cp "$PIN" "$C/pins/proton-cachyos-arm64.pin"
+cat >"$C/bin/systemctl" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$C/systemctl.calls"
+case "\$*" in
+  "--user show-environment") exit "\$(cat "$C/manager")" ;;
+  "--user is-active --quiet retroforge-steam-compat-tools.service")
+    n=\$(cat "$C/active"); [ "\$n" -gt 0 ] || exit 3; echo \$((n - 1)) >"$C/active"; exit 0 ;;
+esac
+exit 1
+EOF
+cat >"$C/bin/systemd-run" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$@" >"$C/systemd-run.args"
+exec "\${@: -2}"
+EOF
+chmod +x "$C/bin/systemctl" "$C/bin/systemd-run"
+cachyos() {  # cachyos <cpuinfo> <user manager: 0 yes, 1 no> <args>
+  rm -f "$C/systemctl.calls" "$C/systemd-run.args"; echo "$2" >"$C/manager"; echo "${ACTIVE:-0}" >"$C/active"
+  COUT="$("${NOPROXY[@]}" -u XDG_DATA_HOME -u RETROFORGE_STEAM_ROOT HOME="$T/home" PATH="$C/bin:$PATH" \
+          RETROFORGE_CPUINFO="$1" RETROFORGE_STEAM_PINS="$C/pins" RETROFORGE_STEAM_COMPAT_TOOLS="$HELPER" \
+          RETROFORGE_STEAM_COMPAT_PIN="$PIN" RETROFORGE_DEVICE_ENV="$T/no-device-env" bash "$CCLI" "${@:3}" 2>"$T/cerr")"; CRC=$?
+  CERR="$(cat "$T/cerr")"
+}
+
+CASE="cachyos: status"
+cachyos "$T/cpuinfo-v82" 0 status
+[ "$CRC" = 0 ] && [ "$COUT" = "installed $R2" ] && ok "installed <tag>" || bad "rc=$CRC out=$COUT err=$CERR"
+cachyos "$T/cpuinfo-v80" 0 status
+[ "$COUT" = armv8 ] && ok "armv8 on an ARMv8.0 CPU (no row)" || bad "out=$COUT"
+rm -rf "$SROOT"
+cachyos "$T/cpuinfo-v82" 0 status
+[ "$COUT" = missing ] && ok "missing on a fresh card" || bad "out=$COUT"
+mkdir -p "$TOOL"; touch "$TOOL/proton"; printf 'tag: x\n' >"$TOOL/.retroforge-pin"
+cachyos "$T/cpuinfo-v82" 0 status
+[ "$COUT" = missing ] && ok "missing for a folder RetroForge did not install" || bad "out=$COUT"
+rm -rf "$SROOT"
+
+CASE="cachyos: install, with a user manager"
+ACTIVE=1 cachyos "$T/cpuinfo-v82" 0 install
+[ "$CRC" = 0 ] && [ "$(tag_of "$TOOL")" = "$R2" ] && [ ! -e "$TOOL/user_settings.py" ] \
+  && ok "installs it (no Sarek: no device-env here)" || bad "rc=$CRC err=$CERR"
+grep -qx -- --wait "$C/systemd-run.args" && grep -qx -- --unit=retroforge-steam-compat-tools "$C/systemd-run.args" \
+  && grep -qx -- "--setenv=RETROFORGE_STEAM_ROOT=$SROOT" "$C/systemd-run.args" \
+  && [ "$(tail -1 "$C/systemd-run.args")" = install ] && ok "as the user unit, waited for" || bad "$(cat "$C/systemd-run.args" 2>&1)"
+[ "$(grep -c is-active "$C/systemctl.calls")" = 2 ] && ok "after the unit's run already going" || bad "$(cat "$C/systemctl.calls")"
+
+CASE="cachyos: install, no user manager"
+rm -rf "$SROOT"
+cachyos "$T/cpuinfo-v82" 1 install
+[ "$CRC" = 0 ] && [ -x "$TOOL/proton" ] && [ ! -e "$C/systemd-run.args" ] && ok "in the foreground" || bad "rc=$CRC err=$CERR"
+
+CASE="cachyos: install fails"
+rm -rf "$SROOT"
+mkpin "" "" "http://127.0.0.1:1/repos/CachyOS/proton-cachyos/releases"
+cachyos "$T/cpuinfo-v82" 0 install
+[ "$CRC" = 1 ] && grep -q "^steam-compat-tools: could not ask GitHub's API" <<<"$CERR" && ok "exit 1, the helper's last log line on stderr" || bad "rc=$CRC err=$CERR"
+mkpin
+
+CASE="cachyos: refused"
+cachyos "$T/cpuinfo-v80" 0 install
+[ "$CRC" = 2 ] && [ ! -e "$C/systemd-run.args" ] && ok "install on an ARMv8.0 CPU: exit 2, nothing run" || bad "rc=$CRC err=$CERR"
+cachyos "$T/cpuinfo-v82" 0
+[ "$CRC" = 2 ] && grep -q usage <<<"$CERR" && ok "no verb: exit 2 with the usage" || bad "rc=$CRC err=$CERR"
 
 echo
 echo "$PASS passed, $FAIL failed"

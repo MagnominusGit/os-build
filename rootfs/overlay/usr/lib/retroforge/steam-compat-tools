@@ -1,21 +1,32 @@
 #!/usr/bin/env python3
 # steam-compat-tools — Proton-CachyOS's arm64 build as a Steam compatibility tool, kept on its newest
-# release, with its DXVK-Sarek turned on or off. Run by /usr/bin/retroforge-steam-sarek, which keeps the
-# player's DXVK-Sarek setting.
+# release, with DXVK-Sarek on in it where the GPU needs it. Run by /usr/bin/retroforge-steam-cachyos (the
+# player's Download / Update in Apps > Steam Client > "CachyOS Proton arm64"), by
+# /usr/bin/retroforge-steam-proton (ARMv8.0 CPUs, below) and by the store's launcher.
 #
-#   steam-compat-tools on    install or update Proton-CachyOS, Sarek on in it
-#   steam-compat-tools off   Sarek off in the installed one. Never touches the network, never removes
-#                            the tool.
+#   steam-compat-tools install  install or update the tool, and DXVK-Sarek on or off in every tool of
+#                               ours as the GPU needs it (below)
+#
+# WHICH GPUS NEED SAREK. The a6xx_gen1_low Adreno 610 (SM6115) and 613 (SM4450): no hardware
+# multiview, so no multiViewport, which every upstream DXVK requires; Turnip fakes it only under
+# TU_DEBUG=noconform (etc/retroforge/session.conf), which Mesa 26.3 removes. There DXVK-Sarek is not a
+# choice: it is on in every tool of ours, and nothing offers to turn it off. Every other GPU runs
+# upstream DXVK, and nothing of ours turns Sarek on there (a player can, per game, in Steam's launch
+# options). The SoC class comes from device-env; RETROFORGE_STEAM_SAREK=on|off overrides it, for testing.
+#
+# PROGRESS. While a run downloads, ~/.local/share/retroforge/steam-compat-tools.progress holds its
+# percentage (0-100), then `unpacking` while the tarball unpacks; it is removed when the run ends. The
+# plugin's row reads it.
 #
 # Every upstream DXVK needs multiViewport. Turnip gives the Adreno 610 (SM6115) that only under
 # TU_DEBUG=noconform (etc/retroforge/session.conf), and Mesa 26.3 removes noconform. DXVK-Sarek works
 # without it, and Proton-CachyOS ships it (as ARM64EC in its arm64 build), turned on by
-# PROTON_DXVK_SAREK=1. None of it is in the image (a ~356 MB download, ~2.2 GB unpacked), so `on`
+# PROTON_DXVK_SAREK=1. None of it is in the image (a ~356 MB download, ~2.2 GB unpacked), so `install`
 # downloads it into the player's home.
 #
 # WHICH RELEASE. /usr/share/retroforge/steam/proton-cachyos-arm64.pin names a channel, not a version.
-# Every `on` (one per `steam` start while the setting is on) makes ONE request to GitHub's API, which
-# allows 60 an hour without a token, and takes the newest release that has the pin's arm64 tarball and
+# Every `install` (each Download/Update, store launch, and on ARMv8.0 CPUs each `steam` start) makes
+# ONE request to GitHub's API, which allows 60 an hour without a token, and takes the newest release that has the pin's arm64 tarball and
 # its .sha512sum: the highest Proton version first, then the latest published, so the last release of
 # an older line (cachyos-10.0-sunset-slr came out after cachyos-11.0-20260601-slr) is not taken for an
 # update. Drafts, prereleases and assets still uploading are skipped. A `tag:` in the pin holds one
@@ -34,26 +45,25 @@
 # a tool. A game running from the old tree would, after that, start wine processes and load DLLs from
 # the new one by path (and wine refuses a wineserver of another build). So while a process of the
 # player's runs from the tool (its program, working folder or a mapped file), the new tree waits,
-# verified, in <Steam root>/.retroforge-compat-tools.next and goes in at a later `on` without being
+# verified, in <Steam root>/.retroforge-compat-tools.next and goes in at a later `install` without being
 # downloaded again. A running Steam keeps the tool's toolmanifest.vdf from its start until it restarts.
 #
 # The folder carries a .retroforge-pin (name, tag, asset, sha512, sha256). That is how this knows its
 # own folders: one without it is the player's and is never touched, even under the pin's dir. Folders
 # of the earlier scheme (one per release, named after it, with a .retroforge-pin of the same name) are
-# removed once the one-name folder is in place, each when nothing runs from it. One `on` at a time: a
+# removed once the one-name folder is in place, each when nothing runs from it. One `install` at a time: a
 # second one exits at once.
 #
-# Sarek on = a user_settings.py with PROTON_DXVK_SAREK=1 in the tool's folder, which Proton-CachyOS
-# applies to every game run with the tool. retroforge-steam-sarek also has /usr/bin/steam export
-# PROTON_DXVK_SAREK=1; the file is for a client that does not hand its environment on to games. A
-# game's own environment wins over the file, so `PROTON_DXVK_SAREK=0 %command%` in a game's launch
-# options turns Sarek off for that game. A user_settings.py that is not exactly the one this writes is
-# the player's: `on` never writes over it, an update carries it into the new tree, `off` leaves it.
+# Sarek on = a user_settings.py with PROTON_DXVK_SAREK=1 in the tool's folder, which the tool applies to
+# every game run with it, with the client or without it (nothing exports PROTON_DXVK_SAREK, which
+# Valve's Proton ignores anyway). A user_settings.py that is not exactly one
+# this writes (or wrote, LEGACY_SETTINGS) is the player's: never written over, carried into an update,
+# never deleted. On a GPU that does not need Sarek, ours is deleted (left by the old DXVK-Sarek toggle).
 #
 # Steam is never told to use the tool (config.vdf is not edited). The player picks it per game
 # (Properties > Compatibility) or as the Steam Play default (docs/steam-arm64.md).
 #
-# Exit 0 (`on`: the tool's folder on stdout, or nothing when another run holds the lock), also when
+# Exit 0 (the tool's folder on stdout, or nothing when another run holds the lock), also when
 # GitHub cannot be asked and a tool is installed; 1 when the release could not be installed (nothing
 # installed and GitHub unreachable, a checksum mismatch, a tarball without its folder); 2 for a bad
 # invocation.
@@ -64,13 +74,14 @@
 #
 # TEST SEAMS (tests/test-steam-compat-tools.sh): RETROFORGE_STEAM_ROOT (also set by /usr/bin/steam),
 # RETROFORGE_STEAM_COMPAT_PIN (whose releases: can point at a fake API), RETROFORGE_STEAM_PINS (the pins'
-# folder), RETROFORGE_CPUINFO.
+# folder), RETROFORGE_CPUINFO, RETROFORGE_DEVICE_ENV, RETROFORGE_STEAM_SAREK.
 import fcntl
 import fnmatch
 import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -84,6 +95,25 @@ DATA = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
 STEAM_ROOT = os.environ.get("RETROFORGE_STEAM_ROOT") or os.path.join(DATA, "Steam")
 PINS = os.environ.get("RETROFORGE_STEAM_PINS", "/usr/share/retroforge/steam")
 CPUINFO = os.environ.get("RETROFORGE_CPUINFO", "/proc/cpuinfo")
+PROGRESS = os.path.join(DATA, "retroforge", "steam-compat-tools.progress")
+DEVICE_ENV = os.environ.get("RETROFORGE_DEVICE_ENV", "/usr/lib/retroforge/device-env")
+SAREK_SOCS = ("SM6115", "SM4450")  # Adreno 610 and 613: see WHICH GPUS NEED SAREK
+
+
+def needs_sarek():
+    """Whether this GPU needs DXVK-Sarek (RETROFORGE_STEAM_SAREK=on|off decides instead, when set)."""
+    forced = os.environ.get("RETROFORGE_STEAM_SAREK")
+    if forced in ("on", "off"):
+        return forced == "on"
+    try:
+        out = subprocess.run([DEVICE_ENV], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    for line in out.splitlines():
+        if line.startswith("RETROFORGE_SOC_CLASS="):
+            value = shlex.split(line.split("=", 1)[1]) or [""]
+            return value[0] in SAREK_SOCS
+    return False
 
 
 def lacks_atomics():
@@ -142,6 +172,15 @@ def sidecar_name(asset, pin):
     return asset + pin["sidecar"] if pin["sidecar"] else stem(asset) + ".sha512sum"
 
 SAREK_SETTINGS = """\
+# Written by /usr/lib/retroforge/steam-compat-tools: this GPU (Adreno 610/613) needs DXVK-Sarek, the one
+# DXVK that runs without multiViewport. DXVK-Sarek instead of DXVK for every game run with this tool.
+# Edit it and it is yours: RetroForge never writes over it or deletes it again.
+user_settings = {
+    "PROTON_DXVK_SAREK": "1",
+}
+"""
+# What earlier releases wrote, still ours: replaced or deleted like SAREK_SETTINGS.
+LEGACY_SETTINGS = ("""\
 # Written by /usr/lib/retroforge/steam-compat-tools: the player's DXVK-Sarek setting is on
 # (retroforge-steam-sarek, Settings > General). DXVK-Sarek instead of DXVK for every game run with this
 # tool. A game's own environment wins: PROTON_DXVK_SAREK=0 %command% in its launch options turns it
@@ -149,7 +188,7 @@ SAREK_SETTINGS = """\
 user_settings = {
     "PROTON_DXVK_SAREK": "1",
 }
-"""
+""",)
 
 
 class Failed(Exception):
@@ -324,17 +363,22 @@ def download(rel, dest, sha512):
     try:
         with urllib.request.urlopen(req, timeout=60) as r, open(dest, "wb") as out:
             total = int(r.headers.get("Content-Length") or 0)
-            done, next_pct = 0, 10
+            done, next_pct, shown = 0, 10, 0
+            progress(0)
             while chunk := r.read(1 << 20):
                 h512.update(chunk)
                 h256.update(chunk)
                 out.write(chunk)
                 done += len(chunk)
+                if total and done * 100 // total > shown:
+                    shown = min(99, done * 100 // total)
+                    progress(shown)
                 if total and done * 100 >= next_pct * total and next_pct < 100:
                     log(f"{next_pct}% ({done // 1000000} of {total // 1000000} MB)")
                     next_pct += 10
     except (OSError, ValueError) as err:
         raise Failed(f"could not download {rel['url']}: {err}")
+    progress(100)
     if h512.hexdigest() != sha512:
         raise Failed(f"sha512 mismatch for {rel['url']}: got {h512.hexdigest()}, want {sha512}")
     if rel["sha256"] and h256.hexdigest() != rel["sha256"]:
@@ -406,11 +450,27 @@ def write(path, text):
     os.replace(path + ".part", path)
 
 
+def progress(value):
+    """What PROGRESS says: a percentage, or `unpacking`."""
+    try:
+        os.makedirs(os.path.dirname(PROGRESS), exist_ok=True)
+        write(PROGRESS, f"{value}\n")
+    except OSError:
+        pass  # the row shows no percentage; the install goes on
+
+
+def progress_done():
+    try:
+        os.unlink(PROGRESS)
+    except OSError:
+        pass
+
+
 def our_settings(path):
-    """Whether path is a user_settings.py this wrote, unchanged."""
+    """Whether path is a user_settings.py this wrote (now or in an earlier release), unchanged."""
     try:
         with open(path, encoding="utf-8") as f:
-            return f.read() == SAREK_SETTINGS
+            return f.read() in (SAREK_SETTINGS,) + LEGACY_SETTINGS
     except (OSError, UnicodeDecodeError):
         return False
 
@@ -418,14 +478,33 @@ def our_settings(path):
 def sarek_on(tool):
     """Writes the Sarek user_settings.py into tool, unless the player has one of their own there."""
     path = os.path.join(tool, SETTINGS)
-    if os.path.lexists(path):
-        if not our_settings(path):
-            log(f"{path} is the player's own; not writing PROTON_DXVK_SAREK into it")
+    if os.path.lexists(path) and not our_settings(path):
+        log(f"{path} is the player's own; not writing PROTON_DXVK_SAREK into it")
         return
-    write(path, SAREK_SETTINGS)
+    write(path, SAREK_SETTINGS)  # also over an earlier release's text
 
 
-def sarek_off(pin):
+def our_tools():
+    """Every complete folder this installed in compatibilitytools.d, under any pin."""
+    try:
+        names = sorted(os.listdir(TOOLS))
+    except FileNotFoundError:
+        return []
+    return [os.path.join(TOOLS, n) for n in names
+            if marker(os.path.join(TOOLS, n)) is not None and complete(os.path.join(TOOLS, n))]
+
+
+def sarek(need):
+    """Every tool of ours as the GPU needs it: Sarek on in each, or off in each (one the old
+    DXVK-Sarek toggle left on)."""
+    if need:
+        for tool in our_tools():
+            sarek_on(tool)
+    else:
+        sarek_off()
+
+
+def sarek_off():
     """Deletes the Sarek user_settings.py from every folder this installed, under any pin (a
     Proton-CachyOS left on an ARMv8.0 device too). The tools stay."""
     try:
@@ -444,16 +523,18 @@ def sarek_off(pin):
             log(f"{path} is the player's own; leaving it (it may still turn DXVK-Sarek on)")
 
 
-def settings_into(new, final, pin):
+def settings_into(new, final, pin, need):
     """The user_settings.py for a tree about to go in: the player's own from the tool (or, before the
-    first one-name install, from a folder of the earlier scheme), else the Sarek one."""
+    first one-name install, from a folder of the earlier scheme), else the Sarek one when the GPU needs
+    it."""
     for tool in [final] if ours(final, pin) else earlier(pin):
         path = os.path.join(tool, SETTINGS)
         if os.path.lexists(path) and not our_settings(path):
             shutil.copy2(path, os.path.join(new, SETTINGS), follow_symlinks=False)
             log(f"keeping the player's own {SETTINGS} (from {os.path.basename(tool)})")
             return
-    sarek_on(new)
+    if need:
+        sarek_on(new)
 
 
 def in_use(path):
@@ -534,6 +615,7 @@ def prepare(rel, pin, tmp):
     sha256 = download(rel, archive, sha512)
     tree = os.path.join(tmp, "tree")
     os.mkdir(tree)
+    progress("unpacking")
     # tar finds zstd by itself when reading (GNU tar and bsdtar both).
     unpack = "-xJf" if archive.endswith(".tar.xz") else "-xf"
     res = subprocess.run(["tar", "--no-same-owner", unpack, archive, "-C", tree],
@@ -556,7 +638,7 @@ def prepare(rel, pin, tmp):
     return new
 
 
-def update(rel, pin, final, was):
+def update(rel, pin, final, was, need):
     """Puts rel in as final: from NEXT when it is there, else downloaded. Waits in NEXT while a
     process runs from final."""
     started = time.monotonic()
@@ -569,7 +651,7 @@ def update(rel, pin, final, was):
             log(f"a game runs from {final}: {rel['tag']} is ready and goes in at the next `steam` "
                 f"start with nothing running from it")
             return
-        settings_into(new, final, pin)
+        settings_into(new, final, pin, need)
         if os.path.lexists(final):
             os.rename(final, os.path.join(tmp, "old"))
             try:
@@ -589,7 +671,9 @@ def update(rel, pin, final, was):
             f"from its next start.")
 
 
-def on(pin):
+def install(pin, need):
+    """The newest release in place, Sarek on in it when need. With the lock only: PROGRESS is the
+    running one's."""
     os.makedirs(TOOLS, exist_ok=True)
     with open(LOCK, "w") as lock:
         try:
@@ -597,51 +681,60 @@ def on(pin):
         except BlockingIOError:
             log("another steam-compat-tools is already running; leaving it to that one")
             return None
-        sweep()
-        final = os.path.join(TOOLS, pin["dir"])
-        if os.path.lexists(final) and not ours(final, pin):
-            log(f"{final} is already there and was not installed by RetroForge; leaving it alone")
-            return final
-        have = marker(final) if complete(final) else None
-        if have:
-            sarek_on(final)
-        if have and pin["tag"] and have["tag"] == pin["tag"] and (not pin["sha512"] or have["sha512"] == pin["sha512"]):
-            current = True  # the pin's own release is in: nothing to ask
+        try:
+            return locked_install(pin, need)
+        finally:
+            progress_done()
+
+
+def locked_install(pin, need):
+    sweep()
+    final = os.path.join(TOOLS, pin["dir"])
+    if os.path.lexists(final) and not ours(final, pin):
+        log(f"{final} is already there and was not installed by RetroForge; leaving it alone")
+        return final
+    have = marker(final) if complete(final) else None
+    if have and need:
+        sarek_on(final)
+    if have and pin["tag"] and have["tag"] == pin["tag"] and (not pin["sha512"] or have["sha512"] == pin["sha512"]):
+        current = True  # the pin's own release is in: nothing to ask
+    else:
+        try:
+            rel = resolve(pin)
+        except Unresolved as err:
+            if not have:
+                raise Failed(f"{err}; no {pin['name']} is installed")
+            log(f"{err}; keeping {have['tag'] or 'the installed release'}")
+            current = None  # unknown: a release waiting in NEXT stays
         else:
-            try:
-                rel = resolve(pin)
-            except Unresolved as err:
-                if not have:
-                    raise Failed(f"{err}; no {pin['name']} is installed")
-                log(f"{err}; keeping {have['tag'] or 'the installed release'}")
-                current = None  # unknown: a release waiting in NEXT stays
-            else:
-                current = bool(have) and holds(have, rel, pin)
-                if not current:
-                    update(rel, pin, final, have and have["tag"])
-        if current and os.path.lexists(NEXT):
-            discard(NEXT)  # a release that waited there and is no longer the one to install
-        if marker(final) is not None and complete(final):
-            retire(pin)
+            current = bool(have) and holds(have, rel, pin)
+            if not current:
+                update(rel, pin, final, have and have["tag"], need)
+    if current and os.path.lexists(NEXT):
+        discard(NEXT)  # a release that waited there and is no longer the one to install
+    if marker(final) is not None and complete(final):
+        retire(pin)
     return final
 
 
 def main(argv):
-    if len(argv) != 2 or argv[1] not in ("on", "off"):
-        log("usage: steam-compat-tools on|off")
+    if argv[1:] != ["install"]:
+        log("usage: steam-compat-tools install")
         return 2
+    need = needs_sarek()
+    rc, path = 0, None
     try:
-        pin = read_pin()
-        if argv[1] == "off":
-            sarek_off(pin)
-            return 0
-        path = on(pin)
+        path = install(read_pin(), need)
     except (Failed, OSError) as err:
         log(str(err))
-        return 1
+        rc = 1
+    try:
+        sarek(need)  # the tools already there, also when no release could be installed
+    except OSError as err:
+        log(f"could not turn DXVK-Sarek {'on' if need else 'off'} in the installed tools: {err}")
     if path is not None:
         print(path)
-    return 0
+    return rc
 
 
 if __name__ == "__main__":

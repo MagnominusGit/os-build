@@ -56,7 +56,7 @@ var state: State
 var catalog := {}
 ## The emulator shown ("" = none yet).
 var emulator_id := ""
-## Adds the Steam rows (plugin.gd: Proton, DXVK-Sarek, keep running, start without Steam) to the box
+## Adds the Steam rows (plugin.gd: Proton, CachyOS Proton arm64, keep running, start without Steam) to the box
 ## it gets, under Steam Client's own rows; called at every build of Steam Client's page.
 var steam_rows := Callable()
 var logger := Log.get_logger("RetroForgeEmulators", Log.LEVEL.INFO)

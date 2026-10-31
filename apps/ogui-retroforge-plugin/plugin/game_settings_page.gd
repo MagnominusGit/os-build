@@ -1,7 +1,7 @@
 extends ScrollContainer
 
 ## Game settings > RetroForge: per-ROM options, in the screen the gear on OGUI's launch menu opens.
-## For Steam games: their Proton, DXVK-Sarek, FEX TSO, launch option and resolution, which
+## For Steam games: their Proton, FEX TSO, launch option and resolution, which
 ## retroforge-steam-direct keeps and uses when it starts the game without the client.
 ## "Run on fast cores": the emulator's default (Main menu > Apps), On or Off for this game
 ## (CPUS=big / all in the game's conf, which retroforge-launch reads; launch_args.gd). Then one
@@ -54,13 +54,11 @@ const STEAM_LIBRARY_ID := "retroforge-steam"
 const STEAM_DIRECT := "/usr/bin/retroforge-steam-direct"
 const STEAM_PROTON := "/usr/bin/retroforge-steam-proton"
 const PROTON_CHOICES := ["default", "stable", "experimental"]
-const SAREK_CHOICES := ["default", "on", "off"]
 const TSO_CHOICES := ["default", "on", "off"]
 const TSO_ABOUT := "How closely FEX keeps x86 memory ordering between a game's threads. Off is faster on this CPU; some games then crash or glitch. Default: Proton's, On."
 const DisplaySettings := preload("display_settings.gd")
 var _steam_app := 0  # the Steam app id of the game being configured, 0 for none
 var _proton: Control  # OGUI Dropdowns: the Steam game's own choices
-var _sarek: Control
 var _tso: Control
 var _launch: Control
 var _launch_keys: Array = []
@@ -148,7 +146,6 @@ func _build_page() -> void:
 	_scrape.finished.connect(_on_art_scraped)
 
 	_proton = _steam_dropdown("Proton", "Built for this CPU. Default: the one Steam runs it with (Apps > Steam Client).", "proton")
-	_sarek = _steam_dropdown("DXVK-Sarek", "Direct3D 8 to 11 for low-end GPUs. Default: Proton's choice.", "sarek")
 	_tso = _steam_dropdown("FEX TSO", TSO_ABOUT, "tso")
 	_launch = _steam_dropdown("Launch option", "Which of the game's programs starts, as in Steam's launch dialog. Default: the one Steam last started.", "launch")
 	_resolution = _steam_dropdown("Resolution", "The size the game draws at; the display scales it to the panel. Default: its Game resolution in Steam, else Settings > Display.", "resolution")
@@ -223,7 +220,7 @@ func _on_game_settings_entered(_from: State) -> void:
 ## only when Steam offers more than one.
 func _fill_steam_rows() -> void:
 	var app := _steam_app
-	for row in [_proton, _sarek, _tso, _launch, _resolution]:
+	for row in [_proton, _tso, _launch, _resolution]:
 		row.visible = false
 	if _item != null:
 		_focus_group.current_focus = _fast_cores
@@ -245,10 +242,6 @@ func _fill_steam_rows() -> void:
 	for text in ["Default (Apps > Steam Client)", "ARMv8.0 stable", "ARMv8.0 experimental"]:
 		_proton.add_item(text)
 	_proton.select(maxi(PROTON_CHOICES.find(settings.get("proton", "default")), 0))
-	_sarek.clear()
-	for text in ["Default (Apps > Steam Client)", "On", "Off"]:
-		_sarek.add_item(text)
-	_sarek.select(maxi(SAREK_CHOICES.find(settings.get("sarek", "default")), 0))
 	_tso.clear()
 	for text in ["Default (On)", "On", "Off"]:
 		_tso.add_item(text)
@@ -279,14 +272,13 @@ func _fill_steam_rows() -> void:
 		_resolution_keys.append(mine)
 		_resolution.add_item(mine.replace("x", " x "))
 	_resolution.select(_resolution_keys.find(mine))
-	for row in [_proton, _sarek, _tso, _launch, _resolution]:
+	for row in [_proton, _tso, _launch, _resolution]:
 		row.description = str(row.get_meta("about")) + ("" if data.get("direct", "on") == "on" else DIRECT_OFF)
 	_proton.visible = _armv8 == 1
-	_sarek.visible = true
 	_tso.visible = true
 	_launch.visible = entries.size() > 1
 	_resolution.visible = _resolution_keys.size() > 1
-	_focus_group.current_focus = _proton if _proton.visible else _sarek
+	_focus_group.current_focus = _proton if _proton.visible else _tso
 	_focus_group.recalculate_focus()
 
 
@@ -302,7 +294,7 @@ func _output_of(cmd_path: String, args: Array[String]) -> String:
 
 
 func _on_steam_choice(key: String, index: int) -> void:
-	var values: Array = {"proton": PROTON_CHOICES, "sarek": SAREK_CHOICES, "tso": TSO_CHOICES,
+	var values: Array = {"proton": PROTON_CHOICES, "tso": TSO_CHOICES,
 		"launch": _launch_keys}.get(key, _resolution_keys)
 	if _steam_app <= 0 or index < 0 or index >= values.size():
 		return

@@ -233,7 +233,7 @@ the game's window (Steam's install scripts 5 s, its process at 7 s), against ~30
 Steam's windows belong to no OGUI launch between games, and OGUI checks for such orphan windows every
 second: its patch 0022 warns about them once per change, not on every check (two journal lines a
 second, idle, before it). Not covered while it is on: what `/usr/bin/steam` sets when the client starts
-(DXVK-Sarek, the x86 guest after its first download, an OGUI per-game environment) reaches games from
+(the x86 guest after its first download, an OGUI per-game environment) reaches games from
 Steam's next start: turn the setting off and on, or restart.
 
 **Minimal in the background** (`retroforge-steam-keep minimal|full`). Idle and signed in, the client
@@ -337,7 +337,7 @@ app id and OGUI's Steam handling (patch 0017) works as with the client.
   app 891390, "SteamPlay 2.0 Manifests", in `appinfo.vdf`. Hades has none.
 - **Working folder.** The working folder of the `appinfo.vdf` launch entry that runs that
   executable (Hades: `x64Vk\`), else the executable's own folder.
-- **Before it runs.** `/usr/bin/steam` still does the D-Bus check and DXVK-Sarek, then execs the
+- **Before it runs.** `/usr/bin/steam` still does the D-Bus check, then execs the
   helper. It skips the kept client and the x86 guest. `check` has already checked everything `run`
   needs, because once `/usr/bin/steam` has exec'd `run` nothing can fall back to Steam. So `run`
   does not ask again about the setting or a client. SIGPIPE and SIGXFSZ go back to their defaults
@@ -385,8 +385,7 @@ then works ("Minimal in the background" above).
 - **The install scripts** Steam runs before each launch (Hades: 19 s on the Air X), the Steam Linux
   Runtime's own update, and anything Steam would update before a launch.
 
-**The setting.** `DIRECT_LAUNCH=on|off` in `~/.config/retroforge/steam.conf`, beside `DXVK_SAREK`
-and `KEEP_RUNNING`. The player changes it in Settings > Steam > "Steam: start games without Steam"
+**The setting.** `DIRECT_LAUNCH=on|off` in `~/.config/retroforge/steam.conf`, beside `KEEP_RUNNING`. The player changes it in Settings > Steam > "Steam: start games without Steam"
 (`steam_direct.gd`), or with `retroforge-steam-direct on|off|status` over SSH. Never set, it is on, on
 every board: with the kept client beside the game, Steam's full client comes up only when the player
 opens Steam (2026-10-25; it was on only for the SM6115 and the 4 GB boards before).
@@ -395,12 +394,12 @@ next launch without a library rescan. Keeping Steam running applies to all of th
 without the client gets the kept client beside it, and first launches and Steam's own UI go to it.
 
 **Per game** (Game settings > RetroForge, `game_settings_page.gd`): a Steam game's own Proton (ARMv8.0
-stable or experimental, shown on ARMv8.0 CPUs only), DXVK-Sarek (on or off), FEX TSO (on or off),
+stable or experimental, shown on ARMv8.0 CPUs only), FEX TSO (on or off),
 launch option and resolution. `retroforge-steam-direct game APPID [set KEY VALUE]` keeps them in
 `~/.config/retroforge/steam-games.json`. A launch without the client applies them to Steam's logged
 command: the tool when it runs on the same runtime; the launch option's executable, its arguments and
 its working folder, the arguments in place of those of the entry Steam ran (the player's own launch
-options after them stay); `PROTON_DXVK_SAREK`; `STEAM_FEX_TSOENABLED`, which Proton writes into the
+options after them stay); `STEAM_FEX_TSOENABLED`, which Proton writes into the
 game's `proton-fex-config.json` (its default, `files/share/fex-emu/Config.json`, is on; the arm64 client sets no
 FEX settings itself, and Valve's appinfo hint `common/steam_frame_compatibility/configuration/tso_enable` is shown
 beside the row); the resolution (below). The launch options are the ones
@@ -588,7 +587,7 @@ there; it needs a new dispatch and a pin bump. Details and the bump steps:
 Not yet seen: our guest (or FEX's) mounted by a device and driving a game, zink GL on Adreno under
 FEX, and whether Valve's tool enables thunks.
 
-## DXVK-Sarek: Proton-CachyOS for the Adreno 610 (downloaded, not shipped)
+## Proton-CachyOS arm64, and DXVK-Sarek for the Adreno 610/613 (downloaded, not shipped)
 
 **Why the A610 needs it (2026-10-16).** Turnip in Mesa 26.2.5 (`packages/mesa`) gives the A610 only
 Vulkan 1.0. It reaches 1.3 because `etc/retroforge/session.conf` exports `TU_DEBUG=noconform` on the
@@ -596,8 +595,8 @@ SM6115, and that also fakes `multiViewport`. Mesa 26.3 (final ~2026-11-04) remov
 multiViewport off on a6xx_gen1_low (Mesa 82b86896). Every upstream DXVK (1.10.3, 2.x, 3.x) requires
 multiViewport, so after that bump DXVK-Sarek is the only DXVK that creates a device on the A610. The
 A650 (SM8250) runs Valve's Proton 11 (DXVK 2.7) but not DXVK 3.x (Proton Experimental,
-Proton-CachyOS), because it has no `storageBuffer8BitAccess`. The A740 and A750 run anything. So
-Sarek is on by default only on the SM6115.
+Proton-CachyOS), because it has no `storageBuffer8BitAccess`. The A740 and A750 run anything. The
+SM4450's Adreno 613 is a6xx_gen1_low like the A610.
 
 Proton-CachyOS publishes an arm64 build with an ARM64EC DXVK-Sarek (`files/lib/wine/dxvk-sarek/
 aarch64-windows/`), turned on by `PROTON_DXVK_SAREK=1`. Its `toolmanifest.vdf` requires tool appid
@@ -607,34 +606,42 @@ LSE atomics (covered by `0025`), apart from libraries that pick their code path 
 `proton` also turns Sarek on by itself when the GPU lacks Vulkan 1.3 with `descriptorIndexing`, but
 under noconform the A610 reports 1.3, so that check does not pick Sarek today.
 
-**One setting.** `DXVK_SAREK=on|off` in `~/.config/retroforge/steam.conf`, kept by
-`/usr/bin/retroforge-steam-sarek`. The player changes it in Settings > Steam > "Steam: DXVK-Sarek
-(low-end GPUs)" (the RetroForge plugin), or with `retroforge-steam-sarek on|off|status` over SSH.
-Never set, it is on for SoC class SM6115 (device-env) and off elsewhere. A card moved to another board
-follows that board until the player chooses. `RETROFORGE_STEAM_SAREK=on|off` overrides it, for testing.
+**Sarek follows the GPU, with no setting (2026-10-31).** On the Adreno 610 (SM6115) and 613 (SM4450)
+DXVK-Sarek is the only DXVK that will run, so it is not a choice: every Proton of ours installed there
+(Proton-CachyOS, our ARMv8.0 build) gets a `user_settings.py` holding `PROTON_DXVK_SAREK=1`, which the
+tool applies to every game it runs, with the client or without it. Every other GPU runs upstream DXVK,
+and nothing of ours turns Sarek on there: a player who wants it for one game sets
+`PROTON_DXVK_SAREK=1 %command%` in its launch options in Steam, as for any other Proton option.
+`steam-compat-tools install` decides from device-env's SoC class (`RETROFORGE_STEAM_SAREK=on|off`
+overrides it, for testing) and makes every tool of ours agree: it writes the file where it is
+needed, and deletes ours (only ours) elsewhere. Nothing exports `PROTON_DXVK_SAREK` (Valve's Proton
+ignores it anyway). Until 2026-10-31 there was a `DXVK_SAREK` setting (`retroforge-steam-sarek`, a
+"Steam: DXVK-Sarek (low-end GPUs)" toggle, and a per-game DXVK-Sarek row): its toggle said it turned
+Sarek on, but only downloaded a tool nothing selected. A leftover `DXVK_SAREK=` line in `steam.conf`
+is ignored, and a `user_settings.py` that toggle wrote is still recognised as ours.
 
-- **On:** every `steam` start (and turning the toggle on) runs `/usr/lib/retroforge/steam-compat-tools
-  on` in the background, as the user unit `retroforge-steam-compat-tools` (with setsid when there is no
-  user manager). A user unit is not under OGUI's reaper, which stops everything under a game when the
-  game ends, and the first `steam` does not wait for the download. It installs or updates the tool
-  (below), with a `user_settings.py` holding `PROTON_DXVK_SAREK=1`, which Proton-CachyOS applies to
-  every game run with it, and `/usr/bin/steam` exports `PROTON_DXVK_SAREK=1` as well (Valve's Proton
-  ignores it). Log: `~/.local/share/retroforge/steam-compat-tools.log`.
-- **Off:** nothing is downloaded, asked or exported. Before the client starts, `steam-compat-tools
-  off` deletes that `user_settings.py` from the installed tool, which stays. Turning the toggle off
-  also stops a download in progress.
+**Downloading it: Apps > Steam Client > "CachyOS Proton arm64".** A row with a Download button
+(Update once installed) and the download's percentage, on CPUs with LSE atomics (ARMv8.0 CPUs get the
+Proton row instead). It runs `/usr/bin/retroforge-steam-cachyos install`, which runs
+`steam-compat-tools install` as the user unit `retroforge-steam-compat-tools` and waits for it (a run of
+that unit already going is waited for first). A user unit is not under OGUI's reaper, and the download
+goes on if OGUI restarts. `install` puts the newest release in place as below, and never selects it.
+The percentage is `~/.local/share/retroforge/steam-compat-tools.progress` (0-100, then `unpacking`; gone
+when the run ends). `retroforge-steam-cachyos status` says `armv8`, `missing` or `installed <tag>`. The
+store launcher (GOG, Epic) uses the same tool, with the same `install`, when a game has no Proton of its
+own: one download serves both. Log: `~/.local/share/retroforge/steam-compat-tools.log`.
 
 **Which release: a channel.** `/usr/share/retroforge/steam/proton-cachyos-arm64.pin` names a channel,
-not a version: the device resolves what is published now. Each `on` makes one request to GitHub's API
-(`/repos/CachyOS/proton-cachyos/releases?per_page=20`; 60 an hour are allowed without a token, and there
-is at most one per `steam` start, only while the setting is on) and takes the newest release that has
+not a version: the device resolves what is published now. Each `install` makes one request to GitHub's
+API (`/repos/CachyOS/proton-cachyos/releases?per_page=20`; 60 an hour are allowed without a token: one
+per Download/Update press or store launch) and takes the newest release that has
 `proton-cachyos-*-slr-arm64.tar.xz` and its `.sha512sum`. Newest means the
 highest Proton version, then the latest published: `cachyos-10.0-sunset-slr` was published a week after
 `cachyos-11.0-20260601-slr`, and a newest-by-date rule would have moved every player back to 10.0.
 Drafts, prereleases and assets still uploading are skipped. The tarball (~356 MB) has to match the
 `.sha512sum`, and the sha256 GitHub's API lists for it. Offline, rate-limited, or on any API error or
 answer without an arm64 build, the installed release stays (exit 0, and the log says why); on a card
-with nothing installed yet, the next `steam` start tries again. A `tag:` in the pin holds one release
+with nothing installed yet, it fails (exit 1) and the row says so. A `tag:` in the pin holds one release
 instead (reproducible builds, or keeping players off a bad release), optionally with its `sha512:`;
 once that release is installed nothing is asked. On 2026-10-16 the channel resolves to
 `cachyos-11.0-20261005-slr`.
@@ -653,16 +660,15 @@ in), so Steam never sees half a tool. A player's own `user_settings.py` moves in
 running from the old tree would, after the swap, start wine processes and load DLLs from the new one
 by path, and wine refuses a wineserver of another build. So while a process of the player's runs from
 the tool (its program, its working folder, or a file it maps), the new tree waits, checked, in
-`~/.local/share/Steam/.retroforge-compat-tools.next/`, and goes in at the next `steam` start that finds
+`~/.local/share/Steam/.retroforge-compat-tools.next/`, and goes in at the next `install` that finds
 nothing running from it, without a second download. One withdrawn upstream meanwhile is dropped. A
 running Steam reads the new `toolmanifest.vdf` at its next start.
 
-**Using it.** Steam reads `compatibilitytools.d` only when it starts, so restart Steam once the log
-says "installed". Then select "Proton-CachyOS arm64 (RetroForge)" per game (Properties >
+**Using it.** Steam reads `compatibilitytools.d` only when it starts, so restart Steam once the row
+says it is installed. Then select "Proton-CachyOS arm64 (RetroForge)" per game (Properties >
 Compatibility > Force the use of a specific Steam Play compatibility tool), or for every game
 (Settings > Compatibility > Default compatibility tool). Nothing edits Steam's `config.vdf`: choosing
-the tool is the player's, once. `PROTON_DXVK_SAREK=0 %command%` in a game's launch options turns Sarek
-off for that game.
+the tool is the player's, once.
 
 **What it never touches.** Each folder it installs carries `.retroforge-pin` (name, tag, asset, sha512,
 sha256). A folder without one is someone else's: other tools, and a Proton-CachyOS the player installed,
@@ -674,7 +680,7 @@ removed once the one-name folder is in place, each when nothing runs from it, an
 `user_settings.py` in one moves into the new folder. A game set to one has to be set to "Proton-CachyOS
 arm64 (RetroForge)", once.
 
-**Removing it.** Turn the setting off, then delete
+**Removing it.** Delete
 `~/.local/share/Steam/compatibilitytools.d/proton-cachyos-arm64-retroforge/` (and
 `~/.local/share/Steam/.retroforge-compat-tools.next/`, if there), and set games that used it back to
 another tool. Steam Linux Runtime 4.0 (arm64) can then be uninstalled from Steam's library like any
@@ -683,7 +689,7 @@ tool.
 Checked in a linux/arm64 container on 2026-10-16: the image's pin against the live API resolved to
 `cachyos-11.0-20261005-slr` (sha256 `e59b646e...cd06c37` as GitHub lists it, the live `.sha512sum`
 `81ca1b66...b1c0fa`, the same as a local copy's). Through the live API's own JSON, with that release's
-two URLs pointed at local copies, `steam-compat-tools on` installed it in 5 s: 2,191 MB, 1,972
+two URLs pointed at local copies, `steam-compat-tools on` (now `install`) installed it in 5 s: 2,191 MB, 1,972
 symlinks, none broken, `toolmanifest.vdf` the release's (require 4185400), `compatibilitytool.vdf`
 renamed as above, `user_settings.py` importing as `{'PROTON_DXVK_SAREK': '1'}`. A second `on` made its
 one API request and touched nothing, and `off` then `on` removed and restored `user_settings.py`.
@@ -699,8 +705,8 @@ Not yet seen:
   `/proc/<pid>/maps` as the check expects; if not, an update goes in while the game runs.
 - Whether the client's environment reaches games: the client runs on the host, games in Steam
   Linux Runtime 4.0. `user_settings.py` covers that either way.
-- Steam fetching 4185400 on arm64, a game run with the tool, Sarek on an A610, the plugin toggle on a
-  device, anything on hardware. A release after `cachyos-11.0-20261005-slr` is not ISA-scanned before
+- Steam fetching 4185400 on arm64, a game run with the tool, Sarek on an A610 or A613, the plugin's
+  Download row on a device, anything on hardware. A release after `cachyos-11.0-20261005-slr` is not ISA-scanned before
   players get it.
 
 ## ARMv8.0 CPUs: our own Proton build (downloaded, not shipped)
@@ -723,8 +729,8 @@ When `/proc/cpuinfo` has no `atomics`, `steam-compat-tools` takes `proton-armv8.
 (RetroForge)". Everything else works as for Proton-CachyOS above: the channel, one request per
 start, the one-name folder, the wait while a game runs from it, and Sarek through `user_settings.py`,
 which Valve's `proton` applies before it reads `PROTON_DXVK_SAREK`. A pin can also take pre-releases
-(`prereleases: yes`), for the experimental channel. Turning Sarek off clears it in every folder
-RetroForge installed, so a Proton-CachyOS left on such a device follows the setting too.
+(`prereleases: yes`), for the experimental channel. Sarek follows the GPU in every folder RetroForge
+installed, so a Proton-CachyOS left on such a device follows it too.
 
 Seen on the Air X (2026-10-22/23): the arm64 client takes the tool (its compat log names "Proton ARMv8.0
 (RetroForge)" as tool 0), Hades runs with it with and without the client, and the emulations fall from

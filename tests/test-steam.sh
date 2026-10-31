@@ -278,8 +278,8 @@ EOF
 chmod +x "$W/client" "$W/bootstrap"
 # The x86 guest and the DXVK-Sarek block have their own suites (test-steam-x86-guest.sh,
 # test-steam-compat-tools.sh). Here they would reach the real helpers, and on a device start real
-# downloads into the test's home (1.4 GB; on an SM6115, Proton-CachyOS too): RETROFORGE_STEAM_X86_GUEST=0
-# turns the guest off, and RETROFORGE_STEAM_SAREK_CLI names no such file. Starting a game without the client
+# downloads into the test's home (1.4 GB): RETROFORGE_STEAM_X86_GUEST=0 turns the guest off. Starting a
+# game without the client
 # has its own suite too (test-steam-direct.sh): RETROFORGE_STEAM_DIRECT_CLI names no such file, so every
 # launch here goes to the client.
 # Keeping Steam running: the real retroforge-steam-keep, over a fake /proc ($P: a process is its
@@ -316,7 +316,7 @@ fakeproc() {  # fakeproc <pid> <ppid> <comm> <argv...>
 gone() { rm -rf "${P:?}/${1:?}"; }
 until_true() { local _; for _ in $(seq 60); do eval "$1" && return 0; sleep 0.1; done; return 1; }
 WENV=(env -u RETROFORGE_STEAM_ROOT -u XDG_DATA_HOME -u LD_LIBRARY_PATH HOME="$W/home" RETROFORGE_STEAM_BOOTSTRAP="$W/bootstrap"
-      RETROFORGE_CPUINFO="$W/cpuinfo" RETROFORGE_STEAM_X86_GUEST=0 RETROFORGE_STEAM_SAREK_CLI="$W/no-sarek-cli" RETROFORGE_STEAM_DIRECT_CLI="$W/no-direct-cli"
+      RETROFORGE_CPUINFO="$W/cpuinfo" RETROFORGE_STEAM_X86_GUEST=0 RETROFORGE_STEAM_DIRECT_CLI="$W/no-direct-cli"
       PATH="$W/bin:$PATH" RETROFORGE_STEAM_KEEP_CLI="$KEEP" RETROFORGE_PROC="$P" RETROFORGE_STEAM_KEEP_KILL="$W/bin/fakekill"
       RETROFORGE_STEAM_KEEP=off XDG_RUNTIME_DIR="$W/run")
 KENV=(env HOME="$W/home" PATH="$W/bin:$PATH" RETROFORGE_PROC="$P" RETROFORGE_STEAM_KEEP_KILL="$W/bin/fakekill" XDG_RUNTIME_DIR="$W/run")

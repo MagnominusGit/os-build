@@ -22,7 +22,7 @@ func setup(scene_tree: SceneTree) -> RefCounted:
 	return self
 
 
-## Add the toggle to target (Apps > Steam Client), else under Settings > General after the DXVK-Sarek
+## Add the toggle to target (Apps > Steam Client), else under Settings > General after the pause-in-menus
 ## one. False when the layout differs or the command is missing.
 func attach(target: Node = null) -> bool:  # target: Apps > Steam Client's rows (apps_page.gd)
 	var menu: Node = tree.root.find_child("GeneralSettings", true, false)
@@ -30,7 +30,7 @@ func attach(target: Node = null) -> bool:  # target: Apps > Steam Client's rows 
 	if not box or not FileAccess.file_exists(TOOL):
 		return false
 	var after: Node = null
-	for name in ["RetroForgeSteamSarek", "RetroForgePauseInMenus", "AnimatedEffectsToggle"]:
+	for name in ["RetroForgeSteamCachyOS", "RetroForgePauseInMenus", "AnimatedEffectsToggle"]:
 		after = box.get_node_or_null(name)
 		if after:
 			break

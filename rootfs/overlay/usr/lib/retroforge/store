@@ -111,7 +111,6 @@ GAME_PROFILE_DECL = os.environ.get("RETROFORGE_GAME_PROFILE",
                                    os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "opengamepadui", "game_profile"))
 STEAM_ROOT = os.environ.get("RETROFORGE_STEAM_ROOT") or os.path.join(DATA_HOME, "Steam")
 COMPAT_TOOLS = os.environ.get("RETROFORGE_STEAM_COMPAT_TOOLS", "/usr/lib/retroforge/steam-compat-tools")
-SAREK = "/usr/bin/retroforge-steam-sarek"
 AGENT = "retroforge-store"
 RUNTIME_NAME = "SteamLinuxRuntime_4-arm64"
 API = os.environ.get("RETROFORGE_STORE_API", "")
@@ -404,20 +403,12 @@ def proton_dir(store=None, gid=None):
     if name:
         log(f"{store} {gid}: no Proton {name!r}; the default one")
     env = dict(os.environ, RETROFORGE_STEAM_ROOT=STEAM_ROOT)
-    res = subprocess.run([COMPAT_TOOLS, "on"], env=env, text=True, capture_output=True)
+    res = subprocess.run([COMPAT_TOOLS, "install"], env=env, text=True, capture_output=True)
     folder = res.stdout.strip().splitlines()[-1] if res.stdout.strip() else ""
     if res.returncode != 0 or not os.path.isfile(os.path.join(folder, "proton")):
         last = (res.stderr.strip().splitlines() or ["no Proton"])[-1]
         raise Failed(f"no Proton to run the game with: {last}")
     return folder
-
-
-def sarek():
-    """The player's DXVK-Sarek setting for the game's environment ("1", "0", or "" to leave it)."""
-    if not os.access(SAREK, os.X_OK):
-        return ""
-    res = subprocess.run([SAREK, "apply"], text=True, capture_output=True)
-    return {"on": "1", "off": "0"}.get(res.stdout.strip(), "")
 
 
 # The player's per-game choices, keyed "<store>-<id>": {"tso": "on" | "off" | "default", "proton": the
@@ -599,9 +590,6 @@ def run_windows_game(store, gid, exe, args, workdir, game_dir, extra_env=None):
         "SteamDeck": "1",
         "STEAM_FEX_TSOENABLED": fex_tso(store, gid),
     })
-    s = sarek()
-    if s:
-        env["PROTON_DXVK_SAREK"] = s
     if game_choice(store, gid, "protonfixes") != "off":
         apply_own_fixes(store, gid)
     env.update(protonfixes_env(store, gid))

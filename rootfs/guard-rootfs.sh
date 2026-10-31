@@ -792,10 +792,10 @@ fi
 #     /usr/lib/retroforge/x86-mesa (rootfs/lib-assemble-x86-mesa.sh). Libraries only, run by nothing
 #     on the host.
 #     usr/share/guestos stays listed.
-#   - Proton-CachyOS arm64, for DXVK-Sarek when the player's setting is on (by default on the SM6115
-#     only): retroforge-steam-sarek has steam-compat-tools keep its newest arm64 release in the Steam
-#     library's compatibilitytools.d (proton-cachyos-arm64.pin), or on ARMv8.0 CPUs our own ARMv8.0 Proton
-#     with Sarek (proton-armv8.pin). usr/share/steam/compatibilitytools.d stays listed.
+#   - Proton-CachyOS arm64, on the player's Download (retroforge-steam-cachyos) and for store games,
+#     with DXVK-Sarek on where the GPU needs it (Adreno 610/613): steam-compat-tools keeps its
+#     newest arm64 release in the Steam library's compatibilitytools.d (proton-cachyos-arm64.pin), or
+#     on ARMv8.0 CPUs our own ARMv8.0 Proton with Sarek (proton-armv8.pin). usr/share/steam/compatibilitytools.d stays listed.
 # The root carries only the wrapper, those helpers and their pins. FEX itself is
 # Steam's: the arm64 client adds it to a game as a dependency, as it does Proton ("adding FEX dependency
 # to %s %u" and STEAM_COMPAT_FEX_CONFIG in steamclient.so; not yet seen on hardware), so nothing x86

@@ -356,18 +356,20 @@ printf '"manifest"\n{\n  "commandline" "/proton %%verb%%"\n  "require_tool_appid
 printf '"compatibilitytools"\n{\n  "compat_tools"\n  {\n    "proton-armv8-experimental-retroforge"\n    {\n      "install_path" "."\n    }\n  }\n}\n' >"$EXP/compatibilitytool.vdf"
 GAMES="$H/.config/retroforge/steam-games.json"
 direct -- game 1145360
-[ "$RC" = 0 ] && python3 -c 'import json, sys; d = json.loads(sys.argv[1]); assert d["settings"] == {"proton": "default", "sarek": "default", "tso": "default", "launch": "default", "resolution": "default"}, d; assert d["tso_hint"] == "0", d; assert [e["key"] for e in d["launch"]] == ["0", "1", "2", "3", "4", "15"], d; assert d["launch"][-1]["description"] == "Hades (Steam Deck)", d; assert d["direct"] in ("on", "off"), d' "$OUT" \
+[ "$RC" = 0 ] && python3 -c 'import json, sys; d = json.loads(sys.argv[1]); assert d["settings"] == {"proton": "default", "tso": "default", "launch": "default", "resolution": "default"}, d; assert d["tso_hint"] == "0", d; assert [e["key"] for e in d["launch"]] == ["0", "1", "2", "3", "4", "15"], d; assert d["launch"][-1]["description"] == "Hades (Steam Deck)", d; assert d["direct"] in ("on", "off"), d' "$OUT" \
   && ok "game: every choice at its default, and the launch entries Steam's dialog offers here, in its order" || bad "rc=$RC out=$OUT err=$ERR"
-direct -- game 1145360 set launch 0 && direct -- game 1145360 set proton experimental && direct -- game 1145360 set sarek off
-[ "$RC" = 0 ] && python3 -c 'import json, sys; assert json.load(open(sys.argv[1])) == {"1145360": {"launch": "0", "proton": "experimental", "sarek": "off"}}' "$GAMES" \
+direct -- game 1145360 set launch 0 && direct -- game 1145360 set proton experimental
+[ "$RC" = 0 ] && python3 -c 'import json, sys; assert json.load(open(sys.argv[1])) == {"1145360": {"launch": "0", "proton": "experimental"}}' "$GAMES" \
   && ok "set: saved in steam-games.json" || bad "rc=$RC $(cat "$GAMES" 2>&1)"
-direct -- game 1145360 set sarek maybe
+direct -- game 1145360 set tso maybe
 [ "$RC" = 2 ] && ok "set: a value that is not a choice is refused" || bad "rc=$RC"
+direct -- game 1145360 set sarek on
+[ "$RC" = 2 ] && ok "set: sarek is no choice any more (Sarek follows the GPU)" || bad "rc=$RC"
 fresh_log; reset_run
 direct -- run 1145360
 grep -qxF "$GAME/x64/Hades.exe" "$T/ran.args" && grep -qxF "$EXP/proton" "$T/ran.args" && [ "$(cat "$T/ran.cwd")" = "$GAME/x64" ] \
   && ok "run: the chosen launch option, from its own working folder, with the chosen Proton" || bad "args=$(grep -E 'proton|Hades' "$T/ran.args") cwd=$(cat "$T/ran.cwd")"
-[ "$(ran_env PROTON_DXVK_SAREK)" = 0 ] && ok "run: DXVK-Sarek off for this game" || bad "sarek=$(ran_env PROTON_DXVK_SAREK)"
+[ -z "$(ran_env PROTON_DXVK_SAREK)" ] && ok "run: no PROTON_DXVK_SAREK (the tool's user_settings.py decides)" || bad "sarek=$(ran_env PROTON_DXVK_SAREK)"
 [ -z "$(ran_env STEAM_FEX_TSOENABLED)" ] && ok "run: FEX TSO left to Proton by default" || bad "tso=$(ran_env STEAM_FEX_TSOENABLED)"
 direct -- game 1145360 set tso off; fresh_log; reset_run
 direct -- run 1145360
@@ -380,7 +382,7 @@ want="$(printf '%s\n' "$GAME/x64/Hades.exe" '/c=..\' -dx11 '/name=two words' /Di
   && ok "run: the launch option's own arguments and working folder, the player's extra words kept" \
   || bad "args=$(tail -6 "$T/ran.args" | tr "\n" "|") cwd=$(cat "$T/ran.cwd")"
 rmdir "$GAME/Odd"
-for k in launch proton sarek tso; do direct -- game 1145360 set $k default; done
+for k in launch proton tso; do direct -- game 1145360 set $k default; done
 python3 -c 'import json, sys; assert json.load(open(sys.argv[1])) == {}' "$GAMES" && ok "all back to default: nothing kept" || bad "$(cat "$GAMES")"
 rm -rf "$S/compatibilitytools.d" "$GAMES"
 
@@ -492,10 +494,6 @@ cat >"$W/bootstrap" <<EOF
 mkdir -p "\$RETROFORGE_STEAM_ROOT/steamrtarm64"; cp "$W/client" "\$RETROFORGE_STEAM_ROOT/steamrtarm64/steam"
 echo "\$RETROFORGE_STEAM_ROOT/steamrtarm64/steam"
 EOF
-cat >"$W/sarek" <<EOF
-#!/usr/bin/env bash
-echo "\$*" >>"$W/sarek.calls"; echo on
-EOF
 # The kept client: keep-running is on unless $W/keep.state says off; systemd-run fails unless
 # $W/sdrun-ok, and then starts the unit, which signs in (a line in Steam's connection log) unless
 # $W/no-signin; systemctl reports the unit active while $W/unit-active is there.
@@ -523,13 +521,13 @@ cat >"$W/guest" <<EOF
 echo "\$1" >>"$W/guest.calls"
 EOF
 printf '#!/usr/bin/env bash\necho "$*" >>"%s/proton.calls"\n' "$W" >"$W/proton"
-chmod +x "$W/client" "$W/bootstrap" "$W/sarek" "$W/keep" "$W/bin/systemd-run" "$W/stub-direct" "$W/guest" "$W/proton"
+chmod +x "$W/client" "$W/bootstrap" "$W/keep" "$W/bin/systemd-run" "$W/stub-direct" "$W/guest" "$W/proton"
 # The real helper, as the image installs it: executable (/usr/bin/steam runs it only then).
 cp "$DIRECT" "$W/direct"; chmod +x "$W/direct"
 # The x86 guest is on, its helper a stub that records its calls (test-steam-x86-guest.sh has the rest).
 WENV=(env -u RETROFORGE_STEAM_KEPT -u PROTON_DXVK_SAREK -u RETROFORGE_STEAM_X86_GUEST "${DENV[@]:1}" PATH="$W/bin:$PATH"
       RETROFORGE_STEAM_BOOTSTRAP="$W/bootstrap" RETROFORGE_STEAM_X86_GUEST_HELPER="$W/guest"
-      RETROFORGE_STEAM_X86_GUEST_DIR="$W/fex-guest" RETROFORGE_STEAM_SAREK_CLI="$W/sarek" RETROFORGE_STEAM_KEEP_CLI="$W/keep"
+      RETROFORGE_STEAM_X86_GUEST_DIR="$W/fex-guest" RETROFORGE_STEAM_KEEP_CLI="$W/keep"
       RETROFORGE_STEAM_DIRECT_CLI="$W/direct" RETROFORGE_STEAM_PROTON_CLI="$W/proton")
 wrap() {  # wrap [VAR=value...] -- args...
   local -a vars=()
@@ -549,7 +547,7 @@ grep -qx status "$W/keep.calls" 2>/dev/null && [ ! -e "$W/sdrun.calls" ] \
 [ ! -e "$W/guest.calls" ] && ok "nor the x86 guest (no FEX game starts this way)" || bad "guest: $(cat "$W/guest.calls")"
 [ ! -e "$W/proton.calls" ] && ok "nor our ARMv8.0 Proton (the client's, with updates in the background)" \
   || bad "proton: $(cat "$W/proton.calls")"
-[ "$(ran_env PROTON_DXVK_SAREK)" = 1 ] && grep -qx apply "$W/sarek.calls" && ok "DXVK-Sarek is applied first (PROTON_DXVK_SAREK=1)" || bad "sarek=$(ran_env PROTON_DXVK_SAREK)"
+[ -z "$(ran_env PROTON_DXVK_SAREK)" ] && ok "no PROTON_DXVK_SAREK from the wrapper" || bad "sarek=$(ran_env PROTON_DXVK_SAREK)"
 [ -f "$T/ran.env" ] && ! grep -q "^DBUS_SESSION_BUS_ADDRESS=" "$T/ran.env" && ok "a D-Bus address that is not ours is dropped first (bwrap fails on it)" || bad "dbus: $(grep DBUS "$T/ran.env" 2>&1)"
 [ "$(cat "$T/ran.cwd")" = "$GAME/x64Vk" ] && ok "as Steam started it" || bad "cwd: $(cat "$T/ran.cwd")"
 reset_run; echo 7 >"$T/game.rc"

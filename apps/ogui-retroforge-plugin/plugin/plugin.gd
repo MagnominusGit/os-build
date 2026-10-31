@@ -56,7 +56,7 @@ var _scraper: RefCounted  # scraper_settings.gd
 var _psn: RefCounted  # psn_settings.gd
 var _art_fetch: RefCounted  # art_fetch.gd: new ROMs' art, fetched when their card asks for it
 var _os: Resource  # retroforge_os.gd, installed as OGUI's platform.os
-var _sarek: RefCounted  # steam_sarek.gd
+var _cachyos: RefCounted  # steam_cachyos.gd
 var _keep: RefCounted  # steam_keep.gd
 var _direct: RefCounted  # steam_direct.gd
 var _stores_page: RefCounted  # steam_settings.gd: Settings > Stores
@@ -126,7 +126,7 @@ func _ready() -> void:
 	_art_fetch.allowed = _scraper.can_fetch
 	_install_os_platform()
 	_proton = load(plugin_base.path_join("steam_proton.gd")).new().setup(get_tree())
-	_sarek = load(plugin_base.path_join("steam_sarek.gd")).new().setup(get_tree())
+	_cachyos = load(plugin_base.path_join("steam_cachyos.gd")).new().setup(get_tree())
 	_keep = load(plugin_base.path_join("steam_keep.gd")).new().setup(get_tree())
 	_direct = load(plugin_base.path_join("steam_direct.gd")).new().setup(get_tree())
 	if is_instance_valid(_emulators_screen):
@@ -177,8 +177,8 @@ func unload() -> void:
 		_art_fetch.runner.cancel()
 	if _os:
 		_os.detach()
-	if _sarek:
-		_sarek.detach()
+	if _cachyos:
+		_cachyos.detach()
 	if _keep:
 		_keep.detach()
 	if _direct:
@@ -270,10 +270,10 @@ func _add_emulators_screen() -> void:
 
 
 ## Apps > Steam Client's page ends with these, under its own rows (apps_page.gd builds the page
-## again at each visit, so this runs each time): Proton (ARMv8.0 CPUs only), DXVK-Sarek, keep Steam
+## again at each visit, so this runs each time): Proton (ARMv8.0 CPUs only), CachyOS Proton arm64 (other CPUs), keep Steam
 ## running, start without Steam. A row whose command is missing is left out.
 func _add_steam_rows(box: Node) -> void:
-	for row in [_proton, _sarek, _keep, _direct]:
+	for row in [_proton, _cachyos, _keep, _direct]:
 		row.attach(box)
 
 

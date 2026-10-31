@@ -45,9 +45,8 @@
 # Completed comes right after the game's process is created; Failed, when Steam refuses the launch
 # (AppError_16: the game already runs).
 #
-# The setting is KEEP_RUNNING=on|off in ~/.config/retroforge/steam.conf, beside
-# retroforge-steam-sarek's DXVK_SAREK (the last such line counts; saving rewrites that line and keeps
-# the others). The RetroForge plugin's Settings > Steam toggle "Steam: keep running in the background"
+# The setting is KEEP_RUNNING=on|off in ~/.config/retroforge/steam.conf, beside the other Steam
+# settings (the last such line counts; saving rewrites that line and keeps the others). The RetroForge plugin's Settings > Steam toggle "Steam: keep running in the background"
 # runs this. RETROFORGE_STEAM_KEEP=on|off overrides the file, for testing and debugging.
 #
 # Exit 0; 1 when the setting could not be saved, or (minimal) the client did not start its web helper
@@ -95,7 +94,7 @@ save() {  # save on|off: through a temporary file and a rename
         case "$line" in KEEP_RUNNING=*) ;; *) printf '%s\n' "$line" ;; esac
       done <"$CONF"
     else
-      echo "# Steam settings of the RetroForge shell (retroforge-steam-sarek, retroforge-steam-keep). Safe to edit."
+      echo "# Steam settings of the RetroForge shell (retroforge-steam-keep). Safe to edit."
     fi
     echo "KEEP_RUNNING=$1"
   } >"$tmp" && mv -f "$tmp" "$CONF"

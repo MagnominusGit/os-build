@@ -114,7 +114,7 @@ run "$T/v82" set experimental; [ "$OUT" = steam ] && [ ! -e "$T/home/.config/ret
 CASE="ARMv8.0, nothing installed"
 run "$T/v80" status; [ "$OUT" = stable ] && ok "status: stable by default" || bad "out=$OUT"
 run "$T/v80" apply
-[ "$OUT" = stable ] && grep -qx "$T/helper on" "$T/started" && cmp -s "$VDF" "$T/orig" && grep -q "not installed yet" <<<"$ERR" \
+[ "$OUT" = stable ] && grep -qx "$T/helper install" "$T/started" && cmp -s "$VDF" "$T/orig" && grep -q "not installed yet" <<<"$ERR" \
   && ok "the install starts; config.vdf untouched until it is in" || bad "out=$OUT started=$(cat "$T/started" 2>&1) err=$ERR"
 
 CASE="ARMv8.0, stable installed"
@@ -191,7 +191,7 @@ done
 for ch in stable experimental; do
   sed -i.b "s/^PROTON_CHANNEL=.*/PROTON_CHANNEL=$ch/" "$T/home/.config/retroforge/steam.conf"
   E="$(HOME="$T/home" XDG_CONFIG_HOME="$T/home/.config" RETROFORGE_STEAM_ROOT="$T/s2" RETROFORGE_STEAM_PINS="$T/pins" \
-       RETROFORGE_CPUINFO="$T/v80" python3 "$HELPER" on 2>&1)"
+       RETROFORGE_CPUINFO="$T/v80" RETROFORGE_STEAM_SAREK=off python3 "$HELPER" install 2>&1)"
   want=proton-armv8; [ "$ch" = experimental ] && want=proton-armv8-experimental
   grep -q "no $want is installed" <<<"$E" && ok "$ch: $want.pin" || bad "$ch: $E"
 done

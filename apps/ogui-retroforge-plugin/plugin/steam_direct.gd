@@ -32,7 +32,7 @@ func attach(target: Node = null) -> bool:  # target: Apps > Steam Client's rows 
 	if not box or not FileAccess.file_exists(TOOL):
 		return false
 	var after: Node = null
-	for name in ["RetroForgeSteamKeep", "RetroForgeSteamSarek", "RetroForgePauseInMenus", "AnimatedEffectsToggle"]:
+	for name in ["RetroForgeSteamKeep", "RetroForgeSteamCachyOS", "RetroForgePauseInMenus", "AnimatedEffectsToggle"]:
 		after = box.get_node_or_null(name)
 		if after:
 			break

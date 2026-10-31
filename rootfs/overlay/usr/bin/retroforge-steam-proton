@@ -22,7 +22,7 @@
 #
 # TEST SEAMS (tests/test-steam-proton.sh): RETROFORGE_STEAM_ROOT, RETROFORGE_CPUINFO,
 # RETROFORGE_STEAM_COMPAT_TOOLS (the helper), RETROFORGE_STEAM_PROTON_START (a command run with the
-# helper and `on` as arguments instead of systemd-run), RETROFORGE_STEAM_LIBRARY (the steam-library
+# helper and `install` as arguments instead of systemd-run), RETROFORGE_STEAM_LIBRARY (the steam-library
 # whose readers this uses).
 import importlib.machinery
 import importlib.util
@@ -106,14 +106,14 @@ def start_install():
     os.makedirs(os.path.dirname(LOG), exist_ok=True)
     out = open(LOG, "a")
     if START:
-        subprocess.Popen([START, HELPER, "on"], stdout=out, stderr=out, start_new_session=True)
+        subprocess.Popen([START, HELPER, "install"], stdout=out, stderr=out, start_new_session=True)
         return
     res = subprocess.run(["systemd-run", "--user", "--quiet", "--collect", "--unit=retroforge-steam-compat-tools",
                           f"--setenv=RETROFORGE_STEAM_ROOT={STEAM_ROOT}", f"-pStandardOutput=append:{LOG}",
-                          f"-pStandardError=append:{LOG}", HELPER, "on"],
+                          f"-pStandardError=append:{LOG}", HELPER, "install"],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if res.returncode != 0:  # no user manager, or Sarek's run is already going (its lock decides)
-        subprocess.Popen([HELPER, "on"], stdout=out, stderr=out, start_new_session=True)
+    if res.returncode != 0:  # no user manager, or another run is already going (its lock decides)
+        subprocess.Popen([HELPER, "install"], stdout=out, stderr=out, start_new_session=True)
 
 
 # ---- config.vdf: one entry changed, the rest of the text kept as it is -------------------------------
