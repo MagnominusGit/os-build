@@ -1,0 +1,123 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/device_profile_v1.json
+#
+# The gamepad in the store sign-in's Chromium window, which takes no gamepad input of its own. `store
+# <s> sign-in` declares this profile to OpenGamepadUI while the window is up, as retroforge-launch
+# declares an emulator's, and OGUI loads it whenever the window has focus (its own focus profile
+# otherwise, so the pad drives its on-screen keyboard as usual; OGUI patch 0024).
+#
+# The D-pad sends the arrow keys, which Chromium's spatial navigation (--enable-spatial-navigation)
+# turns into moving between the page's links, fields and buttons. A presses Enter, B Escape (a
+# dropdown or a dialog closes), Y Space (a checkbox), L1/R1 Shift+Tab/Tab for what spatial navigation
+# skips. X opens OGUI's keyboard (as Guide+X does), for a field the page did not report (signin_window.gd
+# opens it by itself when a text field takes the focus).
+#
+# InputPlumber names face buttons by evdev code: North is BTN_X, the left button on an Xbox layout, and
+# West is BTN_Y, the top one. Guide holds the layer OGUI's own combos live in, and goes to OGUI's menu
+# over DBus when released alone (emulators/xemu/guide-hotkeys.yaml has why). TARGET_DEVICES is explicit
+# for the keyboard target, as there.
+version: 1
+kind: DeviceProfile
+name: RetroForge store sign-in
+description: D-pad and face buttons as the keys a web page moves and presses with
+target_devices:
+  - xbox-elite
+  - keyboard
+  - mouse
+
+mapping:
+  - name: Guide holds the Guide layer (and goes to the shell's menu over DBus)
+    source_event:
+      gamepad:
+        button: Guide
+    target_events:
+      - layer:
+          name: guide
+      - dbus: ui_guide
+
+  - name: D-pad up -> Up
+    source_event:
+      gamepad:
+        button: DPadUp
+    target_events:
+      - keyboard: KeyUp
+
+  - name: D-pad down -> Down
+    source_event:
+      gamepad:
+        button: DPadDown
+    target_events:
+      - keyboard: KeyDown
+
+  - name: D-pad left -> Left
+    source_event:
+      gamepad:
+        button: DPadLeft
+    target_events:
+      - keyboard: KeyLeft
+
+  - name: D-pad right -> Right
+    source_event:
+      gamepad:
+        button: DPadRight
+    target_events:
+      - keyboard: KeyRight
+
+  - name: A -> Enter (follow a link, press a button, submit)
+    source_event:
+      gamepad:
+        button: South
+    target_events:
+      - keyboard: KeyEnter
+
+  - name: B -> Escape
+    source_event:
+      gamepad:
+        button: East
+    target_events:
+      - keyboard: KeyEsc
+
+  - name: Y -> Space (a checkbox)
+    source_event:
+      gamepad:
+        button: West
+    target_events:
+      - keyboard: KeySpace
+
+  - name: X -> ui_osk (OpenGamepadUI on-screen keyboard)
+    source_event:
+      gamepad:
+        button: North
+    target_events:
+      - dbus: ui_osk
+
+  - name: L1 -> Shift+Tab
+    source_event:
+      gamepad:
+        button: LeftBumper
+    target_events:
+      - keyboard: KeyLeftShift
+      - keyboard: KeyTab
+
+  - name: R1 -> Tab
+    source_event:
+      gamepad:
+        button: RightBumper
+    target_events:
+      - keyboard: KeyTab
+
+layers:
+  - name: guide
+    mapping:
+      - name: Guide+A -> ui_quick (OpenGamepadUI quick bar)
+        source_event:
+          gamepad:
+            button: South
+        target_events:
+          - dbus: ui_quick
+
+      - name: Guide+X -> ui_osk (OpenGamepadUI on-screen keyboard)
+        source_event:
+          gamepad:
+            button: North
+        target_events:
+          - dbus: ui_osk

@@ -4,10 +4,11 @@ extends RefCounted
 ## Sign in opens the store's own sign-in page in a window on the device
 ## (.claude/plans/store-signin-window.plan.md): `store <s> sign-in` runs Chromium on OGUI's game
 ## display, which signin_window.gd puts in front as OGUI puts a game; the player signs in there by
-## touch and the on-screen keyboard. The window closes by itself once the store gives its code, the
-## code signs in, the row says whom it signed in and the store's library reloads (`changed`). The
-## first sign-in downloads Chromium first (~190 MB, plan D1), its progress in the row, with Cancel
-## under it; the Guide menu's Exit closes the window and cancels. Each store's tool is set up in the
+## touch or the gamepad (the helper declares stores/signin-gamepad.yaml), and the on-screen keyboard
+## comes up when a page's text field takes the focus (`typing`). The window closes by itself once the
+## store gives its code, the code signs in, the row says whom it signed in and the store's library
+## reloads (`changed`). The first sign-in downloads Chromium first (~190 MB, plan D1), its progress in
+## the row, with Cancel under it; the Guide menu's Exit closes the window and cancels. Each store's tool is set up in the
 ## background when the page first shows (`store <s> setup`); a store whose tool is not set up yet sets
 ## it up first, its progress in the row.
 
@@ -216,6 +217,8 @@ func _on_event(data: Dictionary, store: String) -> void:
 					_show_panel(store, false)
 					s["row"].description = "Signing in to %s..." % title
 					s["row"].grab_focus.call_deferred()
+		"typing":
+			_window.typing(bool(data.get("on", false)))
 		"signed_in":
 			_notify("Signed in to %s as %s." % [title, data.get("account", "")])
 			changed.emit(store)

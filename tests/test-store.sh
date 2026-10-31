@@ -280,7 +280,7 @@ BASE_ENV = dict(os.environ, HOME=HOME, XDG_CONFIG_HOME=os.path.join(HOME, ".conf
                 RETROFORGE_STORE_API=API, RETROFORGE_STORE_TOOL_LEGENDARY=LEGENDARY, RETROFORGE_STORE_TOOL_GOGDL=GOGDL,
                 RETROFORGE_STORE_RUNTIME=RUNTIME, RETROFORGE_STEAM_COMPAT_TOOLS=COMPAT, RETROFORGE_STORE_RUN=RUNNER,
                 RETROFORGE_STORE_CHROMIUM=os.path.join(FAKE, "chromium"), RETROFORGE_STORE_SCALE="1.5",
-                RETROFORGE_STEAM_ROOT=os.path.join(HOME, "no-steam"))
+                RETROFORGE_STEAM_ROOT=os.path.join(HOME, "no-steam"), RETROFORGE_GAME_PROFILE=os.path.join(FAKE, "game_profile"))
 
 
 def store(*args, env=None, unset=()):
@@ -337,7 +337,9 @@ ok("fake tool ['x']" in r.stdout, "it runs unpacked", r.stdout + r.stderr)
 
 # ---- sign-in -------------------------------------------------------------------------------------
 # A fake Chromium on the DevTools pipe (fds 3 and 4): FAKE_CHROMIUM picks how the store's pages go.
-# It records its command line, its profile and its pid, and leaves a cookie in the profile.
+# It records its command line, its profile, its pid and the gamepad profile declared when it started, and
+# leaves a cookie in the profile. The focused-field asks (TYPING) are logged as "typing", not as the
+# Runtime.evaluate of a page read, and answer "" (no field) unless the mode is "typing".
 EPIC_REDIRECT = "https://www.epicgames.com/id/api/redirect?clientId=34a02cf8f4414e29b15921876da36f9a&responseType=code"
 CHROME_LOG = os.path.join(FAKE, "chromium.json")
 CHROMIUM = os.path.join(FAKE, "chromium")
@@ -348,9 +350,13 @@ mode = os.environ.get("FAKE_CHROMIUM", "gog")
 argv = sys.argv[1:]
 profile = next(a.split("=", 1)[1] for a in argv if a.startswith("--user-data-dir="))
 child = subprocess.Popen(["sleep", "300"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) if mode == "stubborn" else None
+decl = os.environ.get("RETROFORGE_GAME_PROFILE", "")
 json.dump({"argv": argv, "profile": profile, "profile_mode": os.stat(profile).st_mode & 0o777, "pid": os.getpid(),
-           "own_session": os.getsid(0) == os.getpid(), "display": os.environ.get("DISPLAY"), "child": child.pid if child else None, "methods": []},
+           "own_session": os.getsid(0) == os.getpid(), "display": os.environ.get("DISPLAY"), "child": child.pid if child else None,
+           "declared": open(decl).read() if decl and os.path.exists(decl) else None, "methods": []},
           open(sys.argv[0] + ".json", "w"))
+# what the page's focused field is at each ask, in mode "typing": none, a field, the same one, another, none
+fields = ["", "login.gog.com|0|username", "login.gog.com|0|username", "login.gog.com|1|password", ""]
 open(os.path.join(profile, "Cookies"), "w").write("session")
 print("chromium noise", flush=True)
 if mode == "stubborn":
@@ -368,7 +374,8 @@ while True:
     *msgs, buf = buf.split(b"\0")
     for raw in msgs:
         m = json.loads(raw)
-        methods.append(m["method"])
+        asks = m["method"] == "Runtime.evaluate" and "activeElement" in m.get("params", {}).get("expression", "")
+        methods.append("typing" if asks else m["method"])
         log = json.load(open(sys.argv[0] + ".json"))
         log["methods"] = methods
         json.dump(log, open(sys.argv[0] + ".json", "w"))
@@ -387,8 +394,17 @@ while True:
                 target("https://www.epicgames.com/id/api/redirect?clientId=x&responseType=code")
             elif mode == "close":
                 sys.exit(0)
+            elif mode == "replace":  # another launcher declares its profile over ours, then the window closes
+                open(decl, "w").write("/other/profile.yaml\n1\n")
+                sys.exit(0)
         elif m["method"] == "Target.attachToTarget":
             send({"id": m["id"], "result": {"sessionId": "S1"}})
+        elif asks:
+            field = fields.pop(0) if mode == "typing" and fields else ""
+            send({"id": m["id"], "sessionId": "S1", "result": {"result": {"type": "string", "value": field}}})
+            if mode == "typing" and not fields:
+                time.sleep(0.3)
+                sys.exit(0)
         elif m["method"] == "Runtime.evaluate":
             reads += 1
             code = os.environ.get("FAKE_EPIC_CODE", "0123456789abcdef0123456789abcdef")
@@ -518,6 +534,41 @@ ok(kinds(events) == ["open", "closed"] and chromium_log().get("methods", []).cou
 events, rc, err = sign_in("epic", "epic-error")
 ok(kinds(events) == ["open", "closed"] and chromium_log().get("methods", []).count("Runtime.evaluate") == 1,
    "an error answer stops the reading", str(chromium_log().get("methods")))
+
+CASE = "sign-in keyboard and gamepad"
+GAME_PROFILE = os.path.join(FAKE, "game_profile")
+events, rc, err = sign_in("gog", "typing")
+log = chromium_log()
+ok([e.get("on") for e in events if e.get("event") == "typing"] == [True, True, False]
+   and kinds(events)[:1] == ["open"] and kinds(events)[-1:] == ["closed"] and rc == 0,
+   "a text field takes the focus, then another one, then none: typing on, on, off", str(events) + err[-300:])
+ok("typing" in log.get("methods", []) and not {"Runtime.enable", "Page.addScriptToEvaluateOnNewDocument",
+                                               "Runtime.addBinding"} & set(log.get("methods", [])),
+   "the page is asked by evaluation alone: no Runtime domain, no binding, nothing injected", str(log.get("methods")))
+ok("--enable-spatial-navigation" in log.get("argv", []), "spatial navigation: the D-pad's arrow keys move between fields")
+decl = (log.get("declared") or "").split("\n")
+ok(decl[:1] == [os.path.join(PINS, "signin-gamepad.yaml")] and decl[1:2] and decl[1].isdigit()
+   and int(decl[1]) != log.get("pid"), "the sign-in's gamepad profile is declared to OGUI while the window is up, as the helper's",
+   str(decl))
+ok(not os.path.exists(GAME_PROFILE), "and withdrawn after")
+events, rc, err = sign_in("gog", "replace")
+ok(os.path.exists(GAME_PROFILE) and open(GAME_PROFILE).read() == "/other/profile.yaml\n1\n",
+   "a declaration another launcher made over ours since is not withdrawn by us")
+if os.path.exists(GAME_PROFILE):
+    os.remove(GAME_PROFILE)
+events, rc, err = sign_in("gog", "gog")
+ok(not [e for e in events if e.get("event") == "typing"], "no field ever focused: no typing event", str(events))
+profile = open(os.path.join(ROOT, "rootfs/overlay/usr/share/retroforge/stores/signin-gamepad.yaml")).read()
+rows = {b: re.search(rf"button: {b}\n\s+target_events:\n\s+- (\w+: \w+)", profile) for b in
+        ["DPadUp", "DPadDown", "DPadLeft", "DPadRight", "South", "East", "West", "North"]}
+ok({b: m.group(1) if m else None for b, m in rows.items()} == {
+    "DPadUp": "keyboard: KeyUp", "DPadDown": "keyboard: KeyDown", "DPadLeft": "keyboard: KeyLeft",
+    "DPadRight": "keyboard: KeyRight", "South": "keyboard: KeyEnter", "East": "keyboard: KeyEsc",
+    "West": "keyboard: KeySpace", "North": "dbus: ui_osk"},
+   "the pad: D-pad = arrow keys, A Enter, B Escape, Y Space, X the keyboard", str(rows))
+ok(re.search(r"button: Guide\n\s+target_events:\n\s+- layer:\n\s+name: guide\n\s+- dbus: ui_guide", profile)
+   and profile.count("dbus: ui_quick") == 1 and profile.count("dbus: ui_osk") == 2,
+   "Guide keeps OGUI's menu, Guide+A its quick bar and Guide+X its keyboard")
 
 CASE = "sign-in ends"
 events, rc, err = sign_in("gog", "close")

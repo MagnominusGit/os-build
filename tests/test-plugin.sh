@@ -123,6 +123,23 @@ PY2
 grep -q 'if not launch_manager.get_running().is_empty():' "$SRC/store_settings.gd" \
   && ok "Sign in waits for no game to run (the window takes its place; nothing gives it focus back)" \
   || bad "store_settings.gd signs in over a running game"
+# Nothing tells OGUI that a web page's text field has the focus: the helper's `typing` events do, and
+# the keyboard comes up as Guide+X brings it up over a game (X11 context, on the popup stack), only
+# when no other popup is up, and goes with the field unless the player opened it; never left behind.
+grep -q '_window.typing(bool(data.get("on", false)))' "$SRC/store_settings.gd" \
+  && python3 - "$SRC/signin_window.gd" <<'PY2' \
+  && ok "a page's text field taking the focus opens OGUI's keyboard into the window, losing it closes ours" \
+  || bad "the sign-in's typing events do not open/close OGUI's keyboard as Guide+X does, or leave it up after"
+import sys
+s = open(sys.argv[1]).read()
+body = s[s.index("func typing(on: bool)"):s.index("func _close_osk()")]
+rel = s[s.index("func release()"):]
+sys.exit(0 if all(x in body for x in ("if on and popup_state_machine.current_state() == null:",
+                                      "popup_state_machine.push_state(osk_state)", "state_machine.push_state(popup_state)",
+                                      "context.type = KeyboardContext.TYPE.X11", "osk.open(context)",
+                                      "elif not on and _osk_ours:"))
+         and "if popup_state_machine.current_state() == osk_state:" in s and "if _osk_ours:" in rel else 1)
+PY2
 # A store refusing the stored refresh token (revoked, expired) signs it out and is exit 3, like never
 # having signed in: the library reads the helper's stderr so the player is told to sign in again.
 grep -q 'out.append(OS.execute(tool, args, output, true))' "$SRC/library_store.gd" \

@@ -49,7 +49,10 @@
 #
 # SIGN-IN. RetroForge never takes a password. `sign-in` opens the store's own sign-in page in Chromium
 # (python/chromium_signin.py; .claude/plans/store-signin-window.plan.md), fullscreen over OGUI, where the
-# player signs in by touch and the on-screen keyboard; Google refuses sign-in in an embedded web view, so
+# player signs in by touch or the gamepad, and the on-screen keyboard: a `typing` event when a page's text
+# field takes or loses the focus opens or closes it, and <pins>/signin-gamepad.yaml (the D-pad as arrow
+# keys, A as Enter...) is declared to OGUI while the window is up, as retroforge-launch declares an
+# emulator's gamepad profile. Google refuses sign-in in an embedded web view, so
 # it is the real browser, set up at the first sign-in (BROWSER below). Chromium is driven over its
 # DevTools pipe, which opens no port, and the store's code is read where the store ends: GOG's in the
 # address it redirects to, Epic's in the JSON page of legendary's client. The window then closes and the
@@ -75,7 +78,7 @@
 # RETROFORGE_STORE_RUN (a command run with the game's command line instead of it), RETROFORGE_STORE_CHROMIUM
 # (a browser command instead of the set-up Chromium), RETROFORGE_STORE_SCALE (its scale instead of the
 # screen's), RETROFORGE_STORE_API (a server every https:// request goes to instead,
-# as <it>/<host>/<path>).
+# as <it>/<host>/<path>), RETROFORGE_GAME_PROFILE (the gamepad profile declaration's path).
 import csv
 import hashlib
 import json
@@ -102,6 +105,10 @@ DATA_HOME = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/shar
 CONFIG_HOME = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
 DATA = os.environ.get("RETROFORGE_STORE_DATA") or os.path.join(DATA_HOME, "retroforge", "stores")
 PINS = os.environ.get("RETROFORGE_STORE_PINS", "/usr/share/retroforge/stores")
+# Where OGUI (its patch 0024) reads the gamepad profile of the app in front: the profile's path, then the
+# pid owning the declaration (retroforge-launch's GAME_PROFILE_DECL).
+GAME_PROFILE_DECL = os.environ.get("RETROFORGE_GAME_PROFILE",
+                                   os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "opengamepadui", "game_profile"))
 STEAM_ROOT = os.environ.get("RETROFORGE_STEAM_ROOT") or os.path.join(DATA_HOME, "Steam")
 COMPAT_TOOLS = os.environ.get("RETROFORGE_STEAM_COMPAT_TOOLS", "/usr/lib/retroforge/steam-compat-tools")
 SAREK = "/usr/bin/retroforge-steam-sarek"
@@ -638,6 +645,31 @@ def sign_in_browser():
     return found["binary"], chromium_setup.environment(found)
 
 
+def declare_gamepad_profile():
+    """<pins>/signin-gamepad.yaml declared for the window (SIGN-IN above), True when it is. Best effort:
+    without it the window still takes touch and Guide+X's keyboard."""
+    profile = os.path.join(PINS, "signin-gamepad.yaml")
+    try:
+        os.makedirs(os.path.dirname(GAME_PROFILE_DECL), exist_ok=True)
+        with open(GAME_PROFILE_DECL + ".partial", "w") as f:
+            f.write(f"{profile}\n{os.getpid()}\n")
+        os.replace(GAME_PROFILE_DECL + ".partial", GAME_PROFILE_DECL)
+    except OSError as err:
+        log(f"could not declare the sign-in's gamepad profile: {err}")
+        return False
+    return True
+
+
+def withdraw_gamepad_profile():
+    """Our declaration goes, unless another launcher's has replaced it since."""
+    try:
+        with open(GAME_PROFILE_DECL) as f:
+            if f.read().split("\n")[1:2] == [str(os.getpid())]:
+                os.remove(GAME_PROFILE_DECL)
+    except OSError:
+        pass
+
+
 def sign_in(store, display=None):
     """SIGN-IN above: the store's page in Chromium until it shows a code, which then signs in. Events:
     browser setup (percent), open (pid), closed; then code, and signed_in (account) or error (message).
@@ -651,14 +683,19 @@ def sign_in(store, display=None):
     if forced and not re.fullmatch(r"[1-4](\.[0-9]{1,2})?", forced):
         raise Failed(f"RETROFORGE_STORE_SCALE is not a scale from 1 to 4: {forced}")
     scale = float(forced) if forced else chromium_signin.screen_scale(display)
+    declared = declare_gamepad_profile()
     try:
         reason, code = chromium_signin.run(
             binary, store.sign_in_url, env=env, scale=scale,
             code_in_url=store.code_in_url, reads_page=store.reads_page, code_in_page=store.code_in_page,
             stop_fd=sys.stdin.fileno(), timeout=SIGN_IN_TIMEOUT,
-            on_open=lambda pid: event(event="browser", state="open", pid=pid))
+            on_open=lambda pid: event(event="browser", state="open", pid=pid),
+            on_typing=lambda on: event(event="typing", on=on))
     except OSError as err:
         raise Failed(f"could not open Chromium: {err}")
+    finally:
+        if declared:
+            withdraw_gamepad_profile()
     event(event="browser", state="closed")
     if reason == "timeout":
         raise Failed(f"{SIGN_IN_TIMEOUT // 60} minutes without signing in")

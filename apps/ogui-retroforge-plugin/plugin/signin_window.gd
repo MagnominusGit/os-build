@@ -20,9 +20,14 @@ var gamescope := load("res://core/systems/gamescope/gamescope.tres") as Gamescop
 var launch_manager := load("res://core/global/launch_manager.tres") as LaunchManager
 var state_machine := load("res://assets/state/state_machines/global_state_machine.tres") as StateMachine
 var in_game_state := load("res://assets/state/states/in_game.tres") as State
+var osk := load("res://core/global/keyboard_instance.tres") as KeyboardInstance
+var popup_state_machine := load("res://assets/state/state_machines/popup_state_machine.tres") as StateMachine
+var osk_state := load("res://assets/state/states/osk.tres") as State
+var popup_state := load("res://assets/state/states/popup.tres") as State
 var logger := Log.get_logger("RetroForgeSignin", Log.LEVEL.INFO)
 var tree: SceneTree
 var _app: RunningApp
+var _osk_ours := false  # the keyboard is up because a page's text field took the focus (typing)
 
 
 func setup(scene_tree: SceneTree) -> RefCounted:
@@ -82,11 +87,38 @@ func _claim_windows(app: RunningApp, xwayland) -> void:
 		await tree.create_timer(POLL).timeout
 
 
+## A text field in the window took (on) or lost the focus (`typing` events, chromium_signin.py THE
+## KEYBOARD): OGUI's keyboard comes up typing into the window, as Guide+X brings it up over a game
+## (OGUI's input_manager.gd _osk_input), and goes once no field has the focus. Never over another
+## popup (the Guide menu), and a keyboard the player brought up is theirs to close.
+func typing(on: bool) -> void:
+	if _app == null:
+		return
+	if on and popup_state_machine.current_state() == null:
+		popup_state_machine.push_state(osk_state)
+		state_machine.push_state(popup_state)
+		var context := KeyboardContext.new()
+		context.type = KeyboardContext.TYPE.X11
+		osk.open(context)
+		_osk_ours = true
+	elif not on and _osk_ours:
+		_close_osk()
+
+
+func _close_osk() -> void:
+	_osk_ours = false
+	if popup_state_machine.current_state() == osk_state:
+		osk.close()
+		popup_state_machine.pop_state()
+
+
 ## The sign-in ended: the app stops if Chromium has not already, as OGUI stops one (state, then
 ## app_killed): OGUI drops it and its in-game state, and its running-game card and launch screen go.
 func release() -> void:
 	if _app == null:
 		return
+	if _osk_ours:
+		_close_osk()
 	var app := _app
 	_app = null
 	app.on_exit = Callable()

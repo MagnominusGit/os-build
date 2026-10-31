@@ -12,6 +12,11 @@
 # in the JSON page it ends on, read with Runtime.evaluate in that page together with the page's own
 # address, so a target that has gone elsewhere since is never read as Epic's.
 #
+# THE KEYBOARD. Nothing tells OGUI that a page's text field has the focus (an X11 window has no text-input
+# protocol), so its on-screen keyboard never came up. Every page is asked for its focused field every
+# TYPING_POLL s, and on_typing(True) runs when one takes the focus (or another one does), on_typing(False)
+# when none has it: the plugin opens and closes the keyboard (signin_window.gd).
+#
 # THE WINDOW. App mode (one window, no address bar), fullscreen, at screen height / 720 (plan F3: 1.5 on
 # 1080p, a 1280x720 page). Its profile is a private temporary folder, deleted after: no cookie outlives
 # the sign-in. Chromium has its own session (process group), so nothing of it outlives us either.
@@ -32,9 +37,30 @@ FLAGS = ["--ozone-platform=x11", "--start-fullscreen", "--no-first-run", "--no-d
          "--disable-sync", "--password-store=basic", "--disable-features=Translate",
          # The pipe alone marks every page automation-controlled (navigator.webdriver is true), and
          # Cloudflare's check on Epic then loops forever (Air X and Pocket FIT, 2026-10-29; plan F2).
-         "--disable-blink-features=AutomationControlled"]
+         "--disable-blink-features=AutomationControlled",
+         # The arrow keys move between a page's links, fields and buttons: the D-pad sends them
+         # (stores/signin-gamepad.yaml).
+         "--enable-spatial-navigation"]
 READ_PAGE = {"expression": "JSON.stringify([location.href, document.body ? document.body.innerText : ''])",
              "returnByValue": True}
+# The page's focused text field as a key that changes when another field takes the focus, "" when none
+# has it (through shadow roots and same-origin frames). Read like READ_PAGE, an evaluation that changes
+# nothing: no script injected, and the Runtime domain never enabled (its events are a bot check's tell).
+TYPING = {"expression": r"""(() => {
+  let e = document.activeElement;
+  for (;;) {
+    if (e && e.shadowRoot && e.shadowRoot.activeElement) { e = e.shadowRoot.activeElement; continue; }
+    let d = null;
+    try { d = e && e.contentDocument; } catch (_) {}
+    if (d && d.activeElement) { e = d.activeElement; continue; }
+    break;
+  }
+  if (!e || !(e.isContentEditable || e.tagName === "TEXTAREA" || (e.tagName === "INPUT"
+      && !/^(button|checkbox|color|file|hidden|image|radio|range|reset|submit)$/i.test(e.type)))) return "";
+  const all = Array.from(e.getRootNode().querySelectorAll("input,textarea,[contenteditable]"));
+  return [location.host, all.indexOf(e), e.name || e.id || e.type || ""].join("|");
+})()""", "returnByValue": True}
+TYPING_POLL = 0.5  # s between two asks of every page for its focused text field
 MAX_MESSAGE = 4 << 20  # bytes of one protocol message; more is not Chromium talking sensibly
 
 
@@ -199,12 +225,64 @@ class _Reader:
         return code
 
 
-def run(binary, url, *, env, scale, code_in_url, reads_page, code_in_page, stop_fd, timeout, on_open):
+class _Typing:
+    """THE KEYBOARD above: each page target attached once, asked for TYPING at every poll() past its
+    time (one ask in flight per page), and on_typing called when the focused field's key changes."""
+
+    def __init__(self, pipe, on_typing):
+        self.pipe, self.on_typing = pipe, on_typing
+        self.sessions = {}  # target id -> session
+        self.keys = {}  # target id -> its focused text field's key, "" for none
+        self.pending = {}  # message id -> ("attach" | "ask", target id)
+        self.shown = ""  # the key on_typing last heard of
+        self.due = 0.0  # time.monotonic() of the next asks
+
+    def take(self, m):
+        method, params = m.get("method"), m.get("params", {})
+        if method == "Target.targetCreated":
+            info = params.get("targetInfo", {})
+            tid = info.get("targetId")
+            if info.get("type") == "page" and tid and tid not in self.sessions:
+                self.pending[self.pipe.send("Target.attachToTarget", {"targetId": tid, "flatten": True})] = ("attach", tid)
+            return
+        if method in ("Target.targetDestroyed", "Target.detachedFromTarget"):
+            tid = params.get("targetId")
+            self.sessions.pop(tid, None)
+            self.keys.pop(tid, None)
+            self._tell()
+            return
+        what, tid = self.pending.pop(m.get("id"), (None, None))
+        if what == "attach" and "error" not in m and m.get("result", {}).get("sessionId"):
+            self.sessions[tid] = m["result"]["sessionId"]
+        elif what == "ask" and tid in self.sessions:
+            value = None if "error" in m else m.get("result", {}).get("result", {}).get("value")
+            self.keys[tid] = value if isinstance(value, str) else ""
+            self._tell()
+
+    def poll(self, now):
+        if now < self.due:
+            return
+        self.due = now + TYPING_POLL
+        asking = {tid for what, tid in self.pending.values() if what == "ask"}
+        for tid, session in self.sessions.items():
+            if tid not in asking:
+                self.pending[self.pipe.send("Runtime.evaluate", TYPING, session)] = ("ask", tid)
+
+    def _tell(self):
+        key = next((k for _, k in sorted(self.keys.items()) if k), "")
+        if key != self.shown:
+            self.shown = key
+            self.on_typing(bool(key))
+
+
+def run(binary, url, *, env, scale, code_in_url, reads_page, code_in_page, stop_fd, timeout, on_open,
+        on_typing=None):
     """Chromium on url until a page gives a code. (reason, code): ("code", code), ("closed", None) when
     the player closed the window, ("cancelled", None) when stop_fd reached its end (the plugin's
-    Cancel) or SIGTERM/SIGHUP came, ("timeout", None). on_open(pid) once Chromium runs. Raises OSError
-    when it cannot start. A signal only sets a flag, so Chromium is always closed and the profile
-    always deleted, however many come and whenever."""
+    Cancel) or SIGTERM/SIGHUP came, ("timeout", None). on_open(pid) once Chromium runs, on_typing(on)
+    as a page's text field takes or loses the focus (THE KEYBOARD). Raises OSError when it cannot
+    start. A signal only sets a flag, so Chromium is always closed and the profile always deleted,
+    however many come and whenever."""
     stopped = []
     old = {s: signal.signal(s, lambda *_: stopped.append(1)) for s in (signal.SIGTERM, signal.SIGHUP)}
     proc = pipe = None
@@ -213,13 +291,17 @@ def run(binary, url, *, env, scale, code_in_url, reads_page, code_in_page, stop_
         proc, pipe = _start(binary, url, profile, scale, env)
         on_open(proc.pid)
         reader = _Reader(pipe, code_in_url, reads_page, code_in_page)
+        typing = _Typing(pipe, on_typing) if on_typing else None
         try:
             pipe.send("Target.setDiscoverTargets", {"discover": True})
             deadline = time.monotonic() + timeout
             while (left := deadline - time.monotonic()) > 0:
                 if stopped:
                     return "cancelled", None
-                ready, _, _ = select.select([pipe.r, stop_fd], [], [], min(left, 1.0))
+                if typing:
+                    typing.poll(time.monotonic())
+                wait = min(left, TYPING_POLL if typing else 1.0)
+                ready, _, _ = select.select([pipe.r, stop_fd], [], [], wait)
                 if stop_fd in ready and not os.read(stop_fd, 4096):
                     return "cancelled", None
                 if pipe.r not in ready:
@@ -228,6 +310,8 @@ def run(binary, url, *, env, scale, code_in_url, reads_page, code_in_page, stop_
                 if msgs is None:
                     return "closed", None
                 for m in msgs:
+                    if typing:
+                        typing.take(m)
                     code = reader.take(m)
                     if code:
                         return "code", code
