@@ -91,15 +91,17 @@ set -eu
 HOME_DEV=/dev/retroforge/retroforge-home
 
 # Wait for udev to publish the home partition's symlink. Even ordered After systemd-udev-trigger,
-# the probe that creates the symlink is async, so settle the queue and then poll briefly. A card
-# without a home partition (nofail / old 2-partition test image) never shows it, so time out after
-# ~10s and no-op (x-systemd.growfs covers any fs at mount) rather than hang boot.
-udevadm settle --timeout=30 2>/dev/null || true
+# the probe that creates the symlink is async, so poll briefly, and settle the queue only if it has
+# still not appeared. Settling FIRST waited out the whole boot-time coldplug -- 2.6s on the Air X,
+# on the path to local-fs, on every boot (measured 2026-10-31) -- for one symlink that is usually
+# already there. A card without a home partition (nofail / old 2-partition test image) never shows
+# it, so give up and no-op (x-systemd.growfs covers any fs at mount) rather than hang boot.
 i=0
 while [ ! -b "$HOME_DEV" ] && [ "$i" -lt 50 ]; do
   sleep 0.2
   i=$((i + 1))
 done
+[ -b "$HOME_DEV" ] || udevadm settle --timeout=30 2>/dev/null || true
 if [ ! -b "$HOME_DEV" ]; then
   echo "[retroforge-grow-home] no ${HOME_DEV} after settle — nothing to grow (x-systemd.growfs covers any fs)"
   exit 0
@@ -125,7 +127,15 @@ udevadm settle 2>/dev/null || true
 
 # 2. Grow the ext4 to fill the (now enlarged) partition. No-op once it already fills it; non-fatal so
 #    a not-cleanly-unmounted fs can't block boot (x-systemd.growfs is the fallback).
-resize2fs "$HOME_PART" || echo "[retroforge-grow-home] resize2fs skipped/failed (non-fatal)" >&2
+if resize2fs "$HOME_PART"; then
+  # The crumb retroforge-grow-home.service is conditioned on: once /home fills the device there is
+  # nothing to grow again, so later boots skip the unit outright. It is on /var (mounted by the
+  # initramfs, so present when the condition is read), which an OTA copies to the new slot and a
+  # reflash starts without.
+  mkdir -p /var/lib/retroforge && : >/var/lib/retroforge/home-grown
+else
+  echo "[retroforge-grow-home] resize2fs skipped/failed (non-fatal)" >&2
+fi
 GROW
 chmod 0755 "$stage/usr/lib/retroforge/grow-home.sh"
 
@@ -136,6 +146,8 @@ Description=retroforge first-boot grow of /home to fill the storage device (syst
 Documentation=man:systemd-repart(8)
 DefaultDependencies=no
 ConditionDirectoryNotEmpty=/usr/lib/repart.d
+# Grown once is grown for good: grow-home.sh leaves this crumb when /home fills the device.
+ConditionPathExists=!/var/lib/retroforge/home-grown
 # After systemd-udev-trigger (block coldplug), else the home partition's by-label symlink isn't
 # published yet when we run and the grow no-ops (HW: grow-home ran 1s before "Found device" and
 # bailed). Before home.mount (not just local-fs-pre.target): the ext4 resize must complete while

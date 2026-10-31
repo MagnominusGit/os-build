@@ -28,8 +28,10 @@
 Description=retroforge gamescope session
 Documentation=file:///usr/bin/retroforge-session
 Conflicts=getty@tty1.service
-After=systemd-user-sessions.service getty@tty1.service systemd-logind.service dbus.socket
-Wants=dbus.socket systemd-logind.service
+# Not After=systemd-user-sessions.service: that waits for network.target. retroforge-allow-login
+# lifts pam_nologin's block once /home is mounted, which is all the login needs.
+After=retroforge-allow-login.service getty@tty1.service systemd-logind.service dbus.socket
+Wants=retroforge-allow-login.service dbus.socket systemd-logind.service
 PartOf=graphical.target
 StartLimitIntervalSec=0
 

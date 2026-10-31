@@ -1,0 +1,19 @@
+# Allow the session's login as soon as /home is mounted, rather than when the network is up.
+#
+# retroforge-session's PAM stack includes system-login, whose pam_nologin refuses a non-root login
+# while /run/nologin exists, and systemd-tmpfiles creates that file at boot. The stock
+# systemd-user-sessions.service removes it, but it is ordered After=network.target, so a session
+# ordered after it waited for NetworkManager: 1.4s on the Air X, on the path to the session, on
+# every boot (measured 2026-10-31). Nothing in the session needs the network to start; Wi-Fi comes
+# up underneath it as it always has. This runs the same `systemd-user-sessions start`, after what
+# a login does need, and the stock unit still runs later and finds the file already gone.
+[Unit]
+Description=retroforge allow the session login before the network is up
+Documentation=man:systemd-user-sessions.service(8)
+After=systemd-tmpfiles-setup.service home.mount nss-user-lookup.target
+Before=retroforge-session.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/lib/systemd/systemd-user-sessions start
