@@ -18,7 +18,8 @@
 #   - the sha256 is what the plugin checks the download against (and must match GitHub's per-asset
 #     digest): a malformed one would make every install fail, or, if skipped, verify nothing;
 #   - an emulator the image cannot launch (no /usr/share/retroforge/emulators/<emu>/emulator.json), or one serving a
-#     system launch.conf maps elsewhere, would download fine and then never start;
+#     system launch.conf maps elsewhere, would download fine and then never start; an app (no
+#     systems, Quiver Launcher) is opened from Apps only, so launch.conf must map nothing to it;
 #   - a plain-http URL would let anyone on the path swap the AppImage;
 #   - an "unpack" entry (PortMaster, a zip unpacked into the player's home) with a target outside
 #     the home, or "self_update" on an AppImage, would be refused by retroforge-emu at every install.
@@ -173,8 +174,15 @@ for emu, e in emus.items():
             bad(case, f"systems {wrong} are not mapped to {emu} in launch.conf")
         else:
             ok(case, f"systems {systems} map to it in launch.conf")
+    elif systems == []:
+        # An app (Quiver Launcher): opened from Apps, never by a ROM card.
+        mapped = sorted(s for s, m in launch.items() if m == emu)
+        if mapped:
+            bad(case, f"systems is empty but launch.conf maps {mapped} to it")
+        else:
+            ok(case, "an app: no system, and launch.conf maps none to it")
     else:
-        bad(case, "systems is not a non-empty list")
+        bad(case, "systems is not a list")
 
     tag = e["tag"]
     tags = None

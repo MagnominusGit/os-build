@@ -284,6 +284,22 @@
         "name": "MIT",
         "url": "https://github.com/PortsMaster/PortMaster-GUI/blob/main/LICENSE"
       }
+    },
+    "quiver": {
+      "name": "Quiver Launcher",
+      "author": "Thomas Georgiadis (based on SirDiabo's GithubLauncher)",
+      "systems": [],
+      "github": "tgeorgiadis/quiver-launcher",
+      "tag": "v3.5.1",
+      "tag_pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "asset": "^QuiverLauncher-linux-arm64\\.AppImage$",
+      "sha256": "d1d84d2dc38e68999dc65d7a53cf09005bf7db5f17e85b585c1d3e170822fb18",
+      "size": 52525576,
+      "homepage": "https://quiverlauncher.com/",
+      "licence": {
+        "name": "MIT",
+        "url": "https://github.com/tgeorgiadis/quiver-launcher/blob/main/LICENSE"
+      }
     }
   }
 }

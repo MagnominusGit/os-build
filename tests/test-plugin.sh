@@ -170,6 +170,14 @@ s = open(sys.argv[1]).read()
 sep, add = s.find("_toggle.separator_visible = false"), s.find("box.add_child(_toggle)")
 sys.exit(0 if 0 <= sep < add and s.find('["RetroForgeSteamKeep", ') > 0 else 1)
 PY2
+# Main menu > Quiver shows only while retroforge-emu has an installed AppImage for it, and opens what
+# Apps > Quiver Launcher's Open does (retroforge-launch --gui quiver), with a definition in the image.
+grep -q '_quiver_button = _add_menu_button(buttons, "RetroForgeQuiverButton", "Quiver", _steam_button, _open_quiver)' "$SRC/plugin.gd" \
+  && grep -q '_quiver_button.visible = FileAccess.file_exists(OS.get_environment("HOME").path_join("emulators/quiver/current"))' "$SRC/plugin.gd" \
+  && grep -q 'item.args = PackedStringArray(\["--gui", "quiver"\])' "$SRC/plugin.gd" \
+  && [ -f "$ROOT/rootfs/overlay/usr/share/retroforge/emulators/quiver/emulator.json" ] \
+  && ok "Main menu > Quiver: shown once Quiver is installed, opens retroforge-launch --gui quiver" \
+  || bad "plugin.gd's Quiver button is missing, shows regardless of the install, or launches something else"
 
 # =================================================================================================
 CASE="zip"
