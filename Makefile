@@ -37,7 +37,6 @@ SIGN_IMG  ?= retroforge-sign
 #                carried by the RAUC bundle manifest. Empty (a local build) renders as `dev`, and
 #                the bundle then identifies itself by its build timestamp instead. CI sets it from
 #                the release tag. There is no separate bundle-version knob; see below.
-#   ESP          mounted EFI System Partition, for `make deploy`.
 #   RETROFORGE_DEV=1  build a dev image. `set -a; . ./dev.env; set +a` sets this and the rest;
 #                dev.env is TRACKED and secret-free, and sources dev.env.local (gitignored) for
 #                Wi-Fi creds. A RELEASE image (no RETROFORGE_DEV) builds locally too — it just
@@ -278,11 +277,9 @@ SPLASH_SRC   := apps/retroforge-splash/Makefile apps/retroforge-splash/src/retro
 # The asset is sized from the widest panel in the device registry (image/mksplash.sh reads it and
 # fails the build when it outgrows the render box), so a new board's conf has to re-run it.
 SPLASH_GEOM  := $(wildcard rootfs/overlay/usr/lib/retroforge/devices/*.conf)
-# Stage-1 steamcl (boot/steamcl.sh). The rule's target is steamcl.efi, but the run also emits
-# holo-bootconf, steamcl-version and fonts/default.pf2 into the same out/boot.
-STEAMCL      := $(OUT)/boot/steamcl.efi
-# Stage-2 GRUB (boot/grub.sh). Co-products in the same out/boot: grub-a.cfg, grub-b.cfg,
-# fonts/dejavu-mono.pf2 and grubenv (the pristine stage-2 env block the ESP gets).
+# GRUB (boot/grub.sh). Co-products in the same out/boot: grub-esp.efi (the ESP GRUB), grub-a.cfg,
+# grub-b.cfg, fonts/, grubenv (the pristine env block the ESP gets), grub-editenv (for RAUC on the
+# device) and steamcl-version (what an older root's update hook expects beside the ESP GRUB).
 GRUB         := $(OUT)/boot/grubaa64.efi
 SDCARD       := $(OUT)/images/sdcard.img
 # The LD_PRELOAD shim that moves a program's SIGTERM handler onto its GLib main loop
@@ -378,8 +375,8 @@ RETROFORGE_CCACHE ?= $(if $(CI),0,1)
 # ==============================================================================
 .PHONY: help all image toolchain kernel fw-linux fw-qcom base overlay verify-lock check-hw-paths \
         rootfs relock installer installer-root relock-installer verify-image \
-        initramfs splash plugin sigdefer gptk-interpose hidemenu mesa-x86 steamcl grub sdcard verify-card test test-disk bundle sign-bundle publish-bundle \
-        deploy clean clean-base clean-overlay clean-ccache distclean
+        initramfs splash plugin sigdefer gptk-interpose hidemenu mesa-x86 grub sdcard verify-card test test-disk bundle sign-bundle publish-bundle \
+        clean clean-base clean-overlay clean-ccache distclean
 
 # An always-out-of-date prerequisite, for rules that must re-evaluate their own inputs every run
 # rather than trust a prerequisite's mtime. Only $(KERNEL_SRC_HASH) uses it; see the note there.
@@ -412,8 +409,7 @@ sigdefer:  $(SIGDEFER_LIB) ## Build the Snes9x SIGTERM shim, libretroforge-sigde
 hidemenu:  $(HIDEMENU_LIB) ## Build the melonDS second-window menu shim, libretroforge-hidemenu.so (in container)
 mesa-x86:  $(MESA_X86_STAMP) ## Build our x86_64 + i686 Mesa for the FEX guest's overlay (x86_64 container)
 gptk-interpose: $(GPTK_LIB) ## Build PortMaster gptokeyb2's pad interposer (in container)
-steamcl:   $(STEAMCL)      ## Build the stage-1 steamcl + steamos-bootconf (in container)
-grub:      $(GRUB)         ## Build the stage-2 GRUB + per-slot grub.cfg (in container)
+grub:      $(GRUB)         ## Build the ESP GRUB + per-slot grub.cfg (in container)
 sdcard:    $(SDCARD)       ## Build the flashable SD-card image (in container)
 
 # Asserts the BUILT card the way guard-rootfs.sh asserts the built tree — the guard stops at the
@@ -808,12 +804,12 @@ $(VERSION_STAMP):
 	@mkdir -p $(@D) && rm -f work/.rootfs-version-* && touch $@
 	@echo "[retroforge] rootfs version: $(if $(RETROFORGE_VERSION),$(RETROFORGE_VERSION),dev)"
 
-# $(INITRAMFS), $(STEAMCL) and $(GRUB) are prerequisites because the root CARRIES its own boot
+# $(INITRAMFS) and $(GRUB) are prerequisites because the root CARRIES its own boot
 # half: /boot/{Image,initramfs-retroforge.img,dtbs} that the slot's stage 2 boots, plus the
 # /usr/lib/retroforge/boot mirror the RAUC hook refreshes the ESP and the slot's efi partition FROM.
 # That is what makes "this root and the software that boots it came from one build" true by
 # construction. No cycle: the initramfs is built from work/base, never from the assembled root.
-$(ROOTFS): $(KERNEL) $(INITRAMFS) $(STEAMCL) $(GRUB) $(BASE_STAMP) $(FW_LINUX) $(FW_QCOM) $(PLUGIN_ZIP) $(SIGDEFER_LIB) $(GPTK_LIB) $(HIDEMENU_LIB) $(MESA_X86_DEP) $(ASSEMBLE_SRC) $(MODE_STAMP) $(VERSION_STAMP) $(SCRAPER_STAMP) | $(BUILD_STAMP)
+$(ROOTFS): $(KERNEL) $(INITRAMFS) $(GRUB) boot/esp-dtbs.sh $(BASE_STAMP) $(FW_LINUX) $(FW_QCOM) $(PLUGIN_ZIP) $(SIGDEFER_LIB) $(GPTK_LIB) $(HIDEMENU_LIB) $(MESA_X86_DEP) $(ASSEMBLE_SRC) $(MODE_STAMP) $(VERSION_STAMP) $(SCRAPER_STAMP) | $(BUILD_STAMP)
 	$(DOCKER) $(DEV_ENV) $(SCRAPER_ENV) $(ID_ENV) -e RETROFORGE_DEBUG -e RETROFORGE_X86_MESA $(BUILD_IMG) \
 	  $(ROOTFS_DIR)/assemble-rootfs.sh /src/work/base
 
@@ -850,23 +846,18 @@ $(MESA_X86_STAMP): $(MESA_X86_SRC)
 $(SPLASH_ASSET): $(IMAGE_DIR)/mksplash.sh $(IMAGE_DIR)/png2nds1.py $(IMAGE_DIR)/splash/logo.svg $(IMAGE_DIR)/splash/logo.png $(SPLASH_GEOM) | $(BUILD_STAMP)
 	$(INBUILD) $(IMAGE_DIR)/mksplash.sh
 
-# Stage-1 steamcl + the steamos-bootconf binary the OS side installs (boot/steamcl.sh, pinned
-# source). Independent of the kernel: it is bootloader software, not a payload.
-$(STEAMCL): boot/steamcl.sh boot/steamos-efi.pin $(wildcard boot/patches/steamos-efi/*.patch) | $(BUILD_STAMP)
-	$(INBUILD) boot/steamcl.sh
-
-# Stage-2 GRUB + the two per-slot grub.cfg files + grubenv. The patch set and the board catalog are
+# The ESP GRUB + the two per-slot grub.cfg files + grubenv. The patch set and the board catalog are
 # prerequisites because both change the artifact: a new patch changes grubaa64.efi, and a new
 # board row changes the configs generated beside it. image/partition-table.txt is in there for
 # the same reason -- the configs address partitions by index out of that file.
 #
-# THE CO-PRODUCTS ARE NOT SEPARATE TARGETS, here or in the steamcl rule above, and the cost is worth
+# THE CO-PRODUCTS ARE NOT SEPARATE TARGETS, and the cost is worth
 # knowing: make only stats grubaa64.efi, so deleting a co-product on its own does NOT retrigger this
 # rule. It fails at the consumer instead -- rootfs/assemble-rootfs.sh and image/make-sdcard.sh both
 # check each file by name and name this script in the error. Loud, and one recipe run rather than
 # four. Giving grubenv its own rule would mean either running boot/grub.sh twice or minting the
 # block outside it, which is the second writer that shipping it as an artifact exists to remove.
-$(GRUB): boot/grub.sh boot/gen-grub-cfg.sh boot/grub.pin boot/boards.map \
+$(GRUB): boot/grub.sh boot/gen-grub-cfg.sh boot/gen-esp-cfg.sh boot/grub.pin boot/boards.map \
          $(IMAGE_DIR)/partition-table.txt $(wildcard boot/patches/grub/*.patch) | $(BUILD_STAMP)
 	$(INBUILD) boot/grub.sh
 
@@ -880,7 +871,7 @@ $(VARIMG_B): $(ROOTFS)
 # slot B for a dev card and leaves it empty for a release card, and an unforwarded RETROFORGE_DEV
 # would build every card release-shaped. No mode stamp is needed on top: $(ROOTFS) already depends
 # on $(MODE_STAMP), so flipping the mode rebuilds the rootfs and this rule with it.
-$(SDCARD): $(ROOTFS) $(VARIMG) $(VARIMG_B) $(STEAMCL) $(GRUB) $(IMAGE_DIR)/make-sdcard.sh | $(BUILD_STAMP)
+$(SDCARD): $(ROOTFS) $(VARIMG) $(VARIMG_B) $(GRUB) boot/esp-dtbs.sh $(IMAGE_DIR)/make-sdcard.sh | $(BUILD_STAMP)
 	$(DOCKER) -e RETROFORGE_DEV -e RETROFORGE_SLOT_B $(BUILD_IMG) $(IMAGE_DIR)/make-sdcard.sh
 
 # Signed RAUC OTA bundle (Phase 4). Dev builds mint an ephemeral cert. For a real signature use
@@ -932,13 +923,6 @@ publish-bundle: ## Publish BUNDLE=<file.raucb> to the OTA bucket (host; needs th
 	@test -n "$(BUNDLE)" || { echo "pass BUNDLE=out/images/retroforge-<version>.raucb" >&2; exit 2; }
 	$(OTA_DIR)/publish-bundle.sh "$(BUNDLE)" $(CHANNEL)
 
-
-# ==============================================================================
-# Deploy (host) — copy the stage-1 steamcl tree onto a mounted ESP
-# ==============================================================================
-deploy: $(STEAMCL) ## Install the stage-1 steamcl tree onto ESP=<mountpoint>
-	@test -n "$(ESP)" || { echo "pass ESP=<esp-mountpoint>" >&2; exit 2; }
-	boot/deploy.sh $(ESP)
 
 # ==============================================================================
 # Cleaning

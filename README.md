@@ -136,7 +136,7 @@ device.
 | `packages/` | From-source overlay: PKGBUILDs + source pins for what we patch or version-bump, plus the builder that turns them into a local pacman repo |
 | `kernel/` | Unified kernel: config fragments, patches, all device trees, firmware embed list |
 | `firmware/` | Vendor firmware fetch/verify recipes + their pins |
-| `boot/` | Two-stage UEFI boot: steamcl (stage 1) + GRUB (stage 2), both built from pinned sources |
+| `boot/` | UEFI boot: the ESP GRUB picks the slot from RAUC's state, the per-slot stage-2 config picks the board; GRUB from a pinned release |
 | `apps/retroforge-splash/` | The boot splash drawer |
 | `tests/` | Every offline suite. `make test` runs the host ones; the signing and disk suites need a container |
 | `build/` | Where the build itself is pinned: the cross-compile `Dockerfile`, the builder digest and the repo snapshot |
