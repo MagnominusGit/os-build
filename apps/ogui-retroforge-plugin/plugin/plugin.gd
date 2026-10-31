@@ -40,7 +40,6 @@ var _scroll_tween: Tween  # a library tab's scroll to its focused card (_scroll_
 var _emulators_button: Control
 var _emulators_screen: Control
 var _steam_button: Control  # Main menu > Steam (_add_menu_button)
-var _quiver_button: Control  # Main menu > Quiver (_add_menu_button)
 var _game_settings_page: Control
 var _hardware_card: Control
 ## Input boost (see _input): how long the UI renders every frame after the last input.
@@ -156,7 +155,7 @@ func unload() -> void:
 	_tabs.clear()
 	if main_menu_state.state_entered.is_connected(_show_app_buttons):
 		main_menu_state.state_entered.disconnect(_show_app_buttons)
-	for node in [_emulators_button, _emulators_screen, _steam_button, _quiver_button]:
+	for node in [_emulators_button, _emulators_screen, _steam_button]:
 		if is_instance_valid(node):
 			node.queue_free()
 	if is_instance_valid(_game_settings_page):
@@ -263,7 +262,6 @@ func _add_emulators_screen() -> void:
 	if library_button:
 		buttons.move_child(_emulators_button, library_button.get_index() + 1)
 	_steam_button = _add_menu_button(buttons, "RetroForgeSteamButton", "Steam", _emulators_button, _open_steam)
-	_quiver_button = _add_menu_button(buttons, "RetroForgeQuiverButton", "Quiver", _steam_button, _open_quiver)
 	main_menu_state.state_entered.connect(_show_app_buttons)
 	_show_app_buttons(null)
 	var focus_group := buttons.find_child("FocusGroup", false, false)
@@ -287,9 +285,9 @@ func _add_proton_rows(box: Node) -> void:
 		row.attach(box)
 
 
-## Main menu > Steam and > Quiver, under Apps while each is installed (looked at each time the main
-## menu opens): what Apps > Steam Client's and Apps > Quiver Launcher's Open start. The launch's
-## in-game state closes the main menu; the popup machine is cleared as OGUI's own buttons do.
+## Main menu > Steam, under Apps while Steam Client is installed (looked at each time the main
+## menu opens): what Apps > Steam Client's Open starts. The launch's in-game state closes the main
+## menu; the popup machine is cleared as OGUI's own buttons do.
 func _add_menu_button(buttons: Node, node_name: String, text: String, after: Control, on_press: Callable) -> Control:
 	var button: Control = load("res://core/ui/components/card_button.tscn").instantiate()
 	button.name = node_name
@@ -308,8 +306,6 @@ func _add_menu_button(buttons: Node, node_name: String, text: String, after: Con
 
 func _show_app_buttons(_from: State) -> void:
 	_steam_button.visible = SteamApps.client_installed(SteamApps.steam_root())
-	# retroforge-emu points `current` at the installed AppImage.
-	_quiver_button.visible = FileAccess.file_exists(OS.get_environment("HOME").path_join("emulators/quiver/current"))
 
 
 func _open_steam() -> void:
@@ -318,17 +314,6 @@ func _open_steam() -> void:
 	item.command = "steam"
 	item.args = SteamApps.ui_args("steam://open/bigpicture")
 	item.installed = true
-	launch_manager.launch(item)
-
-
-## As Apps > Quiver Launcher's Open (apps_page.gd _open): its window, launched like a game.
-func _open_quiver() -> void:
-	var item := LibraryLaunchItem.new()
-	item.name = "Quiver Launcher"
-	item.command = "/usr/bin/retroforge-launch"
-	item.args = PackedStringArray(["--gui", "quiver"])
-	item.installed = true
-	item._provider_id = LIBRARY_ID  # its EXIT hook reports a missing emulator
 	launch_manager.launch(item)
 
 

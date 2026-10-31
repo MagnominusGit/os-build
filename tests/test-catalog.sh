@@ -19,7 +19,7 @@
 #     digest): a malformed one would make every install fail, or, if skipped, verify nothing;
 #   - an emulator the image cannot launch (no /usr/share/retroforge/emulators/<emu>/emulator.json), or one serving a
 #     system launch.conf maps elsewhere, would download fine and then never start; an app (no
-#     systems, Quiver Launcher) is opened from Apps only, so launch.conf must map nothing to it;
+#     systems) is opened from Apps only, so launch.conf must map nothing to it;
 #   - a plain-http URL would let anyone on the path swap the AppImage;
 #   - an "unpack" entry (PortMaster, a zip unpacked into the player's home) with a target outside
 #     the home, or "self_update" on an AppImage, would be refused by retroforge-emu at every install.
@@ -175,7 +175,7 @@ for emu, e in emus.items():
         else:
             ok(case, f"systems {systems} map to it in launch.conf")
     elif systems == []:
-        # An app (Quiver Launcher): opened from Apps, never by a ROM card.
+        # An app: opened from Apps, never by a ROM card.
         mapped = sorted(s for s, m in launch.items() if m == emu)
         if mapped:
             bad(case, f"systems is empty but launch.conf maps {mapped} to it")
