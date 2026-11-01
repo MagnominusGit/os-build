@@ -144,7 +144,9 @@ splash_start() {
       --font /usr/share/retroforge/splash/font.ttf \
       --status /run/retroforge/splash/status \
       --takeover /run/retroforge/splash/takeover \
+      --ready /run/retroforge/splash/ready \
       >/dev/kmsg 2>&1 &
+  SPLASH_PID=$!
 }
 splash_start
 # retroforge.efi= wins when both are present. It comes from the generated grub.cfg, which knows
@@ -299,6 +301,19 @@ mkdir -p /run/retroforge
 
 [ "$overlay_ok" -eq 1 ] || warn "DEGRADED: handing off to systemd on a writable, un-overlaid root"
 [ "$efi_ok" -eq 1 ] || warn "DEGRADED: /efi is not mounted — updates and boot confirmation will fail"
+
+# The drawer reads its logo, its font and the run directory by path, so it must have them before
+# switch_root empties this root. It usually does (the Air X: before root is even mounted), but where
+# the root turns up at once the pivot came first: on the Pocket FIT Elite and the RP5 the drawer lost
+# all three and kept DRM master from the session for good (2026-11-01). It creates the ready file
+# once it has them.
+if [ -n "${SPLASH_PID:-}" ]; then
+  _i=0
+  while [ ! -e /run/retroforge/splash/ready ] && kill -0 "$SPLASH_PID" 2>/dev/null && [ "$_i" -lt 200 ]; do
+    sleep 0.01; _i=$((_i + 1))
+  done
+  [ -e /run/retroforge/splash/ready ] || warn "the splash did not get ready; switching root without it"
+fi
 
 # systemd holds back every mount unit while its mount-table watcher is rate limited, past 5 changes
 # a second by default, and the boot's own mounts go past that: /tmp and /esp, then /home, which

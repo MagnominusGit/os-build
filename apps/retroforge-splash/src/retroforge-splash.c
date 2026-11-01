@@ -1216,6 +1216,7 @@ static void usage(void) {
         "  --font PATH                    TrueType font for the status line\n"
         "  --status PATH                  status file, re-read every tick\n"
         "  --takeover PATH                handover handshake file (drm only)\n"
+        "  --ready PATH                   created once everything read by path is in hand\n"
         "  --rotate auto|0|90|180|270     default auto (the panel's own orientation property)\n"
         "  --bg 0xRRGGBB                  background colour\n"
         "  --logo-height PX / --text-height PX / --gap PX   layout overrides\n"
@@ -1242,6 +1243,7 @@ int main(int argc, char **argv) {
     const char *bgs      = arg(argc, argv, "--bg", NULL);
     const char *out      = arg(argc, argv, "--out", "/tmp/retroforge-splash.ppm");
     const char *handoff  = arg(argc, argv, "--handoff", NULL);
+    const char *ready    = arg(argc, argv, "--ready", NULL);
     anim_tick            = (unsigned)atoi(arg(argc, argv, "--tick", "0"));
     int keep_vt          = flag(argc, argv, "--keep-vt");
     int req_w            = atoi(arg(argc, argv, "--width", "0"));
@@ -1334,6 +1336,13 @@ int main(int argc, char **argv) {
         takeover_fd = open_parent_dir(takeover, takeover_name, sizeof takeover_name);
         if (takeover_fd < 0) note("cannot open the directory holding %s: %s", takeover, strerror(errno));
     }
+    // The initramfs waits for this before switch_root empties our root: where the root turns up at
+    // once, the pivot used to come first, and the logo, the font and both directories were gone.
+    if (ready) {
+        int fd = open(ready, O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
+        if (fd >= 0) close(fd);
+        else note("cannot create %s: %s", ready, strerror(errno));
+    }
 
     char cur[512] = { 0 }, shown[512] = { 0 };
     read_line_at(status_fd, status_name, cur, sizeof cur);
@@ -1380,6 +1389,14 @@ int main(int argc, char **argv) {
 
         // Keep retrying the first modeset: on the initramfs path the DPU may still be binding.
         if (use_drm && !dr.crtc_on) present();
+
+        // With no takeover file to read, nothing can ask us for the display, and holding master
+        // would keep it from the session for good. Hand it on as soon as the first frame is up.
+        if (use_drm && takeover && takeover_fd < 0 && dr.crtc_on) {
+            note("no takeover file to wait for; yielding the display now");
+            yielded = 1;
+            break;
+        }
 
         anim_tick++;
         draw_bar();

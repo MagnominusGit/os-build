@@ -442,10 +442,15 @@ mkdir -p "$RUN"
 printf 'Starting RetroForge\n' >"$RUN/status"
 
 "$BIN" --backend null --width 640 --height 480 --image "$ASSET" --font "$FONT" \
-       --status "$RUN/status" --takeover "$RUN/takeover" >"$TMP/null.log" 2>&1 &
+       --status "$RUN/status" --takeover "$RUN/takeover" --ready "$RUN/ready" >"$TMP/null.log" 2>&1 &
 drawer=$!
 # Give it time to announce ownership before anything moves.
 for _ in 1 2 3 4 5 6 7 8 9 10; do [[ -s "$RUN/takeover" ]] && break; sleep 0.2; done
+
+# The initramfs pivots only once this exists, so it has to be there before the pivot below.
+[[ -e "$RUN/ready" ]] \
+    && ok "the drawer creates its ready file once it has what it reads by path" \
+    || bad "no ready file: the initramfs would wait out its 2 s and pivot under the drawer"
 
 if [[ "$(cat "$RUN/takeover" 2>/dev/null)" == "$drawer" ]]; then
     ok "the drawer announces its own pid in the takeover file"
@@ -485,6 +490,24 @@ wait "$drawer" 2>/dev/null
 grep -q "yielding display to 'sddm'" "$TMP/null.log" \
     && ok "it names who it yielded to" \
     || bad "no 'yielding display' line (log: $(tr '\n' '|' <"$TMP/null.log" | head -c 200))"
+
+# A drawer started after the pivot has no run directory, so no successor can ask it for the
+# display. It must hand it on by itself rather than hold it (the SM8xxx boards, 2026-11-01).
+"$BIN" --backend null --width 640 --height 480 --image "$ASSET" --font "$FONT" \
+       --status "$TMP/gone/status" --takeover "$TMP/gone/takeover" >"$TMP/orphan.log" 2>&1 &
+orphan=$!
+gone=0
+for _ in $(seq 1 25); do
+    kill -0 "$orphan" 2>/dev/null || { gone=1; break; }
+    sleep 0.2
+done
+if [[ $gone -eq 1 ]] && grep -q "no takeover file to wait for" "$TMP/orphan.log"; then
+    ok "a drawer that cannot hear a takeover yields the display by itself"
+else
+    bad "a drawer with no run directory kept the display (log: $(tr '\n' '|' <"$TMP/orphan.log" | head -c 200))"
+    kill "$orphan" 2>/dev/null
+fi
+wait "$orphan" 2>/dev/null
 
 # The diagnostics themselves: one write() per message, because in the initramfs stderr is
 # /dev/kmsg and every write becomes a separate record. Splitting a message across three writes
