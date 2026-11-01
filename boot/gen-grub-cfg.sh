@@ -115,6 +115,13 @@ ESP_MARKER="/EFI/steamos/grubenv"
 # move is ~free, for a slightly costlier fork and exit (2026-10-31).
 BOOT_CMDLINE="quiet loglevel=3 video=efifb:off console=tty0 cgroup.memory=nokmem,nosocket nosoftlockup panic=5 cpuidle.governor=teo cgroup_favordynmods=1"
 
+# The installed system only, not the installer (which prints its failure log to tty1 and so needs
+# the console there): the kernel console stays off tty1, the session's VT. Bound there, it took the
+# panel back the moment the boot splash let go of DRM master, ~7 s in on the Air X, and the panel
+# was black for the ~10 s until gamescope put up the shell's first frame; unbound, the splash's
+# last frame stays up through that. Its consoles on tty2 and up are untouched (2026-10-31).
+SESSION_CMDLINE="fbcon=vc:2-63"
+
 # --- board catalog ------------------------------------------------------------------------------
 declare -a pids=() pnames=() pdtbs=() pbootargs=()
 while IFS=$'\t' read -r id name dtb bootargs; do
@@ -187,7 +194,7 @@ emit_entry() {  # <id> <name> <dtb> <board bootargs>
   cat <<EOF
 menuentry '${ename:-$eid}' --id $eid {
   savedefault
-  linux (\$slotroot)/boot/vmlinuz.efi $BOOT_CMDLINE $ebootargs root=\$rootspec rootfstype=btrfs rootwait ro retroforge.var=\$varspec retroforge.efi=\$efispec retroforge.slot=$SLOT rauc.slot=$SLOT
+  linux (\$slotroot)/boot/vmlinuz.efi $BOOT_CMDLINE $SESSION_CMDLINE $ebootargs root=\$rootspec rootfstype=btrfs rootwait ro retroforge.var=\$varspec retroforge.efi=\$efispec retroforge.slot=$SLOT rauc.slot=$SLOT
   initrd (\$slotroot)/boot/initramfs-retroforge.img
   devicetree (\$slotroot)/boot/dtbs/${edtb}.dtb
 }
