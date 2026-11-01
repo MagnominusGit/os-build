@@ -1,0 +1,16 @@
+#!/bin/sh
+# Queue an add uevent for the boot disk and each of its partitions, ahead of the coldplug replay
+# (systemd-udev-trigger.service.d/retroforge-boot-disk-first.conf says why). The boot disk is the one
+# holding the root the initramfs mounted, as on-boot-disk reads it.
+set -u
+
+BOOTINFO=${RETROFORGE_BOOTINFO:-/run/retroforge/boot}
+SYSBLOCK=${RETROFORGE_SYSBLOCK:-/sys/class/block}
+
+rootdev=$(sed -n 's/^root=//p' "$BOOTINFO" 2>/dev/null | head -1)
+[ -n "$rootdev" ] || exit 0
+rootdev=$(readlink -f "$rootdev" 2>/dev/null) || exit 0
+[ -e "$SYSBLOCK/${rootdev##*/}/partition" ] || exit 0
+disk=$(readlink -f "$SYSBLOCK/${rootdev##*/}/.." 2>/dev/null) || exit 0
+
+exec udevadm trigger --action=add --parent-match="$disk"
