@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Offline test for Proton-CachyOS arm64 and our ARMv8.0 Proton as Steam compatibility tools:
+# Offline test for Proton-CachyOS arm64 and its ARMv8.0 rebuild as Steam compatibility tools:
 # /usr/lib/retroforge/steam-compat-tools (the tool, DXVK-Sarek where the GPU needs it) and
 # /usr/bin/retroforge-proton (the plugin's Apps > Proton).
 #
@@ -37,7 +37,7 @@
 #     (lock);
 #   - its progress file goes 0, percentages, 100, unpacking, and is gone at the end, but not when
 #     another run holds the lock;
-#   status: the tool this CPU takes (Proton-CachyOS, or our ARMv8.0 build), credited to its GitHub
+#   status: the tool this CPU takes (Proton-CachyOS, or its ARMv8.0 rebuild), credited to its GitHub
 #   owner, and its installed release (only from a folder RetroForge installed), as JSON;
 #   retroforge-proton: status is the helper's; install runs the helper as the user unit with --wait
 #   after any run of it already going, else in the foreground, and fails with the log's last line.
@@ -527,6 +527,16 @@ tools install
 release
 tools install
 [ "$RC" = 0 ] && [ -x "$TOOL/proton" ] && ok "and the next run installs" || bad "rc=$RC err=$ERR"
+rm -rf "$TOOL"
+python3 -c 'import fcntl, sys, time
+f = open(sys.argv[1], "w"); fcntl.flock(f, fcntl.LOCK_EX); open(sys.argv[2], "w").close(); time.sleep(2)' \
+  "$SROOT/.retroforge-compat-tools.lock" "$T/locked2" &
+HOLDER2=$!
+for _ in $(seq 50); do [ -e "$T/locked2" ] && break; sleep 0.1; done
+start=$SECONDS; tools install --wait
+[ "$RC" = 0 ] && [ "$OUT" = "$TOOL" ] && [ -x "$TOOL/proton" ] && [ $((SECONDS - start)) -ge 1 ] && grep -q "waiting for it" <<<"$ERR" \
+  && ok "--wait (the store, retroforge-proton): waits for that run, then installs and names the folder" || bad "rc=$RC out=$OUT err=$ERR"
+wait "$HOLDER2" 2>/dev/null
 
 CASE="helper: offline on a fresh card"
 rm -rf "$SROOT"
@@ -571,25 +581,27 @@ CASE="which GPUs need Sarek"
   && [ "$(needs SM6115 RETROFORGE_STEAM_SAREK=maybe)" = on ] && ok "RETROFORGE_STEAM_SAREK=on|off overrides it, anything else does not" || bad "override"
 
 # ================================================================================================
-# ARMv8.0: proton-armv8.pin (sunshineinabox/proton-armv8), taken when /proc/cpuinfo has no `atomics`:
-# .tar.zst assets with a <asset>.sha512 sidecar; experimental releases are prereleases.
-PIN8_REAL="$ROOT/rootfs/overlay/usr/share/retroforge/steam/proton-armv8.pin"
+# ARMv8.0: proton-cachyos-armv8.pin (retroforge-linux/proton-cachyos-armv8), taken when /proc/cpuinfo
+# has no `atomics`: .tar.zst assets with a <asset>.sha512 sidecar. The Valve-based ARMv8.0 builds offered
+# before (proton-armv8, proton-armv8-experimental) are removed once it is in place.
+PIN8_REAL="$ROOT/rootfs/overlay/usr/share/retroforge/steam/proton-cachyos-armv8.pin"
 CASE="armv8: the real pin"
-python3 - "$PIN8_REAL" <<'PY' && ok "stable channel: proton-armv8's API, its .tar.zst with .sha512, one folder" || bad "proton-armv8.pin is not that"
+python3 - "$PIN8_REAL" <<'PY' && ok "proton-cachyos-armv8's API, its .tar.zst with .sha512, one folder" || bad "proton-cachyos-armv8.pin is not that"
 import re, sys
 f = dict(re.findall(r"^(\w+):[ \t]*(.*?)[ \t]*$", open(sys.argv[1]).read(), re.M))
-assert f["releases"] == "https://api.github.com/repos/sunshineinabox/proton-armv8/releases", f
-assert f["asset"] == "proton-armv8-proton-*.tar.zst" and f["sidecar"] == ".sha512", f
-assert f["dir"] == "proton-armv8-retroforge" and "tag" not in f and "prereleases" not in f, f
+assert f["name"] == "proton-cachyos-armv8", f
+assert f["releases"] == "https://api.github.com/repos/retroforge-linux/proton-cachyos-armv8/releases", f
+assert f["asset"] == "proton-cachyos-*-slr-armv8.tar.zst" and f["sidecar"] == ".sha512", f
+assert f["dir"] == "proton-cachyos-armv8-retroforge" and "tag" not in f and "prereleases" not in f, f
 PY
+[ ! -e "$ROOT/rootfs/overlay/usr/share/retroforge/steam/proton-armv8.pin" ] \
+  && [ ! -e "$ROOT/rootfs/overlay/usr/share/retroforge/steam/proton-armv8-experimental.pin" ] \
+  && ok "the Valve-based ARMv8.0 pins are gone" || bad "proton-armv8*.pin still there"
 
-S8="$T/home8/.local/share/Steam"; TOOLS8="$S8/compatibilitytools.d"; DIR8=proton-armv8-retroforge
+S8="$T/home8/.local/share/Steam"; TOOLS8="$S8/compatibilitytools.d"; DIR8=proton-cachyos-armv8-retroforge
 PINS8="$T/pins8"; mkdir -p "$PINS8"
-{ printf 'name: proton-armv8\nreleases: %s\nasset: proton-armv8-proton-*.tar.zst\nsidecar: .sha512\n' "$RELEASES"
-  printf 'dir: %s\ndisplay_name: Proton ARMv8.0 (RetroForge)\n' "$DIR8"; } >"$PINS8/proton-armv8.pin"
-{ printf 'name: proton-armv8-experimental\nreleases: %s\nasset: proton-armv8-experimental-*.tar.zst\n' "$RELEASES"
-  printf 'sidecar: .sha512\nprereleases: yes\ndir: proton-armv8-experimental-retroforge\ndisplay_name: Exp\n'; } >"$PINS8/exp.pin"
-grep -v '^prereleases:' "$PINS8/exp.pin" >"$PINS8/exp-noprerelease.pin"
+{ printf 'name: proton-cachyos-armv8\nreleases: %s\nasset: proton-cachyos-*-slr-armv8.tar.zst\nsidecar: .sha512\n' "$RELEASES"
+  printf 'dir: %s\ndisplay_name: Proton-CachyOS ARMv8.0 (RetroForge)\n' "$DIR8"; } >"$PINS8/proton-cachyos-armv8.pin"
 mkpin; cp "$PIN" "$PINS8/proton-cachyos-arm64.pin"
 printf 'processor\t: 0\nFeatures\t: fp asimd evtstrm aes pmull sha1 sha2 crc32 cpuid\n' >"$T/cpuinfo-v80"
 printf 'processor\t: 0\nFeatures\t: fp asimd evtstrm aes pmull sha1 sha2 crc32 atomics fphp asimdhp cpuid\n' >"$T/cpuinfo-v82"
@@ -628,20 +640,22 @@ tools8() {  # tools8 <cpuinfo> <pin|-> <args>: the helper against $S8, its pin c
          RETROFORGE_CPUINFO="$1" "${pin[@]}" python3 "$HELPER" "${@:3}" 2>"$T/err")"; RC=$?
   ERR="$(cat "$T/err")"
 }
-for t in proton-11.0-2c proton-11.0-2e experimental-11.0-20261014; do mktool8 "proton-armv8-$t" "armv8 $t"; done
+# Releases as retroforge-linux/proton-cachyos-armv8 publishes them: <CachyOS tag>-armv8, asset proton-<that>.tar.zst.
+A8=cachyos-11.0-20261015-slr-armv8; B8=cachyos-11.0-20261005-slr-armv8; P8=cachyos-11.0-20261101-slr-armv8
+for t in "$A8" "$B8" "$P8"; do mktool8 "proton-$t" "armv8 $t"; done
 releases8 <<EOF
-armv8-experimental-11.0-20261014 2026-10-22T13:00:00Z proton-armv8-experimental-11.0-20261014 prerelease
-armv8-proton-11.0-2e 2026-10-22T12:00:00Z proton-armv8-proton-11.0-2e
-armv8-proton-11.0-2c 2026-10-01T12:00:00Z proton-armv8-proton-11.0-2c
+$P8 2026-11-01T12:00:00Z proton-$P8 prerelease
+$A8 2026-10-20T22:00:00Z proton-$A8
+$B8 2026-10-05T12:00:00Z proton-$B8
 EOF
 
 CASE="armv8: an ARMv8.0 CPU"
 tools8 "$T/cpuinfo-v80" - install
-[ "$RC" = 0 ] && [ "$OUT" = "$TOOLS8/$DIR8" ] && [ "$(tag_of "$TOOLS8/$DIR8")" = armv8-proton-11.0-2e ] \
-  && ok "proton-armv8.pin: the newest stable .tar.zst, checked by its .sha512" || bad "rc=$RC out=$OUT err=$ERR"
-grep -q "armv8 proton-11.0-2e" "$TOOLS8/$DIR8/proton" && [ -L "$TOOLS8/$DIR8/files/lib/libfoo.so" ] \
+[ "$RC" = 0 ] && [ "$OUT" = "$TOOLS8/$DIR8" ] && [ "$(tag_of "$TOOLS8/$DIR8")" = "$A8" ] \
+  && ok "proton-cachyos-armv8.pin: the newest release's .tar.zst (no prerelease), checked by its .sha512" || bad "rc=$RC out=$OUT err=$ERR"
+grep -q "armv8 $A8" "$TOOLS8/$DIR8/proton" && [ -L "$TOOLS8/$DIR8/files/lib/libfoo.so" ] \
   && ok "unpacked whole, symlinks kept" || bad "$(ls -la "$TOOLS8/$DIR8" 2>&1 | head -5)"
-[ "$(vdf_strings "$TOOLS8/$DIR8")" = "compatibilitytools|compat_tools|$DIR8|install_path|.|display_name|Proton ARMv8.0 (RetroForge)|from_oslist|windows|to_oslist|linux" ] \
+[ "$(vdf_strings "$TOOLS8/$DIR8")" = "compatibilitytools|compat_tools|$DIR8|install_path|.|display_name|Proton-CachyOS ARMv8.0 (RetroForge)|from_oslist|windows|to_oslist|linux" ] \
   && ok "named $DIR8 for Steam" || bad "$(vdf_strings "$TOOLS8/$DIR8")"
 [ "$(settings "$TOOLS8/$DIR8")" = '{"PROTON_DXVK_SAREK": "1"}' ] && ok "DXVK-Sarek on in it" || bad "$(settings "$TOOLS8/$DIR8" 2>&1)"
 
@@ -651,28 +665,35 @@ tools8 "$T/cpuinfo-v82" - install
 [ "$RC" = 1 ] && grep -q "proton-cachyos-\*-slr-arm64.tar.xz" <<<"$ERR" && [ ! -e "$TOOLS8/$DIR8" ] \
   && ok "keeps proton-cachyos-arm64.pin" || bad "rc=$RC err=$ERR"
 
-CASE="armv8: experimental"
+CASE="armv8: the Valve-based builds go"
+oldtool() {  # oldtool <dir> <pin name>: a folder steam-compat-tools installed for that pin
+  mkdir -p "$TOOLS8/$1" && touch "$TOOLS8/$1/proton" && printf 'name: %s\ntag: armv8-x\n' "$2" >"$TOOLS8/$1/.retroforge-pin"
+}
 rm -rf "$T/home8"
-tools8 "$T/cpuinfo-v80" "$PINS8/exp.pin" install
-[ "$RC" = 0 ] && [ "$(tag_of "$TOOLS8/proton-armv8-experimental-retroforge")" = armv8-experimental-11.0-20261014 ] \
-  && ok "prereleases: yes takes the prerelease" || bad "rc=$RC err=$ERR"
-rm -rf "$T/home8"
-tools8 "$T/cpuinfo-v80" "$PINS8/exp-noprerelease.pin" install
-[ "$RC" = 1 ] && grep -q "with its checksum" <<<"$ERR" && ok "without it, a prerelease is skipped" || bad "rc=$RC err=$ERR"
+oldtool proton-armv8-retroforge proton-armv8
+oldtool proton-armv8-experimental-retroforge proton-armv8-experimental
+mkdir -p "$TOOLS8/proton-armv8-mine"; touch "$TOOLS8/proton-armv8-mine/proton"   # the player's: no marker
+tools8 "$T/cpuinfo-v80" - install
+[ "$RC" = 0 ] && [ "$(tag_of "$TOOLS8/$DIR8")" = "$A8" ] && [ ! -e "$TOOLS8/proton-armv8-retroforge" ] \
+  && [ ! -e "$TOOLS8/proton-armv8-experimental-retroforge" ] && grep -q "removing proton-armv8-retroforge" <<<"$ERR" \
+  && ok "both removed once the new tool is in" || bad "rc=$RC err=$ERR $(ls "$TOOLS8")"
+[ -e "$TOOLS8/proton-armv8-mine/proton" ] && ok "a folder RetroForge did not install stays" || bad "$(ls "$TOOLS8")"
 
 CASE="armv8: a bad .sha512"
 rm -rf "$T/home8"
+oldtool proton-armv8-retroforge proton-armv8
 releases8 <<EOF
-armv8-proton-11.0-2e 2026-10-22T12:00:00Z proton-armv8-proton-11.0-2e badsidecar
+$A8 2026-10-20T22:00:00Z proton-$A8 badsidecar
 EOF
 tools8 "$T/cpuinfo-v80" - install
 [ "$RC" = 1 ] && grep -q "sha512 mismatch" <<<"$ERR" && [ ! -e "$TOOLS8/$DIR8" ] && [ -z "$(find "$S8" -maxdepth 1 -name '.retroforge-compat-tools-*')" ] \
   && ok "refused, nothing installed, nothing left" || bad "rc=$RC err=$ERR"
+[ -e "$TOOLS8/proton-armv8-retroforge/proton" ] && ok "the old build stays while the new one is not in" || bad "$(ls "$TOOLS8")"
 
 CASE="armv8: a GPU without the need"
 rm -rf "$T/home8"
 releases8 <<EOF
-armv8-proton-11.0-2e 2026-10-22T12:00:00Z proton-armv8-proton-11.0-2e
+$A8 2026-10-20T22:00:00Z proton-$A8
 EOF
 tools8 "$T/cpuinfo-v80" - install
 mkdir -p "$TOOLS8/$STABLE"
@@ -762,7 +783,7 @@ EOF
 cat >"$C/bin/systemd-run" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$@" >"$C/systemd-run.args"
-exec "\${@: -2}"
+exec "\${@: -3}"  # <helper> install --wait
 EOF
 chmod +x "$C/bin/systemctl" "$C/bin/systemd-run"
 proton() {  # proton <user manager: 0 yes, 1 no> <args>: retroforge-proton with the test's pin (a CPU with atomics)
@@ -788,16 +809,16 @@ proton 0 status
 rm -rf "$SROOT"
 OUT8="$("${NOPROXY[@]}" HOME="$T/home8" RETROFORGE_STEAM_ROOT="$S8" RETROFORGE_STEAM_PINS="$PINS8" RETROFORGE_CPUINFO="$T/cpuinfo-v80" \
         RETROFORGE_STEAM_COMPAT_TOOLS="$HELPER" bash "$CCLI" status 2>&1)"
-[ "$(field "$OUT8" name)" = proton-armv8 ] && [ "$(field "$OUT8" armv8)" = true ] && [ "$(field "$OUT8" installed)" = armv8-proton-11.0-2e ] \
-  && ok "an ARMv8.0 CPU: our ARMv8.0 build, armv8 true" || bad "out=$OUT8"
-python3 - "$PIN_REAL" "$PIN8_REAL" "$HELPER" <<'PY' && ok "the real pins credit CachyOS and sunshineinabox, with their GitHub pages" || bad "author/homepage from the real pins"
+[ "$(field "$OUT8" name)" = proton-cachyos-armv8 ] && [ "$(field "$OUT8" armv8)" = true ] && [ "$(field "$OUT8" installed)" = "$A8" ] \
+  && ok "an ARMv8.0 CPU: Proton-CachyOS ARMv8.0, armv8 true" || bad "out=$OUT8"
+python3 - "$PIN_REAL" "$PIN8_REAL" "$HELPER" <<'PY' && ok "the real pins credit CachyOS and retroforge-linux, with their GitHub pages" || bad "author/homepage from the real pins"
 import importlib.machinery, importlib.util, os, sys
 os.environ["RETROFORGE_STEAM_ROOT"] = "/nonexistent"
 loader = importlib.machinery.SourceFileLoader("helper", sys.argv[3])
 m = importlib.util.module_from_spec(importlib.util.spec_from_loader("helper", loader))
 loader.exec_module(m)
 for pin, author, home in ((sys.argv[1], "CachyOS", "https://github.com/CachyOS/proton-cachyos"),
-                          (sys.argv[2], "sunshineinabox", "https://github.com/sunshineinabox/proton-armv8")):
+                          (sys.argv[2], "retroforge-linux", "https://github.com/retroforge-linux/proton-cachyos-armv8")):
     m.PIN = pin
     st = m.status(m.read_pin())
     assert (st["author"], st["homepage"], st["installed"]) == (author, home, None), st
@@ -809,7 +830,7 @@ ACTIVE=1 proton 0 install
   && ok "installs it (no Sarek: no device-env here)" || bad "rc=$CRC err=$CERR"
 grep -qx -- --wait "$C/systemd-run.args" && grep -qx -- --unit=retroforge-steam-compat-tools "$C/systemd-run.args" \
   && grep -qx -- "--setenv=RETROFORGE_STEAM_ROOT=$SROOT" "$C/systemd-run.args" \
-  && [ "$(tail -1 "$C/systemd-run.args")" = install ] && ok "as the user unit, waited for" || bad "$(cat "$C/systemd-run.args" 2>&1)"
+  && [ "$(tail -2 "$C/systemd-run.args" | tr '\n' ' ')" = "install --wait " ] && ok "as the user unit, waited for, the helper waiting for any other run" || bad "$(cat "$C/systemd-run.args" 2>&1)"
 [ "$(grep -c is-active "$C/systemctl.calls")" = 2 ] && ok "after the unit's run already going" || bad "$(cat "$C/systemctl.calls")"
 
 CASE="proton: install, no user manager"

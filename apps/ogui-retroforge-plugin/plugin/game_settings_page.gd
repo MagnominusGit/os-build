@@ -52,20 +52,16 @@ var _section_label: Label
 var _item: LibraryLaunchItem  # the RetroForge launch item of the game being configured
 const STEAM_LIBRARY_ID := "retroforge-steam"
 const STEAM_DIRECT := "/usr/bin/retroforge-steam-direct"
-const STEAM_PROTON := "/usr/bin/retroforge-steam-proton"
-const PROTON_CHOICES := ["default", "stable", "experimental"]
 const TSO_CHOICES := ["default", "on", "off"]
 const TSO_ABOUT := "How closely FEX keeps x86 memory ordering between a game's threads. Off is faster on this CPU; some games then crash or glitch. Default: Proton's, On."
 const DisplaySettings := preload("display_settings.gd")
 var _steam_app := 0  # the Steam app id of the game being configured, 0 for none
-var _proton: Control  # OGUI Dropdowns: the Steam game's own choices
-var _tso: Control
+var _tso: Control  # OGUI Dropdowns: the Steam game's own choices
 var _launch: Control
 var _launch_keys: Array = []
 var _resolution: Control
 var _resolution_keys: Array = []  # "default", then WxH: the sizes of Settings > Display > Game resolution
 var _display := DisplaySettings.new()
-var _armv8 := -1  # retroforge-steam-proton manages Proton here (an ARMv8.0 CPU): 1, 0, or -1 not asked yet
 const DIRECT_OFF := " Used only while Apps > Steam Client > \"Steam: start games without Steam\" is on."
 
 
@@ -145,7 +141,6 @@ func _build_page() -> void:
 	_scrape.progressed.connect(func(pct: int) -> void: _art.description = "Scraping... %d%%" % pct)
 	_scrape.finished.connect(_on_art_scraped)
 
-	_proton = _steam_dropdown("Proton", "Built for this CPU. Default: the channel in Apps > Proton.", "proton")
 	_tso = _steam_dropdown("FEX TSO", TSO_ABOUT, "tso")
 	_launch = _steam_dropdown("Launch option", "Which of the game's programs starts, as in Steam's launch dialog. Default: the one Steam last started.", "launch")
 	_resolution = _steam_dropdown("Resolution", "The size the game draws at; the display scales it to the panel. Default: its Game resolution in Steam, else Settings > Display.", "resolution")
@@ -216,11 +211,11 @@ func _on_game_settings_entered(_from: State) -> void:
 
 
 ## The Steam game's own choices, from retroforge-steam-direct (about half a second, so off the UI
-## thread); the rows stay hidden for anything else. Proton only on ARMv8.0 CPUs, the launch option
-## only when Steam offers more than one.
+## thread); the rows stay hidden for anything else. The launch option only when Steam offers more
+## than one.
 func _fill_steam_rows() -> void:
 	var app := _steam_app
-	for row in [_proton, _tso, _launch, _resolution]:
+	for row in [_tso, _launch, _resolution]:
 		row.visible = false
 	if _item != null:
 		_focus_group.current_focus = _fast_cores
@@ -228,20 +223,11 @@ func _fill_steam_rows() -> void:
 		return
 	var output: String = await _output_of(STEAM_DIRECT, ["game", str(app)])
 	var data = JSON.parse_string(output) if output != "" else null
-	if _armv8 < 0 and data is Dictionary:
-		var status := ""
-		if FileAccess.file_exists(STEAM_PROTON):
-			status = await _output_of(STEAM_PROTON, ["status"])
-		_armv8 = 1 if status.strip_edges() in ["stable", "experimental"] else 0
 	if app != _steam_app or not data is Dictionary:
 		return  # another game's page by now, or nothing to offer
 	var settings: Dictionary = data.get("settings", {})
 	var entries: Array = data.get("launch", [])
 	# select() does not emit item_selected, so loading never saves.
-	_proton.clear()
-	for text in ["Default (Apps > Proton)", "ARMv8.0 stable", "ARMv8.0 experimental"]:
-		_proton.add_item(text)
-	_proton.select(maxi(PROTON_CHOICES.find(settings.get("proton", "default")), 0))
 	_tso.clear()
 	for text in ["Default (On)", "On", "Off"]:
 		_tso.add_item(text)
@@ -272,13 +258,12 @@ func _fill_steam_rows() -> void:
 		_resolution_keys.append(mine)
 		_resolution.add_item(mine.replace("x", " x "))
 	_resolution.select(_resolution_keys.find(mine))
-	for row in [_proton, _tso, _launch, _resolution]:
+	for row in [_tso, _launch, _resolution]:
 		row.description = str(row.get_meta("about")) + ("" if data.get("direct", "on") == "on" else DIRECT_OFF)
-	_proton.visible = _armv8 == 1
 	_tso.visible = true
 	_launch.visible = entries.size() > 1
 	_resolution.visible = _resolution_keys.size() > 1
-	_focus_group.current_focus = _proton if _proton.visible else _tso
+	_focus_group.current_focus = _tso
 	_focus_group.recalculate_focus()
 
 
@@ -294,7 +279,7 @@ func _output_of(cmd_path: String, args: Array[String]) -> String:
 
 
 func _on_steam_choice(key: String, index: int) -> void:
-	var values: Array = {"proton": PROTON_CHOICES, "tso": TSO_CHOICES,
+	var values: Array = {"tso": TSO_CHOICES,
 		"launch": _launch_keys}.get(key, _resolution_keys)
 	if _steam_app <= 0 or index < 0 or index >= values.size():
 		return

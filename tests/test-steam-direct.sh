@@ -327,48 +327,46 @@ direct RETROFORGE_STEAM_DIRECT=off -- run 1145360
 rm -rf "$T/proc/7780"
 
 CASE="run: the tool Steam is set to now"
-OURS="$S/compatibilitytools.d/proton-armv8-retroforge"; mkdir -p "$OURS" "$S/config"
+OURS="$S/compatibilitytools.d/proton-cachyos-armv8-retroforge"; mkdir -p "$OURS" "$S/config"
 printf '#!/bin/sh\nexit 0\n' >"$OURS/proton"; chmod +x "$OURS/proton"
 printf '"manifest"\n{\n  "commandline" "/proton %%verb%%"\n  "require_tool_appid" "4185400"\n}\n' >"$OURS/toolmanifest.vdf"
-printf '"compatibilitytools"\n{\n  "compat_tools"\n  {\n    "proton-armv8-retroforge" // Internal name\n    {\n      "install_path" "."\n    }\n  }\n}\n' >"$OURS/compatibilitytool.vdf"
+printf '"compatibilitytools"\n{\n  "compat_tools"\n  {\n    "proton-cachyos-armv8-retroforge" // Internal name\n    {\n      "install_path" "."\n    }\n  }\n}\n' >"$OURS/compatibilitytool.vdf"
 mapping() {  # mapping <the game's own tool|-> <Steam's default tool>: config.vdf's CompatToolMapping
   { printf '"InstallConfigStore"\n{\n\t"Software"\n\t{\n\t\t"Valve"\n\t\t{\n\t\t\t"Steam"\n\t\t\t{\n\t\t\t\t"CompatToolMapping"\n\t\t\t\t{\n'
     [ "$1" != - ] && printf '\t\t\t\t\t"1145360"\n\t\t\t\t\t{\n\t\t\t\t\t\t"name"\t\t"%s"\n\t\t\t\t\t}\n' "$1"
     printf '\t\t\t\t\t"0"\n\t\t\t\t\t{\n\t\t\t\t\t\t"name"\t\t"%s"\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n}\n' "$2"; } >"$S/config/config.vdf"
 }
-fresh_log; reset_run; mapping - proton-armv8-retroforge
+fresh_log; reset_run; mapping - proton-cachyos-armv8-retroforge
 direct -- run 1145360
-grep -qxF "$OURS/proton" "$T/ran.args" && [ "$(ran_env STEAM_COMPAT_TOOL_PATHS)" = "$OURS:$SLR" ] && grep -q "runs with proton-armv8-retroforge" <<<"$ERR" \
+grep -qxF "$OURS/proton" "$T/ran.args" && [ "$(ran_env STEAM_COMPAT_TOOL_PATHS)" = "$OURS:$SLR" ] && grep -q "runs with proton-cachyos-armv8-retroforge" <<<"$ERR" \
   && ok "Steam's default is our tool: it runs instead of the Proton Steam logged" || bad "args=$(grep proton "$T/ran.args") err=$ERR"
-fresh_log; reset_run; mapping proton_11_arm64 proton-armv8-retroforge
+fresh_log; reset_run; mapping proton_11_arm64 proton-cachyos-armv8-retroforge
 direct -- run 1145360
 grep -qxF "$PROTON/proton" "$T/ran.args" && ok "a game set to one of Steam's own tools keeps its logged launch" || bad "args=$(grep proton "$T/ran.args")"
-fresh_log; reset_run; mapping - proton-armv8-retroforge
+fresh_log; reset_run; mapping - proton-cachyos-armv8-retroforge
 sed -i.b 's/4185400/1628350/' "$OURS/toolmanifest.vdf"
 direct -- run 1145360
 grep -qxF "$PROTON/proton" "$T/ran.args" && ok "a tool on another runtime is not swapped in" || bad "args=$(grep proton "$T/ran.args")"
 rm -rf "$S/compatibilitytools.d" "$S/config/config.vdf"
 
 CASE="run: per-game choices"
-EXP="$S/compatibilitytools.d/proton-armv8-experimental-retroforge"; mkdir -p "$EXP"
-printf '#!/bin/sh\nexit 0\n' >"$EXP/proton"; chmod +x "$EXP/proton"
-printf '"manifest"\n{\n  "commandline" "/proton %%verb%%"\n  "require_tool_appid" "4185400"\n}\n' >"$EXP/toolmanifest.vdf"
-printf '"compatibilitytools"\n{\n  "compat_tools"\n  {\n    "proton-armv8-experimental-retroforge"\n    {\n      "install_path" "."\n    }\n  }\n}\n' >"$EXP/compatibilitytool.vdf"
 GAMES="$H/.config/retroforge/steam-games.json"
 direct -- game 1145360
-[ "$RC" = 0 ] && python3 -c 'import json, sys; d = json.loads(sys.argv[1]); assert d["settings"] == {"proton": "default", "tso": "default", "launch": "default", "resolution": "default"}, d; assert d["tso_hint"] == "0", d; assert [e["key"] for e in d["launch"]] == ["0", "1", "2", "3", "4", "15"], d; assert d["launch"][-1]["description"] == "Hades (Steam Deck)", d; assert d["direct"] in ("on", "off"), d' "$OUT" \
+[ "$RC" = 0 ] && python3 -c 'import json, sys; d = json.loads(sys.argv[1]); assert d["settings"] == {"tso": "default", "launch": "default", "resolution": "default"}, d; assert d["tso_hint"] == "0", d; assert [e["key"] for e in d["launch"]] == ["0", "1", "2", "3", "4", "15"], d; assert d["launch"][-1]["description"] == "Hades (Steam Deck)", d; assert d["direct"] in ("on", "off"), d' "$OUT" \
   && ok "game: every choice at its default, and the launch entries Steam's dialog offers here, in its order" || bad "rc=$RC out=$OUT err=$ERR"
-direct -- game 1145360 set launch 0 && direct -- game 1145360 set proton experimental
-[ "$RC" = 0 ] && python3 -c 'import json, sys; assert json.load(open(sys.argv[1])) == {"1145360": {"launch": "0", "proton": "experimental"}}' "$GAMES" \
+direct -- game 1145360 set launch 0
+[ "$RC" = 0 ] && python3 -c 'import json, sys; assert json.load(open(sys.argv[1])) == {"1145360": {"launch": "0"}}' "$GAMES" \
   && ok "set: saved in steam-games.json" || bad "rc=$RC $(cat "$GAMES" 2>&1)"
+direct -- game 1145360 set proton experimental
+[ "$RC" = 2 ] && ok "set: proton is no choice any more (one ARMv8.0 build, Steam's default)" || bad "rc=$RC"
 direct -- game 1145360 set tso maybe
 [ "$RC" = 2 ] && ok "set: a value that is not a choice is refused" || bad "rc=$RC"
 direct -- game 1145360 set sarek on
 [ "$RC" = 2 ] && ok "set: sarek is no choice any more (Sarek follows the GPU)" || bad "rc=$RC"
 fresh_log; reset_run
 direct -- run 1145360
-grep -qxF "$GAME/x64/Hades.exe" "$T/ran.args" && grep -qxF "$EXP/proton" "$T/ran.args" && [ "$(cat "$T/ran.cwd")" = "$GAME/x64" ] \
-  && ok "run: the chosen launch option, from its own working folder, with the chosen Proton" || bad "args=$(grep -E 'proton|Hades' "$T/ran.args") cwd=$(cat "$T/ran.cwd")"
+grep -qxF "$GAME/x64/Hades.exe" "$T/ran.args" && grep -qxF "$PROTON/proton" "$T/ran.args" && [ "$(cat "$T/ran.cwd")" = "$GAME/x64" ] \
+  && ok "run: the chosen launch option, from its own working folder, with the Proton Steam logged" || bad "args=$(grep -E 'proton|Hades' "$T/ran.args") cwd=$(cat "$T/ran.cwd")"
 [ -z "$(ran_env PROTON_DXVK_SAREK)" ] && ok "run: no PROTON_DXVK_SAREK (the tool's user_settings.py decides)" || bad "sarek=$(ran_env PROTON_DXVK_SAREK)"
 [ -z "$(ran_env STEAM_FEX_TSOENABLED)" ] && ok "run: FEX TSO left to Proton by default" || bad "tso=$(ran_env STEAM_FEX_TSOENABLED)"
 direct -- game 1145360 set tso off; fresh_log; reset_run
@@ -382,7 +380,7 @@ want="$(printf '%s\n' "$GAME/x64/Hades.exe" '/c=..\' -dx11 '/name=two words' /Di
   && ok "run: the launch option's own arguments and working folder, the player's extra words kept" \
   || bad "args=$(tail -6 "$T/ran.args" | tr "\n" "|") cwd=$(cat "$T/ran.cwd")"
 rmdir "$GAME/Odd"
-for k in launch proton tso; do direct -- game 1145360 set $k default; done
+for k in launch tso; do direct -- game 1145360 set $k default; done
 python3 -c 'import json, sys; assert json.load(open(sys.argv[1])) == {}' "$GAMES" && ok "all back to default: nothing kept" || bad "$(cat "$GAMES")"
 rm -rf "$S/compatibilitytools.d" "$GAMES"
 

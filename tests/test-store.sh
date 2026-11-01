@@ -703,6 +703,23 @@ ok(os.path.isfile(os.path.join(DATA, "umu-database.csv")) and [s[0] for s in SEE
    "the umu-database is cached, for a first launch offline")
 r = store("epic", "games")
 ok({g["id"]: g["installed"] for g in json.loads(r.stdout)}["Fortnite2"] is True, "installed in the library")
+
+CASE = "install, the first one downloads Proton"
+COMPAT_SLOW = script("compat-tools-slow", f"""
+import time
+prog = os.path.join(os.environ["XDG_DATA_HOME"], "retroforge", "steam-compat-tools.progress")
+os.makedirs(os.path.dirname(prog), exist_ok=True)
+for v in ("40", "unpacking"):
+    open(prog, "w").write(v + "\\n")
+    time.sleep(1.4)
+os.unlink(prog)
+print({PROTON!r})
+""")
+r = store("epic", "install", "Fortnite3", env={"RETROFORGE_STEAM_COMPAT_TOOLS": COMPAT_SLOW})
+p = percents(r.stdout)
+ok(r.returncode == 0 and p == sorted(p) and p[-1] == 100 and any(85 < x < 99 for x in p),
+   "Proton's download moves the bar between the runtime's end (85%) and 99%", r.stdout + r.stderr)
+CASE = "install epic"
 r = store("epic", "install", "broken")
 ok(r.returncode == 1 and "Installation failed" in (r.stderr.splitlines() or [""])[-1], "legendary's logged failure fails the install (it exits 0)", r.stderr)
 reset_calls()

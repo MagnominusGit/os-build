@@ -1,0 +1,20 @@
+# Proton-CachyOS for ARMv8.0 CPUs (no LSE atomics, e.g. the SM6115): CachyOS's own arm64 build of each
+# of its cachyos-*-slr releases, rebuilt with -march=armv8-a by retroforge-linux/proton-cachyos-armv8,
+# whose CI publishes a release only when no arm64 binary in it has an inline LSE/RCpc instruction.
+# steam-compat-tools takes this pin instead of proton-cachyos-arm64.pin when /proc/cpuinfo has no
+# `atomics`. Proton-CachyOS's own arm64 build needs the kernel's LSE emulation there (kernel/patches/0025),
+# ~0.3-0.5 us per atomic, ~94% of it from its ntdll.dll (docs/steam-arm64.md).
+#
+# Like Proton-CachyOS, and unlike Valve's Proton, it runs a game without the Steam client when UMU_ID
+# is set (the store's launcher sets it), and it carries DXVK-Sarek (PROTON_DXVK_SAREK=1, which
+# steam-compat-tools turns on in it on the Adreno 610/613) and umu-protonfixes.
+#
+# Downloaded on demand: on these CPUs as part of Steam Client's install (steam-install), which then makes it
+# Steam's default (retroforge-steam-proton), and at a GOG or Epic game's first install (the store). Fields
+# as in proton-cachyos-arm64.pin; sidecar: is the checksum file's suffix after the asset's name.
+name: proton-cachyos-armv8
+releases: https://api.github.com/repos/retroforge-linux/proton-cachyos-armv8/releases
+asset: proton-cachyos-*-slr-armv8.tar.zst
+sidecar: .sha512
+dir: proton-cachyos-armv8-retroforge
+display_name: Proton-CachyOS ARMv8.0 (RetroForge)

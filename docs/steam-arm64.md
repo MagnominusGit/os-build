@@ -393,9 +393,10 @@ opens Steam (2026-10-25; it was on only for the SM6115 and the 4 GB boards befor
 next launch without a library rescan. Keeping Steam running applies to all of them: a game started
 without the client gets the kept client beside it, and first launches and Steam's own UI go to it.
 
-**Per game** (Game settings > RetroForge, `game_settings_page.gd`): a Steam game's own Proton (ARMv8.0
-stable or experimental, shown on ARMv8.0 CPUs only), FEX TSO (on or off),
-launch option and resolution. `retroforge-steam-direct game APPID [set KEY VALUE]` keeps them in
+**Per game** (Game settings > RetroForge, `game_settings_page.gd`): a Steam game's FEX TSO (on or off),
+launch option and resolution. (Its own Proton, ARMv8.0 stable or experimental, went with the Valve-based
+ARMv8.0 builds on 2026-11-01: there is one ARMv8.0 Proton, and Steam's Properties > Compatibility picks
+any other.) `retroforge-steam-direct game APPID [set KEY VALUE]` keeps them in
 `~/.config/retroforge/steam-games.json`. A launch without the client applies them to Steam's logged
 command: the tool when it runs on the same runtime; the launch option's executable, its arguments and
 its working folder, the arguments in place of those of the entry Steam ran (the player's own launch
@@ -608,7 +609,7 @@ under noconform the A610 reports 1.3, so that check does not pick Sarek today.
 
 **Sarek follows the GPU, with no setting (2026-10-31).** On the Adreno 610 (SM6115) and 613 (SM4450)
 DXVK-Sarek is the only DXVK that will run, so it is not a choice: every Proton of ours installed there
-(Proton-CachyOS, our ARMv8.0 build) gets a `user_settings.py` holding `PROTON_DXVK_SAREK=1`, which the
+(Proton-CachyOS, or its ARMv8.0 rebuild) gets a `user_settings.py` holding `PROTON_DXVK_SAREK=1`, which the
 tool applies to every game it runs, with the client or without it. Every other GPU runs upstream DXVK,
 and nothing of ours turns Sarek on there: a player who wants it for one game sets
 `PROTON_DXVK_SAREK=1 %command%` in its launch options in Steam, as for any other Proton option.
@@ -622,18 +623,17 @@ is ignored, and a `user_settings.py` that toggle wrote is still recognised as ou
 
 **Apps > Proton (2026-10-31).** One entry of the Apps list for the Proton RetroForge keeps for
 Windows games, because Steam, GOG and Epic share it: on a CPU with LSE atomics Proton-CachyOS arm64, on
-an ARMv8.0 CPU our ARMv8.0 build (below). The plugin adds the entry itself (`proton_tool.gd`; no
-`retroforge-emu` catalog row), credited to the releases' GitHub owner (CachyOS, sunshineinabox). Its
-page: on ARMv8.0 CPUs the **Channel** dropdown (stable or experimental, `steam_proton.gd`,
-`retroforge-steam-proton set`), then the tool's row, with its installed release and a Download button
-(Update once installed) that shows the download's percentage. A channel switch starts the other
-build's download and the row follows it. Steam Client's page keeps only Steam's own rows (keep it
-running, start games without it). Until 2026-10-31 the channel and a "CachyOS Proton arm64" row sat
-under Apps > Steam Client, where a GOG- or Epic-only player would not look.
+an ARMv8.0 CPU its ARMv8.0 rebuild (below). The plugin adds the entry itself (`proton_tool.gd`; no
+`retroforge-emu` catalog row), credited to the releases' GitHub owner (CachyOS, retroforge-linux). Its
+page is the tool's row, with its installed release and a Download button (Update once installed) that
+shows the download's percentage. Steam Client's page keeps only Steam's own rows (keep it running,
+start games without it). Until 2026-10-31 a "CachyOS Proton arm64" row sat under Apps > Steam Client,
+where a GOG- or Epic-only player would not look; until 2026-11-01 ARMv8.0 CPUs also had a **Channel**
+dropdown (the Valve-based builds' stable or experimental).
 
 The row runs `/usr/bin/retroforge-proton install`, which runs `steam-compat-tools install` as the user
 unit `retroforge-steam-compat-tools` and waits for it (a run of that unit already going, a `steam`
-start's or a channel switch's, is waited for first). A user unit is not under OGUI's reaper, and the
+start's, is waited for first). A user unit is not under OGUI's reaper, and the
 download goes on if OGUI restarts. `install` puts the newest release in place as below, and never
 selects it in Steam. The percentage is `~/.local/share/retroforge/steam-compat-tools.progress` (0-100,
 then `unpacking`; gone when the run ends). `retroforge-proton status` (`steam-compat-tools status`)
@@ -720,7 +720,7 @@ Not yet seen:
   Download row on a device, anything on hardware. A release after `cachyos-11.0-20261005-slr` is not ISA-scanned before
   players get it.
 
-## ARMv8.0 CPUs: our own Proton build (downloaded, not shipped)
+## ARMv8.0 CPUs: Proton-CachyOS rebuilt for them (downloaded, not shipped)
 
 Valve's Proton ARM64 and Proton-CachyOS are built with `-march=armv8.2-a`. On the SM6115 they run only
 through kernel patch 0025, and that costs a lot. Measured on the Air X (2026-10-22): an emulated atomic
@@ -729,30 +729,50 @@ peaked at 3.36M/s, about 1-1.5 cores. ~94% came from Proton's `aarch64-windows/n
 (RtlEnter/LeaveCriticalSection, RtlAllocateHeap). LSE instructions in `ntdll.dll`: Valve 245, Proton-CachyOS
 252; in CachyOS's Sarek `d3d11.dll`: 6,048.
 
-[sunshineinabox/proton-armv8](https://github.com/sunshineinabox/proton-armv8) builds each new Valve tag with
-`-march=armv8-a` and DXVK-Sarek built in (`PROTON_DXVK_SAREK=1`, as in Proton-CachyOS), on GitHub's arm64
-runners. A release goes out only when its LSE scan finds no inline LSE. Stable follows `proton-11.0-*`;
-experimental follows `experimental-11.0-*` and is marked as a pre-release.
+[retroforge-linux/proton-cachyos-armv8](https://github.com/retroforge-linux/proton-cachyos-armv8) rebuilds
+each new Proton-CachyOS `cachyos-*-slr` release on GitHub's arm64 runners: CachyOS's own arm64 build
+(`configure.sh --target-arch=arm64 --without-nvidia-libs`, `make redist`) with `Makefile.in`'s arm64
+targets at `-march=armv8-a` (C), `-Ctarget-cpu=generic` (Rust) and FEX at `TUNE_CPU=generic`. When those
+lines change upstream the build stops instead of shipping LSE, and a release (`<tag>-armv8`) goes out only
+when its LSE scan (`scan-lse.py`, from sunshineinabox/proton-armv8) finds no inline LSE/RCpc. Being
+Proton-CachyOS, it carries DXVK-Sarek and umu-protonfixes, and runs a game without the Steam client when
+`UMU_ID` is set, which the store's launcher needs.
 
-When `/proc/cpuinfo` has no `atomics`, `steam-compat-tools` takes `proton-armv8.pin` instead of
-`proton-cachyos-arm64.pin`: assets `proton-armv8-proton-*.tar.zst`, each checked by its `.sha512`
-(`sidecar: .sha512`), installed as `compatibilitytools.d/proton-armv8-retroforge`, "Proton ARMv8.0
-(RetroForge)". Everything else works as for Proton-CachyOS above: the channel, one request per
-start, the one-name folder, the wait while a game runs from it, and Sarek through `user_settings.py`,
-which Valve's `proton` applies before it reads `PROTON_DXVK_SAREK`. A pin can also take pre-releases
-(`prereleases: yes`), for the experimental channel. Sarek follows the GPU in every folder RetroForge
-installed, so a Proton-CachyOS left on such a device follows it too.
+When `/proc/cpuinfo` has no `atomics`, `steam-compat-tools` takes `proton-cachyos-armv8.pin` instead of
+`proton-cachyos-arm64.pin`: assets `proton-cachyos-*-slr-armv8.tar.zst`, each checked by its `.sha512`
+(`sidecar: .sha512`), installed as `compatibilitytools.d/proton-cachyos-armv8-retroforge`, "Proton-CachyOS
+ARMv8.0 (RetroForge)". Everything else works as for Proton-CachyOS above: the newest release, one request
+per run, the one-name folder, the wait while a game runs from it, and Sarek through `user_settings.py`.
+Sarek follows the GPU in every folder RetroForge installed, so a Proton-CachyOS left on such a device
+follows it too.
 
-Seen on the Air X (2026-10-22/23): the arm64 client takes the tool (its compat log names "Proton ARMv8.0
-(RetroForge)" as tool 0), Hades runs with it with and without the client, and the emulations fall from
-~3.36M/s to ~1,000/s at their peak, none from `ntdll.dll`.
+**When it is installed.** On these CPUs it is not an optional download:
+- **Steam:** part of Steam Client's install (`steam-install`, a stage of its bar after the x86 guest and
+  before the client's own update; the install fails without it). Once the update has written
+  `config.vdf`, `retroforge-steam-proton apply` makes it Steam's default compatibility tool and each
+  installed Windows-only game's own, and does so again at each `steam` start (updating it in the
+  background). On CPUs with LSE atomics Proton-CachyOS stays an optional download (Apps > Proton) and is
+  never made a default.
+- **GOG and Epic:** part of the first game's install (`store install`: its download is 85-99% of that
+  bar), on every CPU, as the tool this CPU takes.
+
+**The Valve-based builds before it (until 2026-11-01).** ARMv8.0 CPUs took
+[sunshineinabox/proton-armv8](https://github.com/sunshineinabox/proton-armv8)'s rebuild of Valve's Proton
+(stable `proton-armv8.pin`, experimental `proton-armv8-experimental.pin`, a Channel dropdown, a per-game
+choice). Valve's `proton` always starts a game through its own `steam.exe`, which asserts without the
+client (`steamclient_main.c "!status"`), so GOG and Epic games could not run with it. Its folders
+(`proton-armv8-retroforge`, `proton-armv8-experimental-retroforge`, by their `.retroforge-pin`) are
+removed once Proton-CachyOS ARMv8.0 is in place, each when nothing runs from it, and a Steam game set to
+them moves to the new tool. A leftover `PROTON_CHANNEL=` line in `steam.conf` is ignored. Seen with that
+build on the Air X (2026-10-22/23): emulations fell from ~3.36M/s to ~1,000/s at their peak, none from
+`ntdll.dll`.
 
 **FEX: Valve's, untouched.** Valve's FEX tool (app 3127680, `steamapps/common/FEX-Emu`, for native x86 Linux
 games) is built for ARMv8.1+ as well: 388 inline LSE sites in its seven binaries. An ARMv8.0 build of it,
 swapped into Valve's tool or installed as a tool of its own, ran SuperTux on the Air X with no emulations
 (2026-10-23), but it was dropped (2026-10-28): nothing RetroForge ships replaces or adds a FEX. On ARMv8.0
-CPUs native x86 Linux games are not supported; a game with a Windows build runs it with our ARMv8.0 Proton
-(Properties > Compatibility, or our Proton as Steam's default). Proton's own FEX, inside Wine for x86
+CPUs native x86 Linux games are not supported; a game with a Windows build runs it with Proton-CachyOS
+ARMv8.0 (Steam's default there, or Properties > Compatibility). Proton's own FEX, inside Wine for x86
 Windows code, is part of the Proton build and unaffected (the per-game FEX TSO row, above).
 
 ## Remote Play (the handheld as a client)

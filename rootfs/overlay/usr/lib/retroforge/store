@@ -26,9 +26,11 @@
 # legendary, 0.7 s unpacked (2026-10-24). Both __main__.py skip their own unpacking outside a zip.
 #
 # RUNNING A GAME. Windows builds only. The game runs in its own Wine prefix with the Proton
-# steam-compat-tools keeps for this CPU (our ARMv8.0 build without LSE atomics, else Proton-CachyOS),
-# inside Steam Linux Runtime 4 arm64: Steam's copy when it installed one, else ours, downloaded at the
-# first install (steamrt4.pin). The command is the one retroforge-steam-direct replays,
+# steam-compat-tools keeps for this CPU: Proton-CachyOS, rebuilt for ARMv8.0 on CPUs without LSE
+# atomics (the SM6115), which runs a game without the Steam client when UMU_ID is set (PROTONFIXES
+# below; Valve's Proton always goes through its steam.exe). It is part of the first game's install,
+# its download on the install's bar. The game runs inside Steam Linux Runtime 4 arm64: Steam's copy
+# when it installed one, else ours, downloaded at the first install (steamrt4.pin). The command is the one retroforge-steam-direct replays,
 #   <runtime>/_v2-entry-point --verb=waitforexitandrun -- <proton>/proton waitforexitandrun <exe> <args>
 # with the STEAM_COMPAT_* variables. STEAM_COMPAT_CLIENT_INSTALL_PATH is an empty folder of ours: Proton
 # copies Steam's client DLLs from there only when they exist, and their mtimes are part of its prefix
@@ -38,7 +40,7 @@
 # kernel killed the session's audio and bus instead (2026-10-24). This process keeps the session's
 # value, to upload the saves after the game.
 #
-# PROTONFIXES. Our Proton runs umu-protonfixes' per-game fixes (proton-armv8 patch 0003), which find a
+# PROTONFIXES. Proton-CachyOS runs umu-protonfixes' per-game fixes, which find a
 # store game by UMU_ID and STORE (gog, egs) in its environment, as umu-run sets them. The umu-database
 # maps the store's id to the umu id; it is cached in <data>/umu-database.csv, fetched again when a day
 # old, and a game it does not list is umu-default (only the store's defaults run). RetroForge's own
@@ -111,6 +113,8 @@ GAME_PROFILE_DECL = os.environ.get("RETROFORGE_GAME_PROFILE",
                                    os.path.join(os.environ.get("XDG_RUNTIME_DIR") or "/tmp", "opengamepadui", "game_profile"))
 STEAM_ROOT = os.environ.get("RETROFORGE_STEAM_ROOT") or os.path.join(DATA_HOME, "Steam")
 COMPAT_TOOLS = os.environ.get("RETROFORGE_STEAM_COMPAT_TOOLS", "/usr/lib/retroforge/steam-compat-tools")
+# steam-compat-tools' percentage while it downloads, `unpacking` after (its PROGRESS).
+COMPAT_PROGRESS = os.path.join(DATA_HOME, "retroforge", "steam-compat-tools.progress")
 AGENT = "retroforge-store"
 RUNTIME_NAME = "SteamLinuxRuntime_4-arm64"
 API = os.environ.get("RETROFORGE_STORE_API", "")
@@ -392,9 +396,9 @@ def runtime_dir(progress=None):
     return ours
 
 
-def proton_dir(store=None, gid=None):
+def proton_dir(store=None, gid=None, progress=None):
     """The game's chosen Proton (game_choice "proton"), else the one steam-compat-tools keeps for this
-    CPU, installed when it is missing."""
+    CPU, installed when it is missing; progress(done, total) follows its download when given."""
     name = game_choice(store, gid, "proton") if store else ""
     for base in ("compatibilitytools.d", os.path.join("steamapps", "common")):
         folder = os.path.join(STEAM_ROOT, base, name)
@@ -403,7 +407,29 @@ def proton_dir(store=None, gid=None):
     if name:
         log(f"{store} {gid}: no Proton {name!r}; the default one")
     env = dict(os.environ, RETROFORGE_STEAM_ROOT=STEAM_ROOT)
-    res = subprocess.run([COMPAT_TOOLS, "install"], env=env, text=True, capture_output=True)
+    stop = threading.Event()
+
+    def follow():
+        while not stop.wait(1):
+            try:
+                with open(COMPAT_PROGRESS, encoding="utf-8") as f:
+                    value = f.read().strip()
+            except OSError:
+                continue
+            if value == "unpacking":
+                progress(95, 100)
+            elif value.isdigit():
+                progress(int(value) * 90 // 100, 100)
+
+    watcher = threading.Thread(target=follow, daemon=True) if progress else None
+    if watcher:
+        watcher.start()
+    try:
+        res = subprocess.run([COMPAT_TOOLS, "install", "--wait"], env=env, text=True, capture_output=True)
+    finally:
+        stop.set()
+        if watcher:
+            watcher.join()
     folder = res.stdout.strip().splitlines()[-1] if res.stdout.strip() else ""
     if res.returncode != 0 or not os.path.isfile(os.path.join(folder, "proton")):
         last = (res.stderr.strip().splitlines() or ["no Proton"])[-1]
@@ -1392,9 +1418,9 @@ def main(argv):
             # so that its first launch does not wait for them, and has its fixes offline. A launch
             # never downloads the runtime: without it the install fails, and installing again
             # finds the game there and fetches only the rest.
-            install_tries(lambda: store.install(rest[0], percent_printer(0, 90)))
-            runtime_dir(percent_printer(90, 99))
-            proton_dir()
+            install_tries(lambda: store.install(rest[0], percent_printer(0, 80)))
+            runtime_dir(percent_printer(80, 85))
+            proton_dir(progress=percent_printer(85, 99))
             umu_database()
             print("100%", flush=True)
         elif verb == "uninstall":

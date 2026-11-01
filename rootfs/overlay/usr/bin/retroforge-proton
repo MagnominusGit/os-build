@@ -4,13 +4,13 @@
 #
 #   retroforge-proton status    print (JSON) the tool this device takes and what is installed of it
 #                               (steam-compat-tools status: Proton-CachyOS arm64, or on an ARMv8.0 CPU
-#                               our ARMv8.0 build in the player's channel)
+#                               its ARMv8.0 rebuild)
 #   retroforge-proton install   install it, or update it to its newest release, and wait for the end
 #
 # install runs /usr/lib/retroforge/steam-compat-tools install as the user unit
 # retroforge-steam-compat-tools (it goes on if the shell restarts; without a user manager, in the
 # foreground), and waits for it. A run of that unit already going (retroforge-steam-proton's, at a
-# `steam` start, or a channel switch) is waited for first. Its progress is in
+# `steam` start) is waited for first, and a run outside it too (`install --wait`: the store's). steam-install runs this too, on ARMv8.0 CPUs. Its progress is in
 # ~/.local/share/retroforge/steam-compat-tools.progress, its log in
 # ~/.local/share/retroforge/steam-compat-tools.log, whose last line goes to stderr when it fails.
 # DXVK-Sarek is on in the tool only where the GPU needs it (steam-compat-tools). Nothing here selects
@@ -42,10 +42,16 @@ install() {
     systemd-run --user --wait --quiet --collect --unit="$UNIT" \
         --setenv=RETROFORGE_STEAM_ROOT="$STEAM_ROOT" \
         -p StandardOutput="append:$LOG" -p StandardError="append:$LOG" \
-        "$HELPER" install
+        "$HELPER" install --wait
     rc=$?
+    # The unit started by someone else between the check and here: wait for it, then run here.
+    if [ "$rc" != 0 ] && systemctl --user is-active --quiet "$UNIT.service"; then
+      while systemctl --user is-active --quiet "$UNIT.service"; do sleep 1; done
+      RETROFORGE_STEAM_ROOT="$STEAM_ROOT" "$HELPER" install --wait >>"$LOG" 2>&1
+      rc=$?
+    fi
   else
-    RETROFORGE_STEAM_ROOT="$STEAM_ROOT" "$HELPER" install >>"$LOG" 2>&1
+    RETROFORGE_STEAM_ROOT="$STEAM_ROOT" "$HELPER" install --wait >>"$LOG" 2>&1
     rc=$?
   fi
   if [ "$rc" = 0 ] && RETROFORGE_STEAM_ROOT="$STEAM_ROOT" "$HELPER" status 2>/dev/null | grep -q '"installed": null'; then

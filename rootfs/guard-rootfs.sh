@@ -795,7 +795,7 @@ fi
 #   - Proton-CachyOS arm64, on the player's Download (Apps > Proton, retroforge-proton) and for store games,
 #     with DXVK-Sarek on where the GPU needs it (Adreno 610/613): steam-compat-tools keeps its
 #     newest arm64 release in the Steam library's compatibilitytools.d (proton-cachyos-arm64.pin), or
-#     on ARMv8.0 CPUs our own ARMv8.0 Proton with Sarek (proton-armv8.pin). usr/share/steam/compatibilitytools.d stays listed.
+#     on ARMv8.0 CPUs its ARMv8.0 rebuild (proton-cachyos-armv8.pin), also part of Steam Client's install there. usr/share/steam/compatibilitytools.d stays listed.
 # The root carries only the wrapper, those helpers and their pins. FEX itself is
 # Steam's: the arm64 client adds it to a game as a dependency, as it does Proton ("adding FEX dependency
 # to %s %u" and STEAM_COMPAT_FEX_CONFIG in steamclient.so; not yet seen on hardware), so nothing x86

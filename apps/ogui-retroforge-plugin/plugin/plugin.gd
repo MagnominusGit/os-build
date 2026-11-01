@@ -60,7 +60,6 @@ var _keep: RefCounted  # steam_keep.gd
 var _direct: RefCounted  # steam_direct.gd
 var _stores_page: RefCounted  # steam_settings.gd: Settings > Stores
 var _store_rows: RefCounted  # store_settings.gd: GOG and Epic sign-in
-var _proton: RefCounted  # steam_proton.gd
 var _watch: RefCounted  # rom_watch.gd
 var _steam_watch: RefCounted  # steam_watch.gd
 var _rescan_timer: Timer
@@ -124,9 +123,7 @@ func _ready() -> void:
 	_art_fetch.other = _scraper.runner
 	_art_fetch.allowed = _scraper.can_fetch
 	_install_os_platform()
-	_proton = load(plugin_base.path_join("steam_proton.gd")).new().setup(get_tree())
 	_tool = load(plugin_base.path_join("proton_tool.gd")).new().setup(get_tree())
-	_proton.changed.connect(_tool.install)
 	_keep = load(plugin_base.path_join("steam_keep.gd")).new().setup(get_tree())
 	_direct = load(plugin_base.path_join("steam_direct.gd")).new().setup(get_tree())
 	if is_instance_valid(_emulators_screen):
@@ -189,8 +186,6 @@ func unload() -> void:
 		_store_rows.detach()
 	if _stores_page:
 		_stores_page.detach()
-	if _proton:
-		_proton.detach()
 	if is_instance_valid(_hardware_card):
 		var qb_card: Node = _hardware_card.find_parent("QuickBarCard*")
 		(qb_card if qb_card else _hardware_card).queue_free()
@@ -278,11 +273,10 @@ func _add_steam_rows(box: Node) -> void:
 		row.attach(box)
 
 
-## Apps > Proton's page, built at each visit: the channel (ARMv8.0 CPUs only), then the tool with its
-## Download / Update. Steam, GOG and Epic games share both.
+## Apps > Proton's page, built at each visit: the tool with its Download / Update, which Steam, GOG
+## and Epic games share.
 func _add_proton_rows(box: Node) -> void:
-	for row in [_proton, _tool]:
-		row.attach(box)
+	_tool.attach(box)
 
 
 ## Main menu > Steam, under Apps while Steam Client is installed (looked at each time the main

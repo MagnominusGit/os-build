@@ -13,7 +13,7 @@
 #   retroforge-steam-direct remember     keep every game's newest launch in Steam's log (/usr/bin/steam
 #                                        runs it before the client starts)
 #   retroforge-steam-direct game APPID [set KEY VALUE]
-#                                        print (JSON) APPID's own Proton, FEX TSO, launch
+#                                        print (JSON) APPID's own FEX TSO, launch
 #                                        option and resolution (Game settings > RetroForge), after saving one
 #   retroforge-steam-direct restore-resolution PID DISPLAY WxH WxH
 #                                        once PID ends, give DISPLAY's X server the first size back if it
@@ -368,7 +368,7 @@ def runtime_of(tool):
 
 
 def swap_tool(appid, tools, command, want=None):
-    """tools and command with the Proton Steam logged replaced by want (the game's own choice), else by
+    """tools and command with the Proton Steam logged replaced by want, else by
     the one Steam is set to now, when that is a compatibilitytools.d tool on the same runtime."""
     proton = [t for t in tools if os.path.isfile(os.path.join(t, "proton"))]
     want = want or mapped_tool(appid)
@@ -381,8 +381,7 @@ def swap_tool(appid, tools, command, want=None):
 
 # The player's per-game choices (Game settings, steam_game_settings.gd), keyed by app id.
 GAMES = os.path.join(os.path.dirname(CONF), "steam-games.json")
-CHOICES = {"proton": ("default", "stable", "experimental"), "tso": ("default", "on", "off")}
-ARMV8_TOOLS = {"stable": "proton-armv8-retroforge", "experimental": "proton-armv8-experimental-retroforge"}
+CHOICES = {"tso": ("default", "on", "off")}
 
 
 def read_games():
@@ -395,10 +394,10 @@ def read_games():
 
 
 def game_settings(appid):
-    """proton, tso, launch and resolution for appid: "default" for each one not chosen."""
+    """tso, launch and resolution for appid: "default" for each one not chosen."""
     mine = read_games().get(str(appid))
     mine = mine if isinstance(mine, dict) else {}
-    return {k: str(mine.get(k, "default")) for k in ("proton", "tso", "launch", "resolution")}
+    return {k: str(mine.get(k, "default")) for k in ("tso", "launch", "resolution")}
 
 
 def tso_hint(app):
@@ -544,8 +543,7 @@ def plan(appid):
     if not exe:
         raise Refused(f"Steam's launch of {stamp} names no program of the game")
     choice = game_settings(appid)
-    own = choice["proton"] in ARMV8_TOOLS and os.path.join(STEAM_ROOT, "compatibilitytools.d", ARMV8_TOOLS[choice["proton"]])
-    tools, command = swap_tool(appid, tools, command, own or None)
+    tools, command = swap_tool(appid, tools, command)
 
     appinfo = {}
     try:

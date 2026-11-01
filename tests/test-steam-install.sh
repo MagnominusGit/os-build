@@ -7,8 +7,9 @@
 # Every stage it runs is a stand-in here (the bootstrap, the x86 guest helper, /usr/bin/steam), so
 # the suite checks steam-install's own job: the order of the
 # stages, one forward-only percentage (stdout and the progress file the page reads), the exit
-# statuses retroforge-emu's page understands, and what "installed" means. The stages themselves have
-# their own suites (test-steam.sh, test-steam-x86-guest.sh).
+# statuses retroforge-emu's page understands, what "installed" means, and on ARMv8.0 CPUs the
+# Proton-CachyOS ARMv8.0 stage and Steam's default. The stages themselves have their own suites
+# (test-steam.sh, test-steam-x86-guest.sh, test-steam-compat-tools.sh, test-steam-proton.sh).
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -72,11 +73,34 @@ mkdir -p "$STEAM_ROOT/package"
 printf '"linuxarm64"\n{\n\t"version"\t\t"1791918634"\n}\n' >"$STEAM_ROOT/package/steam_client_steamdeck_stable_linuxarm64.installed"
 echo "[2026-10-19 10:06:24] Update complete, launching..."
 EOF
+# retroforge-proton (ARMv8.0 CPUs): `install`, writing steam-compat-tools' progress file as it would;
+# records the page's progress when it starts and while its download runs.
+cat >"$T/bin/proton" <<EOF
+#!/usr/bin/env bash
+{ echo "\$*"; echo "progress-file=\$(cat "$PROG_CLIENT" 2>/dev/null)"; } >>"$T/proton.log"
+echo proton >>"$T/order.log"
+case "\${FAKE_PROTON:-ok}" in
+  net) echo "retroforge-proton: steam-compat-tools: could not download proton-cachyos-x-armv8.tar.zst: timed out" >&2; exit 1 ;;
+esac
+mkdir -p "$DATA/retroforge"
+for p in 30 80; do echo \$p >"$DATA/retroforge/steam-compat-tools.progress"; sleep 1.3; done
+echo "seen=\$(cat "$PROG_CLIENT" 2>/dev/null)" >>"$T/proton.log"
+echo unpacking >"$DATA/retroforge/steam-compat-tools.progress"; sleep 1.3
+rm -f "$DATA/retroforge/steam-compat-tools.progress"
+EOF
+# retroforge-steam-proton: `apply`.
+cat >"$T/bin/steam-proton" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$T/steam-proton.log"; echo apply >>"$T/order.log"; echo armv8
+EOF
+printf 'processor\t: 0\nFeatures\t: fp asimd evtstrm aes pmull sha1 sha2 crc32 cpuid\n' >"$T/v80"
+printf 'processor\t: 0\nFeatures\t: fp asimd aes pmull sha1 sha2 crc32 atomics fphp cpuid\n' >"$T/v82"
 chmod +x "$T/bin"/*
 
 ENVS=(env -u DISPLAY -u WAYLAND_DISPLAY -u RETROFORGE_STEAM_X86_GUEST HOME="$H" XDG_DATA_HOME="$DATA" XDG_CACHE_HOME="$CACHE"
       RETROFORGE_STEAM_BOOTSTRAP="$T/bin/bootstrap" RETROFORGE_STEAM_X86_GUEST_HELPER="$T/bin/guest"
-      RETROFORGE_STEAM_WRAPPER="$T/bin/steam"
+      RETROFORGE_STEAM_WRAPPER="$T/bin/steam" RETROFORGE_CPUINFO="$T/v82"
+      RETROFORGE_PROTON_CLI="$T/bin/proton" RETROFORGE_STEAM_PROTON_CLI="$T/bin/steam-proton"
       RETROFORGE_STEAM_DONE_GRACE=1 DISPLAY=:1 WAYLAND_DISPLAY=gamescope-0)
 si() {  # si [VAR=value...] -- <args...>
   local vars=(); while [ $# -gt 0 ] && [ "$1" != -- ]; do vars+=("$1"); shift; done; shift
@@ -153,6 +177,37 @@ reset; si RETROFORGE_STEAM_X86_GUEST=0 -- install client
 [ "$RC" = 0 ] && [ ! -e "$T/guest.log" ] && ok "RETROFORGE_STEAM_X86_GUEST=0: no guest download" || bad "rc=$RC"
 si RETROFORGE_STEAM_X86_GUEST=0 -- status; [ "$(field steam-client installed)" != null ] && ok "and installed without it" || bad "$OUT"
 si -- status; [ "$(field steam-client installed)" = null ] && ok "with the guest on again, not installed (it is missing)" || bad "$OUT"
+
+# ================================================================================================
+# ARMv8.0 CPUs: Proton-CachyOS ARMv8.0 is part of the client's install (retroforge-proton install,
+# its progress file followed), then Steam's default (retroforge-steam-proton apply) once the client's
+# update has written config.vdf.
+CASE="ARMv8.0: install client"
+reset; si RETROFORGE_CPUINFO="$T/v80" -- install client
+[ "$RC" = 0 ] && forward && ok "exit 0; forward-only percentages ending at 100%" || bad "rc=$RC out=$OUT err=$ERR"
+grep -qx "install" "$T/proton.log" && ok "retroforge-proton install ran" || bad "$(cat "$T/proton.log" 2>&1)"
+p="$(sed -n 's/^progress-file=//p' "$T/proton.log")"
+[ -n "$p" ] && [ "$p" -ge 45 ] && [ "$p" -le 60 ] && ok "after the client and its guest (the bar said $p)" || bad "progress file when Proton started: '$p'"
+s="$(sed -n 's/^seen=//p' "$T/proton.log")"
+[ -n "$s" ] && [ "$s" -gt "$p" ] && ok "the bar moved with its download (then $s)" || bad "start $p, while it downloaded '$s'"
+u="$(sed -n 's/^progress-file=//p' "$T/steam.log")"
+[ -n "$u" ] && [ "$u" -gt "${s:-0}" ] && ok "before the client's own update ($u when that started)" || bad "update started at '$u'"
+grep -qx "apply" "$T/steam-proton.log" && [ "$(head -1 "$T/order.log")" = proton ] && [ "$(tail -1 "$T/order.log")" = apply ] \
+  && ok "then retroforge-steam-proton apply, after the update: Steam's default" || bad "order: $(cat "$T/order.log" 2>&1)"
+si RETROFORGE_CPUINFO="$T/v80" -- status
+python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d["steam-client"]["size"] > (1296 + 652 + 110 + 400) << 20' "$OUT" \
+  && ok "status: its size counts the Proton download" || bad "$OUT"
+
+CASE="ARMv8.0: Proton cannot be installed"
+reset; si RETROFORGE_CPUINFO="$T/v80" FAKE_PROTON=net -- install client
+[ "$RC" = 3 ] && grep -q "Proton-CachyOS for this CPU (ARMv8.0) could not be installed" <<<"$ERR" && [ ! -e "$T/steam.log" ] \
+  && ok "exit 3 (network), before the client's update" || bad "rc=$RC err=$ERR"
+[ ! -e "$PROG_CLIENT" ] && ok "no progress file left" || bad "left: $(cat "$PROG_CLIENT")"
+
+CASE="a CPU with LSE atomics"
+reset; si RETROFORGE_CPUINFO="$T/v82" -- install client
+[ "$RC" = 0 ] && [ ! -e "$T/proton.log" ] && [ ! -e "$T/steam-proton.log" ] \
+  && ok "no Proton downloaded, Steam's default left alone" || bad "rc=$RC $(cat "$T/proton.log" "$T/steam-proton.log" 2>&1)"
 
 echo
 echo "$PASS passed, $FAIL failed"

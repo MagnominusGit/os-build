@@ -1,11 +1,10 @@
 extends RefCounted
 ## Apps > Proton: the Proton RetroForge keeps for Windows games, from Steam, GOG and Epic alike. It is
 ## an entry of the Apps list the plugin adds itself (entry(): no retroforge-emu catalog row), whose page
-## is the channel dropdown on ARMv8.0 CPUs (steam_proton.gd) and then this row: the tool's release and
-## a Download (Update once installed) button with its progress.
+## is this row: the tool's release and a Download (Update once installed) button with its progress.
 ##
-## /usr/bin/retroforge-proton says which tool this device takes (`status`: Proton-CachyOS arm64, or our
-## ARMv8.0 build in the player's channel) and installs it as a user unit, waiting for it (`install`),
+## /usr/bin/retroforge-proton says which tool this device takes (`status`: Proton-CachyOS arm64, or on
+## ARMv8.0 CPUs its ARMv8.0 rebuild) and installs it as a user unit, waiting for it (`install`),
 ## so the download goes on if OGUI restarts. The progress is the percentage steam-compat-tools writes
 ## to ~/.local/share/retroforge/steam-compat-tools.progress, read here while the command runs (the row
 ## is looked up on every tick: the Apps page builds new rows at each visit). DXVK-Sarek is on in the
@@ -86,13 +85,16 @@ func _label(now: Dictionary) -> void:
 		_row.description = _shown
 		return
 	_row.text = _title(now)
-	var steam := "Steam uses it for every Windows game not set to another tool." if now.get("armv8", false) \
+	var armv8: bool = now.get("armv8", false)
+	var steam := "Steam uses it for every Windows game not set to another tool." if armv8 \
 		else "In Steam, select it for a game: Properties > Compatibility."
 	if now.get("installed") != null:
 		_row.description = "Installed: %s. GOG and Epic games run with it. %s" % [now["installed"], steam]
 		_row.button_text = "Update"
 	else:
-		_row.description = "Not installed. GOG and Epic games download it at their first install. %s" % steam
+		var comes := "It comes with Steam Client and with the first GOG or Epic game you install." if armv8 \
+			else "GOG and Epic games download it at their first install."
+		_row.description = "Not installed. %s %s" % [comes, steam]
 		_row.button_text = "Download"
 
 
@@ -127,9 +129,7 @@ func _poll_while_running() -> void:
 			_poll()
 
 
-## Download / Update, and after a channel switch (steam_proton.gd `changed`: the switch has started the
-## other build's download, which `install` waits for, its progress shown): `retroforge-proton
-## install`, polled for its progress until it ends. An Update that found nothing newer leaves the same
+## Download / Update: `retroforge-proton install`, polled for its progress until it ends. An Update that found nothing newer leaves the same
 ## release installed.
 func install() -> void:
 	if _running:

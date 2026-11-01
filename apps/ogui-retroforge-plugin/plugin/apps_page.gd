@@ -20,7 +20,7 @@ extends ScrollContainer
 ## comes from the file steam-install writes (the entry's "progress"), and Open starts Steam's own UI.
 ##
 ## Proton ("kind": "proton") is no catalog row: the plugin adds it (proton_entry), and its page is only
-## the Proton rows (proton_rows: the channel on ARMv8.0 CPUs, the tool with its Download / Update),
+## the Proton rows (proton_rows: the tool with its Download / Update),
 ## which Steam, GOG and Epic games share.
 ##
 ## Built in code on the pattern of OGUI's own settings pages (library_settings_menu.tscn): a
@@ -64,7 +64,7 @@ var emulator_id := ""
 ## Client's own rows; called at every build of Steam Client's page.
 var steam_rows := Callable()
 ## Apps > Proton's list entry ({} for none: proton_tool.gd entry()), read with the catalog, and the rows
-## of its page (plugin.gd: channel, tool), called at every build of that page.
+## of its page (plugin.gd: the tool), called at every build of that page.
 var proton_entry := Callable()
 var proton_rows := Callable()
 var logger := Log.get_logger("RetroForgeEmulators", Log.LEVEL.INFO)

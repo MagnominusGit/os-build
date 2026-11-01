@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 # steam-compat-tools — Proton-CachyOS's arm64 build as a Steam compatibility tool, kept on its newest
-# release (on ARMv8.0 CPUs our ARMv8.0 build instead, below), with DXVK-Sarek on in it where the GPU
-# needs it. Run by /usr/bin/retroforge-proton (the player's Download / Update in Apps > Proton), by
-# /usr/bin/retroforge-steam-proton (ARMv8.0 CPUs, at each `steam` start and channel switch) and by
-# the store's launcher.
+# release (on ARMv8.0 CPUs its ARMv8.0 rebuild instead, below), with DXVK-Sarek on in it where the GPU
+# needs it. Run by /usr/bin/retroforge-proton (the player's Download / Update in Apps > Proton, and
+# Steam Client's install on ARMv8.0 CPUs), by /usr/bin/retroforge-steam-proton (ARMv8.0 CPUs, at each
+# `steam` start) and by the store's launcher.
 #
-#   steam-compat-tools install  install or update the tool, and DXVK-Sarek on or off in every tool of
-#                               ours as the GPU needs it (below)
+#   steam-compat-tools install [--wait]
+#                               install or update the tool, and DXVK-Sarek on or off in every tool of
+#                               ours as the GPU needs it (below). Another run holding the lock: exit
+#                               at once, or with --wait, wait for it and then run (the store and
+#                               retroforge-proton, which need the tool when it ends)
 #   steam-compat-tools status   print (JSON) the tool this device takes and what is installed of it:
 #                               {"name", "display_name", "author", "homepage", "installed": tag or
 #                               null, "armv8": true on an ARMv8.0 CPU}. Never touches the network.
@@ -72,9 +75,10 @@
 # installed and GitHub unreachable, a checksum mismatch, a tarball without its folder); 2 for a bad
 # invocation.
 #
-# ARMv8.0 CPUs (no `atomics` in /proc/cpuinfo, e.g. the SM6115) take proton-armv8.pin instead: Valve's
-# Proton built for them, with DXVK-Sarek (sunshineinabox/proton-armv8). Proton-CachyOS's build needs the
-# kernel's LSE emulation there, which costs ~0.3-0.5 us per atomic.
+# ARMv8.0 CPUs (no `atomics` in /proc/cpuinfo, e.g. the SM6115) take proton-cachyos-armv8.pin instead:
+# the same Proton-CachyOS releases rebuilt for them (retroforge-linux/proton-cachyos-armv8). CachyOS's
+# own build needs the kernel's LSE emulation there, which costs ~0.3-0.5 us per atomic. The folders of
+# the Valve-based ARMv8.0 builds this took before (DROPPED) are removed once it is in place.
 #
 # TEST SEAMS (tests/test-steam-compat-tools.sh): RETROFORGE_STEAM_ROOT (also set by /usr/bin/steam),
 # RETROFORGE_STEAM_COMPAT_PIN (whose releases: can point at a fake API), RETROFORGE_STEAM_PINS (the pins'
@@ -130,26 +134,12 @@ def lacks_atomics():
     return any("atomics" not in x for x in feats)
 
 
-STEAM_CONF = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
-                          "retroforge", "steam.conf")
-
-
-def channel():
-    """The player's ARMv8.0 Proton channel (retroforge-steam-proton): stable unless PROTON_CHANNEL=experimental."""
-    value = ""
-    try:
-        with open(STEAM_CONF, encoding="utf-8", errors="replace") as f:
-            for line in f:
-                if line.startswith("PROTON_CHANNEL="):
-                    value = line.strip().split("=", 1)[1]
-    except OSError:
-        pass
-    return "experimental" if value == "experimental" else "stable"
-
-
-ARMV8_PINS = {"stable": "proton-armv8.pin", "experimental": "proton-armv8-experimental.pin"}
 PIN = os.environ.get("RETROFORGE_STEAM_COMPAT_PIN") or os.path.join(
-    PINS, ARMV8_PINS[channel()] if lacks_atomics() else "proton-cachyos-arm64.pin")
+    PINS, "proton-cachyos-armv8.pin" if lacks_atomics() else "proton-cachyos-arm64.pin")
+# Pin names of tools this installed before and no longer offers: Valve's Proton rebuilt for ARMv8.0
+# (sunshineinabox/proton-armv8), stable and experimental, which run a game only through Valve's
+# steam.exe and so not without the Steam client. Their folders go once the pin's tool is in place.
+DROPPED = ("proton-armv8", "proton-armv8-experimental")
 TOOLS = os.path.join(STEAM_ROOT, "compatibilitytools.d")
 LOCK = os.path.join(STEAM_ROOT, ".retroforge-compat-tools.lock")
 TMP_PREFIX = ".retroforge-compat-tools-"
@@ -589,6 +579,24 @@ def retire(pin):
         discard(path)
 
 
+def drop_retired():
+    """Removes the folders of DROPPED tools, each when nothing runs from it."""
+    try:
+        names = sorted(os.listdir(TOOLS))
+    except FileNotFoundError:
+        return
+    for name in names:
+        path = os.path.join(TOOLS, name)
+        m = marker(path)
+        if m is None or m["name"] not in DROPPED:
+            continue
+        if in_use(path):
+            log(f"keeping {name}, which RetroForge no longer offers, while something runs from it")
+            continue
+        log(f"removing {name}: RetroForge no longer offers it")
+        discard(path)
+
+
 def sweep():
     """Temporary folders left by a run that was killed. With the lock held, none is in use."""
     for name in os.listdir(STEAM_ROOT):
@@ -675,16 +683,20 @@ def update(rel, pin, final, was, need):
             f"from its next start.")
 
 
-def install(pin, need):
+def install(pin, need, wait=False):
     """The newest release in place, Sarek on in it when need. With the lock only: PROGRESS is the
-    running one's."""
+    running one's. Another run holding it: None at once, or with wait, its end waited for first (its
+    progress is in PROGRESS meanwhile), and then this run."""
     os.makedirs(TOOLS, exist_ok=True)
     with open(LOCK, "w") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            log("another steam-compat-tools is already running; leaving it to that one")
-            return None
+            if not wait:
+                log("another steam-compat-tools is already running; leaving it to that one")
+                return None
+            log("another steam-compat-tools is already running; waiting for it")
+            fcntl.flock(lock, fcntl.LOCK_EX)
         try:
             return locked_install(pin, need)
         finally:
@@ -718,6 +730,7 @@ def locked_install(pin, need):
         discard(NEXT)  # a release that waited there and is no longer the one to install
     if marker(final) is not None and complete(final):
         retire(pin)
+        drop_retired()
     return final
 
 
@@ -741,13 +754,13 @@ def main(argv):
             log(str(err))
             return 1
         return 0
-    if argv[1:] != ["install"]:
-        log("usage: steam-compat-tools install|status")
+    if argv[1:] not in (["install"], ["install", "--wait"]):
+        log("usage: steam-compat-tools install [--wait]|status")
         return 2
     need = needs_sarek()
     rc, path = 0, None
     try:
-        path = install(read_pin(), need)
+        path = install(read_pin(), need, wait=argv[2:] == ["--wait"])
     except (Failed, OSError) as err:
         log(str(err))
         rc = 1
