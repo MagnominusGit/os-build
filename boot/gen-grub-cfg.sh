@@ -107,11 +107,13 @@ ESP_MARKER="/EFI/steamos/grubenv"
 # them all, which is the only place anyone reads them on a board with no serial console.
 # cpuidle.governor=teo picks the TEO idle governor over menu, which would otherwise win on rating;
 # see the cpuidle block in kernel/kernel.config for why.
-# audit=0: journald (systemd 260, Audit=yes by default) switches kernel auditing on at start, after
-# which every process takes the audited syscall path and kmsg fills with records nothing reads
-# (auditd ships disabled). audit=0 keeps the subsystem from initializing, so there is nothing to
-# switch on. Measured on the Air X: ~3000 audit records in 7 h had pushed the boot log out of kmsg.
-BOOT_CMDLINE="quiet loglevel=3 video=efifb:off console=tty0 cgroup.memory=nokmem,nosocket nosoftlockup panic=5 cpuidle.governor=teo audit=0"
+# NOT audit=0. Kernel auditing is kept off by journald instead (usr/lib/systemd/journald.conf.d/
+# 10-retroforge-audit.conf): audit=0 never registers the audit netlink socket, so every record PAM,
+# sshd or dbus-broker sent made the kernel exec modprobe and wait for it.
+# cgroup_favordynmods=1: moving a process between cgroups otherwise waits out an RCU grace period,
+# 10-20 ms on the Air X with lazy RCU, and every login, scope and game launch moves one; with it the
+# move is ~free, for a slightly costlier fork and exit (2026-10-31).
+BOOT_CMDLINE="quiet loglevel=3 video=efifb:off console=tty0 cgroup.memory=nokmem,nosocket nosoftlockup panic=5 cpuidle.governor=teo cgroup_favordynmods=1"
 
 # --- board catalog ------------------------------------------------------------------------------
 declare -a pids=() pnames=() pdtbs=() pbootargs=()
