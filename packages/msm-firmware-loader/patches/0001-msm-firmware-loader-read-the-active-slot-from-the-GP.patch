@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: sunshineinabox <aqemail@gmail.com>
 Date: Sat, 24 Oct 2026 16:00:00 -0700
-Subject: [PATCH 1/5] msm-firmware-loader: read the active slot from the GPT
+Subject: [PATCH] msm-firmware-loader: read the active slot from the GPT
 
 OpenABL boots Linux without androidboot.slot_suffix, and qbootctl needs
 udev's /dev/disk/by-partlabel links, which do not exist yet when this

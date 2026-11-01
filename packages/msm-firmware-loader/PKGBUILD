@@ -9,11 +9,13 @@
 # WHAT IT DOES ON THE AIR X. Before udev, it mounts the active slot's modem partition (vfat:
 # adsp/cdsp/modem/wlanmdsp) and vendor partition (ext4 inside super: a610_zap), read-only, links
 # their blobs under the devicetree's device folder (qcom/sm6115/mangmi/) in a tmpfs, and points
-# firmware_class.path there. tqftpserv finds wlanmdsp.mbn through the same path. Patches (ours,
-# see each header): 0001 reads the active slot from the GPT (OpenABL passes no slot suffix);
-# 0002 exposes blobs only under DT device folders; 0003 maps the active slot's dynamic partitions;
-# 0004 drops the per-entry forks; 0005 mounts only modem and vendor; 0006 prefers vendor's copy
-# of a name, as Android does.
+# firmware_class.path there. tqftpserv finds wlanmdsp.mbn through the same path. It also mounts
+# dsp and persist (noload) and builds the hexagonrpc tree for hexagonrpcd's sensors PD. Patches
+# (ours, see each header): 0001 reads the active slot from the GPT (OpenABL passes no slot
+# suffix); 0002 links the sensors registry without a fastrpc user; 0003 exposes blobs only under
+# DT device folders; 0004 maps the active slot's dynamic partitions; 0005 drops the per-entry
+# forks; 0006 mounts persist and dsp without journal replay; 0007 prefers vendor's copy of a
+# name, as Android does; 0008 cuts the remaining forks on the boot path.
 #
 # It runs on every board, serving whatever its partitions hold under the devicetree's device
 # folders (e.g. adsp/cdsp under qcom/sm8550/ayn/odin2portal/). A name the partitions lack falls
@@ -52,8 +54,11 @@ prepare() {
 
 build() {
   # The Makefile's CFLAGS/LDFLAGS are empty placeholders and its pkg-config flags are separate
-  # variables, so makepkg's flags can be handed over on the command line.
-  make -C "make-dynpart-mappings-${_dynpart}" CFLAGS="${CFLAGS}" LDFLAGS="${LDFLAGS}"
+  # variables, so makepkg's flags can be handed over on the command line. USERSPACE=1 maps `super`
+  # through the device the loader passes instead of finding it by PARTLABEL: before udev that
+  # lookup is a libblkid probe of every partition, 680 ms on the Air X. Every board here has one
+  # `super` block device, so the argument is the whole answer.
+  make -C "make-dynpart-mappings-${_dynpart}" CFLAGS="${CFLAGS}" LDFLAGS="${LDFLAGS}" USERSPACE=1
 }
 
 package() {

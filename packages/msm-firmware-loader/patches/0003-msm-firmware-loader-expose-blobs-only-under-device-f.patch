@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: sunshineinabox <aqemail@gmail.com>
 Date: Sat, 24 Oct 2026 16:10:00 -0700
-Subject: [PATCH 2/5] msm-firmware-loader: expose blobs only under device
+Subject: [PATCH] msm-firmware-loader: expose blobs only under device
  firmware folders
 
 Collect the partition blobs in blobs/ and link them only under the
@@ -11,7 +11,7 @@ by bare name keeps loading from /lib/firmware, and the bluetooth, venus
 and WCNSS aliases that would shadow it are dropped.
 
 diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
-index 7b7b8cf..55fdde1 100644
+index b59bed8..9be7a42 100644
 --- a/msm-firmware-loader.sh
 +++ b/msm-firmware-loader.sh
 @@ -106,9 +106,11 @@ BASEDIR="/run/msm-firmware-loader"
@@ -60,7 +60,7 @@ index 7b7b8cf..55fdde1 100644
  # Mount hexagonrpc paths, see
  # https://github.com/linux-msm/hexagonrpc#hexagonfs
  
-@@ -249,86 +248,24 @@ link_path "$BASEDIR/mnt/vendor$(ab_get_slot)/etc/sensors/sns_reg_config" "$BASED
+@@ -254,86 +253,24 @@ link_path "$BASEDIR/mnt/vendor$(ab_get_slot)/etc/sensors/sns_reg_config" "$BASED
  # runtime-specific, the closest we have is socinfo from runtime kernel.
  link_path "/sys/devices/soc0" "$BASEDIR/hexagonrpc/socinfo"
  

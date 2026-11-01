@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sun, 1 Nov 2026 14:00:41 -0800
+Subject: [PATCH] msm-firmware-loader: mount persist and dsp without
+ replaying their journals
+
+Both are journaled ext4, and a read-only ext4 mount still replays the
+journal after an unclean Android shutdown, writing to Android's
+partitions; mount them with noload. Leave bluetooth out: its blobs are
+never linked where the kernel looks.
+
+diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
+index e25d10a..25ecd29 100644
+--- a/msm-firmware-loader.sh
++++ b/msm-firmware-loader.sh
+@@ -95,9 +95,9 @@ link_path() {
+ # Configurations:
+ 
+ # List of partitions to be mounted and inspected for blobs.
++# bluetooth is left out: its blobs are never linked where the kernel looks.
+ FW_PARTITIONS="
+ 	apnhlos
+-	bluetooth$(ab_get_slot)
+ 	dsp$(ab_get_slot)
+ 	modem$(ab_get_slot)
+ 	persist
+@@ -183,8 +183,14 @@ do
+ 
+ 	if [ -z "${FW_PARTITIONS##*"$PARTNAME"*}" ] && [ -n "$PARTNAME" ] && [ ! -d "$BASEDIR/mnt/$PARTNAME" ]
+ 	then
++		# persist and dsp are journaled ext4, and a read-only mount still
++		# replays the journal after an unclean Android shutdown; noload does not
++		case "$PARTNAME" in
++			dsp*|persist) mount_opts=ro,noload,nodev,noexec,nosuid ;;
++			*) mount_opts=ro,nodev,noexec,nosuid ;;
++		esac
+ 		mkdir -p "$BASEDIR/mnt/$PARTNAME"
+-		mount -o ro,nodev,noexec,nosuid \
++		mount -o "$mount_opts" \
+ 			"/dev/$DEVNAME" "$BASEDIR/mnt/$PARTNAME"
+ 		# Some devices have 600 permissions on persist, therefore we need an additional
+ 		# mount with UID and GID mappings for hexagonrpcd to access it
+@@ -197,7 +203,7 @@ do
+ 			target_gid="$(id -g fastrpc)"
+ 			mkdir -p "$BASEDIR/mnt/persist-fastrpc"
+ 			# Kernel requires both UID and GID mapped
+-			mount -o ro,nodev,noexec,nosuid \
++			mount -o ro,noload,nodev,noexec,nosuid \
+ 				--map-users="$source_uid:$target_uid:1" \
+ 				--map-groups="$source_gid:$target_gid:1" \
+ 				"/dev/$DEVNAME" "$BASEDIR/mnt/persist-fastrpc"

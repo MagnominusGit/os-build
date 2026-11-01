@@ -1,0 +1,147 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sun, 1 Nov 2026 14:01:35 -0800
+Subject: [PATCH] msm-firmware-loader: fork less on the boot path
+
+The loader runs before udevd, so all of it is boot time. Read the cmdline
+and the firmware path with read, take the GPT header and flag byte straight
+from od, use the cached slot instead of a subshell per use, drop dirname
+from link_path, make the work directories with one mkdir, and link each
+partition's blobs with one ln -s, whose refusal to replace a name is the
+first-copy rule.
+
+diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
+index 4f25979..82c330b 100644
+--- a/msm-firmware-loader.sh
++++ b/msm-firmware-loader.sh
+@@ -26,10 +26,16 @@ ab_get_slot() {
+ 		echo "$AB_SLOT"
+ 		return
+ 	fi
++	ab_slot_suffix=
+ 	if command -v qbootctl > /dev/null; then
+ 		ab_slot_suffix=$(qbootctl -a | grep -o 'Active slot: _[ab]' | cut -d ":" -f2 | xargs) || :
+ 	else
+-		ab_slot_suffix=$(grep -o 'androidboot\.slot_suffix=..' /proc/cmdline |  cut -d "=" -f2) || :
++		read -r cmdline < /proc/cmdline
++		case " $cmdline " in
++			*" androidboot.slot_suffix="*)
++				ab_slot_suffix="${cmdline#*androidboot.slot_suffix=}"
++				ab_slot_suffix="${ab_slot_suffix%% *}" ;;
++		esac
+ 	fi
+ 	if [ -z "$ab_slot_suffix" ]; then
+ 		ab_slot_suffix=$(gpt_get_slot)
+@@ -66,11 +72,12 @@ gpt_get_slot() {
+ 		disk="${part%/*}"
+ 		read -r sector < "$disk"/queue/logical_block_size
+ 		disk="/dev/${disk##*/}"
+-		entries_lba="$(dd if="$disk" bs=1 skip=$((sector + 72)) count=8 2>/dev/null | od -A n -t u8 | tr -d ' ')"
+-		entry_size="$(dd if="$disk" bs=1 skip=$((sector + 84)) count=4 2>/dev/null | od -A n -t u4 | tr -d ' ')"
+-		entry="$(($(cat "$part"/partition) - 1))"
++		# GPT header: entries LBA (u64 at 72), entry count, entry size (u32 at 84)
++		set -- $(od -A n -t u4 -j $((sector + 72)) -N 16 "$disk")
++		if [ $# -ne 4 ]; then continue; fi
++		read -r entry < "$part"/partition
+ 		# Byte 6 of the entry attributes holds the A/B flags, 0x4 is active
+-		ab_flags="$(dd if="$disk" bs=1 skip=$((entries_lba * sector + entry * entry_size + 54)) count=1 2>/dev/null | od -A n -t u1 | tr -d ' ')"
++		ab_flags=$(od -A n -t u1 -j $((($1 + ($2 << 32)) * sector + (entry - 1) * $4 + 54)) -N 1 "$disk")
+ 
+ 		if [ $((ab_flags & 4)) -ne 0 ]
+ 		then
+@@ -87,7 +94,7 @@ AB_SLOT="$(ab_get_slot)"
+ link_path() {
+ 	if [ -e "$1" ]
+ 	then
+-		mkdir -p "$(dirname "$2")"
++		mkdir -p "${2%/*}"
+ 		ln -s "$1" "$2"
+ 	fi
+ }
+@@ -98,10 +105,10 @@ link_path() {
+ # bluetooth is left out: its blobs are never linked where the kernel looks.
+ FW_PARTITIONS="
+ 	apnhlos
+-	dsp$(ab_get_slot)
+-	modem$(ab_get_slot)
++	dsp$AB_SLOT
++	modem$AB_SLOT
+ 	persist
+-	vendor$(ab_get_slot)
++	vendor$AB_SLOT
+ 	RADIO
+ "
+ 
+@@ -123,9 +130,7 @@ BASEDIR="/run/msm-firmware-loader"
+ mkdir -p "$BASEDIR"
+ mount -o mode=755,nodev,noexec,nosuid -t tmpfs none "$BASEDIR"
+ 
+-mkdir -p "$BASEDIR/mnt"
+-mkdir -p "$BASEDIR/blobs"
+-mkdir -p "$BASEDIR/target"
++mkdir -p "$BASEDIR/mnt" "$BASEDIR/blobs" "$BASEDIR/target"
+ 
+ # Scanning and mounting partitions we're interested in:
+ 
+@@ -217,7 +222,7 @@ done
+ # This is needed for devices that require blobs either not present
+ # on the partitions (e.g. venus on many msm8916 devices) or if
+ # the device has secure-boot disabled and can run newer blobs.
+-EXTRA_PATH="$(cat /sys/module/firmware_class/parameters/path)"
++read -r EXTRA_PATH < /sys/module/firmware_class/parameters/path || :
+ 
+ if [ -d "$EXTRA_PATH" ]
+ then
+@@ -232,41 +237,37 @@ fi
+ # Vendor's firmware/ goes first: Android's ueventd searches /vendor/firmware
+ # before the modem partition, and OEMs ship rebuilt DSP images there. Whole
+ # names are compared, as ueventd does, so vendor's wlanmdsp.otaupdate does not
+-# hide the modem's wlanmdsp.mbn.
++# hide the modem's wlanmdsp.mbn. ln -s without -f keeps a name that exists and
++# goes on with the rest, which is exactly that rule, with no loop per file.
+ for dir in "$BASEDIR"/mnt/*/firmware "$BASEDIR"/mnt/*/image
+ do
+-	set --
+-	for blob in "$dir"/*
+-	do
+-		if [ -f "$blob" ] && ! [ -e "$BASEDIR/blobs/${blob##*/}" ]; then set -- "$@" "$blob"; fi
+-	done
+-	if [ $# -gt 0 ]; then ln -s "$@" "$BASEDIR/blobs/"; fi
++	ln -s "$dir"/* "$BASEDIR/blobs/" 2>/dev/null || :
+ done
+ 
+ # Mount hexagonrpc paths, see
+ # https://github.com/linux-msm/hexagonrpc#hexagonfs
+ 
+-link_path "$BASEDIR/mnt/vendor$(ab_get_slot)/etc/acdbdata" "$BASEDIR/hexagonrpc/acdb"
++link_path "$BASEDIR/mnt/vendor$AB_SLOT/etc/acdbdata" "$BASEDIR/hexagonrpc/acdb"
+ 
+-if [ -d "$BASEDIR/mnt/dsp$(ab_get_slot)/adsp" ] || \
+-	[ -d "$BASEDIR/mnt/dsp$(ab_get_slot)/cdsp" ] || \
+-	[ -d "$BASEDIR/mnt/dsp$(ab_get_slot)/sdsp" ]
++if [ -d "$BASEDIR/mnt/dsp$AB_SLOT/adsp" ] || \
++	[ -d "$BASEDIR/mnt/dsp$AB_SLOT/cdsp" ] || \
++	[ -d "$BASEDIR/mnt/dsp$AB_SLOT/sdsp" ]
+ then
+ 	# Some devices with separated dsp_a/dsp_b
+-	link_path "$BASEDIR/mnt/dsp$(ab_get_slot)" "$BASEDIR/hexagonrpc/dsp"
++	link_path "$BASEDIR/mnt/dsp$AB_SLOT" "$BASEDIR/hexagonrpc/dsp"
+ else
+ 	# Documented hexagonrpc path
+-	link_path "$BASEDIR/mnt/vendor$(ab_get_slot)/dsp" "$BASEDIR/hexagonrpc/dsp"
++	link_path "$BASEDIR/mnt/vendor$AB_SLOT/dsp" "$BASEDIR/hexagonrpc/dsp"
+ fi
+ 
+-link_path "$BASEDIR/mnt/vendor$(ab_get_slot)/etc/sensors/config" "$BASEDIR/hexagonrpc/sensors/config"
++link_path "$BASEDIR/mnt/vendor$AB_SLOT/etc/sensors/config" "$BASEDIR/hexagonrpc/sensors/config"
+ link_path "$BASEDIR/mnt/persist-fastrpc/sensors/registry/registry" "$BASEDIR/hexagonrpc/sensors/registry"
+ # Without a fastrpc user hexagonrpcd runs as root and reads persist directly
+ if ! [ -e "$BASEDIR/hexagonrpc/sensors/registry" ]
+ then
+ 	link_path "$BASEDIR/mnt/persist/sensors/registry/registry" "$BASEDIR/hexagonrpc/sensors/registry"
+ fi
+-link_path "$BASEDIR/mnt/vendor$(ab_get_slot)/etc/sensors/sns_reg_config" "$BASEDIR/hexagonrpc/sensors/sns_reg.conf"
++link_path "$BASEDIR/mnt/vendor$AB_SLOT/etc/sensors/sns_reg_config" "$BASEDIR/hexagonrpc/sensors/sns_reg.conf"
+ # hexagonrpc expects socinfo packaged from downstream here, but because it is
+ # runtime-specific, the closest we have is socinfo from runtime kernel.
+ link_path "/sys/devices/soc0" "$BASEDIR/hexagonrpc/socinfo"

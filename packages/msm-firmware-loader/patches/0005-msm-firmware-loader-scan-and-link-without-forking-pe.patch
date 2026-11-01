@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: sunshineinabox <aqemail@gmail.com>
 Date: Mon, 26 Oct 2026 01:00:00 -0700
-Subject: [PATCH 4/5] msm-firmware-loader: scan and link without forking per
+Subject: [PATCH] msm-firmware-loader: scan and link without forking per
  entry
 
 The partition scans ran grep and sed for every block device and the blob
@@ -11,7 +11,7 @@ uevent with read, use parameter expansion, link each blob group with one
 ln and skip .mbn aliases that already exist.
 
 diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
-index d3bef83..9ecca09 100644
+index 0528180..e25d10a 100644
 --- a/msm-firmware-loader.sh
 +++ b/msm-firmware-loader.sh
 @@ -37,6 +37,19 @@ ab_get_slot() {
@@ -127,7 +127,7 @@ index d3bef83..9ecca09 100644
  done
  
  # Mount hexagonrpc paths, see
-@@ -261,9 +272,13 @@ link_path "/sys/devices/soc0" "$BASEDIR/hexagonrpc/socinfo"
+@@ -266,9 +277,13 @@ link_path "/sys/devices/soc0" "$BASEDIR/hexagonrpc/socinfo"
  
  # Some kernel versions expect .mbn instead of legacy .mdt
  # Symlink these files together, the kernel can autodetect the type.

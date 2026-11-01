@@ -1,17 +1,17 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: sunshineinabox <aqemail@gmail.com>
 Date: Sat, 24 Oct 2026 16:15:00 -0700
-Subject: [PATCH 3/5] msm-firmware-loader: map the dynamic partitions of the
+Subject: [PATCH] msm-firmware-loader: map the dynamic partitions of the
  active slot
 
 make-dynpart-mappings maps the first metadata slot unless it is given a
-slot number, so pass the slot found by ab_get_slot. The Mangmi Air X's
-factory super holds data only in its _a partitions, so with slot B
-active vendor_b has no node; mount the other slot's partition under the
+slot number, so pass the slot found by ab_get_slot. The Mangmi Air X
+boots slot B while only its _a dynamic partitions hold data, leaving
+vendor_b without a node, so mount the other slot's partition under the
 active slot's name when that happens.
 
 diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
-index 55fdde1..d3bef83 100644
+index 9be7a42..0528180 100644
 --- a/msm-firmware-loader.sh
 +++ b/msm-firmware-loader.sh
 @@ -132,11 +132,22 @@ then

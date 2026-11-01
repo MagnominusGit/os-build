@@ -1,8 +1,8 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: sunshineinabox <aqemail@gmail.com>
 Date: Sun, 1 Nov 2026 12:19:51 -0800
-Subject: [PATCH] msm-firmware-loader: prefer the vendor partition's blobs, by
- file name
+Subject: [PATCH] msm-firmware-loader: prefer the vendor partition's blobs,
+ by file name
 
 Android's ueventd searches /vendor/firmware before the modem partition
 (system's firmware_directories are read before the vendor file it
@@ -12,10 +12,10 @@ names, as ueventd does: grouping by stem would let the Air X vendor's
 wlanmdsp.otaupdate hide the modem's wlanmdsp.mbn.
 
 diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
-index ead95dd..4528100 100644
+index 25ecd29..4f25979 100644
 --- a/msm-firmware-loader.sh
 +++ b/msm-firmware-loader.sh
-@@ -222,27 +222,17 @@ then
+@@ -228,27 +228,17 @@ then
  	done
  fi
  
