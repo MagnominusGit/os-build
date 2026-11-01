@@ -1,0 +1,55 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Sun, 1 Nov 2026 00:15:00 -0700
+Subject: [PATCH] perf(HardwareManager): a platform GPU looks up no PCI ids
+
+HardwareManager finds the GPU cards as it loads, on the main thread,
+before the shell's first frame. For a platform DRM device, an SoC's
+display controller, the card has no PCI vendor id, and an empty one is a
+prefix of every line, so the pci.ids lookup read all ~42,000 lines of
+the file (0.6 s on the MANGMI Air X). vulkaninfo then ran only to be
+matched against those PCI ids, and every attribute was read by a `cat`
+process. Now a card without a vendor id skips the lookup, vulkaninfo
+runs only when a card has PCI ids, and the attributes are read directly.
+---
+ core/systems/hardware/hardware_manager.gd | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/core/systems/hardware/hardware_manager.gd b/core/systems/hardware/hardware_manager.gd
+--- a/core/systems/hardware/hardware_manager.gd
++++ b/core/systems/hardware/hardware_manager.gd
+@@ -185,7 +185,9 @@
+ 	var device := ""
+ 	var subdevice := ""
+ 	logger.debug("Getting device info from:", vendor_id, device_id, subvendor_id, subdevice_id)
+-	while not hwids.eof_reached():
++	# A platform device (an SoC's display controller) has no PCI ids to look up, and with an empty
++	# vendor_id every line "begins with" it: this read all ~42,000 lines of pci.ids.
++	while not vendor_id.is_empty() and not hwids.eof_reached():
+ 		var line := hwids.get_line()
+ 		var line_clean := line.strip_escapes()
+ 
+@@ -263,6 +265,9 @@
+ 
+ 		found_cards.append(card_info)
+ 
++	# vulkaninfo's devices are matched to the cards by PCI id below, which platform cards have none of.
++	if found_cards.size() > 0 and found_cards.all(func(card: DRMCardInfo): return card.vendor_id.is_empty()):
++		return found_cards
+ 	var vulkan_info := _get_cards_from_vulkan()
+ 	if found_cards.size() == 0 or vulkan_info.size() == 0:
+ 		logger.error("Unable to identify display adapters")
+@@ -367,11 +372,8 @@
+ 
+ 
+ func _get_card_property_from_cat(path: String) -> String:
+-	var output := []
+-	OS.execute("cat", [path], output)
+-	if output.is_empty():
+-		return ""
+-	var value := output[0] as String
++	# Read, not a `cat` process per attribute: five of them for every card.
++	var value := _read_sys(path)
+ 	logger.debug("Got cat output:", value)
+ 	return value.lstrip("0x").to_lower().strip_escapes()
+ 
