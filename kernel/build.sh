@@ -214,7 +214,11 @@ fi
   #   =m  VIDEO_QCOM_VENUS: the SM6115's decoder (its qcom,qcm2290-venus fallback is not behind
   #       that #if). Lose it and the SM6115 has no /dev/video* -- Steam's Remote Play client then
   #       falls back to software decode on four A73s, again with no other symptom.
+  #   =y  NETFILTER_NETLINK: no prompt of its own, so it is here only through NF_TABLES' select.
+  #       Without it systemd execs modprobe at every unit start and waits (kernel.config, nfnetlink),
+  #       a boot-time cost with no failure anywhere to show it.
   for pair in CFG80211=m MAC80211=m TOUCHSCREEN_CHIPONE_TDDI=m VIDEO_QCOM_IRIS=m VIDEO_QCOM_VENUS=m \
+              NETFILTER_NETLINK=y \
               BLK_DEV_DM=y DM_VERITY=y VFAT_FS=y BLK_DEV_LOOP=y \
               ZRAM=y ZRAM_BACKEND_ZSTD=y \
               DRM_MSM=y PCIE_QCOM=y PCI_PWRCTRL_GENERIC=y MMC_SDHCI_MSM=y SCSI_UFSHCD=y \
