@@ -124,21 +124,27 @@ grep -q 'if not launch_manager.get_running().is_empty():' "$SRC/store_settings.g
   && ok "Sign in waits for no game to run (the window takes its place; nothing gives it focus back)" \
   || bad "store_settings.gd signs in over a running game"
 # Nothing tells OGUI that a web page's text field has the focus: the helper's `typing` events do, and
-# the keyboard comes up as Guide+X brings it up over a game (X11 context, on the popup stack), only
-# when no other popup is up, and goes with the field unless the player opened it; never left behind.
-grep -q '_window.typing(bool(data.get("on", false)))' "$SRC/store_settings.gd" \
+# the keyboard comes up as Guide+X brings it up over a game (on the popup stack), only when no other
+# popup is up, and goes with the field unless the player opened it; never left behind. It types into a
+# hidden field of ours (GODOT context), not the window (X11: no InputPlumber keyboard found after a
+# fresh boot, Air X 2026-11-01); each edit, and Enter, goes to the helper on its stdin (say).
+grep -q '_window.typing(bool(data.get("on", false)), s\["runner"\].say)' "$SRC/store_settings.gd" \
   && python3 - "$SRC/signin_window.gd" <<'PY2' \
-  && ok "a page's text field taking the focus opens OGUI's keyboard into the window, losing it closes ours" \
-  || bad "the sign-in's typing events do not open/close OGUI's keyboard as Guide+X does, or leave it up after"
+  && ok "a page's text field taking the focus opens OGUI's keyboard, typing through the helper; losing it closes ours" \
+  || bad "the sign-in's typing events do not open/close OGUI's keyboard into the helper, or leave it up after"
 import sys
 s = open(sys.argv[1]).read()
-body = s[s.index("func typing(on: bool)"):s.index("func _close_osk()")]
+body = s[s.index("func typing(on: bool, say: Callable)"):s.index("func _close_osk()")]
 rel = s[s.index("func release()"):]
 sys.exit(0 if all(x in body for x in ("if on and popup_state_machine.current_state() == null:",
                                       "popup_state_machine.push_state(osk_state)", "state_machine.push_state(popup_state)",
-                                      "context.type = KeyboardContext.TYPE.X11", "osk.open(context)",
-                                      "elif not on and _osk_ours:"))
-         and "if popup_state_machine.current_state() == osk_state:" in s and "if _osk_ours:" in rel else 1)
+                                      "KeyboardContext.new(KeyboardContext.TYPE.GODOT, _field)", "osk.open(context)",
+                                      "context.submitted.connect(_on_submitted)", "elif not on and _osk_ours:",
+                                      '"type": "text", "delete": _sent.length() - same, "insert": now.substr(same)',
+                                      '"type": "key", "key": "Enter"', "_field.focus_mode = Control.FOCUS_NONE"))
+         and "TYPE.X11" not in body
+         and "if popup_state_machine.current_state() == osk_state:" in s and "if _osk_ours:" in rel
+         and "_field.queue_free()" in rel else 1)
 PY2
 # A store refusing the stored refresh token (revoked, expired) signs it out and is exit 3, like never
 # having signed in: the library reads the helper's stderr so the player is told to sign in again.

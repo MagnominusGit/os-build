@@ -16,6 +16,11 @@
 # protocol), so its on-screen keyboard never came up. Every page is asked for its focused field every
 # TYPING_POLL s, and on_typing(True) runs when one takes the focus (or another one does), on_typing(False)
 # when none has it: the plugin opens and closes the keyboard (signin_window.gd).
+# The keyboard types into the plugin, not into the window: OGUI's X11 keyboard sends through InputPlumber's
+# virtual keyboard, which OGUI does not find after a fresh boot (its D-Bus proxy caches InputPlumber's target
+# list from before the keyboard target exists, and InputPlumber 0.82 never signals the change; Air X,
+# 2026-11-01). The plugin says each edit as a JSON line on our stdin, {"type": "text", "delete": n,
+# "insert": s} or {"type": "key", "key": "Enter"}, and type_in() types it into the focused field's page.
 #
 # THE WINDOW. App mode (one window, no address bar), fullscreen, at screen height / 720 (plan F3: 1.5 on
 # 1080p, a 1280x720 page). Its profile is a private temporary folder, deleted after: no cookie outlives
@@ -61,6 +66,9 @@ TYPING = {"expression": r"""(() => {
   return [location.host, all.indexOf(e), e.name || e.id || e.type || ""].join("|");
 })()""", "returnByValue": True}
 TYPING_POLL = 0.5  # s between two asks of every page for its focused text field
+MAX_DELETE = 256  # backspaces one edit may type; more is not the keyboard talking
+# The keys type_in() presses: DevTools key name -> Windows virtual key code, and the text a press types.
+KEYS = {"Backspace": (8, None), "Enter": (13, "\r")}
 MAX_MESSAGE = 4 << 20  # bytes of one protocol message; more is not Chromium talking sensibly
 
 
@@ -268,6 +276,36 @@ class _Typing:
             if tid not in asking:
                 self.pending[self.pipe.send("Runtime.evaluate", TYPING, session)] = ("ask", tid)
 
+    def type_in(self, line):
+        """One line the plugin said (THE KEYBOARD above) typed into the page whose field has the focus;
+        dropped when no field has it, or when it is not an edit."""
+        tid = next((t for t, k in sorted(self.keys.items()) if k), None)
+        session = self.sessions.get(tid)
+        try:
+            cmd = json.loads(line)
+        except ValueError:
+            return
+        if not session or not isinstance(cmd, dict):
+            return
+        if cmd.get("type") == "text":
+            delete, insert = cmd.get("delete", 0), cmd.get("insert", "")
+            if not isinstance(delete, int) or not isinstance(insert, str):
+                return
+            for _ in range(max(0, min(delete, MAX_DELETE))):
+                self._press(session, "Backspace")
+            if insert:
+                self.pipe.send("Input.insertText", {"text": insert}, session)
+        elif cmd.get("type") == "key" and cmd.get("key") in KEYS:
+            self._press(session, cmd["key"])
+
+    def _press(self, session, key):
+        code, text = KEYS[key]
+        down = {"key": key, "code": key, "windowsVirtualKeyCode": code, "nativeVirtualKeyCode": code}
+        self.pipe.send("Input.dispatchKeyEvent", dict(down, type="rawKeyDown"), session)
+        if text:
+            self.pipe.send("Input.dispatchKeyEvent", dict(down, type="char", text=text), session)
+        self.pipe.send("Input.dispatchKeyEvent", dict(down, type="keyUp"), session)
+
     def _tell(self):
         key = next((k for _, k in sorted(self.keys.items()) if k), "")
         if key != self.shown:
@@ -280,7 +318,8 @@ def run(binary, url, *, env, scale, code_in_url, reads_page, code_in_page, stop_
     """Chromium on url until a page gives a code. (reason, code): ("code", code), ("closed", None) when
     the player closed the window, ("cancelled", None) when stop_fd reached its end (the plugin's
     Cancel) or SIGTERM/SIGHUP came, ("timeout", None). on_open(pid) once Chromium runs, on_typing(on)
-    as a page's text field takes or loses the focus (THE KEYBOARD). Raises OSError when it cannot
+    as a page's text field takes or loses the focus, and the lines on stop_fd typed into it (THE KEYBOARD).
+    Raises OSError when it cannot
     start. A signal only sets a flag, so Chromium is always closed and the profile always deleted,
     however many come and whenever."""
     stopped = []
@@ -292,6 +331,7 @@ def run(binary, url, *, env, scale, code_in_url, reads_page, code_in_page, stop_
         on_open(proc.pid)
         reader = _Reader(pipe, code_in_url, reads_page, code_in_page)
         typing = _Typing(pipe, on_typing) if on_typing else None
+        said = b""  # stop_fd's bytes past its last whole line
         try:
             pipe.send("Target.setDiscoverTargets", {"discover": True})
             deadline = time.monotonic() + timeout
@@ -302,8 +342,15 @@ def run(binary, url, *, env, scale, code_in_url, reads_page, code_in_page, stop_
                     typing.poll(time.monotonic())
                 wait = min(left, TYPING_POLL if typing else 1.0)
                 ready, _, _ = select.select([pipe.r, stop_fd], [], [], wait)
-                if stop_fd in ready and not os.read(stop_fd, 4096):
-                    return "cancelled", None
+                if stop_fd in ready:
+                    chunk = os.read(stop_fd, 4096)
+                    if not chunk:
+                        return "cancelled", None
+                    *lines, said = (said + chunk).split(b"\n")
+                    said = said[-MAX_MESSAGE:]
+                    for line in lines:
+                        if typing:
+                            typing.type_in(line.decode("utf-8", "replace"))
                 if pipe.r not in ready:
                     continue
                 msgs = pipe.read()

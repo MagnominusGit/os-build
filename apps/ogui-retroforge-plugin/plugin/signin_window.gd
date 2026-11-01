@@ -28,6 +28,9 @@ var logger := Log.get_logger("RetroForgeSignin", Log.LEVEL.INFO)
 var tree: SceneTree
 var _app: RunningApp
 var _osk_ours := false  # the keyboard is up because a page's text field took the focus (typing)
+var _field: TextEdit  # what the keyboard types into: its edits go to the page's field (typing)
+var _sent := ""  # _field's text as the page's field last heard of it
+var _say := Callable()  # a line to the sign-in's helper
 
 
 func setup(scene_tree: SceneTree) -> RefCounted:
@@ -88,21 +91,61 @@ func _claim_windows(app: RunningApp, xwayland) -> void:
 
 
 ## A text field in the window took (on) or lost the focus (`typing` events, chromium_signin.py THE
-## KEYBOARD): OGUI's keyboard comes up typing into the window, as Guide+X brings it up over a game
-## (OGUI's input_manager.gd _osk_input), and goes once no field has the focus. Never over another
-## popup (the Guide menu), and a keyboard the player brought up is theirs to close.
-func typing(on: bool) -> void:
+## KEYBOARD): OGUI's keyboard comes up over the window, as Guide+X brings it up over a game (OGUI's
+## input_manager.gd _osk_input), and goes once no field has the focus. Never over another popup (the
+## Guide menu), and a keyboard the player brought up is theirs to close.
+##
+## It types into _field, not into the window (X11): OGUI sends X11 keys through InputPlumber's
+## virtual keyboard, which it does not find after a fresh boot (its proxy keeps InputPlumber's target
+## list from before that keyboard existed; Air X, 2026-11-01). say(line) carries each edit to the
+## helper, which types it into the page's field.
+func typing(on: bool, say: Callable) -> void:
 	if _app == null:
 		return
 	if on and popup_state_machine.current_state() == null:
+		_say = say
+		_open_field()
 		popup_state_machine.push_state(osk_state)
 		state_machine.push_state(popup_state)
-		var context := KeyboardContext.new()
-		context.type = KeyboardContext.TYPE.X11
+		var context := KeyboardContext.new(KeyboardContext.TYPE.GODOT, _field)
+		context.submitted.connect(_on_submitted)
+		# OGUI gives the target the focus back when the keyboard closes: not this hidden one.
+		context.exited.connect(func() -> void: _field.focus_mode = Control.FOCUS_NONE)
 		osk.open(context)
 		_osk_ours = true
 	elif not on and _osk_ours:
 		_close_osk()
+
+
+## An empty _field, in the tree (the keyboard looks for the target's scroll containers) and hidden.
+func _open_field() -> void:
+	if _field == null or not is_instance_valid(_field):
+		_field = TextEdit.new()
+		_field.visible = false
+		_field.focus_mode = Control.FOCUS_NONE
+		_field.text_changed.connect(_on_field_changed)
+		tree.root.add_child(_field)
+	_sent = ""
+	_field.text = ""
+
+
+## The keyboard changed _field: the page's field gets a backspace per character past what both
+## share, then the rest.
+func _on_field_changed() -> void:
+	var now := _field.text
+	var same := 0
+	while same < mini(now.length(), _sent.length()) and now[same] == _sent[same]:
+		same += 1
+	var line := JSON.stringify({"type": "text", "delete": _sent.length() - same, "insert": now.substr(same)})
+	_sent = now
+	if _say.is_valid():
+		_say.call(line)
+
+
+## The keyboard's Enter (it closes itself after): the page's field gets an Enter.
+func _on_submitted() -> void:
+	if _say.is_valid():
+		_say.call(JSON.stringify({"type": "key", "key": "Enter"}))
 
 
 func _close_osk() -> void:
@@ -119,6 +162,10 @@ func release() -> void:
 		return
 	if _osk_ours:
 		_close_osk()
+	_say = Callable()
+	if _field != null and is_instance_valid(_field):
+		_field.queue_free()
+	_field = null
 	var app := _app
 	_app = null
 	app.on_exit = Callable()

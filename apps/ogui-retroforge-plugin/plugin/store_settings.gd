@@ -218,7 +218,7 @@ func _on_event(data: Dictionary, store: String) -> void:
 					s["row"].description = "Signing in to %s..." % title
 					s["row"].grab_focus.call_deferred()
 		"typing":
-			_window.typing(bool(data.get("on", false)))
+			_window.typing(bool(data.get("on", false)), s["runner"].say)
 		"signed_in":
 			_notify("Signed in to %s as %s." % [title, data.get("account", "")])
 			changed.emit(store)

@@ -376,6 +376,8 @@ while True:
         m = json.loads(raw)
         asks = m["method"] == "Runtime.evaluate" and "activeElement" in m.get("params", {}).get("expression", "")
         methods.append("typing" if asks else m["method"])
+        if m["method"].startswith("Input."):  # what the helper typed, in order
+            methods.append(m["method"] + " " + json.dumps(m.get("params", {}), sort_keys=True))
         log = json.load(open(sys.argv[0] + ".json"))
         log["methods"] = methods
         json.dump(log, open(sys.argv[0] + ".json", "w"))
@@ -399,6 +401,13 @@ while True:
                 sys.exit(0)
         elif m["method"] == "Target.attachToTarget":
             send({"id": m["id"], "result": {"sessionId": "S1"}})
+        elif m["method"].startswith("Input."):
+            send({"id": m["id"], "sessionId": m.get("sessionId"), "result": {}})
+            if mode == "type" and m["params"].get("key") == "Enter" and m["params"].get("type") == "keyUp":
+                time.sleep(0.3)
+                sys.exit(0)
+        elif asks and mode == "type":  # one field keeps the focus until Enter is typed into it
+            send({"id": m["id"], "sessionId": "S1", "result": {"result": {"type": "string", "value": "login.gog.com|0|username"}}})
         elif asks:
             field = fields.pop(0) if mode == "typing" and fields else ""
             send({"id": m["id"], "sessionId": "S1", "result": {"result": {"type": "string", "value": field}}})
@@ -551,6 +560,30 @@ ok(decl[:1] == [os.path.join(PINS, "signin-gamepad.yaml")] and decl[1:2] and dec
    and int(decl[1]) != log.get("pid"), "the sign-in's gamepad profile is declared to OGUI while the window is up, as the helper's",
    str(decl))
 ok(not os.path.exists(GAME_PROFILE), "and withdrawn after")
+# The on-screen keyboard types into the plugin, not into an X11 window (OGUI's X11 path finds no
+# InputPlumber keyboard after a fresh boot): the plugin says each edit on the helper's stdin, and the
+# helper types it into the focused field over the pipe. Lines before a field has the focus, broken
+# lines and unknown ones are dropped.
+def type_in(proc):
+    proc.stdin.write("not json\n" + json.dumps({"type": "text", "delete": 0, "insert": "early"}) + "\n")
+    proc.stdin.flush()
+    while True:
+        line = proc.stdout.readline()
+        if not line or json.loads(line).get("event") == "typing":
+            break
+    for cmd in ({"type": "text", "delete": 0, "insert": "ab"}, {"type": "text", "delete": 1, "insert": "c\u00e9"},
+                {"type": "bogus"}, {"type": "key", "key": "Enter"}):
+        proc.stdin.write(json.dumps(cmd) + "\n")
+    proc.stdin.flush()
+events, rc, err = sign_in("gog", "type", stop=type_in)
+typed = [x for x in chromium_log().get("methods", []) if x.startswith("Input.") and " " in x]
+key = lambda t, k, code, **kw: "Input.dispatchKeyEvent " + json.dumps(dict(
+    {"type": t, "key": k, "code": k, "windowsVirtualKeyCode": code, "nativeVirtualKeyCode": code}, **kw), sort_keys=True)
+ok(typed == ['Input.insertText {"text": "ab"}', key("rawKeyDown", "Backspace", 8), key("keyUp", "Backspace", 8),
+             'Input.insertText {"text": "c\\u00e9"}', key("rawKeyDown", "Enter", 13), key("char", "Enter", 13, text="\r"),
+             key("keyUp", "Enter", 13)],
+   "the keyboard's edits are typed into the focused field: text, a backspace per deleted character, Enter",
+   str(typed) + err[-300:])
 events, rc, err = sign_in("gog", "replace")
 ok(os.path.exists(GAME_PROFILE) and open(GAME_PROFILE).read() == "/other/profile.yaml\n1\n",
    "a declaration another launcher made over ours since is not withdrawn by us")
