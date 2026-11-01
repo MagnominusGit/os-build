@@ -1,0 +1,143 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Sun, 1 Nov 2026 00:50:00 -0700
+Subject: [PATCH] perf(InputIconManager): each icon mapping is loaded once
+
+A mapping loads with all of its textures. InputIconManager loaded all
+sixteen of them three times while it was created, on the main thread
+before the shell's first frame: _device_mappings's initializer and the
+two discover_*() calls in _init(), each dropping every mapping again.
+Then each icon lookup loaded the device's mapping anew, and as nothing
+held it, its textures with it. That was ~3,000 of the 3,600 resources
+loaded at startup on the MANGMI Air X. Now one pass collects both maps,
+and the mappings in use are held.
+---
+ core/systems/input/input_icon_manager.gd | 58 ++++++++++++++++++++++++++++++-------------
+ 1 file changed, 45 insertions(+), 13 deletions(-)
+
+diff --git a/core/systems/input/input_icon_manager.gd b/core/systems/input/input_icon_manager.gd
+--- a/core/systems/input/input_icon_manager.gd
++++ b/core/systems/input/input_icon_manager.gd
+@@ -32,10 +32,12 @@
+ ## Mapping of device names to match to path to input icon mapping. There can be
+ ## multiple device names that match a single icon mapping resource.
+ ## E.g. {"Xbox 360 Controller": "res://assets/gamepad/icon_mappings/xb360.tres"}
+-var _device_mappings := discover_device_mappings(MAPPINGS_DIR)
++var _device_mappings := {}
+ ## Mapping of icon mapping names to the path to the mapping
+ ## E.g. {"XBox 360": "res://assets/gamepad/icon_mappings/xb360.tres"}
+ var _mappings := {}
++## Mappings _load_mapping() has loaded, by path
++var _loaded := {}
+ ## Mapping of device names to a mapping name. There can be multiple device names
+ ## that match a single icon mapping name.
+ ## E.g. {"Xbox 360 Wireless Controller": "XBox 360"}
+@@ -134,8 +136,12 @@
+ 	if Engine.is_editor_hint():
+ 		_parse_input_actions()
+ 
+-	self._mappings = discover_mappings(MAPPINGS_DIR)
+-	self._device_mappings = discover_device_mappings(MAPPINGS_DIR)
++	# One pass. A mapping loads with all of its textures, and the two discover_*() calls plus
++	# _device_mappings's initializer loaded every one of them three times: ~1,800 resources before
++	# the first frame (MANGMI Air X).
++	var found := discover(MAPPINGS_DIR)
++	self._mappings = found[0]
++	self._device_mappings = found[1]
+ 	
+ 	# Populate mapping of device names to mapping names
+ 	for mapping_name in self._mappings.keys():
+@@ -168,6 +174,25 @@
+ 
+ 	# Set input type to what's likely being used currently
+ 	set_last_input_type(InputType.GAMEPAD)
++
++
++## discover_mappings() and discover_device_mappings() in one pass over the mappings.
++static func discover(mappings_dir: String) -> Array:
++	var name_mappings := {}
++	var device_mappings := {}
++	for filename: String in DirAccess.get_files_at(mappings_dir):
++		# After being exported, resources are listed with a ".remap" extension
++		if filename.ends_with(".remap"):
++			filename = filename.trim_suffix(".remap")
++		var path := "/".join([MAPPINGS_DIR, filename])
++		var mapping := load(path) as InputIconMapping
++		if not mapping:
++			push_error("InputIconManager: Failed to load input icon mapping: ", path)
++			continue
++		name_mappings[mapping.name] = path
++		for dev_name: String in mapping.device_names:
++			device_mappings[dev_name] = path
++	return [name_mappings, device_mappings]
+ 
+ 
+ ## Discover all input icon mappings from the specified path
+@@ -211,6 +236,17 @@
+ 	return device_mappings
+ 
+ 
++## A mapping in use, held. Its textures go when nothing holds it, and every icon lookup loaded it
++## again, textures and all.
++func _load_mapping(path: String) -> InputIconMapping:
++	if not path in _loaded:
++		var mapping := load(path) as InputIconMapping
++		if not mapping:
++			return null
++		_loaded[path] = mapping
++	return _loaded[path]
++
++
+ ## Refresh all icons
+ func refresh():
+ 	# All it takes is to signal icons to refresh paths
+@@ -233,10 +269,10 @@
+ 		var mapping_path := DEFAULT_MAPPING
+ 		if mapping_name in self._mappings:
+ 			mapping_path = self._mappings[mapping_name] as String
+-		var mapping := load(mapping_path) as InputIconMapping
++		var mapping := _load_mapping(mapping_path)
+ 		if not mapping:
+ 			logger.warn("Failed to load input icon mapping: " + mapping_path)
+-			mapping = load(DEFAULT_MAPPING) as InputIconMapping
++			mapping = _load_mapping(DEFAULT_MAPPING)
+ 		var texture := mapping.get_texture(path)
+ 		if texture == null:
+ 			logger.warn("No texture for '" + path + "' found in mapping: " + mapping.name)
+@@ -251,7 +287,7 @@
+ 		InputType.GAMEPAD:
+ 			mapping = self.load_matching_mapping(device_name)
+ 		InputType.KEYBOARD_MOUSE:
+-			mapping = load("res://assets/keyboard/icon_mappings/keyboard.tres")
++			mapping = _load_mapping("res://assets/keyboard/icon_mappings/keyboard.tres")
+ 	if not mapping:
+ 		logger.warn("No mapping found for device: " + device_name)
+ 		return textures
+@@ -318,24 +354,20 @@
+ 	#logger.debug("Devices with mappings: " + str(self._device_mappings))
+ 	if device_name in self._device_mappings:
+ 		var mapping_path := self._device_mappings[device_name] as String
+-		var mapping := load(mapping_path) as InputIconMapping
+-		return mapping
++		return _load_mapping(mapping_path)
+ 	
+ 	# Next, try to do a substring match
+ 	for pattern: String in self._device_mappings.keys():
+ 		if not pattern in device_name:
+ 			continue
+ 		var mapping_path := self._device_mappings[pattern] as String
+-		var mapping := load(mapping_path) as InputIconMapping
+-		return mapping
++		return _load_mapping(mapping_path)
+ 	
+ 	# Last resort, fallback to default icon mapping. No device yet (startup, before any
+ 	# input) is not worth a warning per icon.
+ 	if not device_name.is_empty():
+ 		logger.warn("No input icon mapping found for device: " + device_name)
+-	var mapping_path := DEFAULT_MAPPING
+-	var mapping := load(mapping_path) as InputIconMapping
+-	return mapping
++	return _load_mapping(DEFAULT_MAPPING)
+ 
+ 
+ ## Returns the mapping name for the given device name. The mapping name is the

@@ -1,0 +1,57 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Sun, 1 Nov 2026 00:58:00 -0700
+Subject: [PATCH] perf(DisksMenu): drive cards are built when the menu is shown
+
+The Disks settings menu listed the drives and built a card for every
+partition as the card UI loaded, and again when udisks2 settled. A
+handheld's internal storage alone is ~85 vendor partitions, a card
+each: ~2 s on the main thread before the shell's first frame (MANGMI Air
+X). It now builds them when it is shown, and a change while it is
+hidden only marks them out of date.
+---
+ core/ui/card_ui/settings/disks_settings_menu.gd | 22 +++++++++++++++++++++-
+ 1 file changed, 21 insertions(+), 1 deletions(-)
+
+diff --git a/core/ui/card_ui/settings/disks_settings_menu.gd b/core/ui/card_ui/settings/disks_settings_menu.gd
+--- a/core/ui/card_ui/settings/disks_settings_menu.gd
++++ b/core/ui/card_ui/settings/disks_settings_menu.gd
+@@ -11,17 +11,37 @@
+ @onready var focus_group: FocusGroup = $%FocusGroup
+ @onready var no_drive_label: Label = $%NoDisksLabel
+ 
++## Whether the drive cards are out of date. They are built only while the menu is shown: a
++## handheld's internal storage alone is ~85 vendor partitions, a card each, and listing and
++## building them (twice, as udisks2 settles) held the shell's first frame back ~2 s at boot.
++var _stale := true
+ 
++
+ # Called when the node enters the scene tree for the first time.
+ func _ready():
+ 	if not udisks2.is_running():
+ 		return
+ 
+-	udisks2.unprotected_devices_updated.connect(_on_drives_updated)
++	udisks2.unprotected_devices_updated.connect(_on_devices_updated)
++	visibility_changed.connect(_refresh)
++	_refresh()
++
++
++func _on_devices_updated(devices: Array[BlockDevice]) -> void:
++	if is_visible_in_tree():
++		_on_drives_updated(devices)
++	else:
++		_stale = true
++
++
++func _refresh() -> void:
++	if not _stale or not is_visible_in_tree():
++		return
+ 	_on_drives_updated(udisks2.get_unprotected_devices())
+ 
+ 
+ func _on_drives_updated(devices: Array[BlockDevice]) -> void:
++	_stale = false
+ 	logger.debug("Got updated drives")
+ 
+ 	# Clear the current grid of items
