@@ -97,7 +97,7 @@ emit_entry() {  # <id> <name> <dtb> <board bootargs> <suffix> <title-suffix> <ex
   cat >>"$OUTFILE" <<EOF
 
 menuentry '${ename:-$eid}${etitle}' --id ${eid}${esuffix} {
-  linux /Image $BOOT_CMDLINE $ebootargs $INSTALLER_CMDLINE $eextra
+  linux /vmlinuz.efi $BOOT_CMDLINE $ebootargs $INSTALLER_CMDLINE $eextra
   devicetree /dtbs/${edtb}.dtb
 }
 EOF

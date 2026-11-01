@@ -290,7 +290,7 @@ seed_var() {  # <dev> <slot> <mnt> <source>
 # mounted somewhere readable -- and never this running system's.
 #
 # WHY THE FILES COME OUT OF THE NEW ROOT AND NOT THE BUNDLE (or, for the installer, not the medium):
-# grubaa64.efi and grub-<slot>.cfg are boot software owned by the same build that ships /boot/Image
+# grubaa64.efi and grub-<slot>.cfg are boot software owned by the same build that ships /boot/vmlinuz.efi
 # and /lib/modules/<ver> inside that rootfs. Taking them from the root makes the pairing true by
 # construction -- there is no second layout to keep in sync, and no way to install a root whose
 # stage 2 does not boot it.

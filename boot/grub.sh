@@ -96,7 +96,7 @@ make -j"$(nproc)" AWK=gawk
 # The stage-2 module set. GRUB 2.14 has no `saveenv` (merged into `loadenv`) and no `menu` (merged
 # into `normal`).
 #   part_gpt fat btrfs      the three filesystems the chain touches: GPT, the ESP/efi vfat, the
-#                           slot root's btrfs (where Image/initramfs/dtbs live)
+#                           slot root's btrfs (where vmlinuz.efi/initramfs/dtbs live)
 #   loadenv                 load_env/save_env against the ESP's grubenv -- the saved board choice
 #   regexp                  derives the boot disk from $root; see boot/gen-grub-cfg.sh
 #   search*                 the fallback path when that derivation fails

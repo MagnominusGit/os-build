@@ -15,7 +15,7 @@
 # set by RAUC at deploy time (needs a mount), so it is not applied here. The kernel mounts
 # it `ro` regardless (rootfstype=btrfs ... ro on the stage-2 grub.cfg cmdline).
 #
-# The root carries its own boot half (docs/archive/phase5.md): /boot/{Image, initramfs-retroforge.img,
+# The root carries its own boot half (docs/archive/phase5.md): /boot/{vmlinuz.efi, initramfs-retroforge.img,
 # dtbs} that the slot's stage-2 GRUB boots, plus the /usr/lib/retroforge/boot mirror + the
 # /esp//efi mountpoints the update path reads. The stage-1/2 binaries reach the cards through
 # the ESP/efi partitions laid by image/make-sdcard.sh and refreshed by the RAUC hook.
@@ -42,8 +42,8 @@ VAR_SIZE_MIB="${VAR_SIZE_MIB:-256}"   # matches var-a/-b in partition-table.txt 
 
 [ -n "$BASE" ]        || { echo "usage: assemble-rootfs.sh <base-rootfs-dir>" >&2; exit 2; }
 [ -d "$BASE" ]        || { echo "no base rootfs dir: $BASE" >&2; exit 2; }
-[ -f "$OUT/Image" ]       || { echo "no kernel: $OUT/Image (run kernel/build.sh first)" >&2; exit 1; }
-[ -f "$OUT/initramfs.cpio.gz" ] || { echo "no initramfs: $OUT/initramfs.cpio.gz (run make initramfs)" >&2; exit 1; }
+[ -f "$OUT/vmlinuz.efi" ] || { echo "no kernel: $OUT/vmlinuz.efi (run kernel/build.sh first)" >&2; exit 1; }
+[ -f "$OUT/initramfs.cpio.zst" ] || { echo "no initramfs: $OUT/initramfs.cpio.zst (run make initramfs)" >&2; exit 1; }
 command -v mkfs.btrfs >/dev/null 2>&1 || { echo "mkfs.btrfs not found (run inside retroforge-build)" >&2; exit 1; }
 
 stage="$(mktemp -d)"
@@ -80,11 +80,11 @@ else cp -a "$BASE"/. "$stage"/; fi
 # and #36 for the real guard (assert every file is package-owned or declared).
 
 # STAGE kernel-boot — retroforge kernel + dtbs + initramfs under /boot. These are what the stage-2 grub.cfg boots
-# (docs/archive/phase5.md): `linux ($root)/boot/Image`, `initrd ($root)/boot/initramfs-retroforge.img`,
-# `devicetree ($root)/boot/dtbs/<dtb>.dtb`. The kernel must be the UNCOMPRESSED Image — the
-# embedded gzio filter is not in grubaa64.efi's module set, so Image.gz would not decompress.
-install -Dm0644 "$OUT/Image" "$stage/boot/Image"
-install -Dm0644 "$OUT/initramfs.cpio.gz" "$stage/boot/initramfs-retroforge.img"
+# (docs/archive/phase5.md): `linux ($root)/boot/vmlinuz.efi`, `initrd ($root)/boot/initramfs-retroforge.img`,
+# `devicetree ($root)/boot/dtbs/<dtb>.dtb`. The kernel is the EFI zboot image, which unpacks itself:
+# grubaa64.efi has no gzio filter, and does not need one for it (kernel/README.md).
+install -Dm0644 "$OUT/vmlinuz.efi" "$stage/boot/vmlinuz.efi"
+install -Dm0644 "$OUT/initramfs.cpio.zst" "$stage/boot/initramfs-retroforge.img"
 for dtb in "$OUT"/dtbs/*.dtb; do install -Dm0644 "$dtb" "$stage/boot/dtbs/$(basename "$dtb")"; done
 
 # STAGE kernel-modules — loadable kernel modules under /lib/modules (from kernel/build.sh modules_install).

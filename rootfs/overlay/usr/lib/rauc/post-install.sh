@@ -20,7 +20,7 @@
 #   4. re-arm     -- the grubenv names the target first, OK and with all three tries.
 #
 # WHY THE BOOT FILES COME OUT OF THE NEW ROOT AND NOT THE BUNDLE: grub-esp.efi and grub-<slot>.cfg
-# are boot software owned by the same build that ships /boot/Image and /lib/modules/<ver> inside the
+# are boot software owned by the same build that ships /boot/vmlinuz.efi and /lib/modules/<ver> inside the
 # rootfs. Taking them from the root makes the pairing true by construction -- there is no bundle
 # layout to keep in sync, and no way to install a root whose stage 2 does not boot it.
 #

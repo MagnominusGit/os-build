@@ -5,13 +5,14 @@
 # config fragments, all out-of-tree patches, and all device trees. Every board DTB is staged
 # alongside it and the stage-2 grub.cfg picks one per menu entry.
 #
-# UNCOMPRESSED, deliberately. This used to build Image.gz for the android-bootimg boot artifact.
-# The stage-2 GRUB boots ($slotroot)/boot/Image, and grubaa64.efi's module set has no gzio filter
-# to unpack a .gz with -- so a compressed kernel here would simply not load. Building both and
-# shipping one is how the unused half goes stale, so only Image is built.
+# vmlinuz.efi, an EFI zboot image: the Image, gzip-compressed, behind a PE stub that unpacks it.
+# The stage-2 GRUB boots ($slotroot)/boot/vmlinuz.efi, and reading is what costs there (~7 MB/s
+# through the firmware's block driver; see kernel.config). GRUB needs no decompressor for it --
+# which grubaa64.efi lacks, the reason this staged the plain Image before -- so only vmlinuz.efi
+# is staged. Image.gz is not built: nothing boots it.
 #
 # Steps: fetch+verify pinned tarball -> apply all patches -> inject all device trees ->
-# merge all config fragments -> build Image + every dtb + modules -> stage for image assembly.
+# merge all config fragments -> build vmlinuz.efi + every dtb + modules -> stage for image assembly.
 #
 #   kernel/build.sh           # no SoC argument — the build is unified
 set -euo pipefail
@@ -217,8 +218,12 @@ fi
   #   =y  NETFILTER_NETLINK: no prompt of its own, so it is here only through NF_TABLES' select.
   #       Without it systemd execs modprobe at every unit start and waits (kernel.config, nfnetlink),
   #       a boot-time cost with no failure anywhere to show it.
+  #   =y  EFI_ZBOOT + KERNEL_GZIP: vmlinuz.efi is the only kernel staged, so without ZBOOT there is
+  #       nothing to stage; zstd in place of gzip still boots, and measured no faster (kernel.config).
+  #   =y  RD_ZSTD: the initramfs is zstd (image/mkinitramfs.sh). Without it the kernel cannot
+  #       unpack it and panics before any log reaches a disk.
   for pair in CFG80211=m MAC80211=m TOUCHSCREEN_CHIPONE_TDDI=m VIDEO_QCOM_IRIS=m VIDEO_QCOM_VENUS=m \
-              NETFILTER_NETLINK=y \
+              NETFILTER_NETLINK=y EFI_ZBOOT=y KERNEL_GZIP=y RD_ZSTD=y \
               BLK_DEV_DM=y DM_VERITY=y VFAT_FS=y BLK_DEV_LOOP=y \
               ZRAM=y ZRAM_BACKEND_ZSTD=y \
               DRM_MSM=y PCIE_QCOM=y PCI_PWRCTRL_GENERIC=y MMC_SDHCI_MSM=y SCSI_UFSHCD=y \
@@ -297,14 +302,14 @@ fi
     }
   fi
 
-  make ARCH=arm64 "${CC[@]}" -j"$(nproc)" Image dtbs modules
+  make ARCH=arm64 "${CC[@]}" -j"$(nproc)" vmlinuz.efi dtbs modules
 )
 [ -z "${CCACHE_DIR:-}" ] || ccache --show-stats
 
 # --- Stage artifacts for image assembly ---
 OUT="$ROOT/out"; mkdir -p "$OUT/dtbs"
-cp "$SRCDIR/arch/arm64/boot/Image" "$OUT/"
-rm -f "$OUT/Image.gz"   # a leftover from a pre-phase-5 out/ would be stale, and nothing reads it
+cp "$SRCDIR/arch/arm64/boot/vmlinuz.efi" "$OUT/"
+rm -f "$OUT/Image" "$OUT/Image.gz"   # leftovers from an older out/ would be stale, and nothing reads them
 for b in "${BOARDS[@]}"; do cp "$QCOM_DTS/${b}.dtb" "$OUT/dtbs/"; done
 
 # Install loadable modules into a staging tree consumed by rootfs/assemble-rootfs.sh.
@@ -318,4 +323,4 @@ rm -rf "$MODROOT"
   make ARCH=arm64 "${CC[@]}" INSTALL_MOD_PATH="$MODROOT" INSTALL_MOD_STRIP=1 modules_install
 )
 find "$MODROOT/lib/modules" -maxdepth 2 -type l \( -name build -o -name source \) -delete
-echo "[retroforge] staged Image + ${#BOARDS[@]} dtbs + modules in $OUT"
+echo "[retroforge] staged vmlinuz.efi + ${#BOARDS[@]} dtbs + modules in $OUT"

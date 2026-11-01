@@ -407,7 +407,7 @@ for f in usr/bin/rauc etc/rauc/keyring.pem etc/rauc/system.conf \
          usr/lib/retroforge/boot/grubaa64.efi usr/lib/retroforge/boot/grub-a.cfg \
          usr/lib/retroforge/boot/grub-b.cfg \
          usr/lib/retroforge/boot/fonts/dejavu-mono.pf2 \
-         boot/Image boot/initramfs-retroforge.img \
+         boot/vmlinuz.efi boot/initramfs-retroforge.img \
          usr/lib/rauc/post-install.sh \
          usr/lib/retroforge/install/lib-slotwrite.sh; do
   if [ ! -s "$STAGE/$f" ]; then

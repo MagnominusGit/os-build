@@ -157,11 +157,39 @@ splash_start
 # polling for it. There is no udev here and storage probes asynchronously, so the device may
 # simply not exist yet on the first pass — this is what the kernel's own `rootwait` does for us
 # when it mounts root itself. ~30s, then give up.
+#
+# PARTUUID= is read from each disk's own partition table, one partx call per disk. findfs answers it
+# too, but with no udev links and no cache it first probes every partition for a filesystem, ~100
+# with the eMMC's vendor ones: the root mounted 0.58 s after the card's partitions appeared, and
+# 0.16 s with this (Air X, 2026-10-31).
+by_partuuid() {  # <uuid>: the partition device carrying it
+  local want=${1,,} disk tok nr="" uuid p n
+  for disk in /sys/block/*; do
+    [ -e "$disk/device" ] || continue   # zram, loop: nothing to boot from
+    for tok in $(partx -g -P -o NR,UUID "/dev/${disk##*/}" 2>/dev/null); do
+      case $tok in
+        NR=*)   nr=${tok#NR=}; nr=${nr//\"/} ;;
+        UUID=*) uuid=${tok#UUID=}; uuid=${uuid//\"/}
+                [ -n "$uuid" ] && [ "${uuid,,}" = "$want" ] || continue
+                for p in "$disk"/*/partition; do
+                  read -r n < "$p" 2>/dev/null && [ "$n" = "$nr" ] || continue
+                  p=${p%/partition}; printf '/dev/%s' "${p##*/}"; return 0
+                done ;;
+      esac
+    done
+  done
+  return 1
+}
+
 resolve() {
   _spec=$1 _i=0
   while [ "$_i" -lt 300 ]; do
     case "$_spec" in
       /dev/*) [ -b "$_spec" ] && { printf '%s' "$_spec"; return 0; } ;;
+      PARTUUID=*)
+        if command -v partx >/dev/null; then _d=$(by_partuuid "${_spec#PARTUUID=}")
+        else _d=$(findfs "$_spec" 2>/dev/null); fi
+        [ -n "$_d" ] && [ -b "$_d" ] && { printf '%s' "$_d"; return 0; } ;;
       *)      _d=$(findfs "$_spec" 2>/dev/null) && [ -b "$_d" ] && { printf '%s' "$_d"; return 0; } ;;
     esac
     sleep 0.1; _i=$((_i + 1))

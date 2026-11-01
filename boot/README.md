@@ -6,7 +6,7 @@ The UEFI boot chain:
 ABL (OpenABL)  →  the ESP GRUB (\EFI\BOOT\bootaa64.efi)  →  stage-2 grub.cfg (the slot's efi-A/B)  →  kernel in the slot root
                   picks the SLOT from RAUC's state in        picks the BOARD (OpenABL's Device
                   \EFI\steamos\grubenv, counts its tries     model, else the saved choice, else
-                                                             a menu), loads Image + initramfs +
+                                                             a menu), loads vmlinuz.efi + initramfs +
                                                              that board's DTB from the slot root
 ```
 

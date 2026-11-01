@@ -18,17 +18,17 @@
 # Everything here is unprivileged — dd out a superblock and ask blkid, read ext4 with debugfs,
 # read the ESP/efi partitions with mtools. No loop mounts, no root.
 #
-# Run inside the build image (needs sgdisk, blkid, debugfs, mtools, cpio):
+# Run inside the build image (needs sgdisk, blkid, debugfs, mtools, cpio, zstd):
 #   docker run --rm -v "$PWD":/src -w /src retroforge-build image/verify-card.sh
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 IMG="${1:-$ROOT/out/images/sdcard.img}"
 TABLE="$ROOT/image/partition-table.txt"
-INITRAMFS="$ROOT/out/initramfs.cpio.gz"
+INITRAMFS="$ROOT/out/initramfs.cpio.zst"
 
 [ -f "$IMG" ] || { echo "no card image: $IMG (run make sdcard)" >&2; exit 1; }
-for t in sgdisk blkid debugfs mdir mtype mlabel cpio cmp; do
+for t in sgdisk blkid debugfs mdir mtype mlabel cpio cmp zstd; do
   command -v "$t" >/dev/null 2>&1 || { echo "$t not found — run inside retroforge-build" >&2; exit 1; }
 done
 
@@ -231,8 +231,8 @@ check_efi "$P_EFIB" B
 # ----------------------------------------------------------------------------------------------
 echo "  5. initramfs"
 if [ -f "$INITRAMFS" ]; then
-  ( cd "$T" && gzip -dc "$INITRAMFS" | cpio -idm --quiet 2>/dev/null )
-  for b in mount findfs switch_root; do
+  ( cd "$T" && zstd -dcq "$INITRAMFS" | cpio -idm --quiet 2>/dev/null )
+  for b in mount partx findfs switch_root; do
     [ -x "$T/usr/bin/$b" ] && ok "$b staged" || bad "$b is NOT in the initramfs"
   done
   grep -q 'steamos.efi=' "$T/init" && ok "init mounts /efi from steamos.efi=PARTUUID=" \

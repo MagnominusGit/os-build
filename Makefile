@@ -257,7 +257,7 @@ OVERLAY_DB      := work/repo/$(OVERLAY_ARCH)/retroforge.db.tar.zst
 # customize-base off a byte-identical repo.
 OVERLAY_STAMP   := work/repo/$(OVERLAY_ARCH)/.overlay.stamp
 BASE_STAMP   := work/.base.stamp
-KERNEL       := $(OUT)/Image
+KERNEL       := $(OUT)/vmlinuz.efi
 ROOTFS       := $(OUT)/images/rootfs.img
 # Sibling image the assembler emits alongside the root (see image/partition-table.txt):
 # the writable state partition, which also carries the /etc overlay upper.
@@ -265,7 +265,7 @@ VARIMG       := $(OUT)/images/var.img
 # Slot B's var, emitted by the same run. Identical but for /var/lib/retroforge/slot, which is the
 # independent witness of which slot actually mounted (the roots are content-identical by design).
 VARIMG_B     := $(OUT)/images/var-b.img
-INITRAMFS    := $(OUT)/initramfs.cpio.gz
+INITRAMFS    := $(OUT)/initramfs.cpio.zst
 # The boot splash drawer (apps/retroforge-splash): one static aarch64 binary with no shared
 # libraries, and the logo flattened to raw pixels beside it. Both go into the initramfs AND the
 # sealed root, because the same program paints the pre-switch_root phase, the session phase and
@@ -396,7 +396,7 @@ all: sdcard ## Alias for `sdcard` (the full bring-up image)
 image: $(ROOTFS) ## Read-only Btrfs root only (out/images/rootfs.img)
 
 toolchain: $(BUILD_STAMP) ## Build the retroforge-build cross-compile docker image
-kernel:    $(KERNEL)       ## Build Image + all dtbs + modules (in build container)
+kernel:    $(KERNEL)       ## Build vmlinuz.efi + all dtbs + modules (in build container)
 fw-linux:  $(FW_LINUX)     ## Fetch open linux-firmware blobs (host, network)
 fw-qcom:   $(FW_QCOM)      ## Fetch device-proprietary firmware from the qcom-firmwares repo (host, network)
 overlay:   $(OVERLAY_DB)   ## Rebuild from-source overlay pkgs (patched gamescope) -> work/repo/<arch>/
@@ -932,7 +932,7 @@ publish-bundle: ## Publish BUNDLE=<file.raucb> to the OTA bucket (host; needs th
 # the artifacts from inside a throwaway container as root, like clean-base. (out/.build-image.stamp
 # is host-owned and deliberately kept so the toolchain image isn't rebuilt.)
 clean: ## Remove built artifacts (out/), keep firmware/base caches + toolchain stamp
-	$(CTR_RUN) --rm -v $(CURDIR)/out:/wo $(BUSYBOX) rm -rf /wo/Image /wo/Image.gz /wo/dtbs /wo/modroot /wo/images /wo/boot /wo/initramfs.cpio.gz
+	$(CTR_RUN) --rm -v $(CURDIR)/out:/wo $(BUSYBOX) rm -rf /wo/vmlinuz.efi /wo/Image /wo/Image.gz /wo/dtbs /wo/modroot /wo/images /wo/boot /wo/initramfs.cpio.zst /wo/initramfs.cpio.gz
 
 # work/base is root-owned (the bootstrap's pacman writes it as root inside a container), so a
 # plain rm fails for the build user — remove it from inside a throwaway container as root.

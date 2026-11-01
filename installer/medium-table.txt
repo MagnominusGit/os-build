@@ -45,7 +45,7 @@
 # of which is 512e. Every internal UFS in this fleet is 4Kn; none of it is ever this partition.
 # If an installer image is ever targeted at 4Kn media, this is the line that breaks first.
 #
-# esp is 256M for headroom, not need: GRUB is ~2.3M, the kernel Image ~40M and the dtbs ~2M. The
+# esp is 256M for headroom, not need: GRUB is ~2.3M, the kernel (vmlinuz.efi) ~20M and the dtbs ~2M. The
 # slack is for the log, and for a future initramfs if the read-only-/etc decision is ever revisited.
 #
 # The ESP carries NO GPT bit 63 here, unlike the shipped card. That bit exists to stop systemd's

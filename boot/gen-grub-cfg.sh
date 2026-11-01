@@ -187,7 +187,7 @@ emit_entry() {  # <id> <name> <dtb> <board bootargs>
   cat <<EOF
 menuentry '${ename:-$eid}' --id $eid {
   savedefault
-  linux (\$slotroot)/boot/Image $BOOT_CMDLINE $ebootargs root=\$rootspec rootfstype=btrfs rootwait ro retroforge.var=\$varspec retroforge.efi=\$efispec retroforge.slot=$SLOT rauc.slot=$SLOT
+  linux (\$slotroot)/boot/vmlinuz.efi $BOOT_CMDLINE $ebootargs root=\$rootspec rootfstype=btrfs rootwait ro retroforge.var=\$varspec retroforge.efi=\$efispec retroforge.slot=$SLOT rauc.slot=$SLOT
   initrd (\$slotroot)/boot/initramfs-retroforge.img
   devicetree (\$slotroot)/boot/dtbs/${edtb}.dtb
 }

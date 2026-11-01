@@ -37,7 +37,7 @@ IMG="$OUT/installer.img"
 TABLE="$ROOT/installer/medium-table.txt"
 GENPART="$ROOT/image/genpart.sh"
 GENCFG="$ROOT/installer/gen-grub-cfg.sh"
-KERNEL="$ROOT/out/Image"
+KERNEL="$ROOT/out/vmlinuz.efi"
 DTBDIR="$ROOT/out/dtbs"
 GRUB_EFI="$BOOT/grubaa64.efi"
 GRUB_FONT="$BOOT/fonts/dejavu-mono.pf2"
@@ -202,7 +202,7 @@ mcopy -i "$esp" "$cfg" ::/EFI/steamos/grub.cfg
 # nothing to fall back to.
 
 # The kernel and every dtb, at the FAT root. GRUB reads them from the partition it booted from.
-mcopy -i "$esp" "$KERNEL" ::/Image
+mcopy -i "$esp" "$KERNEL" ::/vmlinuz.efi
 dtb_n=0
 for dtb in "$DTBDIR"/*.dtb; do
   [ -e "$dtb" ] || continue
@@ -214,7 +214,7 @@ done
 # block explaining why this medium deliberately writes NO grubenv, and contradicting it. A build log
 # is read by someone diagnosing a medium that did not boot, and a file named there that is not on
 # the partition sends them looking for a fault in the wrong half.
-log "ESP: grub + wifi.conf.example + Image + $dtb_n dtbs (no grubenv: this medium remembers nothing)"
+log "ESP: grub + wifi.conf.example + vmlinuz.efi + $dtb_n dtbs (no grubenv: this medium remembers nothing)"
 
 # --- 4. write the filesystems into their partitions ---------------------------------------------------
 # Every populated filesystem must fit the slot the table gave it. A silently truncated dd produces a

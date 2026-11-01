@@ -21,7 +21,7 @@ kernel (`kernel/build.sh`), fetched firmware (`firmware/fetch-qcom-fw.sh` +
 | File | Purpose |
 |---|---|
 | `initramfs/init` | The initramfs `/init` (Phase 5): mounts the booted slot's root read-only + its `/var`, mounts the slot's efi-a/b partition at `/efi` (from `retroforge.efi=PARTUUID=`), stacks the `/etc` overlay on `/var`, then `switch_root`s into systemd. Slot selection is not here — the bootloader chain did it. Degrades to a writable un-overlaid root (loudly, via `/dev/kmsg`) rather than bricking a device with no serial console. |
-| `mkinitramfs.sh <base-rootfs>` | Stage `bash` + util-linux out of the base, resolve their libraries via `readelf`, and roll `init` into `out/initramfs.cpio.gz` (installed as `/boot/initramfs-retroforge.img`). No mkinitcpio/dracut, no modules — every filesystem and block driver we need is `=y`. |
+| `mkinitramfs.sh <base-rootfs>` | Stage `bash` + util-linux out of the base, resolve their libraries via `readelf`, and roll `init` into `out/initramfs.cpio.zst` (installed as `/boot/initramfs-retroforge.img`). No mkinitcpio/dracut, no modules — every filesystem and block driver we need is `=y`. |
 
 ## Assembly and verification
 

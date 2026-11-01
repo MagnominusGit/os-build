@@ -622,7 +622,7 @@ seed_home() {
 # means the first OTA has nothing to lay down but a root and a var.
 #
 # THE FILES COME OUT OF THE ROOT WE JUST WROTE, never off the installer medium. grubaa64.efi and
-# grub-<slot>.cfg are boot software owned by the same build that ships /boot/Image and
+# grub-<slot>.cfg are boot software owned by the same build that ships /boot/vmlinuz.efi and
 # /lib/modules/<ver> inside that rootfs, so taking them from there makes the pairing true by
 # construction: there is no way to install a root whose stage 2 does not boot it.
 ROOTMNT=""

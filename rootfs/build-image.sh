@@ -6,7 +6,7 @@
 #   2. fetch device-proprietary firmware (pinned)     (firmware/fetch-qcom-fw.sh)
 #   3. assemble the read-only Btrfs root              (rootfs/assemble-rootfs.sh)
 #
-# Prereq: unified kernel already built (kernel/build.sh) so out/ has Image + modroot,
+# Prereq: unified kernel already built (kernel/build.sh) so out/ has vmlinuz.efi + modroot,
 # plus the initramfs (image/mkinitramfs.sh) and the boot artifacts (boot/grub.sh) — the assembler
 # bakes all three into the root.
 # Device firmware is fetched from the pinned retroforge-linux/qcom-firmwares repo — no proprietary
@@ -21,10 +21,10 @@ OUT="$ROOT/out"
 FW="$ROOT/firmware/qcom-fw"
 DK=(ctr run --rm -v "$ROOT":/src -w /src retroforge-build)
 
-[ -f "$OUT/Image" ] \
-  || { echo "no kernel: out/Image — run kernel/build.sh first" >&2; exit 1; }
-[ -f "$OUT/initramfs.cpio.gz" ] \
-  || { echo "no initramfs: out/initramfs.cpio.gz — run image/mkinitramfs.sh first" >&2; exit 1; }
+[ -f "$OUT/vmlinuz.efi" ] \
+  || { echo "no kernel: out/vmlinuz.efi — run kernel/build.sh first" >&2; exit 1; }
+[ -f "$OUT/initramfs.cpio.zst" ] \
+  || { echo "no initramfs: out/initramfs.cpio.zst — run image/mkinitramfs.sh first" >&2; exit 1; }
 
 # 1. the root, laid down from packages into an empty tree (pinned, idempotent): the `base`
 # metapackage plus the release runtime (NetworkManager, openssh, mesa+Turnip+vulkan-tools).
@@ -51,7 +51,7 @@ ctr run --rm -v "$ROOT":/src -w /src \
 cat <<EOF
 
 Image flow done. Read-only root at out/images/rootfs.img.
-The root carries its own boot half (Phase 5): /boot/{Image, initramfs-retroforge.img, dtbs} and the
+The root carries its own boot half (Phase 5): /boot/{vmlinuz.efi, initramfs-retroforge.img, dtbs} and the
 /usr/lib/retroforge/boot mirror (run boot/grub.sh for out/boot/* first).
 Next — the flashable card:
   image/make-sdcard.sh             # -> out/images/sdcard.img (or `make sdcard`)

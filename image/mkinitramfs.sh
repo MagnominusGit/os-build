@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# retroforge initramfs builder -> out/initramfs.cpio.gz (installed as /boot/initramfs-retroforge.img
+# retroforge initramfs builder -> out/initramfs.cpio.zst (installed as /boot/initramfs-retroforge.img
 # by rootfs/assemble-rootfs.sh; the slot's stage-2 grub.cfg boots it via `initrd`).
 #
 # Stages a handful of aarch64 binaries out of the base rootfs, resolves their shared
@@ -18,7 +18,7 @@
 #   image/mkinitramfs.sh <base-rootfs-dir>
 #   BASE_ROOTFS=<dir> image/mkinitramfs.sh
 #
-# Run inside the build image (needs readelf + cpio + gzip):
+# Run inside the build image (needs readelf + cpio + zstd):
 #   docker run --rm -v "$PWD":/src -w /src retroforge-build image/mkinitramfs.sh work/base
 set -euo pipefail
 
@@ -26,18 +26,19 @@ BASE="${1:-${BASE_ROOTFS:-}}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/out"
 INIT="$ROOT/image/initramfs/init"
-IMG="$OUT/initramfs.cpio.gz"
+IMG="$OUT/initramfs.cpio.zst"
 
-# /bin/sh is bash (the base has no busybox); the rest is util-linux + coreutils. findfs
-# resolves root=/retroforge.var=/steamos.efi=PARTUUID= specs without udev; mkdir creates the
-# overlay upper/work and the /efi mountpoint on first boot; sleep paces the device-probe poll.
+# /bin/sh is bash (the base has no busybox); the rest is util-linux + coreutils. partx resolves
+# the PARTUUID= specs (root=, retroforge.var=, retroforge.efi=/steamos.efi=) from each disk's own
+# partition table, and findfs the rest, both without udev; mkdir creates the overlay upper/work and
+# the /efi mountpoint on first boot; sleep paces the device-probe poll.
 #
 # NO umount: the init mounts only INSIDE the btrfs root ($SYSROOT/efi, $SYSROOT/var), so every
 # mount survives switch_root attached to the new root's filesystem, and the shared ESP is never
 # mounted at all (the booted system mounts it at /esp from /etc/fstab). The old design-C need
 # for a pre-switch_root umount — a still-mounted initramfs-root /esp becoming an orphan and
 # gpt-auto mounting the same vfat twice — is gone with the ESP-state code.
-BINS=(bash mount switch_root findfs mkdir sleep)
+BINS=(bash mount switch_root partx findfs mkdir sleep)
 
 # The boot splash. Three files, staged whole rather than resolved through copy_deps() below,
 # because the drawer is STATIC on purpose (apps/retroforge-splash/src/retroforge-splash.c explains
@@ -54,7 +55,7 @@ SPLASH_FONT="$BASE/usr/share/fonts/noto/NotoSansMono-Medium.ttf"
 [ -n "$BASE" ] || { echo "usage: mkinitramfs.sh <base-rootfs-dir>" >&2; exit 2; }
 [ -d "$BASE" ] || { echo "no base rootfs dir: $BASE" >&2; exit 2; }
 [ -f "$INIT" ] || { echo "no init script: $INIT" >&2; exit 1; }
-for t in readelf cpio gzip; do
+for t in readelf cpio zstd; do
   command -v "$t" >/dev/null 2>&1 || { echo "$t not found (run inside retroforge-build)" >&2; exit 1; }
 done
 
@@ -128,13 +129,15 @@ install -m0755 "$SPLASH_BIN"   "$stage/usr/lib/retroforge/retroforge-splash"
 install -m0644 "$SPLASH_ASSET" "$stage/usr/share/retroforge/splash/logo.nds1"
 install -m0644 "$SPLASH_FONT"  "$stage/usr/share/retroforge/splash/font.ttf"
 
-# newc cpio, gzip (CONFIG_RD_GZIP=y). Ownership comes from the build user — root in the
+# newc cpio, zstd -19 (CONFIG_RD_ZSTD=y): GRUB reads this through the firmware at ~7 MB/s, so
+# the 0.8M zstd saves over gzip -9 is ~0.1 s of every boot, and the kernel unpacks it faster too
+# (Air X, 2026-10-31). -T1 keeps the output byte-identical from build to build. Ownership comes from the build user — root in the
 # build container, which is what the kernel should unpack as. Refuse to build a cpio whose
 # files would land owned by a non-root uid.
 [ "$(id -u)" -eq 0 ] || { echo "must run as root (else initramfs files are not root-owned)" >&2; exit 1; }
 
 mkdir -p "$OUT"
 ( cd "$stage" && find . -print0 | sort -z | cpio --null -o -H newc --quiet ) \
-  | gzip -9 >"$IMG"
+  | zstd -19 -T1 -q -c >"$IMG"
 
 echo "[retroforge] initramfs: ${#BINS[@]} binaries, ${#copied[@]} libraries, splash (static) -> ${IMG#"$ROOT"/} ($(du -h "$IMG" | cut -f1))"

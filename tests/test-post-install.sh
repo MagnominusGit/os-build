@@ -637,7 +637,7 @@ echo "== stage 2 on the target efi partition =="
 
 t "the-stage-2-comes-out-of-the-new-root"
 # Not out of the bundle: grubaa64.efi and grub-<slot>.cfg are boot software owned by the same build
-# that ships /boot/Image and /lib/modules/<ver> inside the rootfs, so taking them from the root
+# that ships /boot/vmlinuz.efi and /lib/modules/<ver> inside the rootfs, so taking them from the root
 # makes the pairing true by construction. The target efi started with stale OLD-EFI-GRUB content,
 # and the root carries both slots' configs, so the grub.cfg must be the TARGET's.
 run

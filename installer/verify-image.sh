@@ -123,7 +123,7 @@ case "$label" in
 esac
 
 # The byte ABL actually loads, and the three files the boot depends on.
-for f in ::/EFI/BOOT/bootaa64.efi ::/EFI/steamos/grub.cfg ::/EFI/steamos/fonts/dejavu-mono.pf2 ::/Image; do
+for f in ::/EFI/BOOT/bootaa64.efi ::/EFI/steamos/grub.cfg ::/EFI/steamos/fonts/dejavu-mono.pf2 ::/vmlinuz.efi; do
   mtype -i "$IMG@@$ESP_OFF" "$f" >/dev/null 2>&1 && ok "$f present" || bad "$f MISSING"
 done
 # No steamcl: it is the A/B slot chooser and this medium has one root, so its conf files would be

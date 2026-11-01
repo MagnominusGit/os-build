@@ -20,7 +20,7 @@
 #    ota/gen-signing-ca.sh also signs bundles against) rather than a duplicate under rootfs/overlay that could drift.
 #
 # 2. The boot software, mirrored under /usr/lib/retroforge/boot. The ESP GRUB that picks the slot
-#    and both per-slot stage-2 configs are owned by the same build that ships /boot/Image and
+#    and both per-slot stage-2 configs are owned by the same build that ships /boot/vmlinuz.efi and
 #    /lib/modules/<ver> inside this root, so carrying them here makes the pairing true by
 #    construction: the RAUC post-install hook refreshes the ESP and the slot's efi partition FROM
 #    this directory, so an update can never install a root whose boot chain does not boot it.
