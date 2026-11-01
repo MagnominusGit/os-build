@@ -7,5 +7,10 @@
 # and tagging all of them made each one a pair of device units and an event PID1 had to process,
 # 125 on the Air X (mostly LEDs), while the boot's first mounts and fsck waited behind them.
 ENV{SYNTH_UUID}=="?*", GOTO="retroforge_hw_end"
+# Nor for a device that appears before the boot's own run has started its scan, which maps it anyway
+# (hw-map leaves /run/retroforge/hw.scan as it starts). A driver that probes during coldplug adds its
+# devices as the kernel's own adds: the Air X's LEDs were 72 device units in every service manager,
+# the session user's included, which loads them all before the login goes on (2026-11-01).
+TEST!="/run/retroforge/hw.scan", GOTO="retroforge_hw_end"
 SUBSYSTEM=="power_supply|backlight|leds|thermal|hwmon", ACTION=="add", TAG+="systemd", ENV{SYSTEMD_WANTS}+="retroforge-hw.service"
 LABEL="retroforge_hw_end"

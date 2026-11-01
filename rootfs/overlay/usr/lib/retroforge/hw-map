@@ -50,6 +50,11 @@ fi
 : "${RETROFORGE_HW_THERMAL_SKIN:=}" "${RETROFORGE_HW_FAN:=}" "${RETROFORGE_HW_GPU_DEVFREQ:=}" "${RETROFORGE_HW_LED_GROUPS:=}"
 : "${RETROFORGE_DEVICE_ID:=unknown}" "${RETROFORGE_DEVICE_NAME:=unknown}" "${RETROFORGE_SOC_CLASS:=}"
 
+# A device of a mapped class that appears from here on may be missed by this scan, so
+# 70-retroforge-hw.rules starts this again for it once this exists. One that appeared before is in it.
+mkdir -p "$(dirname "$RUN")"
+: > "$RUN.scan"
+
 tmp="$RUN.tmp.$$"
 rm -rf "$tmp"
 mkdir -p "$tmp/thermal/all" "$tmp/leds"
