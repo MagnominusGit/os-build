@@ -271,4 +271,10 @@ mkdir -p /run/retroforge
 
 [ "$overlay_ok" -eq 1 ] || warn "DEGRADED: handing off to systemd on a writable, un-overlaid root"
 [ "$efi_ok" -eq 1 ] || warn "DEGRADED: /efi is not mounted — updates and boot confirmation will fail"
+
+# systemd holds back every mount unit while its mount-table watcher is rate limited, past 5 changes
+# a second by default, and the boot's own mounts go past that: /tmp and /esp, then /home, which
+# waited out the rest of the second (~0.95 s on the Air X, every boot, 2026-10-31), then its binds.
+# The limit is settable only through PID1's environment, which this exec hands on.
+export SYSTEMD_DEFAULT_MOUNT_RATE_LIMIT_BURST=50
 exec switch_root "$SYSROOT" /usr/lib/systemd/systemd
