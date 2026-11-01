@@ -762,6 +762,60 @@ static int drm_panel_orientation(int fd, uint32_t conn_id) {
     return found;
 }
 
+// The id of an object's property, by name; 0 when the object has none by that name.
+static uint32_t drm_object_prop(int fd, uint32_t obj_id, uint32_t obj_type, const char *name) {
+    struct drm_mode_obj_get_properties o;
+    memset(&o, 0, sizeof o);
+    o.obj_id = obj_id;
+    o.obj_type = obj_type;
+    if (ioctl(fd, DRM_IOCTL_MODE_OBJ_GETPROPERTIES, &o) || !o.count_props) return 0;
+
+    uint32_t nprops = o.count_props;
+    uint32_t *ids = xalloc((size_t)nprops * sizeof *ids);
+    uint64_t *vals = xalloc((size_t)nprops * sizeof *vals);
+    o.props_ptr = (uint64_t)(uintptr_t)ids;
+    o.prop_values_ptr = (uint64_t)(uintptr_t)vals;
+    uint32_t found = 0;
+    if (!ioctl(fd, DRM_IOCTL_MODE_OBJ_GETPROPERTIES, &o)) {
+        for (uint32_t i = 0; i < o.count_props && !found; i++) {
+            struct drm_mode_get_property p;
+            memset(&p, 0, sizeof p);
+            p.prop_id = ids[i];
+            if (!ioctl(fd, DRM_IOCTL_MODE_GETPROPERTY, &p) && !strncmp(p.name, name, sizeof p.name)) found = ids[i];
+        }
+    }
+    free(ids);
+    free(vals);
+    return found;
+}
+
+// An identity colour matrix on the CRTC, set before our modeset so the modeset carries it.
+//
+// msm reserves its colour blocks (DSPPs) only in a modeset, and only for a CRTC whose state has a
+// CTM or a gamma LUT. gamescope always sets a CTM (its patch 0014), so with none from us its first
+// commit was a full modeset: the panel powered off and on, ~0.7 s of black between our frame and its
+// copy of it (Air X, 2026-11-01). With this the blocks are ours from the start and its CTM is only a
+// new value. Best effort: a CRTC without a CTM property has no such blocks to reserve.
+static void drm_identity_ctm(int fd, uint32_t crtc_id) {
+    uint32_t prop = drm_object_prop(fd, crtc_id, DRM_MODE_OBJECT_CRTC, "CTM");
+    if (!prop) return;
+    struct drm_color_ctm ctm;
+    memset(&ctm, 0, sizeof ctm);
+    ctm.matrix[0] = ctm.matrix[4] = ctm.matrix[8] = 1ULL << 32;   // S31.32: 1.0 on the diagonal
+    struct drm_mode_create_blob b;
+    memset(&b, 0, sizeof b);
+    b.data = (uint64_t)(uintptr_t)&ctm;
+    b.length = sizeof ctm;
+    if (ioctl(fd, DRM_IOCTL_MODE_CREATEPROPBLOB, &b)) { note("CTM blob: %s", strerror(errno)); return; }
+    struct drm_mode_obj_set_property sp;
+    memset(&sp, 0, sizeof sp);
+    sp.value = b.blob_id;
+    sp.prop_id = prop;
+    sp.obj_id = crtc_id;
+    sp.obj_type = DRM_MODE_OBJECT_CRTC;
+    if (ioctl(fd, DRM_IOCTL_MODE_OBJ_SETPROPERTY, &sp)) note("CTM: %s", strerror(errno));
+}
+
 // Pick a CRTC for a connector: its current encoder's CRTC when it already has one, otherwise the
 // first CRTC any of its encoders can drive.
 static uint32_t drm_pick_crtc(int fd, struct drm_mode_get_connector *c, struct drm_mode_card_res *res,
@@ -866,6 +920,7 @@ static int drm_open(const char *card, const char *want, int angle) {
     dr.angle = angle;
     dr.w = dr.mode.hdisplay;
     dr.h = dr.mode.vdisplay;
+    drm_identity_ctm(dr.fd, dr.crtc_id);
 
     struct drm_mode_create_dumb cd;
     memset(&cd, 0, sizeof cd);
