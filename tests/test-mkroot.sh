@@ -524,6 +524,7 @@ declare -A STAGE_EXPECTED=(
   [offload-mounts]="the writable paths a read-only root needs"
   [dev-wifi-ssh]="DEV-ONLY Wi-Fi credentials + root authorized_keys"
   [dev-ota-channel]="DEV-ONLY OTA channel pin"
+  [dev-usb-gadget]="DEV-ONLY USB Ethernet gadget (NCM) + its networkd DHCP server"
   [boot-splash]="the splash drawer + its asset, in the sealed root"
   [ogui-plugin]="the RetroForge OGUI plugin zip, copied to the player's home by the session (not on the installer medium: it runs no OGUI)"
   [scraper-login]="RetroForge's ScreenScraper developer login, when the build had it (not on the installer medium: it scrapes nothing)"

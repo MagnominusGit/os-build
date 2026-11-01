@@ -177,3 +177,123 @@ if [ "${RETROFORGE_DEV:-}" = "1" ]; then
     echo "  [TEST] WARNING: RETROFORGE_SSH_PUBKEY unset — sshd (key-only root) will reject login"
   fi
 fi
+
+# STAGE dev-usb-gadget — DEV-ONLY USB Ethernet gadget (NCM): plug the device into a PC and ssh root@10.55.0.1.
+#
+# A second way in when Wi-Fi is the thing being debugged (or the router is: see the 2026-10-29 TCP
+# stalls). NCM, not RNDIS/ECM: Linux, macOS and Windows 11 all bind it with their in-box drivers.
+# The kernel side is already there (USB_CONFIGFS_NCM=y, every board's dwc3 is dr_mode=otg).
+#
+# DEV-ONLY because sshd ships on EVERY build: a release image would answer on a USB cable to any
+# computer it is plugged into. Key-only, but there is no reason to widen a shipped device's surface
+# for a bring-up affordance.
+#
+# Addressing: systemd-networkd, NOT NetworkManager, owns usb0. NM's ipv4.method=shared needs
+# dnsmasq, which the base does not carry; networkd has a DHCP server built in. NM is told to leave
+# usb0 alone and networkd only touches links its .network files match, so the two never meet.
+#
+# The UDC can come and go with the dwc3 role switch, so the bind runs from a udev rule on every
+# udc add (and is idempotent) rather than once at boot. Once bound, the gadget bus re-binds it by
+# UDC name on its own after a host<->device flip.
+if [ "${RETROFORGE_DEV:-}" = "1" ]; then
+  echo "  [DEV] USB Ethernet gadget (NCM): device is 10.55.0.1 on usb0, the PC gets DHCP"
+
+  install -d -m0755 "$stage/usr/local/lib/retroforge"
+  cat >"$stage/usr/local/lib/retroforge/usb-gadget-ncm" <<'GADGET'
+#!/bin/sh
+# DEV CARD ONLY (rootfs/lib-assemble-devcard.sh, STAGE dev-usb-gadget). Idempotent.
+set -eu
+G=/sys/kernel/config/usb_gadget/retroforge
+udc=$(ls /sys/class/udc 2>/dev/null | head -n1)
+[ -n "$udc" ] || { echo "usb-gadget-ncm: no UDC yet (host role?), waiting for udev" >&2; exit 0; }
+
+if [ ! -d "$G" ]; then
+  # Stable MACs from the machine-id, so the PC keeps one interface (and its settings) per device.
+  h=$(sha256sum /etc/machine-id | cut -c1-10)
+  mac() { printf '%s:%s:%s:%s:%s:%s' "$1" "$(echo "$h" | cut -c1-2)" "$(echo "$h" | cut -c3-4)" \
+          "$(echo "$h" | cut -c5-6)" "$(echo "$h" | cut -c7-8)" "$(echo "$h" | cut -c9-10)"; }
+  mkdir -p "$G/strings/0x409" "$G/configs/c.1/strings/0x409" "$G/functions/ncm.usb0"
+  echo 0x1d6b > "$G/idVendor"        # Linux Foundation
+  echo 0x0104 > "$G/idProduct"       # Multifunction Composite Gadget
+  echo 0x0200 > "$G/bcdUSB"
+  echo 0xEF   > "$G/bDeviceClass"    # IAD, so Windows binds the NCM function
+  echo 0x02   > "$G/bDeviceSubClass"
+  echo 0x01   > "$G/bDeviceProtocol"
+  echo "$h"          > "$G/strings/0x409/serialnumber"
+  echo "RetroForge"  > "$G/strings/0x409/manufacturer"
+  echo "RetroForge dev card" > "$G/strings/0x409/product"
+  echo "NCM"         > "$G/configs/c.1/strings/0x409/configuration"
+  echo 250           > "$G/configs/c.1/MaxPower"
+  mac 06 > "$G/functions/ncm.usb0/dev_addr"
+  mac 0a > "$G/functions/ncm.usb0/host_addr"
+  ln -s "$G/functions/ncm.usb0" "$G/configs/c.1/"
+fi
+
+if [ -z "$(cat "$G/UDC")" ]; then
+  echo "$udc" > "$G/UDC"
+  echo "usb-gadget-ncm: bound to $udc ($(cat "$G/functions/ncm.usb0/ifname"))"
+fi
+GADGET
+  chmod 0755 "$stage/usr/local/lib/retroforge/usb-gadget-ncm"
+
+  cat >"$stage/etc/systemd/system/retroforge-usb-gadget.service" <<'UNIT'
+# DEV CARD ONLY (rootfs/lib-assemble-devcard.sh, STAGE dev-usb-gadget).
+[Unit]
+Description=RetroForge dev USB Ethernet gadget (NCM)
+Requires=sys-kernel-config.mount
+After=sys-kernel-config.mount systemd-machine-id-commit.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/retroforge/usb-gadget-ncm
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  install -d -m0755 "$stage/etc/systemd/system/multi-user.target.wants"
+  ln -sf ../retroforge-usb-gadget.service \
+    "$stage/etc/systemd/system/multi-user.target.wants/retroforge-usb-gadget.service"
+
+  install -d -m0755 "$stage/etc/udev/rules.d"
+  cat >"$stage/etc/udev/rules.d/90-retroforge-usb-gadget.rules" <<'RULE'
+# DEV CARD ONLY (rootfs/lib-assemble-devcard.sh, STAGE dev-usb-gadget): (re)bind when a UDC appears.
+ACTION=="add", SUBSYSTEM=="udc", TAG+="systemd", ENV{SYSTEMD_WANTS}+="retroforge-usb-gadget.service"
+RULE
+
+  install -d -m0755 "$stage/etc/systemd/network"
+  cat >"$stage/etc/systemd/network/50-retroforge-usb-gadget.network" <<'NET'
+# DEV CARD ONLY (rootfs/lib-assemble-devcard.sh, STAGE dev-usb-gadget).
+[Match]
+Name=usb0
+
+[Network]
+Address=10.55.0.1/24
+DHCPServer=yes
+LinkLocalAddressing=ipv6
+ConfigureWithoutCarrier=yes
+
+[DHCPServer]
+PoolOffset=10
+PoolSize=20
+EmitDNS=no
+EmitRouter=no
+NET
+  # customize-base.sh MASKS networkd (/dev/null links in /etc/systemd/system), and an enable link
+  # cannot beat a mask: HW-found 2026-11-01 on the Air X, gadget enumerated, PC side NO-CARRIER
+  # (f_ncm only reports carrier once usb0 is up on the device). Unmask the daemon and its socket
+  # here; wait-online STAYS masked, or boot would wait on a cable that is usually not there.
+  rm -f "$stage/etc/systemd/system/systemd-networkd.service" \
+        "$stage/etc/systemd/system/systemd-networkd.socket"
+  ln -sf /usr/lib/systemd/system/systemd-networkd.service \
+    "$stage/etc/systemd/system/multi-user.target.wants/systemd-networkd.service"
+  install -d -m0755 "$stage/etc/systemd/system/sockets.target.wants"
+  ln -sf /usr/lib/systemd/system/systemd-networkd.socket \
+    "$stage/etc/systemd/system/sockets.target.wants/systemd-networkd.socket"
+
+  install -d -m0755 "$stage/etc/NetworkManager/conf.d"
+  cat >"$stage/etc/NetworkManager/conf.d/90-retroforge-usb-gadget.conf" <<'NMCONF'
+# DEV CARD ONLY (rootfs/lib-assemble-devcard.sh, STAGE dev-usb-gadget): systemd-networkd owns usb0.
+[keyfile]
+unmanaged-devices=interface-name:usb0
+NMCONF
+fi
