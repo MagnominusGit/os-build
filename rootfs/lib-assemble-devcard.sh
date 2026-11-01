@@ -272,6 +272,13 @@ DHCPServer=yes
 LinkLocalAddressing=ipv6
 ConfigureWithoutCarrier=yes
 
+# usb0 is the only link networkd manages, and with no cable it has no carrier. Left required, it holds
+# networkd's online state at "offline", and timesyncd, which asks networkd whenever networkd runs,
+# never polls NTP: HW-found 2026-11-01 on the Air X, clock stuck at the image's build epoch, every
+# TLS download "certificate is not yet valid". Wi-Fi is NetworkManager's, invisible to that state.
+[Link]
+RequiredForOnline=no
+
 [DHCPServer]
 PoolOffset=10
 PoolSize=20
