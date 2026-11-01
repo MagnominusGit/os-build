@@ -597,6 +597,22 @@ its virtual pad (`28de:11ff`) carried 6 button / 179 axis events where it had 0.
 under OGUI's id gave a "Last Resort" gamepad config for app 1984639; under 769 it gave `ClientUI`.
 Needs OGUI patch 0025 (a game Steam starts keeps its own `STEAM_GAME`).
 
+`0050` — **the boot splash stays up until the shell draws.** gamescope takes DRM master at
+its start (~9 s into a boot on the MANGMI Air X) and commits nothing until the shell's first frame
+(~17 s). The panel keeps the splash drawer's last frame, but once the drawer has dropped master its
+activity bar reaches glass only on a video-mode panel; a command-mode one shows committed frames
+only. The drawer (`apps/retroforge-splash`) now writes its frame, in panel orientation, and the
+bar's 40 frames as strips of it to `/run/retroforge/splash/handoff`, which `retroforge-session`
+names in `GAMESCOPE_BOOT_SPLASH`. Until the shell is drawing, gamescope paints only that: one
+screen-sized XRGB8888 layer, double-buffered, the next strip copied into the buffer off screen each
+40 ms tick. "Drawing" is three shell frames within 0.5 s, not its first frame: OpenGamepadUI puts
+up one empty, transparent frame, then loads for ~7 s before its boot video (HW 2026-10-31, MANGMI
+Air X), and ending on that first frame left the panel black for those 7 s. At the latest the splash
+goes 20 s after the shell's first frame, and 60 s after gamescope's start. The images take the plane's modifiers (UBWC on msm), and the layer is
+pre-rotated, so it scans out with no copy wherever `g_uPreRotation` is set. A panel rotated in the
+composite, or a frame drawn for another orientation, gets no splash. Applies with or without
+`0049`.
+
 Drop the patch files here with those exact names (or rename and update `source.pin`'s
 `patches:` line). **Until a declared patch is present, `make overlay` / `make base` fail fast**
 with a clear "missing patch" message from `build-overlay.sh`.

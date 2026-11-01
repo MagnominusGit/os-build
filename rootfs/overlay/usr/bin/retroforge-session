@@ -64,6 +64,15 @@ if [ -n "${RETROFORGE_GAMESCOPE_FAKE_OUTPUT_MM:-}" ]; then
   export GAMESCOPE_FAKE_OUTPUT_MM="$RETROFORGE_GAMESCOPE_FAKE_OUTPUT_MM"
 fi
 
+# The boot splash drawer leaves its last frame here as it yields the display, and gamescope (our
+# patch 0050) keeps it up, bar moving, until the shell is drawing. Exported whenever the splash
+# ran, not only when the file is already there: the drawer writes it a few hundred ms after the
+# takeover, and gamescope does not look for it until it is up. The drawer removes it once gamescope
+# is on screen, so a session that restarts later goes straight to the shell.
+if [ -d /run/retroforge/splash ]; then
+  export GAMESCOPE_BOOT_SPLASH=/run/retroforge/splash/handoff
+fi
+
 # Force the real DRM/KMS backend: a stray WAYLAND_DISPLAY/DISPLAY makes gamescope try to nest under
 # a (non-existent) parent compositor and fail with "Failed to connect to wayland socket".
 unset WAYLAND_DISPLAY DISPLAY

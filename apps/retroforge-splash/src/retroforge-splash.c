@@ -23,7 +23,8 @@
 // stb_truetype.h, which is a header.
 //
 // Everything the program will ever need from the filesystem is read BEFORE the main loop, with
-// the single exception of the status and takeover files.
+// the single exception of the status and takeover files (and the handoff the yield writes beside
+// the takeover file).
 //
 // THOSE TWO ARE REACHED THROUGH A DIRECTORY FD, NEVER A PATH. An earlier version of this comment
 // claimed "/run is moved into the new root, so those paths stay valid across the pivot" — which
@@ -58,6 +59,7 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/timerfd.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <drm/drm.h>
@@ -362,6 +364,38 @@ static uint32_t err_fg = 0xFFFF5C5Cu;
 static int auto_logo_px(int ref) { return ref * 480 / 1080; }
 static int auto_text_px(int ref) { return ref * 44 / 1080; }
 static int auto_gap_px(int ref)  { return ref * 56 / 1080; }
+static int auto_bar_w(int ref)   { return ref * 400 / 1080; }
+static int auto_bar_h(int ref)   { int h = ref * 8 / 1080; return h < 3 ? 3 : h; }
+
+// The activity bar under the status line: a dim track with a bright segment sweeping back and
+// forth on it, so the panel never looks hung while the boot -- and, after we yield, the session
+// coming up behind us -- is still working. compose() places it; draw_bar() repaints only it, and
+// the main loop presents only its rectangle, so a frame costs a few thousand pixels, not the panel.
+#define TICK_MS      40     // the drawer's clock: 25 bar frames a second
+#define STATUS_EVERY 6      // ticks between reads of the status and takeover files (~240 ms)
+#define BAR_PERIOD   40     // ticks for one sweep out and back (1.6 s)
+static int bar_x, bar_y, bar_w, bar_h;   // canvas rectangle; bar_w 0 = no bar
+static unsigned anim_tick;
+
+static uint32_t mix(uint32_t a, uint32_t b, int t) {   // t/255 of b over a
+    uint32_t r = (((a >> 16) & 0xFF) * (uint32_t)(255 - t) + ((b >> 16) & 0xFF) * (uint32_t)t) / 255;
+    uint32_t g = (((a >> 8) & 0xFF) * (uint32_t)(255 - t) + ((b >> 8) & 0xFF) * (uint32_t)t) / 255;
+    uint32_t c = ((a & 0xFF) * (uint32_t)(255 - t) + (b & 0xFF) * (uint32_t)t) / 255;
+    return 0xFF000000u | (r << 16) | (g << 8) | c;
+}
+
+static void draw_bar(void) {
+    if (bar_w <= 0) return;
+    // Out and back with a smoothstep ease, so the segment slows at each end instead of bouncing.
+    unsigned half = BAR_PERIOD / 2, ph = anim_tick % BAR_PERIOD;
+    int x = (int)((ph < half ? ph : BAR_PERIOD - ph) * 1024 / half);   // 0..1024..0
+    int e = x * x / 1024 * (3 * 1024 - 2 * x) / 1024;                   // smoothstep, 0..1024
+    int seg = bar_w / 4, sx = bar_x + e * (bar_w - seg) / 1024;
+    uint32_t track = mix(bg, fg, 46);
+    for (int y = bar_y; y < bar_y + bar_h && y < SH; y++)
+        for (int xx = bar_x; xx < bar_x + bar_w && xx < SW; xx++)
+            canvas[y * SW + xx] = (xx >= sx && xx < sx + seg) ? fg : track;
+}
 
 // Greedy word wrap. Returns the number of lines, with each line's [start,len) in `off`/`len`.
 static int wrap(const char *s, int maxw, int *off, int *len) {
@@ -418,7 +452,10 @@ static void compose(const char *status) {
     }
 
     int text_block = nlines ? nlines * line_h : 0;
-    int total = logo_h + (text_block ? gap + text_block : 0);
+    int above_bar = logo_h + (text_block ? gap + text_block : 0);
+    bar_w = auto_bar_w(ref);
+    bar_h = auto_bar_h(ref);
+    int total = above_bar + gap / 2 + bar_h;
     int top = (SH - total) / 2;
     if (top < 0) top = 0;
 
@@ -440,6 +477,10 @@ static void compose(const char *status) {
         for (int i = 0; i < nlines; i++)
             draw_line(msg + off[i], len[i], baseline + i * line_h, colour);
     }
+
+    bar_x = (SW - bar_w) / 2;
+    bar_y = top + above_bar + gap / 2;
+    draw_bar();
 }
 
 // ============================================================================================
@@ -597,11 +638,29 @@ static inline uint32_t sample(int px, int py, int pw, int ph, int angle) {
     return canvas[ly * SW + lx];
 }
 
-static void fb_present(void) {
+// The panel-space rectangle [*a,*c) x [*b,*d) that canvas rectangle [x0,x1) x [y0,y1) lands in:
+// sample()'s mapping run the other way, clamped to the panel.
+static void panel_rect(int angle, int pw, int ph, int x0, int y0, int x1, int y1,
+                       int *a, int *b, int *c, int *d) {
+    switch (angle) {
+        case 90:  *a = pw - y1; *c = pw - y0; *b = x0;      *d = x1;      break;
+        case 180: *a = pw - x1; *c = pw - x0; *b = ph - y1; *d = ph - y0; break;
+        case 270: *a = y0;      *c = y1;      *b = ph - x1; *d = ph - x0; break;
+        default:  *a = x0;      *c = x1;      *b = y0;      *d = y1;      break;
+    }
+    if (*a < 0) *a = 0;
+    if (*b < 0) *b = 0;
+    if (*c > pw) *c = pw;
+    if (*d > ph) *d = ph;
+}
+
+static void fb_present_rect(int x0, int y0, int x1, int y1) {
     if (!fb.map) return;
-    for (uint32_t py = 0; py < fb.h; py++) {
+    int a, b, c, d;
+    panel_rect(fb.angle, (int)fb.w, (int)fb.h, x0, y0, x1, y1, &a, &b, &c, &d);
+    for (int py = b; py < d; py++) {
         uint8_t *row = fb.map + (size_t)py * fb.pitch;
-        for (uint32_t px = 0; px < fb.w; px++) {
+        for (int px = a; px < c; px++) {
             uint32_t c = sample((int)px, (int)py, (int)fb.w, (int)fb.h, fb.angle);
             uint32_t v = fb_chan((c >> 16) & 0xFF, fb.var.red)
                        | fb_chan((c >> 8) & 0xFF, fb.var.green)
@@ -611,6 +670,8 @@ static void fb_present(void) {
         }
     }
 }
+
+static void fb_present(void) { fb_present_rect(0, 0, SW, SH); }
 
 // ============================================================================================
 // DRM backend (raw ioctls — see the header for why there is no libdrm here)
@@ -843,6 +904,40 @@ fail:
     return 0;
 }
 
+// Command-mode DSI panels latch one frame per commit — writing the buffer alone never reaches
+// glass. DirtyFB is the cheap way to say "this changed"; where the driver does not implement
+// it, fall back to re-running the modeset, which always commits. `clip` narrows the DirtyFB to
+// what changed (the bar, every tick); NULL is the whole buffer. Only ever called holding master.
+static void drm_commit(const struct drm_clip_rect *clip) {
+    if (dr.dirty_ok) {
+        struct drm_mode_fb_dirty_cmd d;
+        memset(&d, 0, sizeof d);
+        d.fb_id = dr.fb_id;
+        if (clip) { d.num_clips = 1; d.clips_ptr = (uint64_t)(uintptr_t)clip; }
+        int failed = ioctl(dr.fd, DRM_IOCTL_MODE_DIRTYFB, &d);
+        if (failed && clip) {   // a driver that takes DirtyFB but not its clips
+            d.num_clips = 0;
+            d.clips_ptr = 0;
+            failed = ioctl(dr.fd, DRM_IOCTL_MODE_DIRTYFB, &d);
+        }
+        if (failed) {
+            dr.dirty_ok = 0;
+            note("DIRTYFB unsupported; re-committing per update");
+        }
+    }
+    if (!dr.dirty_ok) {
+        struct drm_mode_crtc set;
+        memset(&set, 0, sizeof set);
+        set.crtc_id = dr.crtc_id;
+        set.fb_id = dr.fb_id;
+        set.count_connectors = 1;
+        set.set_connectors_ptr = (uint64_t)(uintptr_t)&dr.conn_id;
+        set.mode = dr.mode;
+        set.mode_valid = 1;
+        ioctl(dr.fd, DRM_IOCTL_MODE_SETCRTC, &set);
+    }
+}
+
 static void drm_present(void) {
     if (!dr.map) return;
     for (uint32_t py = 0; py < dr.h; py++) {
@@ -874,30 +969,25 @@ static void drm_present(void) {
         dr.crtc_on = 1;
         return;
     }
+    drm_commit(NULL);
+}
 
-    // Command-mode DSI panels latch one frame per commit — writing the buffer alone never reaches
-    // glass. DirtyFB is the cheap way to say "this changed"; where the driver does not implement
-    // it, fall back to re-running the modeset, which always commits.
-    if (dr.dirty_ok) {
-        struct drm_mode_fb_dirty_cmd d;
-        memset(&d, 0, sizeof d);
-        d.fb_id = dr.fb_id;
-        if (ioctl(dr.fd, DRM_IOCTL_MODE_DIRTYFB, &d)) {
-            dr.dirty_ok = 0;
-            note("DIRTYFB unsupported; re-committing per update");
-        }
+// Present one canvas rectangle. With `commit` 0 -- after the yield, without master -- the pixels
+// are written and nothing else: a video-mode panel scans the buffer continuously, so they reach
+// glass anyway, and a command-mode one simply keeps its last committed frame.
+static void drm_present_rect(int x0, int y0, int x1, int y1, int commit) {
+    if (!dr.map || !dr.crtc_on) return;
+    int a, b, c, d;
+    panel_rect(dr.angle, (int)dr.w, (int)dr.h, x0, y0, x1, y1, &a, &b, &c, &d);
+    if (a >= c || b >= d) return;
+    for (int py = b; py < d; py++) {
+        uint32_t *row = (uint32_t *)(dr.map + (size_t)py * dr.pitch);
+        for (int px = a; px < c; px++)
+            row[px] = sample(px, py, (int)dr.w, (int)dr.h, dr.angle);
     }
-    if (!dr.dirty_ok) {
-        struct drm_mode_crtc set;
-        memset(&set, 0, sizeof set);
-        set.crtc_id = dr.crtc_id;
-        set.fb_id = dr.fb_id;
-        set.count_connectors = 1;
-        set.set_connectors_ptr = (uint64_t)(uintptr_t)&dr.conn_id;
-        set.mode = dr.mode;
-        set.mode_valid = 1;
-        ioctl(dr.fd, DRM_IOCTL_MODE_SETCRTC, &set);
-    }
+    if (!commit) return;
+    struct drm_clip_rect clip = { (unsigned short)a, (unsigned short)b, (unsigned short)c, (unsigned short)d };
+    drm_commit(&clip);
 }
 
 // Hand the display over. Dropping master is not enough on its own: closing our fd (and with it
@@ -965,16 +1055,27 @@ static int drm_successor_is_scanning(void) {
 //
 // The wait is bounded because an unbounded one turns "the successor crashed" into "the device
 // hangs on a logo with no way out".
+//
+// The bar keeps moving through the wait. The successor takes master well before it puts up a
+// frame (gamescope: at its start, ~9 s on the Air X), and our buffer stays on the plane until
+// then; without master we can only write into it, which a video-mode panel shows and a
+// command-mode one does not. gamescope ends the wait early: it puts up the handoff (see
+// write_handoff) as soon as it can.
 static void drm_yield(int timeout_ms) {
     if (dr.fd < 0 || !dr.crtc_on) return;
     if (ioctl(dr.fd, DRM_IOCTL_DROP_MASTER, 0)) note("DROP_MASTER: %s", strerror(errno));
 
     int unknowable = 0;
-    for (int waited = 0; waited < timeout_ms; waited += 100) {
-        int r = drm_successor_is_scanning();
-        if (r > 0) return;                 // proven: it announced which fb, and we are done
-        if (r < 0) { unknowable = 1; break; }
-        usleep(100000);
+    for (int waited = 0; waited < timeout_ms; waited += TICK_MS) {
+        if (waited % (3 * TICK_MS) == 0) {
+            int r = drm_successor_is_scanning();
+            if (r > 0) return;             // proven: it announced which fb, and we are done
+            if (r < 0) { unknowable = 1; break; }
+        }
+        anim_tick++;
+        draw_bar();
+        drm_present_rect(bar_x, bar_y, bar_x + bar_w, bar_y + bar_h, 0);
+        usleep(TICK_MS * 1000);
     }
 
     if (unknowable) {
@@ -987,6 +1088,80 @@ static void drm_yield(int timeout_ms) {
         return;
     }
     note("successor never took the display within %dms; releasing anyway", timeout_ms);
+}
+
+// gamescope takes master at its start but puts up nothing of its own until the shell's first
+// frame, ~8 s later on the Air X. So the yield leaves it what it needs to keep the splash up
+// itself (gamescope patch 0050): our frame as the panel scans it out, and the bar's BAR_PERIOD
+// frames as strips of it, one per tick. The layout is gamescope's BootSplashHeader_t: this
+// header, the frame, then the strips, all XRGB8888. Written under a temporary name and renamed,
+// so gamescope never maps half a file.
+#define HANDOFF_MAGIC 0x31534652u   // "RFS1"
+#define HANDOFF_NAME  "handoff"
+struct handoff_header {
+    uint32_t magic, w, h, rotation;
+    uint32_t strip_x, strip_y, strip_w, strip_h;
+    uint32_t strips, tick_ms, tick0, pad;
+    uint64_t t0_ns;   // CLOCK_MONOTONIC, when strip tick0 is on screen
+};
+
+static int write_handoff(int dirfd, const char *name, int pw, int ph, int angle) {
+    struct handoff_header hd;
+    memset(&hd, 0, sizeof hd);
+    hd.magic = HANDOFF_MAGIC;
+    hd.w = (uint32_t)pw;
+    hd.h = (uint32_t)ph;
+    hd.rotation = (uint32_t)angle;
+    hd.tick_ms = TICK_MS;
+    int a = 0, b = 0, c = 0, d = 0;
+    if (bar_w > 0) panel_rect(angle, pw, ph, bar_x, bar_y, bar_x + bar_w, bar_y + bar_h, &a, &b, &c, &d);
+    if (a < c && b < d) {
+        hd.strip_x = (uint32_t)a;
+        hd.strip_y = (uint32_t)b;
+        hd.strip_w = (uint32_t)(c - a);
+        hd.strip_h = (uint32_t)(d - b);
+        hd.strips = BAR_PERIOD;
+    }
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    hd.t0_ns = (uint64_t)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
+    hd.tick0 = anim_tick % BAR_PERIOD;
+
+    char tmp[160];
+    snprintf(tmp, sizeof tmp, ".%s.tmp", name);
+    int fd = openat(dirfd, tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    FILE *f = fd >= 0 ? fdopen(fd, "wb") : NULL;
+    if (!f) {
+        note("cannot write the handoff: %s", strerror(errno));
+        if (fd >= 0) close(fd);
+        return 0;
+    }
+    uint32_t *row = xalloc((size_t)pw * 4);
+    fwrite(&hd, sizeof hd, 1, f);
+    for (int py = 0; py < ph; py++) {
+        for (int px = 0; px < pw; px++) row[px] = sample(px, py, pw, ph, angle);
+        fwrite(row, 4, (size_t)pw, f);
+    }
+    unsigned tick = anim_tick;
+    for (uint32_t k = 0; k < hd.strips; k++) {
+        anim_tick = k;
+        draw_bar();
+        for (int py = b; py < d; py++) {
+            for (int px = a; px < c; px++) row[px - a] = sample(px, py, pw, ph, angle);
+            fwrite(row, 4, (size_t)(c - a), f);
+        }
+    }
+    anim_tick = tick;
+    draw_bar();
+    free(row);
+    int ok = !ferror(f);
+    if (fclose(f)) ok = 0;
+    if (ok && renameat(dirfd, tmp, dirfd, name)) ok = 0;
+    if (!ok) {
+        note("cannot write the handoff: %s", strerror(errno));
+        unlinkat(dirfd, tmp, 0);
+    }
+    return ok;
 }
 
 // ============================================================================================
@@ -1046,6 +1221,8 @@ static void usage(void) {
         "  --logo-height PX / --text-height PX / --gap PX   layout overrides\n"
         "  --width N --height N           force the canvas size (ppm, or a forced fbdev size)\n"
         "  --out PATH                     ppm output (default /tmp/retroforge-splash.ppm)\n"
+        "  --tick N                       activity-bar frame to render (ppm)\n"
+        "  --handoff PATH                 also write the session handoff for this panel (ppm)\n"
         "  --keep-vt                      do not put the console into graphics mode\n",
         stderr);
 }
@@ -1064,6 +1241,8 @@ int main(int argc, char **argv) {
     const char *rotate   = arg(argc, argv, "--rotate", "auto");
     const char *bgs      = arg(argc, argv, "--bg", NULL);
     const char *out      = arg(argc, argv, "--out", "/tmp/retroforge-splash.ppm");
+    const char *handoff  = arg(argc, argv, "--handoff", NULL);
+    anim_tick            = (unsigned)atoi(arg(argc, argv, "--tick", "0"));
     int keep_vt          = flag(argc, argv, "--keep-vt");
     int req_w            = atoi(arg(argc, argv, "--width", "0"));
     int req_h            = atoi(arg(argc, argv, "--height", "0"));
@@ -1161,7 +1340,15 @@ int main(int argc, char **argv) {
     compose(cur);
     memcpy(shown, cur, sizeof shown);
 
-    if (use_ppm) return write_ppm(out, ppm_w, ppm_h, angle) ? 0 : 1;
+    if (use_ppm) {
+        int ok = write_ppm(out, ppm_w, ppm_h, angle);
+        if (ok && handoff) {
+            char name[128];
+            int dirfd = open_parent_dir(handoff, name, sizeof name);
+            ok = dirfd >= 0 && write_handoff(dirfd, name, ppm_w, ppm_h, angle);
+        }
+        return ok ? 0 : 1;
+    }
 
     void (*present)(void) = use_drm ? drm_present : fb_present;
     present();
@@ -1179,10 +1366,11 @@ int main(int argc, char **argv) {
     }
 
     int tfd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC);
-    struct itimerspec its = { { 0, 250000000 }, { 0, 250000000 } };
+    struct itimerspec its = { { 0, TICK_MS * 1000000L }, { 0, TICK_MS * 1000000L } };
     timerfd_settime(tfd, 0, &its, NULL);
 
     int yielded = 0;
+    unsigned since_read = STATUS_EVERY;   // read the files on the first tick
     while (running) {
         struct pollfd p = { tfd, POLLIN, 0 };
         if (poll(&p, 1, -1) < 0) { if (errno == EINTR) continue; break; }
@@ -1193,16 +1381,27 @@ int main(int argc, char **argv) {
         // Keep retrying the first modeset: on the initramfs path the DPU may still be binding.
         if (use_drm && !dr.crtc_on) present();
 
-        if (use_drm && takeover_fd >= 0) {
-            read_line_at(takeover_fd, takeover_name, tk, sizeof tk);
-            if (tk[0] && strcmp(tk, mine)) { note("yielding display to '%s'", tk); yielded = 1; break; }
-        }
+        anim_tick++;
+        draw_bar();
+        if (use_drm) drm_present_rect(bar_x, bar_y, bar_x + bar_w, bar_y + bar_h, 1);
+        else if (use_fb) fb_present_rect(bar_x, bar_y, bar_x + bar_w, bar_y + bar_h);
 
+        if (++since_read < STATUS_EVERY) continue;
+        since_read = 0;
+
+        // The status line before the takeover file: the session writes its "Starting" line just
+        // ahead of the takeover, so it is committed while we still hold master and even a
+        // command-mode panel shows it through the hand-over.
         read_line_at(status_fd, status_name, cur, sizeof cur);
         if (strcmp(cur, shown)) {
             compose(cur);
             memcpy(shown, cur, sizeof shown);
             present();
+        }
+
+        if (use_drm && takeover_fd >= 0) {
+            read_line_at(takeover_fd, takeover_name, tk, sizeof tk);
+            if (tk[0] && strcmp(tk, mine)) { note("yielding display to '%s'", tk); yielded = 1; break; }
         }
     }
 
@@ -1213,7 +1412,13 @@ int main(int argc, char **argv) {
         read_line_at(takeover_fd, takeover_name, tk, sizeof tk);
         yielded = tk[0] && strcmp(tk, mine);
     }
-    if (use_drm && yielded) drm_yield(60000);
+    if (use_drm && yielded) {
+        // Removed again once the handover is over: gamescope has its own copy by then, and a
+        // session that restarts later goes straight to the shell.
+        if (dr.fd >= 0 && takeover_fd >= 0) write_handoff(takeover_fd, HANDOFF_NAME, (int)dr.w, (int)dr.h, dr.angle);
+        drm_yield(60000);
+        if (takeover_fd >= 0) unlinkat(takeover_fd, HANDOFF_NAME, 0);
+    }
     if (!yielded) vt_restore();
     return 0;
 }

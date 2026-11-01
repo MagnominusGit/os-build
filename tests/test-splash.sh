@@ -227,6 +227,100 @@ else
 fi
 
 # ---------------------------------------------------------------------------------------------
+# 2b. The activity bar, and the handoff gamescope keeps it up from
+# ---------------------------------------------------------------------------------------------
+# At the yield the drawer writes its frame and the bar's frames (strips of the panel buffer, one
+# per tick) for gamescope's patch 0050, which shows nothing else until the shell's first frame.
+# gamescope copies the strips in blind, so every number in the header has to be right: the frame
+# is the panel buffer exactly, the strip rect is where the bar is on THIS panel's rotation, and the
+# strips are the bar turned the same way as the rest of the frame.
+echo
+echo "activity bar and handoff:"
+render "$TMP/h0.ppm" 800 400 0 "x" --tick 7 --handoff "$TMP/h0.bin"
+render "$TMP/h90.ppm" 400 800 90 "x" --tick 7 --handoff "$TMP/h90.bin"
+render "$TMP/h270.ppm" 400 800 270 "x" --tick 7 --handoff "$TMP/h270.bin"
+render "$TMP/hairx.ppm" 1080 1920 270 "Starting RetroForge" --tick 33 --handoff "$TMP/hairx.bin"
+while IFS= read -r line; do
+    case $line in ok\ *) ok "${line#ok }" ;; *) bad "$line" ;; esac
+done < <(python3 - "$TMP" <<'PY'
+import struct, sys
+T = sys.argv[1]
+HDR = struct.Struct('<12IQ')
+def ppm(p):
+    parts = open(p, 'rb').read().split(b'\n', 3)
+    w, h = map(int, parts[1].split())
+    return w, h, parts[3]
+def handoff(p):
+    d = open(p, 'rb').read()
+    f = dict(zip('magic w h rot sx sy sw sh n tick_ms tick0 pad t0'.split(), HDR.unpack_from(d)))
+    f['size'] = len(d)
+    off = HDR.size + f['w'] * f['h'] * 4
+    f['frame'] = d[HDR.size:off]
+    n = f['sw'] * f['sh'] * 4
+    f['strips'] = [d[off + k * n:off + (k + 1) * n] for k in range(f['n'])]
+    return f
+def rgb(v):  # XRGB8888 little endian -> the ppm's RGB
+    return bytes((v[2], v[1], v[0]))
+out = []
+H = {}
+for tag, pw, ph, rot, tick in (('h0', 800, 400, 0, 7), ('h90', 400, 800, 90, 7), ('h270', 400, 800, 270, 7),
+                               ('hairx', 1080, 1920, 270, 33)):
+    h = H[tag] = handoff(f'{T}/{tag}.bin')
+    w, hh, px = ppm(f'{T}/{tag}.ppm')
+    want = (0x31534652, pw, ph, rot, 40, 40, tick % 40)
+    if (h['magic'], h['w'], h['h'], h['rot'], h['n'], h['tick_ms'], h['tick0']) != want:
+        out.append(f'{tag}: header {h["magic"]:#x} {h["w"]}x{h["h"]} rot {h["rot"]} {h["n"]} strips/{h["tick_ms"]} ms tick0 {h["tick0"]}')
+        continue
+    if h['size'] != HDR.size + pw * ph * 4 + 40 * h['sw'] * h['sh'] * 4:
+        out.append(f'{tag}: {h["size"]} bytes, not header + frame + 40 strips'); continue
+    if not (h['sw'] and h['sh'] and h['sx'] + h['sw'] <= pw and h['sy'] + h['sh'] <= ph):
+        out.append(f'{tag}: strip {h["sx"]},{h["sy"]} {h["sw"]}x{h["sh"]} is not inside the frame'); continue
+    fr = h['frame']
+    if any(rgb(fr[i * 4:i * 4 + 3]) != px[i * 3:i * 3 + 3] for i in range(pw * ph)):
+        out.append(f'{tag}: the frame is not the panel buffer'); continue
+    cur = h['strips'][h['tick0']]
+    region = b''.join(fr[((h['sy'] + y) * pw + h['sx']) * 4:((h['sy'] + y) * pw + h['sx'] + h['sw']) * 4] for y in range(h['sh']))
+    if cur != region:
+        out.append(f'{tag}: strip {h["tick0"]} is not what the frame shows at its tick'); continue
+    out.append(f'ok {tag}: header, frame and the strip on screen match the panel buffer')
+
+h0, h90, h270 = H['h0'], H['h90'], H['h270']
+s = h0['strips']
+if all(s[k] == s[(40 - k) % 40] for k in range(40)) and s[0] != s[10]:
+    out.append('ok the bar sweeps out and back: strip k is strip 40-k, and it moves')
+else:
+    out.append('the strips do not sweep out and back')
+def seg(strip, sw):  # first and last bright column of the bar's first row
+    cols = [i for i in range(sw) if strip[i * 4 + 1] > 128]
+    return (cols[0], cols[-1]) if cols else (-1, -1)
+segs = [seg(s[k], h0['sw']) for k in range(21)]
+if segs[0][0] == 0 and segs[20][1] == h0['sw'] - 1 and all(segs[k][0] <= segs[k + 1][0] for k in range(20)) \
+        and len({b - a for a, b in segs}) == 1:
+    out.append('ok the segment runs edge to edge at a constant width')
+else:
+    out.append(f'the segment does not run edge to edge at a constant width: {segs[0]} .. {segs[20]}')
+
+# The strip rect and pixels on a turned panel are the unturned ones turned the same way as the
+# rotation check above: clockwise for 90, counter-clockwise for 270.
+x0, y0, bw, bh = h0['sx'], h0['sy'], h0['sw'], h0['sh']
+for tag, h, rect, cw in (('rot=90', h90, (400 - y0 - bh, x0, bh, bw), True), ('rot=270', h270, (y0, 800 - x0 - bw, bh, bw), False)):
+    if (h['sx'], h['sy'], h['sw'], h['sh']) != rect:
+        out.append(f'{tag}: strip at {h["sx"]},{h["sy"]} {h["sw"]}x{h["sh"]}, the bar is at {rect}'); continue
+    bad = 0
+    for k in (0, 7, 20):
+        a, b = h0['strips'][k], h['strips'][k]
+        for j in range(bh):
+            for i in range(bw):
+                X, Y = x0 + i, y0 + j
+                PX, PY = (400 - 1 - Y, X) if cw else (Y, 800 - 1 - X)
+                q = ((PY - h['sy']) * h['sw'] + PX - h['sx']) * 4
+                bad += a[(j * bw + i) * 4:(j * bw + i) * 4 + 4] != b[q:q + 4]
+    out.append(f'ok {tag}: the strips are the bar turned with the frame' if not bad else f'{tag}: {bad} strip pixels are not the bar turned')
+print('\n'.join(out))
+PY
+)
+
+# ---------------------------------------------------------------------------------------------
 # 3. Text: wrapping, the error marker, and the empty case
 # ---------------------------------------------------------------------------------------------
 echo

@@ -1,0 +1,392 @@
+From: retroforge
+Subject: [PATCH] steamcompmgr: hold the boot splash until the shell draws
+
+gamescope takes DRM master at its start, ~9 s into a boot on the MANGMI
+Air X, and commits nothing until the shell's first frame, ~17 s. The
+panel keeps the boot splash drawer's last frame through that gap, but
+only a video-mode panel keeps showing the drawer's activity bar moving:
+a command-mode one shows committed frames only, and the drawer can no
+longer commit once it has dropped master.
+
+The drawer now hands its frame over, in the file GAMESCOPE_BOOT_SPLASH
+names: the frame as the panel scans it out, and the bar's frames as
+strips of it. Until the shell is drawing, gamescope paints only that:
+one screen-sized XRGB8888 layer, double buffered, with the next strip
+copied into the buffer that is not on screen once per tick. The frames
+are ordinary scanout images, with the modifiers the plane offers (UBWC
+on msm). The layer is pre-rotated, so it scans out with no copy wherever
+the panel takes a pre-rotated buffer (g_uPreRotation), and it is placed
+the same on any rotation. A panel rotated in the composite, or a frame
+drawn for another orientation, gets no splash.
+
+The shell's first frame is not the end: OpenGamepadUI puts up one
+empty, transparent frame and then loads for ~7 s before its next, which
+was ~7 s of black between the splash and its boot video. The splash
+goes once the shell has put up three frames within 0.5 s, 20 s after
+its first frame at the latest, and 60 s after gamescope's start in any
+case.
+
+vulkan_upload_texture_rect() copies a rectangle into a texture, in bands
+the upload buffer holds (one 1080p frame).
+
+---
+ src/rendervulkan.cpp |  38 ++++++++
+ src/rendervulkan.hpp |   3 +
+ src/steamcompmgr.cpp | 252 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 293 insertions(+)
+diff --git a/src/rendervulkan.cpp b/src/rendervulkan.cpp
+index 006aa58..9b02f04 100644
+--- a/src/rendervulkan.cpp
++++ b/src/rendervulkan.cpp
+@@ -2272,6 +2272,27 @@ void CVulkanCmdBuffer::copyBufferToImage(VkBuffer buffer, VkDeviceSize offset, u
+ 	m_textureRefs.emplace_back(std::move(dst));
+ }
+ 
++void CVulkanCmdBuffer::copyBufferToImageRect(VkBuffer buffer, VkDeviceSize offset, gamescope::Rc<CVulkanTexture> dst, uint32_t x, uint32_t y, uint32_t width, uint32_t height)
++{
++	prepareDestImage(dst.get());
++	insertBarrier();
++	VkBufferImageCopy region = {
++		.bufferOffset = offset,
++		.imageSubresource = {
++			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
++			.layerCount = 1,
++		},
++		.imageOffset = { int32_t(x), int32_t(y), 0 },
++		.imageExtent = { width, height, 1 },
++	};
++
++	m_device->vk.CmdCopyBufferToImage(m_cmdBuffer, buffer, dst->vkImage(), VK_IMAGE_LAYOUT_GENERAL, 1, &region);
++
++	markDirty(dst.get());
++
++	m_textureRefs.emplace_back(std::move(dst));
++}
++
+ void CVulkanCmdBuffer::clearImage(gamescope::Rc<CVulkanTexture> dst, const VkClearColorValue &color)
+ {
+ 	prepareDestImage(dst.get());
+@@ -4331,6 +4352,23 @@ gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_bits( uint32_t wi
+ 	return pTex;
+ }
+ 
++void vulkan_upload_texture_rect( gamescope::Rc<CVulkanTexture> pTex, uint32_t x, uint32_t y, uint32_t width, uint32_t height, const void *bits )
++{
++	// In bands the upload buffer holds: a whole frame of a panel past 1080p does not fit in it.
++	const uint32_t uRowSize = width * DRMFormatGetBPP( pTex->drmFormat() );
++	const uint32_t uBandRows = std::max<uint32_t>( CVulkanDevice::upload_buffer_size / uRowSize, 1u );
++	for ( uint32_t uRow = 0; uRow < height; uRow += uBandRows )
++	{
++		const uint32_t uRows = std::min( uBandRows, height - uRow );
++		auto [ dst, offset ] = g_device.uploadBufferData( uRows * uRowSize );
++		memcpy( dst, (const uint8_t *)bits + size_t( uRow ) * uRowSize, size_t( uRows ) * uRowSize );
++
++		auto cmdBuffer = g_device.commandBuffer();
++		cmdBuffer->copyBufferToImageRect( g_device.uploadBuffer(), offset, pTex, x, y + uRow, width, uRows );
++		g_device.wait( g_device.submit( std::move( cmdBuffer ) ) );
++	}
++}
++
+ static uint32_t s_frameId = 0;
+ 
+ void vulkan_garbage_collect( void )
+diff --git a/src/rendervulkan.hpp b/src/rendervulkan.hpp
+index f24c323..06c652b 100644
+--- a/src/rendervulkan.hpp
++++ b/src/rendervulkan.hpp
+@@ -480,6 +480,8 @@ bool vulkan_make_output();
+ 
+ gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_dmabuf( struct wlr_dmabuf_attributes *pDMA, gamescope::OwningRc<gamescope::IBackendFb> pBackendFb );
+ gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_bits( uint32_t width, uint32_t height, uint32_t contentWidth, uint32_t contentHeight, uint32_t drmFormat, CVulkanTexture::createFlags texCreateFlags, void *bits );
++// Copy tightly packed pixels into a rectangle of a texture, and wait for the copy.
++void vulkan_upload_texture_rect( gamescope::Rc<CVulkanTexture> pTex, uint32_t x, uint32_t y, uint32_t width, uint32_t height, const void *bits );
+ gamescope::OwningRc<CVulkanTexture> vulkan_create_texture_from_wlr_buffer( struct wlr_buffer *buf, gamescope::OwningRc<gamescope::IBackendFb> pBackendFb );
+ 
+ std::optional<uint64_t> vulkan_composite( struct FrameInfo_t *frameInfo, gamescope::Rc<CVulkanTexture> pScreenshotTexture, bool partial, gamescope::Rc<CVulkanTexture> pOutputOverride = nullptr, bool increment = true, std::unique_ptr<CVulkanCmdBuffer> pInCommandBuffer = nullptr, bool bAllowGfxBlit = false, uint32_t uOverrideRotation = 0 );
+@@ -1108,6 +1110,7 @@ public:
+ 	void copyImageRegions(gamescope::Rc<CVulkanTexture> src, gamescope::Rc<CVulkanTexture> dst, std::span<const VkImageCopy> regions);
+ 	void blitImageRotated(gamescope::Rc<CVulkanTexture> src, gamescope::Rc<CVulkanTexture> dst, uint32_t rotation);
+ 	void copyBufferToImage(VkBuffer buffer, VkDeviceSize offset, uint32_t stride, gamescope::Rc<CVulkanTexture> dst);
++	void copyBufferToImageRect(VkBuffer buffer, VkDeviceSize offset, gamescope::Rc<CVulkanTexture> dst, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
+ 	void clearImage(gamescope::Rc<CVulkanTexture> dst, const VkClearColorValue &color);
+ 
+ 
+diff --git a/src/steamcompmgr.cpp b/src/steamcompmgr.cpp
+index b3b66fb..97035b3 100644
+--- a/src/steamcompmgr.cpp
++++ b/src/steamcompmgr.cpp
+@@ -63,6 +63,8 @@
+ #include <sys/time.h>
+ #include <sys/wait.h>
+ #include <sys/types.h>
++#include <sys/mman.h>
++#include <sys/stat.h>
+ #if defined(__linux__)
+ #include <sys/prctl.h>
+ #elif defined(__DragonFly__) || defined(__FreeBSD__)
+@@ -5773,6 +5775,251 @@ static void update_secondary_output_power()
+ 	}
+ }
+ 
++// The boot splash, held on the panel until the shell has a frame of its own.
++//
++// We take DRM master at our start but commit nothing until the shell's first frame, ~8 s later on
++// the MANGMI Air X. In between the panel keeps what the boot splash drawer left on the plane: a
++// video-mode panel scans it out, but a command-mode one shows committed frames only, and the drawer
++// cannot commit once it has dropped master. So the drawer hands its frame over, in a file that
++// GAMESCOPE_BOOT_SPLASH names: the frame as the panel scans it out, and its activity bar's frames
++// as strips of it. We scan the frame out double-buffered and, every tick, copy the next strip into
++// the buffer that is not on screen. One screen-sized layer: it lands the same on any panel rotation,
++// and scans out pre-rotated, with no copy, wherever the plane takes a pre-rotated buffer.
++//
++// Layout, native endian: this header, the frame (uWidth * uHeight XRGB8888 pixels), then uStrips
++// strips of uStripW * uStripH pixels.
++struct BootSplashHeader_t
++{
++	uint32_t uMagic;
++	uint32_t uWidth, uHeight;
++	uint32_t uRotation; // degrees the drawer turned the picture for the panel
++	uint32_t uStripX, uStripY, uStripW, uStripH;
++	uint32_t uStrips;
++	uint32_t uTickMs;
++	uint32_t uTick0; // the strip on screen at ulTime0
++	uint32_t uPad;
++	uint64_t ulTime0; // CLOCK_MONOTONIC
++};
++static const uint32_t k_uBootSplashMagic = 0x31534652; // "RFS1"
++static const uint64_t k_ulBootSplashMaxTime = 60'000'000'000ul;
++static const uint64_t k_ulBootSplashShellCadence = 500'000'000ul; // three shell frames within this: it is drawing
++static const uint64_t k_ulBootSplashShellGrace = 20'000'000'000ul; // after the shell's first frame, at most
++
++enum class BootSplashState { Unloaded, Showing, Done };
++static BootSplashState s_eBootSplash = BootSplashState::Unloaded;
++static void *s_pBootSplashMap = MAP_FAILED;
++static size_t s_ulBootSplashMapSize = 0;
++static gamescope::OwningRc<CVulkanTexture> s_pBootSplashFrames[ 2 ];
++static uint32_t s_uBootSplashBack = 0;
++static int64_t s_nBootSplashShownStrip = -1;
++static uint64_t s_ulBootSplashContentID = 0;
++static uint64_t s_ulBootSplashStart = 0;
++static int64_t s_nBootSplashShellCommit = 0;
++static uint32_t s_uBootSplashShellFrames = 0;
++static uint64_t s_ulBootSplashShellFirst = 0;
++static uint64_t s_ulBootSplashShellTimes[ 3 ] = {}; // the shell's last three frames, oldest first
++
++static const BootSplashHeader_t *boot_splash_header()
++{
++	return (const BootSplashHeader_t *)s_pBootSplashMap;
++}
++
++static void boot_splash_finish()
++{
++	s_eBootSplash = BootSplashState::Done;
++	s_pBootSplashFrames[ 0 ] = nullptr;
++	s_pBootSplashFrames[ 1 ] = nullptr;
++	if ( s_pBootSplashMap != MAP_FAILED )
++		munmap( s_pBootSplashMap, s_ulBootSplashMapSize );
++	s_pBootSplashMap = MAP_FAILED;
++}
++
++static bool boot_splash_load()
++{
++	const char *pszPath = getenv( "GAMESCOPE_BOOT_SPLASH" );
++	if ( !pszPath || !*pszPath )
++		return false;
++
++	// The drawer drives the built-in panel.
++	gamescope::IBackendConnector *pConnector = GetBackend()->GetCurrentConnector();
++	if ( !pConnector || pConnector->GetScreenType() != gamescope::GAMESCOPE_SCREEN_TYPE_INTERNAL )
++		return false;
++
++	int fd = open( pszPath, O_RDONLY | O_CLOEXEC );
++	if ( fd < 0 )
++	{
++		xwm_log.infof( "boot splash: %s: %s", pszPath, strerror( errno ) );
++		return false;
++	}
++	struct stat st;
++	if ( fstat( fd, &st ) == 0 && size_t( st.st_size ) >= sizeof( BootSplashHeader_t ) )
++	{
++		s_ulBootSplashMapSize = st.st_size;
++		s_pBootSplashMap = mmap( nullptr, s_ulBootSplashMapSize, PROT_READ, MAP_PRIVATE, fd, 0 );
++	}
++	close( fd );
++	if ( s_pBootSplashMap == MAP_FAILED )
++		return false;
++
++	const BootSplashHeader_t *pHeader = boot_splash_header();
++	const uint64_t ulFrame = uint64_t( pHeader->uWidth ) * pHeader->uHeight * 4;
++	const uint64_t ulStrip = uint64_t( pHeader->uStripW ) * pHeader->uStripH * 4;
++	const bool bValid = pHeader->uMagic == k_uBootSplashMagic &&
++		pHeader->uWidth && pHeader->uHeight && pHeader->uWidth <= 8192 && pHeader->uHeight <= 8192 &&
++		pHeader->uStrips <= 1024 && ( !pHeader->uStrips || ( pHeader->uTickMs && ulStrip &&
++			pHeader->uStripX + uint64_t( pHeader->uStripW ) <= pHeader->uWidth &&
++			pHeader->uStripY + uint64_t( pHeader->uStripH ) <= pHeader->uHeight ) ) &&
++		s_ulBootSplashMapSize == sizeof( BootSplashHeader_t ) + ulFrame + ulStrip * pHeader->uStrips;
++	if ( !bValid )
++	{
++		xwm_log.errorf( "boot splash: %s is not a splash frame", pszPath );
++		return false;
++	}
++
++	// The picture is turned for the panel, so it scans out as is only where the panel takes a
++	// pre-rotated buffer, and only if the drawer turned it the way we would.
++	uint32_t uRotation = 0;
++	switch ( pConnector->GetCurrentOrientation() )
++	{
++		case GAMESCOPE_PANEL_ORIENTATION_90:  uRotation = 270; break; // left side up
++		case GAMESCOPE_PANEL_ORIENTATION_270: uRotation = 90;  break; // right side up
++		case GAMESCOPE_PANEL_ORIENTATION_180: uRotation = 180; break;
++		default: break;
++	}
++	if ( pHeader->uRotation != uRotation || ( uRotation && !g_uPreRotation ) )
++	{
++		xwm_log.infof( "boot splash: drawn turned %u, the panel takes %u%s", pHeader->uRotation, uRotation,
++			g_uPreRotation ? "" : " in the composite" );
++		return false;
++	}
++
++	for ( auto &pFrame : s_pBootSplashFrames )
++	{
++		CVulkanTexture::createFlags flags;
++		flags.bFlippable = true;
++		flags.bSampled = true;
++		flags.bTransferDst = true;
++		pFrame = new CVulkanTexture();
++		if ( !pFrame->BInit( pHeader->uWidth, pHeader->uHeight, 1u, DRM_FORMAT_XRGB8888, flags ) )
++		{
++			xwm_log.errorf( "boot splash: no %ux%u image", pHeader->uWidth, pHeader->uHeight );
++			return false;
++		}
++		vulkan_upload_texture_rect( pFrame.get(), 0, 0, pHeader->uWidth, pHeader->uHeight, pHeader + 1 );
++	}
++
++	xwm_log.infof( "boot splash: %ux%u, %u bar frames", pHeader->uWidth, pHeader->uHeight, pHeader->uStrips );
++	return true;
++}
++
++// Paints the boot splash, on a vblank when its bar has moved. Returns whether it is still up, in
++// which case nothing else is painted.
++static bool paint_boot_splash( bool vblank )
++{
++	if ( s_eBootSplash == BootSplashState::Done )
++		return false;
++
++	const uint64_t ulNow = get_time_in_nanos();
++	if ( s_eBootSplash == BootSplashState::Unloaded )
++	{
++		if ( !boot_splash_load() )
++		{
++			boot_splash_finish();
++			return false;
++		}
++		s_eBootSplash = BootSplashState::Showing;
++		s_ulBootSplashStart = ulNow;
++	}
++
++	// Up until the shell is drawing, not just until its first frame: OpenGamepadUI puts up one
++	// empty, transparent frame and then spends ~7 s loading before its next (MANGMI Air X). So the
++	// splash goes once the shell has put up frames back to back, or a while after its first.
++	for ( auto &iter : g_VirtualConnectorFocuses )
++	{
++		steamcompmgr_win_t *w = iter.second.focusWindow;
++		if ( !w || iter.second.HeldCommits[ HELD_COMMIT_BASE ] == nullptr )
++			continue;
++
++		const int64_t nCommit = window_last_done_commit_id( w );
++		if ( nCommit != s_nBootSplashShellCommit )
++		{
++			s_nBootSplashShellCommit = nCommit;
++			if ( !s_uBootSplashShellFrames++ )
++				s_ulBootSplashShellFirst = ulNow;
++			s_ulBootSplashShellTimes[ 0 ] = s_ulBootSplashShellTimes[ 1 ];
++			s_ulBootSplashShellTimes[ 1 ] = s_ulBootSplashShellTimes[ 2 ];
++			s_ulBootSplashShellTimes[ 2 ] = ulNow;
++		}
++		const bool bDrawing = s_uBootSplashShellFrames >= 3 && ulNow - s_ulBootSplashShellTimes[ 0 ] <= k_ulBootSplashShellCadence;
++		if ( bDrawing || ulNow - s_ulBootSplashShellFirst >= k_ulBootSplashShellGrace )
++		{
++			xwm_log.infof( "boot splash: the shell is %s after %" PRIu64 " ms, its first frame %" PRIu64 " ms before",
++				bDrawing ? "drawing" : "still loading", ( ulNow - s_ulBootSplashStart ) / 1'000'000ul,
++				( ulNow - s_ulBootSplashShellFirst ) / 1'000'000ul );
++			boot_splash_finish();
++			hasRepaint = true;
++			return false;
++		}
++		break;
++	}
++	if ( ulNow - s_ulBootSplashStart >= k_ulBootSplashMaxTime )
++	{
++		xwm_log.infof( "boot splash: no frame from the shell, leaving it" );
++		boot_splash_finish();
++		return false;
++	}
++
++	gamescope::IBackendConnector *pConnector = GetBackend()->GetCurrentConnector();
++	if ( !vblank || !pConnector )
++		return true;
++
++	const BootSplashHeader_t *pHeader = boot_splash_header();
++	int64_t nStrip = 0;
++	if ( pHeader->uStrips )
++	{
++		const uint64_t ulTicks = ulNow > pHeader->ulTime0 ? ( ulNow - pHeader->ulTime0 ) / ( pHeader->uTickMs * 1'000'000ul ) : 0;
++		nStrip = ( pHeader->uTick0 + ulTicks ) % pHeader->uStrips;
++	}
++	if ( nStrip == s_nBootSplashShownStrip )
++		return true;
++
++	gamescope::Rc<CVulkanTexture> pTex = s_pBootSplashFrames[ s_uBootSplashBack ].get();
++	if ( pHeader->uStrips )
++	{
++		const uint8_t *pStrips = (const uint8_t *)( pHeader + 1 ) + uint64_t( pHeader->uWidth ) * pHeader->uHeight * 4;
++		vulkan_upload_texture_rect( pTex, pHeader->uStripX, pHeader->uStripY, pHeader->uStripW, pHeader->uStripH,
++			pStrips + uint64_t( nStrip ) * pHeader->uStripW * pHeader->uStripH * 4 );
++	}
++
++	struct FrameInfo_t frameInfo = {};
++	frameInfo.applyOutputColorMgmt = false;
++	frameInfo.outputEncodingEOTF = EOTF_Gamma22;
++	frameInfo.allowVRR = false;
++	frameInfo.bFadingOut = false;
++
++	// Sized in logical orientation like any layer: a pre-rotated one is placed as its unrotated self.
++	const bool bTransposed = pHeader->uRotation == 90 || pHeader->uRotation == 270;
++	FrameInfo_t::Layer_t *layer = frameInfo.layers.push();
++	layer->tex = pTex;
++	layer->zpos = g_zposBase;
++	layer->scale.x = float( bTransposed ? pTex->height() : pTex->width() ) / currentOutputWidth;
++	layer->scale.y = float( bTransposed ? pTex->width() : pTex->height() ) / currentOutputHeight;
++	layer->offset = { 0.0f, 0.0f };
++	layer->opacity = 1.0f;
++	layer->blackBorder = true;
++	layer->applyColorMgmt = false;
++	layer->bPreRotated = pHeader->uRotation != 0;
++	layer->ulContentID = ++s_ulBootSplashContentID;
++	layer->colorspace = GAMESCOPE_APP_TEXTURE_COLORSPACE_SRGB;
++
++	if ( pConnector->Present( &frameInfo, false ) == 0 )
++	{
++		s_nBootSplashShownStrip = nStrip;
++		s_uBootSplashBack ^= 1;
++	}
++	return true;
++}
++
+ // Paints the secondary focus onto the secondary output when it has new content and the output can
+ // take a frame. Direct scanout first: on an unrotated panel, a buffer the size of the output goes
+ // on the plane as is. Otherwise (a rotated panel, other sizes, or a buffer the plane refuses) the
+@@ -11283,8 +11530,13 @@ steamcompmgr_main(int argc, char **argv)
+ 		if ( cv_adaptive_sync_ignore_overlay )
+ 			nIgnoredOverlayRepaints = 0;
+ 
++		const bool bBootSplash = paint_boot_splash( vblank );
++
+ 		for ( auto &iter : g_VirtualConnectorFocuses )
+ 		{
++			if ( bBootSplash )
++				break;
++
+ 			global_focus_t *pPaintFocus = &iter.second;
+ 			bool bRepeatFrame = false;
+ 

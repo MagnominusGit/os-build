@@ -71,6 +71,11 @@ LimitMEMLOCK=infinity
 # `+`: runs as root, outside User=/PAM (player cannot write /run/retroforge). `-`: a failure to write
 # the file cannot stop the session. A splash that will not yield is a bad boot; a session that
 # will not start is a brick.
+#
+# The splash's last status line comes first. The drawer reads the status before the takeover, so
+# this one is committed while it still holds master, and is the frame it hands gamescope, which
+# keeps it up, bar moving, until the shell is drawing.
+ExecStartPre=-+/usr/lib/retroforge/splash-progress Starting RetroForge
 ExecStartPre=-+/bin/sh -c 'mkdir -p /run/retroforge/splash && echo retroforge-session >/run/retroforge/splash/takeover'
 ExecStart=/bin/bash --login -c 'exec /usr/bin/retroforge-session'
 # A stop is SIGTERM to retroforge-session, which stops the shell and gamescope and exits 128+15; that is
