@@ -148,11 +148,22 @@ func _add_updater(box: Node) -> void:
 	var focus_group = box.get_node_or_null("FocusGroup")
 	if focus_group:
 		focus_group.current_focus = _button  # was OGUI's auto-update toggle, now freed
-	_running = _run(["version"]).strip_edges()
+	_channel.item_selected.connect(_on_channel_selected)
+	_load_state()
+
+
+## The version and the channels, read once the rows are up and not awaited by _add_updater: each run
+## of retroforge-update starts Python, ~0.5 s on the Air X, and the three of them held OGUI's first
+## frames back by 1.3 s at boot (2026-11-01).
+func _load_state() -> void:
+	_running = (await _run_async(["version"])).strip_edges()
+	if not _alive():
+		return
 	if _running == "":
 		logger.warn("retroforge-update version printed nothing")
-	_fill_channels()
-	_channel.item_selected.connect(_on_channel_selected)
+	await _fill_channels()
+	if not _alive():
+		return
 	_show()
 	_restore_staged()
 
@@ -265,9 +276,19 @@ func _run(args: Array) -> String:
 	return str(out[0]) if OS.execute(tool, args, out) == 0 and not out.is_empty() else ""
 
 
+## _run, off the main thread.
+func _run_async(args: Array) -> String:
+	var cmd := Command.create(tool, args)
+	if cmd.execute() != OK or (await cmd.finished) != 0:
+		return ""
+	return cmd.stdout
+
+
 func _fill_channels() -> void:
-	var listed := UpdateStates.parse_channels(_run(["channels"]))
-	var current := UpdateStates.parse_channel(_run(["channel"]))
+	var listed := UpdateStates.parse_channels(await _run_async(["channels"]))
+	var current := UpdateStates.parse_channel(await _run_async(["channel"]))
+	if not _alive():
+		return
 	_channels = listed["channels"]
 	_channel.clear()  # dropdown.tscn ships one placeholder item
 	for i in _channels.size():
@@ -406,7 +427,7 @@ func _on_channel_selected(index: int) -> void:
 	if not ok:
 		logger.warn("retroforge-update set-channel %s failed: %s" % [_channels[index], cmd.stderr])
 		_notify("Could not change the update channel")
-		_fill_channels()
+		await _fill_channels()
 		_show()
 		return
 	logger.info("update channel: " + _channels[index])

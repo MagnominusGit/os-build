@@ -70,8 +70,9 @@ PY2
 python3 - "$SRC/retroforge_os.gd" <<'PY2' && ok "retroforge_os.gd fills its dropdown only once it is in the tree" || bad "retroforge_os.gd calls the dropdown before add_child: OGUI segfaults"
 import sys
 s = open(sys.argv[1]).read()
-add, fill = s.find("box.add_child(node)"), s.find("_fill_channels()\n\t_channel.item_selected")
-sys.exit(0 if 0 <= add < fill and s.find("_channel.clear()") > 0 and s.find("_channel.add_item") > 0 else 1)
+add, fill = s.find("box.add_child(node)"), s.find("_channel.item_selected.connect(_on_channel_selected)\n\t_load_state()")
+sys.exit(0 if 0 <= add < fill and s.find("await _fill_channels()") > s.find("func _load_state()") > 0
+         and s.find("_channel.clear()") > 0 and s.find("_channel.add_item") > 0 else 1)
 PY2
 # OGUI never calls ready() on our OS platform (it knows no `retroforge` OS): plugin.gd must, and
 # only where OGUI detected none.

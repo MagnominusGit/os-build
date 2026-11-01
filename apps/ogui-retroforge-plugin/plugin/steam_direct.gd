@@ -44,9 +44,18 @@ func attach(target: Node = null) -> bool:  # target: Apps > Steam Client's rows 
 	box.add_child(_toggle)
 	if after:
 		box.move_child(_toggle, after.get_index() + 1)
-	_toggle.button_pressed = status() == "on"
 	_toggle.toggled.connect(_on_toggled)
+	_load_status()
 	return true
+
+
+## The switch is set once retroforge-steam-direct answers. It is Python, ~0.5 s on the Air X, which
+## held OGUI's first frames back at boot when attach() waited for it (2026-11-01).
+func _load_status() -> void:
+	var cmd := Command.create(TOOL, ["status"])
+	if cmd.execute() != OK or (await cmd.finished) != 0 or not is_instance_valid(_toggle):
+		return
+	_toggle.button_pressed = cmd.stdout.strip_edges() == "on"
 
 
 func detach() -> void:
