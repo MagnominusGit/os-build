@@ -139,9 +139,15 @@ run "$T/v80" apply
 [ "$(default_of)" = proton-cachyos-armv8-retroforge ] && grep -q '"AutoUpdateWindowEnabled"' "$VDF" && ok "the section is created" || bad "$(cat "$VDF")"
 
 CASE="no config.vdf yet"
-rm -f "$VDF"
+rm -f "$VDF" "$VDF.before-retroforge-proton"
 run "$T/v80" apply
-[ "$RC" = 0 ] && [ ! -e "$VDF" ] && grep -q "no config.vdf yet" <<<"$ERR" && ok "nothing written; set at a later start" || bad "rc=$RC err=$ERR"
+[ "$RC" = 0 ] && [ "$(default_of)" = proton-cachyos-armv8-retroforge ] && [ ! -e "$VDF.before-retroforge-proton" ] \
+  && ok "one is written holding only the default (the client reads it at its first start); no backup of nothing" || bad "rc=$RC err=$ERR $(cat "$VDF" 2>&1)"
+python3 - "$VDF" <<'PY2' && ok "it is InstallConfigStore > Software > Valve > Steam > CompatToolMapping > 0, nothing else" || bad "$(cat "$VDF")"
+import re, sys
+t = open(sys.argv[1]).read()
+assert re.sub(r"\s+", " ", t).strip() == '"InstallConfigStore" { "Software" { "Valve" { "Steam" { "CompatToolMapping" { "0" { "name" "proton-cachyos-armv8-retroforge" "config" "" "priority" "75" } } } } } }', t
+PY2
 
 CASE="each Windows game"
 vdf; rm -f "$T/apps"

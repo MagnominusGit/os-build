@@ -748,9 +748,11 @@ follows it too.
 
 **When it is installed.** On these CPUs it is not an optional download:
 - **Steam:** part of Steam Client's install (`steam-install`, a stage of its bar after the x86 guest and
-  before the client's own update; the install fails without it). Once the update has written
-  `config.vdf`, `retroforge-steam-proton apply` makes it Steam's default compatibility tool and each
-  installed Windows-only game's own, and does so again at each `steam` start (updating it in the
+  before the client's own update; the install fails without it). Then `retroforge-steam-proton apply`
+  makes it Steam's default compatibility tool and each installed Windows-only game's own. The client
+  writes `config.vdf` only at its first real start, so when there is none yet `apply` writes one holding
+  just that default, which the client reads and keeps; the first Windows game already runs with it. It
+  does so again at each `steam` start (updating it in the
   background). On CPUs with LSE atomics Proton-CachyOS stays an optional download (Apps > Proton) and is
   never made a default.
 - **GOG and Epic:** part of the first game's install (`store install`: its download is 85-99% of that

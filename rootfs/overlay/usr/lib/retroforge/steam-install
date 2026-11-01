@@ -26,8 +26,9 @@
 #      for them (~420 MB), by retroforge-proton install (steam-compat-tools, proton-cachyos-armv8.pin),
 #      which writes its percentage to ~/.local/share/retroforge/steam-compat-tools.progress, read here
 #      for the bar. Without it Steam has no Proton that runs well there, so the install fails without
-#      it. Once the client's update (4) has written config.vdf, retroforge-steam-proton apply makes it
-#      Steam's default and each installed Windows game's tool. Other CPUs get no Proton here: Steam
+#      it. After the client's update (4), retroforge-steam-proton apply makes it Steam's default (it
+#      writes config.vdf if the client has not yet: the client writes its own only at its first real
+#      start, and reads one that is there). Other CPUs get no Proton here: Steam
 #      keeps its own default, and Proton-CachyOS is an optional download in Apps > Proton;
 #   4. the client's own update, by Valve's updater: `steam -steamdeck -exitsteam` through /usr/bin/steam
 #      (the wrapper every start goes through), which downloads the rest of the client (~600 MB: its

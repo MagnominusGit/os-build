@@ -11,6 +11,8 @@
 # apply installs or updates the build in the background (steam-compat-tools; Steam Client's install
 # has already put it in place, see steam-install), and once it is installed and the client is not
 # running, sets it as Steam's default compatibility tool: entry "0" of CompatToolMapping in config.vdf.
+# Before the client's first real start there is no config.vdf: this writes one holding only that
+# entry, which the client reads and keeps, so the first Windows game already runs with our build.
 #
 # EACH WINDOWS GAME TOO. Steam picks a game's tool by priority: one set for the game (250), Valve's
 # recommendation for it (85), the default (75). Valve recommends its own Proton for most Windows games,
@@ -43,6 +45,7 @@ OLD_DIRS = ("proton-armv8-retroforge", "proton-armv8-experimental-retroforge")
 STEAM_LIBRARY = os.environ.get("RETROFORGE_STEAM_LIBRARY", "/usr/lib/retroforge/steam-library")
 VDF = os.path.join(STEAM_ROOT, "config", "config.vdf")
 MAPPING = ["InstallConfigStore", "Software", "Valve", "Steam", "CompatToolMapping"]
+EMPTY_VDF = '"InstallConfigStore"\n{\n}\n'  # what set_tools starts from before the client wrote one
 DEFAULT = MAPPING + ["0"]
 
 
@@ -234,12 +237,14 @@ def windows_games():
 
 def set_tools(name):
     """Our build as Steam's default and as each Windows game's own tool (see EACH WINDOWS GAME TOO)."""
+    fresh = False
     try:
         with open(VDF, encoding="utf-8") as f:
             text = f.read()
     except FileNotFoundError:
-        log("Steam has no config.vdf yet; the default is set at a later start")
-        return
+        # The client writes config.vdf at its first real start (not at steam-install's update run),
+        # and reads one that is there: so it starts with our default, not Valve's Proton.
+        text, fresh = EMPTY_VDF, True
     new = set_entry(text, DEFAULT, {"name": name, "config": "", "priority": "75"})
     try:
         games = windows_games()
@@ -257,8 +262,9 @@ def set_tools(name):
         log(f"{name} is now the tool of {', '.join(added)}")
     if new == text:
         return
+    os.makedirs(os.path.dirname(VDF), exist_ok=True)
     backup = VDF + ".before-retroforge-proton"
-    if not os.path.exists(backup):
+    if not fresh and not os.path.exists(backup):
         with open(backup, "w", encoding="utf-8") as f:
             f.write(text)
     with open(VDF + ".part", "w", encoding="utf-8") as f:
