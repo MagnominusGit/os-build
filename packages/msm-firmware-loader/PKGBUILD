@@ -12,7 +12,8 @@
 # firmware_class.path there. tqftpserv finds wlanmdsp.mbn through the same path. Patches (ours,
 # see each header): 0001 reads the active slot from the GPT (OpenABL passes no slot suffix);
 # 0002 exposes blobs only under DT device folders; 0003 maps the active slot's dynamic partitions;
-# 0004 drops the per-entry forks; 0005 mounts only modem and vendor.
+# 0004 drops the per-entry forks; 0005 mounts only modem and vendor; 0006 prefers vendor's copy
+# of a name, as Android does.
 #
 # It runs on every board, serving whatever its partitions hold under the devicetree's device
 # folders (e.g. adsp/cdsp under qcom/sm8550/ayn/odin2portal/). A name the partitions lack falls

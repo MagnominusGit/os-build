@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sun, 1 Nov 2026 12:19:51 -0800
+Subject: [PATCH] msm-firmware-loader: prefer the vendor partition's blobs, by
+ file name
+
+Android's ueventd searches /vendor/firmware before the modem partition
+(system's firmware_directories are read before the vendor file it
+imports), and the Odin 3, Odin 2 Portal, RP Nova and Classic ship a newer
+OEM rebuild of the ADSP there. Link vendor blobs first and compare whole
+names, as ueventd does: grouping by stem would let the Air X vendor's
+wlanmdsp.otaupdate hide the modem's wlanmdsp.mbn.
+
+diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
+index ead95dd..4528100 100644
+--- a/msm-firmware-loader.sh
++++ b/msm-firmware-loader.sh
+@@ -222,27 +222,17 @@ then
+ 	done
+ fi
+ 
+-# Scan through mounted partitions and symlink all of the blobs.
+-# This loop ignores blobs with names already present in the
+-# target to allow preinstalled blobs to override ones in the partitions.
+-for blob in "$BASEDIR"/mnt/*/image/* "$BASEDIR"/mnt/*/firmware/*
++# Link each partition's blobs by file name, the first copy of a name winning.
++# Vendor's firmware/ goes first: Android's ueventd searches /vendor/firmware
++# before the modem partition, and OEMs ship rebuilt DSP images there. Whole
++# names are compared, as ueventd does, so vendor's wlanmdsp.otaupdate does not
++# hide the modem's wlanmdsp.mbn.
++for dir in "$BASEDIR"/mnt/*/firmware "$BASEDIR"/mnt/*/image
+ do
+-	if ! [ -e "$blob" ]; then continue; fi;
+-
+-	DIR="${blob%/*}"
+-	BLOBBASE="${blob##*/}"
+-	BLOBBASE="${BLOBBASE%.*}"
+-
+-	# Skip blob prefix if it's already present.
+-	for prefix in "$BASEDIR/blobs/$BLOBBASE."*
+-	do
+-		if [ -e "$prefix" ]; then continue 2; fi
+-	done
+-
+ 	set --
+-	for part in "$DIR"/"$BLOBBASE"*
++	for blob in "$dir"/*
+ 	do
+-		if [ -f "$part" ]; then set -- "$@" "$part"; fi
++		if [ -f "$blob" ] && ! [ -e "$BASEDIR/blobs/${blob##*/}" ]; then set -- "$@" "$blob"; fi
+ 	done
+ 	if [ $# -gt 0 ]; then ln -s "$@" "$BASEDIR/blobs/"; fi
+ done
