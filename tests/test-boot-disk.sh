@@ -84,6 +84,11 @@ bootinfo() {  # <root device path, or empty for a file with no root= line>
 # The argument is optional so the no-argument case below can be exercised: a rule typo'd to
 # PROGRAM=="...on-boot-disk" with no %k is a real way for this to be called bare.
 on_boot_disk() {  # [kernel name]
+  RETROFORGE_SYSBLOCK="$T/sys/class/block" RETROFORGE_BOOTINFO="$T/boot" "$PROG" ${1+"$1"} >/dev/null
+}
+# What udev keeps as RESULT. 99-retroforge-automount.rules skips a partition on "boot", so only a
+# known boot disk may print it: a fail-open "cannot tell" that printed it would stop every card mounting.
+boot_result() {  # [kernel name]
   RETROFORGE_SYSBLOCK="$T/sys/class/block" RETROFORGE_BOOTINFO="$T/boot" "$PROG" ${1+"$1"}
 }
 
@@ -109,6 +114,12 @@ if on_boot_disk mmcblk0p1; then
 else
   bad "the card's ESP was refused — the trial could never be confirmed and every boot would roll back"
 fi
+[ "$(boot_result mmcblk0p8)" = boot ] \
+  && ok "the card's own partition reports RESULT=boot (automount skips it)" \
+  || bad "the card's own partition does not print boot — automount starts a unit only to refuse it"
+[ -z "$(boot_result sda8)" ] \
+  && ok "the internal partition prints nothing" \
+  || bad "a partition on another disk printed a RESULT"
 
 echo
 echo "booted from internal storage, card inserted"
@@ -160,6 +171,16 @@ bootinfo /dev/mmcblk0     # a whole disk, not a partition: no parent disk to der
 on_boot_disk sda8 \
   && ok "a root= naming a whole disk rather than a partition -> linked" \
   || bad "a whole-disk root= refuses every link"
+quiet=1
+for b in '' /dev/nonexistent99 /dev/mmcblk0; do
+  bootinfo "$b"
+  [ -z "$(boot_result sda8)" ] || quiet=0
+done
+rm -f "$T/boot"
+[ -z "$(boot_result sda8)" ] || quiet=0
+[ "$quiet" = 1 ] \
+  && ok "every fail-open link prints nothing, so automount still runs for it" \
+  || bad "a fail-open link printed boot — automount would skip a card it cannot place"
 
 echo
 echo "fail-closed: only where the boot disk IS known"
@@ -179,6 +200,11 @@ echo "every consumer names the scoped link"
 grep -q 'PROGRAM=="/usr/lib/retroforge/on-boot-disk %k"' "$RULE" \
   && ok "the rule matches through on-boot-disk, passing the kernel name" \
   || bad "the rule does not invoke on-boot-disk with %k — the program this suite tests is not the one that runs"
+grep -q '^RESULT=="boot", ENV{RETROFORGE_BOOT_DISK}="1"$' "$RULE" \
+  && grep -q '^ENV{RETROFORGE_BOOT_DISK}=="1", *GOTO="retroforge_automount_end"$' \
+       "$ROOT/rootfs/overlay/usr/lib/udev/rules.d/99-retroforge-automount.rules" \
+  && ok "the rule marks RESULT=boot partitions and automount skips them" \
+  || bad "RETROFORGE_BOOT_DISK is not set by the rule or not read by 99-retroforge-automount.rules"
 # 60-persistent-storage.rules is what exports ID_PART_ENTRY_NAME, and udev sorts rule FILES
 # lexically: at 60-retroforge-* this file would run BEFORE that import and match an unset variable,
 # creating no links and saying nothing. The prefix IS the mechanism here, so it is asserted.

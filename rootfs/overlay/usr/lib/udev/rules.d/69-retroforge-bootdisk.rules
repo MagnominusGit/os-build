@@ -25,5 +25,8 @@ ENV{ID_PART_ENTRY_NAME}!="retroforge-*|RETROFORGE-*", GOTO="retroforge_bootdisk_
 # disk" AND for "the boot disk cannot be determined" — see its header for why the second is
 # deliberate, and why it is the only behaviour that cannot regress a single-disk device.
 PROGRAM=="/usr/lib/retroforge/on-boot-disk %k", SYMLINK+="retroforge/$env{ID_PART_ENTRY_NAME}"
+# It prints "boot" only for the first, so this marks the partitions known to be on the boot disk and
+# never a "cannot tell". 99-retroforge-automount.rules skips them, as automount.sh would.
+RESULT=="boot", ENV{RETROFORGE_BOOT_DISK}="1"
 
 LABEL="retroforge_bootdisk_end"

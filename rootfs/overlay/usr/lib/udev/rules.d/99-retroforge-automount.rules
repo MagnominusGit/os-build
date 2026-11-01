@@ -38,6 +38,15 @@
 # than our formatter (a hand-run mkfs over SSH) stays unmounted until it is reinserted.
 ACTION!="add|remove",           GOTO="retroforge_automount_end"
 KERNEL!="mmcblk*p*",            GOTO="retroforge_automount_end"
+# The two cards automount.sh refuses, refused here before a unit starts: mmcblk is also the internal
+# eMMC on the SM6115 boards (the MMC core types it "MMC", a card "SD", the attribute storage_is_sd
+# reads), and the boot disk's own partitions (69-retroforge-bootdisk.rules). Each refusal cost a
+# unit that waited out coldplug in `udevadm settle`: seventeen on every boot from a card on the Air
+# X (2026-10-31), all landing as the session started. The vendor's eMMC partitions are also kept
+# from systemd altogether (99-zz-retroforge-hide-oem-partitions.rules); the MMC line here is for an
+# internal install's own.
+ATTRS{type}=="MMC",             GOTO="retroforge_automount_end"
+ENV{RETROFORGE_BOOT_DISK}=="1", GOTO="retroforge_automount_end"
 ENV{ID_FS_USAGE}!="filesystem", GOTO="retroforge_automount_end"
 
 ENV{SYSTEMD_WANTS}+="retroforge-automount@%k.service"

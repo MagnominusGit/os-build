@@ -44,9 +44,9 @@
 # device we could not inspect.
 #
 # NO STATE, NO CACHE, NO LOGGING. This runs from a udev rule for every partition uevent, including
-# coldplug, so it is three file reads and a string compare. udev discards stdout of a PROGRAM match
-# and stderr goes to the journal as a udev worker error, so a chatty version of this would be noise
-# on every boot on every device.
+# coldplug, so it is three file reads and a string compare. udev keeps stdout only as RESULT (the one
+# word printed at the end) and stderr goes to the journal as a udev worker error, so a chatty version
+# of this would be noise on every boot on every device.
 set -u
 
 # Seams, for tests/test-boot-disk.sh — which executes THIS file, not a copy, so what it asserts is
@@ -79,4 +79,5 @@ bootdisk=$(parent_disk "${rootdev##*/}") || exit 0
 candidate=$(parent_disk "$part") || exit 1
 [ -n "$candidate" ] || exit 1
 
-[ "$candidate" = "$bootdisk" ]
+# "boot" on stdout (udev's RESULT) is the positive answer only, which no fail-open exit above gives.
+[ "$candidate" = "$bootdisk" ] && echo boot
