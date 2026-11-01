@@ -1,0 +1,65 @@
+# retroforge msm-firmware-loader — loads each board's own Qualcomm firmware from its Android
+# partitions, built FROM SOURCE via a retroforge-owned PKGBUILD. postmarketOS's loader script and
+# make-dynpart-mappings, which it runs to map the dynamic partitions inside `super`; neither is in
+# the holo snapshot.
+#
+# ONE PACKAGE, NOT TWO, for the reason packages/rmtfs gives: build-overlay.sh indexes the repo only
+# after every package is built, so a depends= on another overlay package cannot be met by makepkg -s.
+#
+# WHAT IT DOES ON THE AIR X. Before udev, it mounts the active slot's modem partition (vfat:
+# adsp/cdsp/modem/wlanmdsp) and vendor partition (ext4 inside super: a610_zap), read-only, links
+# their blobs under the devicetree's device folder (qcom/sm6115/mangmi/) in a tmpfs, and points
+# firmware_class.path there. tqftpserv finds wlanmdsp.mbn through the same path. Patches (ours,
+# see each header): 0001 reads the active slot from the GPT (OpenABL passes no slot suffix);
+# 0002 exposes blobs only under DT device folders; 0003 maps the active slot's dynamic partitions;
+# 0004 drops the per-entry forks; 0005 mounts only modem and vendor.
+#
+# It runs on every board, serving whatever its partitions hold under the devicetree's device
+# folders (e.g. adsp/cdsp under qcom/sm8550/ayn/odin2portal/). A name the partitions lack falls
+# through to /lib/firmware; only the SM6115 copies are left out of the image
+# (rootfs/assemble-rootfs.sh), so those boards have no fallback.
+#
+# To bump: change pkgver/_dynpart and their sha256sums together (GitLab archive tarballs, taken
+# 2026-11-01). makepkg runs with --skipinteg in this tree, so prepare() verifies them itself.
+
+pkgname=msm-firmware-loader
+pkgver=1.9.0
+pkgrel=1
+_dynpart=10.2.4
+pkgdesc='Qualcomm DSP and GPU firmware from the Android partitions (msm-firmware-loader + make-dynpart-mappings)'
+arch=('aarch64')
+url='https://gitlab.postmarketos.org/postmarketOS/msm-firmware-loader'
+license=('MIT' 'GPL-3.0-only')
+depends=('device-mapper' 'libmd' 'util-linux' 'util-linux-libs')
+makedepends=('pkgconf')
+provides=("make-dynpart-mappings=${_dynpart}")
+source=("msm-firmware-loader-${pkgver}.tar.gz::https://gitlab.postmarketos.org/postmarketOS/msm-firmware-loader/-/archive/${pkgver}/msm-firmware-loader-${pkgver}.tar.gz"
+        "make-dynpart-mappings-${_dynpart}.tar.gz::https://gitlab.com/flamingradian/make-dynpart-mappings/-/archive/${_dynpart}/make-dynpart-mappings-${_dynpart}.tar.gz")
+sha256sums=('af66adb4f1bb6c1d4d7a7a5e96ccd9e8561dc897803aed58166492f0fd857e56'
+            'efda3dfc781cc3582e218a7b7d9618be599eb3b484c167e17873255ddf9ae527')
+
+prepare() {
+  local i
+  for i in "${!sha256sums[@]}"; do
+    echo "${sha256sums[$i]}  ${source[$i]%%::*}" | sha256sum -c - >/dev/null \
+      || { echo "checksum mismatch: ${source[$i]%%::*}" >&2; return 1; }
+  done
+  cd "msm-firmware-loader-${pkgver}"
+  # build-overlay.sh injects `patch -p1 < "$srcdir/<patch>"` for each source.pin `patches:` entry
+  # right here, after the first `cd`. Keep this `cd` as the first one in prepare().
+}
+
+build() {
+  # The Makefile's CFLAGS/LDFLAGS are empty placeholders and its pkg-config flags are separate
+  # variables, so makepkg's flags can be handed over on the command line.
+  make -C "make-dynpart-mappings-${_dynpart}" CFLAGS="${CFLAGS}" LDFLAGS="${LDFLAGS}"
+}
+
+package() {
+  # /usr/sbin is a symlink to /usr/bin on Arch, so upstream's unit (ExecStart=/usr/sbin/...) runs as is.
+  install -Dm755 "msm-firmware-loader-${pkgver}/msm-firmware-loader.sh" "${pkgdir}/usr/bin/msm-firmware-loader.sh"
+  install -Dm644 "msm-firmware-loader-${pkgver}/msm-firmware-loader.service" "${pkgdir}/usr/lib/systemd/system/msm-firmware-loader.service"
+  install -Dm755 "make-dynpart-mappings-${_dynpart}/make-dynpart-mappings" "${pkgdir}/usr/bin/make-dynpart-mappings"
+  install -Dm644 "msm-firmware-loader-${pkgver}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE.msm-firmware-loader"
+  install -Dm644 "make-dynpart-mappings-${_dynpart}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE.make-dynpart-mappings"
+}

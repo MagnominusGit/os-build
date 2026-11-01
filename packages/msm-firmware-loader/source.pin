@@ -1,0 +1,19 @@
+# msm-firmware-loader — the SM6115 boards' own Qualcomm firmware from their Android partitions
+# (postmarketOS msm-firmware-loader + make-dynpart-mappings), built FROM SOURCE via the local
+# PKGBUILD; see its header. Neither is in the holo snapshot.
+#
+# Patches, all ours (from ROCKNIX's SM6115 port, 0005 written here):
+#   0001  slot from the GPT A/B flags of boot_a/boot_b: OpenABL boots Linux with no
+#         androidboot.slot_suffix and qbootctl needs udev's by-partlabel links.
+#   0002  blobs only under the devicetree's device folders (qcom/<soc>/<vendor>/...), so the
+#         vendor partition's venus, a630_sqe or touch firmware never shadow /lib/firmware.
+#   0003  map the active slot's dynamic partitions; the Air X's factory super has data only in _a.
+#   0004  no per-entry forks in the scans and links; the unit runs before udev.
+#   0005  mount only modem and vendor: no hexagonrpcd here, and persist/dsp are journaled ext4.
+#
+# After adding or bumping this: `make relock` (the package must land in rootfs/manifest.lock; it is
+# listed in PKGS in rootfs/customize-base.sh).
+name: msm-firmware-loader
+pkgbuild_local: PKGBUILD
+patches: 0001-msm-firmware-loader-read-the-active-slot-from-the-GP.patch 0002-msm-firmware-loader-expose-blobs-only-under-device-f.patch 0003-msm-firmware-loader-map-the-dynamic-partitions-of-th.patch 0004-msm-firmware-loader-scan-and-link-without-forking-pe.patch 0005-msm-firmware-loader-mount-only-the-partitions-blobs-.patch
+pkgrel_suffix: 1

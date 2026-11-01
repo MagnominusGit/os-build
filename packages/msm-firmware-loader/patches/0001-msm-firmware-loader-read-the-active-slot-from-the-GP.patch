@@ -1,0 +1,73 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sat, 24 Oct 2026 16:00:00 -0700
+Subject: [PATCH 1/5] msm-firmware-loader: read the active slot from the GPT
+
+OpenABL boots Linux without androidboot.slot_suffix, and qbootctl needs
+udev's /dev/disk/by-partlabel links, which do not exist yet when this
+runs. Read the A/B active flag of boot_a/boot_b from their GPT entries
+instead, and resolve the slot only once since that scan is slow.
+
+diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
+index 4b48d46..7b7b8cf 100644
+--- a/msm-firmware-loader.sh
++++ b/msm-firmware-loader.sh
+@@ -18,18 +18,57 @@
+ 
+ # Get the slot suffix for A/B devices.
+ # If qbootctl is available query the active slot using that, otherwise rely on
+-# the kernel cmdline to contain the slot suffix.
++# the kernel cmdline to contain the slot suffix, then on the GPT attributes.
+ # On non-A/B devices the return value will be empty.
+ # https://source.android.com/docs/core/architecture/bootloader/updating#slots
+ ab_get_slot() {
++	if [ -n "${AB_SLOT+x}" ]; then
++		echo "$AB_SLOT"
++		return
++	fi
+ 	if command -v qbootctl > /dev/null; then
+ 		ab_slot_suffix=$(qbootctl -a | grep -o 'Active slot: _[ab]' | cut -d ":" -f2 | xargs) || :
+ 	else
+ 		ab_slot_suffix=$(grep -o 'androidboot\.slot_suffix=..' /proc/cmdline |  cut -d "=" -f2) || :
+ 	fi
++	if [ -z "$ab_slot_suffix" ]; then
++		ab_slot_suffix=$(gpt_get_slot)
++	fi
+ 	echo "$ab_slot_suffix"
+ }
+ 
++# Return the suffix of the boot partition with the A/B active flag set in its
++# GPT entry, as qbootctl does, without needing udev's by-partlabel links.
++gpt_get_slot() {
++	for part in /sys/block/mmcblk*/mmcblk*p* /sys/block/sd*/sd*
++	do
++		if ! [ -e "$part" ]; then continue; fi;
++
++		part_name="$(grep PARTNAME "$part"/uevent | sed 's/PARTNAME=//g')"
++		case "$part_name" in
++			boot_a|boot_b) ;;
++			*) continue ;;
++		esac
++
++		disk="/dev/$(basename "$(dirname "$part")")"
++		sector="$(cat "$(dirname "$part")"/queue/logical_block_size)"
++		entries_lba="$(dd if="$disk" bs=1 skip=$((sector + 72)) count=8 2>/dev/null | od -A n -t u8 | tr -d ' ')"
++		entry_size="$(dd if="$disk" bs=1 skip=$((sector + 84)) count=4 2>/dev/null | od -A n -t u4 | tr -d ' ')"
++		entry="$(($(cat "$part"/partition) - 1))"
++		# Byte 6 of the entry attributes holds the A/B flags, 0x4 is active
++		ab_flags="$(dd if="$disk" bs=1 skip=$((entries_lba * sector + entry * entry_size + 54)) count=1 2>/dev/null | od -A n -t u1 | tr -d ' ')"
++
++		if [ $((ab_flags & 4)) -ne 0 ]
++		then
++			echo "${part_name#boot}"
++			return
++		fi
++	done
++}
++
++# Resolve the slot once, the GPT fallback is too slow to repeat
++AB_SLOT="$(ab_get_slot)"
++
+ # Check path $1 for existence and link it to $2
+ link_path() {
+ 	if [ -e "$1" ]

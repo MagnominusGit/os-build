@@ -59,12 +59,12 @@ qcom/sm8250/a650_zap.mbn
 # path (SND_SOC_SM8250), which has no AudioReach topology blob to load. Its adsp/cdsp are
 # likewise absent here — QCOM_Q6V5_PAS is =m, so they load from the mounted root.
 
-# --- sm6115: Adreno 610 GPU microcode + zap shader ---
-# The A610 runs the A630 SQE firmware (open, linux-firmware) and has no GMU. Its zap shader is the
-# MANGMI-signed one in the qcom-firmwares repo (firmware/QCOM_FW.pin). Shared by the Air X variants and the Air Y; embedded for the same reason as the
-# other SoCs.
+# --- sm6115: Adreno 610 GPU microcode ---
+# The A610 runs the A630 SQE firmware (open, linux-firmware) and has no GMU. Its zap shader is NOT
+# here: msm-firmware-loader serves the device's own from its vendor partition, and built-in
+# firmware is searched first, so an embedded copy would shadow it. msm inits the GPU on first
+# open and retries on the next one if that fails, so nothing needs the zap before the root mounts.
 qcom/a630_sqe.fw
-qcom/sm6115/mangmi/a610_zap.mbn
 
 # --- sm4450: Adreno 613 zap shader + AudioReach topologies ---
 # The A613 runs the A630 SQE firmware, already listed for the SM6115 above, and has no GMU. Its

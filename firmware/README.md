@@ -43,7 +43,9 @@ claimed by `qcom-iris.ko`, not venus — see the SM8250 block in `LINUX_FW.pin`.
 There is no separate firmware requirements list. What ships is decided by the two pins and
 nothing else: `LINUX_FW.pin` is an explicit per-file allowlist (each row carries its own
 sha256), and `qcom-fw/` is whatever the pinned qcom-firmwares commit contains. Both staged
-trees are then installed into the rootfs wholesale by `rootfs/assemble-rootfs.sh`.
+trees are then installed into the rootfs wholesale by `rootfs/assemble-rootfs.sh`, with one
+exception: `qcom/sm6115/mangmi/` is left out, because `packages/msm-firmware-loader` serves the
+Air X and Air Y their own copies from their Android partitions. The installer medium still takes it.
 
 A board's firmware requirement is expressed where it is actually consumed — the DTS
 `firmware-name` properties, and `kernel/embed.list` for the subset baked into `Image.gz`.

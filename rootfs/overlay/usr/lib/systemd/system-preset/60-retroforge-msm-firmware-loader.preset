@@ -1,0 +1,3 @@
+# retroforge: each board's own DSP firmware (and the SM6115 zap and modem) from its Android
+# partitions (packages/msm-firmware-loader). Runs on every board; see the PKGBUILD header.
+enable msm-firmware-loader.service

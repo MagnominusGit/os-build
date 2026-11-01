@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sat, 24 Oct 2026 16:15:00 -0700
+Subject: [PATCH 3/5] msm-firmware-loader: map the dynamic partitions of the
+ active slot
+
+make-dynpart-mappings maps the first metadata slot unless it is given a
+slot number, so pass the slot found by ab_get_slot. The Mangmi Air X's
+factory super holds data only in its _a partitions, so with slot B
+active vendor_b has no node; mount the other slot's partition under the
+active slot's name when that happens.
+
+diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
+index 55fdde1..d3bef83 100644
+--- a/msm-firmware-loader.sh
++++ b/msm-firmware-loader.sh
+@@ -132,11 +132,22 @@ then
+ 		then
+ 			# system is for retrofit targets, not all devices may be
+ 			# retrofit, in which case make-dynpart-mappings will fail.
+-			if ! make-dynpart-mappings "/dev/$DEVNAME"; then continue; fi;
++			# Map the active slot, make-dynpart-mappings defaults to the first one
++			case "$AB_SLOT" in
++				_b) slot_number=1 ;;
++				*) slot_number=0 ;;
++			esac
++			if ! make-dynpart-mappings "/dev/$DEVNAME" "$slot_number"; then continue; fi;
+ 
+ 			for dynpart in /dev/mapper/*
+ 			do
+ 				PARTNAME="$(basename "$dynpart")"
++				# If the active slot's copy is empty, only the other slot's
++				# partition gets a node; mount it under the active slot's name
++				if [ -n "$AB_SLOT" ] && [ ! -e "/dev/mapper/${PARTNAME%_[ab]}$AB_SLOT" ]
++				then
++					PARTNAME="${PARTNAME%_[ab]}$AB_SLOT"
++				fi
+ 				if [ -z "${FW_PARTITIONS##*"$PARTNAME"*}" ] && [ -n "$PARTNAME" ]
+ 				then
+ 					mkdir -p "$BASEDIR/mnt/$PARTNAME"

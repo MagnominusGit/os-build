@@ -112,12 +112,14 @@ install -dm0755 "$stage/efi"
 ln -s /efi "$stage/boot/efi"
 
 # STAGE firmware-device — device-proprietary firmware under /lib/firmware (paths are already /lib/firmware-relative).
-# Fetched from the qcom-firmwares repo by firmware/fetch-qcom-fw.sh.
+# Fetched from the qcom-firmwares repo by firmware/fetch-qcom-fw.sh. qcom/sm6115/mangmi/ is left out:
+# msm-firmware-loader serves those from the device's own Android partitions, with no fallback here.
+# The installer medium (installer/mkroot.sh) still takes the whole tree, as it has no loader.
 if [ -d "$FW" ]; then
   while IFS= read -r f; do
     rel="${f#"$FW"/}"
     install -Dm0644 "$f" "$stage/lib/firmware/$rel"
-  done < <(find "$FW" -type f ! -name sha256sums.txt 2>/dev/null)
+  done < <(find "$FW" -type f ! -name sha256sums.txt ! -path "$FW/qcom/sm6115/mangmi/*" 2>/dev/null)
 else
   echo "  (no device firmware at ${FW#"$ROOT"/} — run firmware/fetch-qcom-fw.sh; continuing)"
 fi

@@ -1,0 +1,162 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sat, 24 Oct 2026 16:10:00 -0700
+Subject: [PATCH 2/5] msm-firmware-loader: expose blobs only under device
+ firmware folders
+
+Collect the partition blobs in blobs/ and link them only under the
+qcom/<soc>/<vendor>[/<device>] folders named in the devicetree. Firmware
+requested from generic linux-firmware folders such as qcom/qrb4210/ or
+by bare name keeps loading from /lib/firmware, and the bluetooth, venus
+and WCNSS aliases that would shadow it are dropped.
+
+diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
+index 7b7b8cf..55fdde1 100644
+--- a/msm-firmware-loader.sh
++++ b/msm-firmware-loader.sh
+@@ -106,9 +106,11 @@ BASEDIR="/run/msm-firmware-loader"
+ # may not be available yet. Since this script only creates symlinks, it
+ # uses tmpfs to work around the early-run limitations as well as to reduce
+ # disk wear slightly.
++mkdir -p "$BASEDIR"
+ mount -o mode=755,nodev,noexec,nosuid -t tmpfs none "$BASEDIR"
+ 
+ mkdir -p "$BASEDIR/mnt"
++mkdir -p "$BASEDIR/blobs"
+ mkdir -p "$BASEDIR/target"
+ 
+ # Scanning and mounting partitions we're interested in:
+@@ -193,7 +195,7 @@ then
+ 	for blob in "$EXTRA_PATH"/*
+ 	do
+ 		if ! [ -e "$blob" ]; then break; fi
+-		ln -s "$blob" "$BASEDIR/target/$(basename "$blob")"
++		ln -s "$blob" "$BASEDIR/blobs/$(basename "$blob")"
+ 	done
+ fi
+ 
+@@ -209,7 +211,7 @@ do
+ 	BLOBBASE="${BLOBBASE%.*}"
+ 
+ 	# Skip blob prefix if it's already present.
+-	for prefix in "$BASEDIR/target/$BLOBBASE."*
++	for prefix in "$BASEDIR/blobs/$BLOBBASE."*
+ 	do
+ 		if [ -e "$prefix" ]; then continue 2; fi
+ 	done
+@@ -218,14 +220,11 @@ do
+ 	do
+ 		if [ -f "$part" ]
+ 		then
+-			ln -s "$part" "$BASEDIR/target/$(basename "$part")"
++			ln -s "$part" "$BASEDIR/blobs/$(basename "$part")"
+ 		fi
+ 	done
+ done
+ 
+-# Check for sns.reg in persist partition
+-link_path "$BASEDIR"/mnt/persist/sensors/sns.reg "$BASEDIR"/target/qcom/sensors/sns.reg
+-
+ # Mount hexagonrpc paths, see
+ # https://github.com/linux-msm/hexagonrpc#hexagonfs
+ 
+@@ -249,86 +248,24 @@ link_path "$BASEDIR/mnt/vendor$(ab_get_slot)/etc/sensors/sns_reg_config" "$BASED
+ # runtime-specific, the closest we have is socinfo from runtime kernel.
+ link_path "/sys/devices/soc0" "$BASEDIR/hexagonrpc/socinfo"
+ 
+-# Check WCNSS_qcom_wlan_nv.bin in persist partition
+-link_path "$BASEDIR"/mnt/persist/WCNSS_qcom_wlan_nv.bin "$BASEDIR"/target/WCNSS_qcom_wlan_nv.bin
+-
+-# Fixup the directory structure:
+-
+-# venus (video encoder/decoder) blobs are expected to be in a subdir.
+-# Re-link the blobs if the venus firmware wasn't already preinstalled.
+-# Different platforms expect firmware in different subdirs
+-# (as in linux-firmware-qcom) so the venus dir is duplicated multiple times
+-# under possible names for the script to be generic without complex detection.
+-
+-if [ -f "$BASEDIR/target/venus.mdt" ] && ! [ -d "$BASEDIR/target/qcom/venus-x" ]
+-then
+-	mkdir -p "$BASEDIR/target/qcom/venus-x"
+-	for part in "$BASEDIR"/target/venus.*
+-	do
+-		ln -s "$part" "$BASEDIR/target/qcom/venus-x/$(basename "$part")"
+-	done
+-fi
+-
+-VENUS_DIRS="
+-	venus-1.8
+-	venus-3.0
+-	venus-4.2
+-	venus-4.4
+-	venus-5.2
+-	venus-5.4
+-	vpu-1.0
+-	vpu-2.0
+-"
+-
+-for vdir in $VENUS_DIRS
+-do
+-	if ! [ -d "$BASEDIR/target/qcom/$vdir" ] && [ -f "$BASEDIR/target/venus.mdt" ]
+-	then
+-		ln -s "$BASEDIR/target/qcom/venus-x" \
+-			"$BASEDIR/target/qcom/$vdir"
+-	fi
+-done
+-
+-# WCNSS_qcom_wlan_nv.bin needs to be relocated too
+-if [ -h "$BASEDIR"/target/WCNSS_qcom_wlan_nv.bin ]
+-then
+-	if ! [ -f "$BASEDIR"/target/wlan/prima/WCNSS_qcom_wlan_nv.bin ]
+-	then
+-		link_path "$BASEDIR"/target/WCNSS_qcom_wlan_nv.bin "$BASEDIR"/target/wlan/prima/WCNSS_qcom_wlan_nv.bin
+-	fi
+-fi
+-
+-# Devices with ath10k wcn3990 wifi/bt have bluetooth firmware on a separate
+-# "bluetooth" partition. Files from it need to be placed into qca/ subdir.
+-# Check if bluetooth partition was mounted, and if so, link files into qca/
+-if [ -d "$BASEDIR/mnt/bluetooth$(ab_get_slot)" ]
+-then
+-	for btblob in "$BASEDIR/mnt/bluetooth$(ab_get_slot)/image"/*
+-	do
+-		link_path "$btblob" "$BASEDIR"/target/qca/"$(basename "$btblob")"
+-	done
+-fi
+-
+ # Some kernel versions expect .mbn instead of legacy .mdt
+ # Symlink these files together, the kernel can autodetect the type.
+-find "$BASEDIR"/target/ \
++find "$BASEDIR"/blobs/ \
+ 	-name '*.mdt' \
+ 	-exec sh -c 'ln -s $0 ${0%.mdt}.mbn' {} \;
+ 
+-# It's customary to define device-model-specific firmware prefix in
+-# devicetree to separate similarly named but differently signed blobs
+-# between different devices. This script handles those by guessing
+-# the common prefix and symlinking the firmware tree to it, which
+-# relies on following implications:
+-#  - The device uses the same firmware prefix for all blobs;
+-#  - All blob file names in the prefix are same as in downstream,
+-#    with the exception that .mbn instead of legacy .mdt may be used
+-FIRMWARE_PREFIX=$(find /sys/firmware/devicetree -name "firmware-name" | head -n1 | xargs cat | xargs dirname)
+-
+-if [ -n "$FIRMWARE_PREFIX" ]
+-then
+-	link_path "$BASEDIR/target" "$BASEDIR/target/$FIRMWARE_PREFIX"
+-fi
++# Expose the blobs only under the device-specific firmware folders
++# (qcom/<soc>/<vendor>[/<device>]) named in the devicetree. Generic folders
++# and bare file names keep resolving to the firmware shipped in /lib/firmware.
++find /sys/firmware/devicetree -name firmware-name -exec cat {} + | tr '\000' '\n' |
++	sed -n 's|^\(qcom/[^/]*/.*\)/[^/]*$|\1|p' | sort -u |
++	while read -r dir
++	do
++		set -- "$BASEDIR"/blobs/*
++		[ -e "$1" ] || continue
++		mkdir -p "$BASEDIR/target/$dir"
++		ln -s "$@" "$BASEDIR/target/$dir/"
++	done
+ 
+ # Set the new custom firmware path:
+ printf "%s" "$BASEDIR/target" > /sys/module/firmware_class/parameters/path

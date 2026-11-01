@@ -1,0 +1,146 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Mon, 26 Oct 2026 01:00:00 -0700
+Subject: [PATCH 4/5] msm-firmware-loader: scan and link without forking per
+ entry
+
+The partition scans ran grep and sed for every block device and the blob
+linking ran dirname, basename and ln for every file: hundreds of forks
+on the Air X's 85-partition eMMC, all before udev may start. Parse
+uevent with read, use parameter expansion, link each blob group with one
+ln and skip .mbn aliases that already exist.
+
+diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
+index d3bef83..9ecca09 100644
+--- a/msm-firmware-loader.sh
++++ b/msm-firmware-loader.sh
+@@ -37,6 +37,19 @@ ab_get_slot() {
+ 	echo "$ab_slot_suffix"
+ }
+ 
++# Set DEVNAME and PARTNAME from a sysfs block device's uevent without forking
++read_uevent() {
++	DEVNAME=
++	PARTNAME=
++	while IFS='=' read -r key value
++	do
++		case "$key" in
++			DEVNAME) DEVNAME="$value" ;;
++			PARTNAME) PARTNAME="$value" ;;
++		esac
++	done < "$1"/uevent
++}
++
+ # Return the suffix of the boot partition with the A/B active flag set in its
+ # GPT entry, as qbootctl does, without needing udev's by-partlabel links.
+ gpt_get_slot() {
+@@ -44,14 +57,15 @@ gpt_get_slot() {
+ 	do
+ 		if ! [ -e "$part" ]; then continue; fi;
+ 
+-		part_name="$(grep PARTNAME "$part"/uevent | sed 's/PARTNAME=//g')"
+-		case "$part_name" in
++		read_uevent "$part"
++		case "$PARTNAME" in
+ 			boot_a|boot_b) ;;
+ 			*) continue ;;
+ 		esac
+ 
+-		disk="/dev/$(basename "$(dirname "$part")")"
+-		sector="$(cat "$(dirname "$part")"/queue/logical_block_size)"
++		disk="${part%/*}"
++		read -r sector < "$disk"/queue/logical_block_size
++		disk="/dev/${disk##*/}"
+ 		entries_lba="$(dd if="$disk" bs=1 skip=$((sector + 72)) count=8 2>/dev/null | od -A n -t u8 | tr -d ' ')"
+ 		entry_size="$(dd if="$disk" bs=1 skip=$((sector + 84)) count=4 2>/dev/null | od -A n -t u4 | tr -d ' ')"
+ 		entry="$(($(cat "$part"/partition) - 1))"
+@@ -60,7 +74,7 @@ gpt_get_slot() {
+ 
+ 		if [ $((ab_flags & 4)) -ne 0 ]
+ 		then
+-			echo "${part_name#boot}"
++			echo "${PARTNAME#boot}"
+ 			return
+ 		fi
+ 	done
+@@ -125,8 +139,7 @@ then
+ 	do
+ 		if ! [ -e "$part" ]; then continue; fi;
+ 
+-		DEVNAME="$(grep DEVNAME "$part"/uevent | sed 's/DEVNAME=//g')"
+-		PARTNAME="$(grep PARTNAME "$part"/uevent | sed 's/PARTNAME=//g')"
++		read_uevent "$part"
+ 
+ 		if [ -z "${SUPER_PARTITIONS##*"$PARTNAME"*}" ] && [ -n "$PARTNAME" ]
+ 		then
+@@ -141,7 +154,7 @@ then
+ 
+ 			for dynpart in /dev/mapper/*
+ 			do
+-				PARTNAME="$(basename "$dynpart")"
++				PARTNAME="${dynpart##*/}"
+ 				# If the active slot's copy is empty, only the other slot's
+ 				# partition gets a node; mount it under the active slot's name
+ 				if [ -n "$AB_SLOT" ] && [ ! -e "/dev/mapper/${PARTNAME%_[ab]}$AB_SLOT" ]
+@@ -166,8 +179,7 @@ for part in /sys/block/mmcblk*/mmcblk*p* /sys/block/sd*/sd*
+ do
+ 	if ! [ -e "$part" ]; then continue; fi;
+ 
+-	DEVNAME="$(grep DEVNAME "$part"/uevent | sed 's/DEVNAME=//g')"
+-	PARTNAME="$(grep PARTNAME "$part"/uevent | sed 's/PARTNAME=//g')"
++	read_uevent "$part"
+ 
+ 	if [ -z "${FW_PARTITIONS##*"$PARTNAME"*}" ] && [ -n "$PARTNAME" ] && [ ! -d "$BASEDIR/mnt/$PARTNAME" ]
+ 	then
+@@ -206,7 +218,7 @@ then
+ 	for blob in "$EXTRA_PATH"/*
+ 	do
+ 		if ! [ -e "$blob" ]; then break; fi
+-		ln -s "$blob" "$BASEDIR/blobs/$(basename "$blob")"
++		ln -s "$blob" "$BASEDIR/blobs/${blob##*/}"
+ 	done
+ fi
+ 
+@@ -217,7 +229,7 @@ for blob in "$BASEDIR"/mnt/*/image/* "$BASEDIR"/mnt/*/firmware/*
+ do
+ 	if ! [ -e "$blob" ]; then continue; fi;
+ 
+-	DIR="$(dirname "$blob")"
++	DIR="${blob%/*}"
+ 	BLOBBASE="${blob##*/}"
+ 	BLOBBASE="${BLOBBASE%.*}"
+ 
+@@ -227,13 +239,12 @@ do
+ 		if [ -e "$prefix" ]; then continue 2; fi
+ 	done
+ 
++	set --
+ 	for part in "$DIR"/"$BLOBBASE"*
+ 	do
+-		if [ -f "$part" ]
+-		then
+-			ln -s "$part" "$BASEDIR/blobs/$(basename "$part")"
+-		fi
++		if [ -f "$part" ]; then set -- "$@" "$part"; fi
+ 	done
++	if [ $# -gt 0 ]; then ln -s "$@" "$BASEDIR/blobs/"; fi
+ done
+ 
+ # Mount hexagonrpc paths, see
+@@ -261,9 +272,13 @@ link_path "/sys/devices/soc0" "$BASEDIR/hexagonrpc/socinfo"
+ 
+ # Some kernel versions expect .mbn instead of legacy .mdt
+ # Symlink these files together, the kernel can autodetect the type.
+-find "$BASEDIR"/blobs/ \
+-	-name '*.mdt' \
+-	-exec sh -c 'ln -s $0 ${0%.mdt}.mbn' {} \;
++for mdt in "$BASEDIR"/blobs/*.mdt
++do
++	if [ -e "$mdt" ] && ! [ -e "${mdt%.mdt}.mbn" ]
++	then
++		ln -s "$mdt" "${mdt%.mdt}.mbn"
++	fi
++done
+ 
+ # Expose the blobs only under the device-specific firmware folders
+ # (qcom/<soc>/<vendor>[/<device>]) named in the devicetree. Generic folders
