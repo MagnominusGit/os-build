@@ -85,7 +85,7 @@ jobs:
           - [ ] \`git_tag\` + \`git_commit\`: the **dereferenced** tag (\`git ls-remote ... 'v$latest^{}'\`), not the annotated tag object
           - [ ] grep the ChangeLog for drm/msm, qcom clk/phy/iommu, ath1x, mac80211 and soundwire — those are the legs that have broken us before (7.2.6 killed WCN7850 Wi-Fi); delete any of our patches that landed
           - [ ] re-apply \`kernel/patches/\` **cumulatively, in lexical order, to one tree** — the way kernel/build.sh does. Dry-running each patch against a pristine tree reports false failures, because several of them patch files an earlier patch creates
-          - [ ] config: every \`CONFIG_*\` named in \`kernel/kernel.config\` + \`kernel/trim-platforms.config\` must still exist in the patched tree; kernel/build.sh asserts the trim took effect
+          - [ ] config: every \`CONFIG_*\` named in \`kernel/*.config\` must still exist in the patched tree; kernel/build.sh asserts each trim took effect, and its unshipped-qcom note names new Qualcomm SoC drivers to add to \`kernel/trim-qcom-socs.config\`
           - [ ] record the re-pin in \`kernel/SOURCE.pin\`'s header, then a HW pass on one board per SoC (SM8250, SM8550, SM8650) before this becomes the shipped kernel
 
           Closing this issue is a legitimate answer — a point release we decide to skip stays

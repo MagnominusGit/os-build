@@ -222,8 +222,10 @@ fi
   #       nothing to stage; zstd in place of gzip still boots, and measured no faster (kernel.config).
   #   =y  RD_ZSTD: the initramfs is zstd (image/mkinitramfs.sh). Without it the kernel cannot
   #       unpack it and panics before any log reaches a disk.
+  #   =y  CPU_IDLE + ARM_PSCI_CPUIDLE: without them every core idles in WFI, a battery and heat
+  #       cost with no other symptom. defconfig had CPU_IDLE only through ACPI's select.
   for pair in CFG80211=m MAC80211=m TOUCHSCREEN_CHIPONE_TDDI=m VIDEO_QCOM_IRIS=m VIDEO_QCOM_VENUS=m \
-              NETFILTER_NETLINK=y EFI_ZBOOT=y KERNEL_GZIP=y RD_ZSTD=y \
+              NETFILTER_NETLINK=y EFI_ZBOOT=y KERNEL_GZIP=y RD_ZSTD=y CPU_IDLE=y ARM_PSCI_CPUIDLE=y \
               BLK_DEV_DM=y DM_VERITY=y VFAT_FS=y BLK_DEV_LOOP=y \
               ZRAM=y ZRAM_BACKEND_ZSTD=y \
               DRM_MSM=y PCIE_QCOM=y PCI_PWRCTRL_GENERIC=y MMC_SDHCI_MSM=y SCSI_UFSHCD=y \
@@ -242,7 +244,7 @@ fi
     }
   done
 
-  # Verify kernel/trim-platforms.config actually TOOK EFFECT. That fragment is subtractive --
+  # Verify each kernel/trim-*.config actually TOOK EFFECT. Those fragments are subtractive --
   # it is a list of `# CONFIG_x is not set` directives -- and subtractive config has a failure
   # mode additive config does not: when a directive is malformed, nothing errors. The symbol
   # simply keeps its defconfig value, the build succeeds, and the image ships the drivers you
@@ -258,19 +260,19 @@ fi
   # resolved to unset. Two extra guards, because a parse that finds nothing would otherwise
   # "pass" an empty loop: a floor on the directive count, and an explicit scan for the
   # trailing-text form that merge_config would ignore.
-  TRIM="$KDIR_REPO/trim-platforms.config"
-  if [ -f "$TRIM" ]; then
+  for TRIM in "$KDIR_REPO"/trim-*.config; do
+    TNAME="${TRIM##*/}"
     # The exact form merge_config would ignore: a directive with anything trailing "is not set".
     if grep -nE '^# CONFIG_[A-Za-z0-9_]+ is not set.+' "$TRIM" >&2; then
-      echo "trim-platforms.config: the lines above have trailing text after 'is not set'," >&2
+      echo "$TNAME: the lines above have trailing text after 'is not set'," >&2
       echo "  so merge_config.sh treats them as comments and the symbols stay enabled." >&2
       echo "  Move the description to its own line above the directive." >&2
       exit 1
     fi
     TRIM_SYMS="$(sed -n 's/^# CONFIG_\([A-Za-z0-9_]\+\) is not set$/\1/p' "$TRIM")"
     TRIM_N="$(printf '%s\n' "$TRIM_SYMS" | grep -c . || true)"
-    [ "$TRIM_N" -ge 40 ] || {
-      echo "trim-platforms.config: parsed only $TRIM_N directives, expected >= 40" >&2
+    [ "$TRIM_N" -ge 20 ] || {
+      echo "$TNAME: parsed only $TRIM_N directives, expected >= 20" >&2
       echo "  the file is present but nearly nothing in it is a valid directive" >&2
       exit 1
     }
@@ -288,21 +290,49 @@ fi
       case "$got" in
         n)     TRIM_CUT=$((TRIM_CUT + 1)) ;;
         undef) TRIM_DEAD="$TRIM_DEAD $sym" ;;
-        *) echo "CONFIG_$sym is '$got' but kernel/trim-platforms.config asks for it to be unset" >&2
+        *) echo "CONFIG_$sym is '$got' but kernel/$TNAME asks for it to be unset" >&2
            echo "  something we still enable selects it; find it with: grep -rn \"select $sym\" ." >&2
            exit 1 ;;
       esac
     done
-    echo "[retroforge] trim-platforms: $TRIM_CUT symbols confirmed disabled"
+    echo "[retroforge] ${TNAME%.config}: $TRIM_CUT symbols confirmed disabled"
     [ -z "$TRIM_DEAD" ] || {
-      echo "[retroforge] trim-platforms: REDUNDANT, cuts nothing --$TRIM_DEAD"
-      echo "[retroforge]   each is already unreachable via a gate this file cuts. Find the parent"
-      echo "[retroforge]   with 'grep -A3 \"^config <SYM>\$\" arch/arm64/Kconfig.platforms' and drop"
-      echo "[retroforge]   the line; see the fragment header's cascade rule."
+      echo "[retroforge] ${TNAME%.config}: REDUNDANT, cuts nothing --$TRIM_DEAD"
+      echo "[retroforge]   each is already unreachable through a gate cut in this or another"
+      echo "[retroforge]   trim-*.config (its 'depends on'). Drop the line; see the fragment's header."
     }
-  fi
+  done
 
   make ARCH=arm64 "${CC[@]}" -j"$(nproc)" vmlinuz.efi dtbs modules
+
+  # Qualcomm clocks, pinctrl and interconnect still built for a SoC no board here has: what a
+  # kernel bump adds to defconfig after trim-qcom-socs.config was written. A symbol counts when
+  # none of its objects has a compatible that any shipped DTB carries. Reported, not fatal.
+  SHIPPED="$(for b in "${BOARDS[@]}"; do scripts/dtc/dtc -q -I dtb -O dts "$QCOM_DTS/$b.dtb"; done |
+             sed -n 's/^[[:space:]]*compatible = //p' | grep -o '"[^"]*"' | sort -u)"
+  declare -A SEEN=() USED=()
+  for d in drivers/clk/qcom drivers/pinctrl/qcom drivers/interconnect/qcom; do
+    while read -r sym objs; do
+      case "$(scripts/config --file .config --state "$sym")" in y|m) ;; *) continue ;; esac
+      for o in $objs; do
+        o="${o%.o}"; src="$d/$o.c"
+        [ -f "$src" ] || src="$(sed -n "s/^$o-\(objs\|y\)[[:space:]]*[:+]\?=//p" "$d/Makefile" |
+                                tr ' ' '\n' | sed -n "s|^\(.*\)\.o\$|$d/\1.c|p")"
+        [ -n "$src" ] || continue
+        c="$(grep -ho '\.compatible[[:space:]]*=[[:space:]]*"[^"]*"' $src </dev/null 2>/dev/null |
+             grep -o '"[^"]*"' || true)"
+        [ -n "$c" ] || continue
+        SEEN[$sym]=1
+        printf '%s\n' "$c" | grep -qxF -f <(printf '%s\n' "$SHIPPED") && USED[$sym]=1
+      done
+    done < <(sed -n 's/^obj-\$(CONFIG_\([A-Za-z0-9_]*\))[[:space:]]*+=[[:space:]]*\(.*\)/\1 \2/p' "$d/Makefile")
+  done
+  UNSHIPPED=""
+  for sym in "${!SEEN[@]}"; do [ -n "${USED[$sym]:-}" ] || UNSHIPPED="$UNSHIPPED $sym"; done
+  [ -z "$UNSHIPPED" ] || {
+    echo "[retroforge] unshipped-qcom: built for no shipped board --$UNSHIPPED"
+    echo "[retroforge]   add each to kernel/trim-qcom-socs.config, unless a new board needs it."
+  }
 )
 [ -z "${CCACHE_DIR:-}" ] || ccache --show-stats
 
