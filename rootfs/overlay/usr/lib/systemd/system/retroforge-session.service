@@ -32,6 +32,10 @@ Conflicts=getty@tty1.service
 # lifts pam_nologin's block once /home is mounted, which is all the login needs.
 After=retroforge-allow-login.service getty@tty1.service systemd-logind.service dbus.socket
 Wants=retroforge-allow-login.service dbus.socket systemd-logind.service
+# upower and udisks2 start on D-Bus activation, and OpenGamepadUI asked for each while it loaded:
+# its main thread waited the ~0.5 s each took to start (Air X, 2026-11-01). Started with the session,
+# in parallel, they are up by then.
+Wants=upower.service udisks2.service
 PartOf=graphical.target
 StartLimitIntervalSec=0
 
