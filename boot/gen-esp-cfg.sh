@@ -169,7 +169,12 @@ for s in \$ORDER; do
   fi
   if [ "\$ok" != 1 ]; then continue; fi
   if [ -n "\$t" -a "\$t" != 0 -a "\$t" != 1 -a "\$t" != 2 ]; then continue; fi
-  if [ -f (\$bootdisk,gpt\$ei)/EFI/steamos/grub.cfg -a -f (\$bootdisk,gpt\$ri)/boot/Image ]; then
+  # A kernel by either name: vmlinuz.efi since the zboot kernel, Image in a root from before it,
+  # which this GRUB must still boot after an update installs it (and on a rollback to that root).
+  set kern=0
+  if [ -f (\$bootdisk,gpt\$ri)/boot/vmlinuz.efi ]; then set kern=1; fi
+  if [ -f (\$bootdisk,gpt\$ri)/boot/Image ]; then set kern=1; fi
+  if [ -f (\$bootdisk,gpt\$ei)/EFI/steamos/grub.cfg -a "\$kern" = 1 ]; then
     set slot="\$s"
     set try="\$t"
     break
@@ -206,7 +211,10 @@ else
     else
       continue
     fi
-    if [ "\$ok" = 1 -a -f (\$bootdisk,gpt\$ei)/EFI/steamos/grub.cfg -a -f (\$bootdisk,gpt\$ri)/boot/Image ]; then
+    set kern=0
+    if [ -f (\$bootdisk,gpt\$ri)/boot/vmlinuz.efi ]; then set kern=1; fi
+    if [ -f (\$bootdisk,gpt\$ri)/boot/Image ]; then set kern=1; fi
+    if [ "\$ok" = 1 -a -f (\$bootdisk,gpt\$ei)/EFI/steamos/grub.cfg -a "\$kern" = 1 ]; then
       set slot="\$s"
     fi
   done

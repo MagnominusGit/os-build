@@ -468,8 +468,9 @@ if "$ROOT/boot/gen-esp-cfg.sh" "$espcfg" >/dev/null; then
   grep -q 'save_env -f "\$env" \$tryvar' "$espcfg" && ! grep -q 'save_env -f "\$env" A_TRY B_TRY' "$espcfg" \
     && ok "writes only the chosen slot's TRY" || bad "writes TRY variables it did not set"
   # A slot is a candidate only with a stage-2 config and a kernel, so an empty B is never chosen.
-  grep -q '/EFI/steamos/grub.cfg -a -f (\$bootdisk,gpt\$ri)/boot/Image' "$espcfg" \
-    && ok "checks the slot's grub.cfg and kernel before choosing it" || bad "chooses a slot without checking it is there"
+  grep -q '/boot/vmlinuz.efi ]; then set kern=1; fi' "$espcfg" && grep -q '/boot/Image ]; then set kern=1; fi' "$espcfg" \
+    && grep -q '/EFI/steamos/grub.cfg -a "\$kern" = 1' "$espcfg" \
+    && ok "checks the slot's grub.cfg and kernel (vmlinuz.efi or an older root's Image) before choosing it" || bad "chooses a slot without checking it is there"
   grep -q '^set prefix="(\$root)/EFI/steamos"$' "$espcfg" && tail -1 "$espcfg" | grep -qx 'source \$prefix/grub.cfg' \
     && ok "hands over by sourcing the slot's grub.cfg from its efi partition" || bad "does not source \$prefix/grub.cfg for the hand-over"
   # The old boot conf: only a CHANGE since the last look moves ORDER, so a device with no older root

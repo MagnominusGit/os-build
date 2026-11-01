@@ -45,9 +45,10 @@ halt
 EOF
     mcopy -i "efi-$s.img" probe.cfg ::/EFI/steamos/grub.cfg
   done
-  # roots: btrfs with /boot/Image
+  # roots: btrfs with a kernel, A by the old name (a root from before the zboot kernel), B the new
   for s in A B; do
-    rm -rf "rootdir-$s"; mkdir -p "rootdir-$s/boot"; echo "kernel $s" >"rootdir-$s/boot/Image"
+    k=vmlinuz.efi; [ "$s" = A ] && k=Image
+    rm -rf "rootdir-$s"; mkdir -p "rootdir-$s/boot"; echo "kernel $s" >"rootdir-$s/boot/$k"
     truncate -s 256M "root-$s.img"
     if [ "$s" = A ] || [ "$1" = 1 ]; then mkfs.btrfs -q -f -r "rootdir-$s" "root-$s.img" >/dev/null
     else mkfs.btrfs -q -f "root-$s.img" >/dev/null; fi
@@ -116,7 +117,7 @@ boot; expect 'slot=A' "a slot that is not OK is skipped"
 echo "== a slot with no kernel is never chosen =="
 mkdisk 0
 setenv "ORDER=B A" A_OK=1 A_TRY=0 B_OK=1 B_TRY=0
-boot; expect 'slot=A' "B has no /boot/Image: A"
+boot; expect 'slot=A' "B has no kernel: A"
 
 echo "== an older root's hook re-armed the boot conf =="
 mkdisk 1
