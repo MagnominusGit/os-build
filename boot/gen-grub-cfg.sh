@@ -116,11 +116,14 @@ ESP_MARKER="/EFI/steamos/grubenv"
 BOOT_CMDLINE="quiet loglevel=3 video=efifb:off console=tty0 cgroup.memory=nokmem,nosocket nosoftlockup panic=5 cpuidle.governor=teo cgroup_favordynmods=1"
 
 # The installed system only, not the installer (which prints its failure log to tty1 and so needs
-# the console there): the kernel console stays off tty1, the session's VT. Bound there, it took the
-# panel back the moment the boot splash let go of DRM master, ~7 s in on the Air X, and the panel
-# was black for the ~10 s until gamescope put up the shell's first frame; unbound, the splash's
-# last frame stays up through that. Its consoles on tty2 and up are untouched (2026-10-31).
-SESSION_CMDLINE="fbcon=vc:2-63"
+# the console there): no fbdev emulation, so the kernel puts nothing on the panel itself and the boot
+# splash's modeset is the first. fbdev's own lit the panel black at ~1.2 s, and the splash's then had
+# to be a second, full one: msm reserves its colour blocks (DSPPs) only in a modeset, and the splash
+# sets the colour matrix gamescope later keeps, so that gamescope's first frame is not a modeset too.
+# Each was ~0.7 s of the panel off (Air X, 2026-11-01). With no fbdev there is no kernel console either,
+# which was already kept off tty1, the session's VT: bound there, it took the panel back the moment the
+# splash let go of DRM master.
+SESSION_CMDLINE="drm_kms_helper.fbdev_emulation=0"
 
 # --- board catalog ------------------------------------------------------------------------------
 declare -a pids=() pnames=() pdtbs=() pbootargs=()
