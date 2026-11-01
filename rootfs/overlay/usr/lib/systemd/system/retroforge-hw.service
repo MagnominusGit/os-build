@@ -5,8 +5,11 @@ Documentation=file:///usr/lib/retroforge/hw-map
 # reads the tree from its Hardware card. Re-run by udev (70-retroforge-hw.rules) when a device of one
 # of the mapped classes appears after boot, which is why this is a plain oneshot and not
 # RemainAfterExit: an inactive oneshot can be started again.
+#
+# NOT Before=retroforge-session.service, which it was: the session then waited the whole run, ~0.6 s
+# of the boot on the Air X, for a tree the shell reads only when its Hardware card refreshes (live,
+# so a later map shows up on the next refresh). retroforge-powerd orders itself after this.
 After=local-fs.target
-Before=retroforge-session.service
 
 [Service]
 Type=oneshot

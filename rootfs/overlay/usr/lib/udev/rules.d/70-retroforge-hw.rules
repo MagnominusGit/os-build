@@ -1,4 +1,11 @@
 # A battery, charger, backlight, LED, thermal zone or hwmon device that appears after boot (a
 # late-probing driver, a hot-plugged charger) re-resolves /run/retroforge/hw. retroforge-hw.service is a
-# plain oneshot, so systemd starts it again each time; the script rebuilds the tree in ~50 ms.
+# plain oneshot, so systemd starts it again each time.
+#
+# Not for the coldplug replay (udevadm trigger marks its events with SYNTH_UUID; a kernel's own add
+# has none): those devices are already in sysfs when the boot's own run of the service maps them,
+# and tagging all of them made each one a pair of device units and an event PID1 had to process,
+# 125 on the Air X (mostly LEDs), while the boot's first mounts and fsck waited behind them.
+ENV{SYNTH_UUID}=="?*", GOTO="retroforge_hw_end"
 SUBSYSTEM=="power_supply|backlight|leds|thermal|hwmon", ACTION=="add", TAG+="systemd", ENV{SYSTEMD_WANTS}+="retroforge-hw.service"
+LABEL="retroforge_hw_end"
