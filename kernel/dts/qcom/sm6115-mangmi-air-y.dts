@@ -64,7 +64,7 @@
 				"Headphone Jack", "HPOL",
 				"Headphone Jack", "HPOR";
 
-		sec-mi2s-playback-dai-link {
+		speaker-playback-dai-link {
 			codec {
 				sound-dai = <&aw88261_l>;
 			};

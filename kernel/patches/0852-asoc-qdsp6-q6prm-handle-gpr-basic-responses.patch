@@ -1,0 +1,28 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sun, 25 Oct 2026 19:20:00 -0700
+Subject: [PATCH] ASoC: qcom: q6prm: handle GPR_BASIC_RSP_RESULT
+
+retroforge: ROCKNIX SM6115 0310, for the Air X's stock AudioReach ADSP.
+
+The SM6115 ADSP firmware can answer a PRM command with a GPR basic
+response instead of the PRM response opcode. q6prm ignores it, so the
+sender waits for the full timeout. Record the reported opcode and status
+and wake the waiter, as q6apm does, so a DSP error is returned as one.
+---
+diff --git a/sound/soc/qcom/qdsp6/q6prm.c b/sound/soc/qcom/qdsp6/q6prm.c
+--- a/sound/soc/qcom/qdsp6/q6prm.c
++++ b/sound/soc/qcom/qdsp6/q6prm.c
+@@ -190,6 +190,12 @@
+ 		prm->result.status = result->status;
+ 		wake_up(&prm->wait);
+ 		break;
++	case GPR_BASIC_RSP_RESULT:
++		result = data->payload;
++		prm->result.opcode = result->opcode;
++		prm->result.status = result->status;
++		wake_up(&prm->wait);
++		break;
+ 	default:
+ 		break;
+ 	}
+

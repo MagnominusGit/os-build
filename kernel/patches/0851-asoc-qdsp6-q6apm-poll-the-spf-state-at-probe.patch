@@ -1,0 +1,47 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Mon, 26 Oct 2026 01:10:00 -0700
+Subject: [PATCH] ASoC: qcom: q6apm: poll the SPF state at probe
+
+retroforge: ROCKNIX SM6115 0311, for the Air X's stock AudioReach ADSP.
+
+Right after the ADSP boots the SPF can leave the first GET_SPF_STATE
+unanswered, so APM probe waits out the 5 s command timeout before the
+sound card can register. Resend the request every 50 ms until the SPF
+reports ready, as the downstream spf_core driver does.
+---
+diff --git a/sound/soc/qcom/qdsp6/q6apm.c b/sound/soc/qcom/qdsp6/q6apm.c
+--- a/sound/soc/qcom/qdsp6/q6apm.c
++++ b/sound/soc/qcom/qdsp6/q6apm.c
+@@ -144,10 +144,30 @@
+ {
+ 	struct gpr_pkt *pkt __free(kfree) = audioreach_alloc_apm_cmd_pkt(0,
+ 								APM_CMD_GET_SPF_STATE, 0);
++	int i;
++
+ 	if (IS_ERR(pkt))
+ 		return PTR_ERR(pkt);
+ 
+-	q6apm_send_cmd_sync(apm, pkt, APM_CMD_RSP_GET_SPF_STATE);
++	/*
++	 * The SPF may not answer requests sent right after the DSP boots, so
++	 * resend every 50 ms like the downstream spf_core driver instead of
++	 * waiting out the full command timeout.
++	 */
++	mutex_lock(&apm->lock);
++	for (i = 0; i < 100; i++) {
++		apm->result.opcode = 0;
++		if (gpr_send_pkt(apm->gdev, pkt) < 0)
++			break;
++		if (!wait_event_timeout(apm->wait,
++					apm->result.opcode == APM_CMD_RSP_GET_SPF_STATE,
++					msecs_to_jiffies(50)))
++			continue;
++		if (apm->state)
++			break;
++		msleep(50);
++	}
++	mutex_unlock(&apm->lock);
+ 
+ 	return apm->state;
+ }
+

@@ -8,7 +8,7 @@
 #include <dt-bindings/leds/common.h>
 #include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
 #include <dt-bindings/sound/qcom,q6afe.h>
-#include <dt-bindings/sound/qcom,q6asm.h>
+#include <dt-bindings/soc/qcom,gpr.h>
 #include <dt-bindings/usb/pd.h>
 #include "sm6115.dtsi"
 #include "pm6125.dtsi"
@@ -205,7 +205,7 @@
 	};
 
 	sound {
-		compatible = "qcom,qrb4210-rb2-sndcard";
+		compatible = "qcom,sm8450-sndcard";
 		model = "MangmiAirX";
 
 		widgets = "Speaker", "SPK_L Speaker",
@@ -222,87 +222,52 @@
 		pinctrl-0 = <&lpi_qua_mi2s_active>, <&lpi_i2s2_active>,
 			    <&lpi_dmic23_active>;
 
-		mm1-dai-link {
-			link-name = "MultiMedia1";
+		speaker-playback-dai-link {
+			link-name = "MI2S-LPAIF_WSA-RX-PRIMARY";
 			cpu {
-				sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA1>;
-			};
-		};
-
-		mm2-dai-link {
-			link-name = "MultiMedia2";
-			cpu {
-				sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA2>;
-			};
-		};
-
-		mm3-dai-link {
-			link-name = "MultiMedia3";
-			cpu {
-				sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA3>;
-			};
-		};
-
-		sec-mi2s-playback-dai-link {
-			link-name = "Secondary MI2S Playback";
-			cpu {
-				sound-dai = <&q6afedai SECONDARY_MI2S_RX>;
+				sound-dai = <&q6apmbedai SECONDARY_MI2S_RX>;
 			};
 			platform {
-				sound-dai = <&q6routing>;
+				sound-dai = <&q6apm>;
 			};
 			codec {
 				sound-dai = <&aw88261_l>, <&aw88261_r>;
 			};
 		};
 
-		quat-mi2s-playback-dai-link {
-			link-name = "Quaternary MI2S Playback";
+		headphone-playback-dai-link {
+			link-name = "MI2S-LPAIF_RXTX-RX-PRIMARY";
 			cpu {
-				sound-dai = <&q6afedai QUATERNARY_MI2S_RX>;
+				sound-dai = <&q6apmbedai QUATERNARY_MI2S_RX>;
 			};
 			platform {
-				sound-dai = <&q6routing>;
+				sound-dai = <&q6apm>;
 			};
 			codec {
 				sound-dai = <&es8326>;
 			};
 		};
 
-		quat-mi2s-capture-dai-link {
-			link-name = "Quaternary MI2S Capture";
+		headset-mic-capture-dai-link {
+			link-name = "MI2S-LPAIF_RXTX-TX-PRIMARY";
 			cpu {
-				sound-dai = <&q6afedai QUATERNARY_MI2S_TX>;
+				sound-dai = <&q6apmbedai QUATERNARY_MI2S_TX>;
 			};
 			platform {
-				sound-dai = <&q6routing>;
+				sound-dai = <&q6apm>;
 			};
 			codec {
 				sound-dai = <&es8326>;
 			};
 		};
 
-		mm4-capture-dai-link {
-			link-name = "MultiMedia4 Capture";
+		dmic-capture-dai-link {
+			link-name = "CODEC_DMA-LPAIF_VA-TX-0";
 			cpu {
-				sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA4>;
-			};
-		};
-
-		mm5-capture-dai-link {
-			link-name = "MultiMedia5 Capture";
-			cpu {
-				sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA5>;
-			};
-		};
-
-		va-codec-dma-dai-link {
-			link-name = "VA_CODEC_DMA_TX_0";
-			cpu {
-				sound-dai = <&q6afedai VA_CODEC_DMA_TX_0>;
+				sound-dai = <&q6apmbedai VA_CODEC_DMA_TX_0>;
 			};
 			platform {
-				sound-dai = <&q6routing>;
+				sound-dai = <&q6apm>;
 			};
 			codec {
 				sound-dai = <&vamacro 0>;
@@ -337,14 +302,14 @@
 		compatible = "qcom,sm6115-lpass-rx-macro";
 		reg = <0x0 0x0a600000 0x0 0x1000>;
 
-		clocks = <&q6afecc LPASS_CLK_ID_RX_CORE_MCLK     LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
-			 <&q6afecc LPASS_CLK_ID_RX_CORE_NPL_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
-			 <&q6afecc LPASS_HW_DCODEC_VOTE          LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+		clocks = <&q6prmcc LPASS_CLK_ID_RX_CORE_MCLK     LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+			 <&q6prmcc LPASS_CLK_ID_RX_CORE_NPL_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+			 <&q6prmcc LPASS_HW_DCODEC_VOTE          LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
 			 <&vamacro>;
 		clock-names = "mclk", "npl", "dcodec", "fsgen";
 
-		assigned-clocks = <&q6afecc LPASS_CLK_ID_RX_CORE_MCLK     LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
-				  <&q6afecc LPASS_CLK_ID_RX_CORE_NPL_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+		assigned-clocks = <&q6prmcc LPASS_CLK_ID_RX_CORE_MCLK     LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+				  <&q6prmcc LPASS_CLK_ID_RX_CORE_NPL_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
 		assigned-clock-rates = <22579200>, <22579200>;
 
 		#clock-cells = <0>;
@@ -356,14 +321,14 @@
 		compatible = "qcom,sm6115-lpass-tx-macro";
 		reg = <0x0 0x0a620000 0x0 0x1000>;
 
-		clocks = <&q6afecc LPASS_CLK_ID_TX_CORE_MCLK     LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
-			 <&q6afecc LPASS_CLK_ID_TX_CORE_NPL_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
-			 <&q6afecc LPASS_HW_DCODEC_VOTE          LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+		clocks = <&q6prmcc LPASS_CLK_ID_TX_CORE_MCLK     LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+			 <&q6prmcc LPASS_CLK_ID_TX_CORE_NPL_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+			 <&q6prmcc LPASS_HW_DCODEC_VOTE          LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
 			 <&vamacro>;
 		clock-names = "mclk", "npl", "dcodec", "fsgen";
 
-		assigned-clocks = <&q6afecc LPASS_CLK_ID_TX_CORE_MCLK     LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
-				  <&q6afecc LPASS_CLK_ID_TX_CORE_NPL_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+		assigned-clocks = <&q6prmcc LPASS_CLK_ID_TX_CORE_MCLK     LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+				  <&q6prmcc LPASS_CLK_ID_TX_CORE_NPL_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
 		assigned-clock-rates = <19200000>, <19200000>;
 
 		qcom,dmic-sample-rate = <2400000>;
@@ -383,13 +348,13 @@
 		compatible = "qcom,sm6115-lpass-va-macro";
 		reg = <0x0 0x0a730000 0x0 0x1000>;
 
-		clocks = <&q6afecc LPASS_CLK_ID_TX_CORE_MCLK     LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
-			 <&q6afecc LPASS_HW_DCODEC_VOTE          LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
-			 <&q6afecc LPASS_CLK_ID_TX_CORE_NPL_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+		clocks = <&q6prmcc LPASS_CLK_ID_TX_CORE_MCLK     LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+			 <&q6prmcc LPASS_HW_DCODEC_VOTE          LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+			 <&q6prmcc LPASS_CLK_ID_TX_CORE_NPL_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
 		clock-names = "mclk", "dcodec", "npl";
 
-		assigned-clocks = <&q6afecc LPASS_CLK_ID_TX_CORE_MCLK     LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
-				  <&q6afecc LPASS_CLK_ID_TX_CORE_NPL_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+		assigned-clocks = <&q6prmcc LPASS_CLK_ID_TX_CORE_MCLK     LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+				  <&q6prmcc LPASS_CLK_ID_TX_CORE_NPL_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
 		assigned-clock-rates = <19200000>, <19200000>;
 
 		qcom,dmic-sample-rate = <2400000>;
@@ -403,42 +368,6 @@
 		compatible = "qcom,sm6115-lpasscc";
 		reg = <0x0 0x0a7e0000 0x0 0x12000>;
 		#reset-cells = <1>;
-	};
-};
-
-&q6afedai {
-	dai@18 {
-		reg = <SECONDARY_MI2S_RX>;
-		qcom,sd-lines = <0>;
-	};
-
-	dai@19 {
-		reg = <SECONDARY_MI2S_TX>;
-		qcom,sd-lines = <1>;
-	};
-
-	dai@22 {
-		reg = <QUATERNARY_MI2S_RX>;
-		qcom,sd-lines = <0>;
-	};
-
-	dai@23 {
-		reg = <QUATERNARY_MI2S_TX>;
-		qcom,sd-lines = <1>;
-	};
-
-	dai@110 {
-		reg = <VA_CODEC_DMA_TX_0>;
-	};
-};
-
-&q6asmdai {
-	dai@3 {
-		reg = <MSM_FRONTEND_DAI_MULTIMEDIA4>;
-	};
-
-	dai@4 {
-		reg = <MSM_FRONTEND_DAI_MULTIMEDIA5>;
 	};
 };
 
@@ -473,9 +402,9 @@
 	es8326: codec@18 {
 		compatible = "everest,es8326";
 		reg = <0x18>;
-		clocks = <&q6afecc LPASS_CLK_ID_MCLK_1 LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+		clocks = <&q6prmcc LPASS_CLK_ID_MCLK_1 LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
 		clock-names = "mclk";
-		assigned-clocks = <&q6afecc LPASS_CLK_ID_MCLK_1 LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+		assigned-clocks = <&q6prmcc LPASS_CLK_ID_MCLK_1 LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
 		assigned-clock-rates = <12288000>;
 		interrupts-extended = <&tlmm 65 IRQ_TYPE_EDGE_FALLING>;
 		vdd-supply = <&es8326_vdd_3v3>;
@@ -899,7 +828,7 @@
 };
 
 &remoteproc_adsp {
-	firmware-name = "qcom/qrb4210/adsp.mbn";
+	firmware-name = "qcom/sm6115/mangmi/adsp.mbn";
 	status = "okay";
 
 	interrupts-extended = <&intc GIC_SPI 282 IRQ_TYPE_EDGE_RISING>,
@@ -910,6 +839,74 @@
 			      <&adsp_smp2p_in 7 IRQ_TYPE_EDGE_RISING>;
 	interrupt-names = "wdog", "fatal", "ready",
 			  "handover", "stop-ack", "shutdown-ack";
+
+	/* The stock ADSP speaks AudioReach (GPR) only */
+	glink-edge {
+		apr {
+			status = "disabled";
+		};
+
+		gpr {
+			compatible = "qcom,gpr";
+			qcom,glink-channels = "adsp_apps";
+			qcom,domain = <GPR_DOMAIN_ID_ADSP>;
+			qcom,intents = <512 20>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			q6apm: service@1 {
+				compatible = "qcom,q6apm";
+				reg = <GPR_APM_MODULE_IID>;
+				#sound-dai-cells = <0>;
+				qcom,protection-domain = "avs/audio",
+							 "msm/adsp/audio_pd";
+
+				q6apmdai: dais {
+					compatible = "qcom,q6apm-dais";
+					iommus = <&apps_smmu 0x1c1 0x0>;
+				};
+
+				q6apmbedai: bedais {
+					compatible = "qcom,q6apm-lpass-dais";
+					#sound-dai-cells = <1>;
+					#address-cells = <1>;
+					#size-cells = <0>;
+
+					dai@18 {
+						reg = <SECONDARY_MI2S_RX>;
+						clocks = <&q6prmcc LPASS_CLK_ID_SEC_MI2S_IBIT LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+						clock-names = "bclk";
+					};
+
+					dai@22 {
+						reg = <QUATERNARY_MI2S_RX>;
+						clocks = <&q6prmcc LPASS_CLK_ID_QUAD_MI2S_IBIT LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+							 <&q6prmcc LPASS_CLK_ID_MCLK_1 LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+						clock-names = "bclk", "mclk";
+					};
+
+					dai@23 {
+						reg = <QUATERNARY_MI2S_TX>;
+						clocks = <&q6prmcc LPASS_CLK_ID_QUAD_MI2S_IBIT LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+							 <&q6prmcc LPASS_CLK_ID_MCLK_1 LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+						clock-names = "bclk", "mclk";
+					};
+				};
+			};
+
+			q6prm: service@2 {
+				compatible = "qcom,q6prm";
+				reg = <GPR_PRM_MODULE_IID>;
+				qcom,protection-domain = "avs/audio",
+							 "msm/adsp/audio_pd";
+
+				q6prmcc: clock-controller {
+					compatible = "qcom,q6prm-lpass-clocks";
+					#clock-cells = <2>;
+				};
+			};
+		};
+	};
 };
 
 &remoteproc_cdsp {
@@ -1203,6 +1200,7 @@
 };
 
 &lpass_tlmm {
+	clocks = <&q6prmcc LPASS_HW_DCODEC_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
 
 	lpi_i2s2_active: lpi-i2s2-active-state {
 		sck-pins {
