@@ -47,6 +47,7 @@ HCI_DEV_NONE = 0xFFFF
 HCI_CHANNEL_CONTROL = 3
 
 MGMT_OP_READ_INDEX_LIST = 0x0003
+MGMT_OP_READ_UNCONF_INDEX_LIST = 0x0036
 # From the kernel's own mgmt.h, not from counting down a table: 0x0044 is GET_PHY_CONFIGURATION,
 # which the handler table does NOT mark HCI_MGMT_UNCONFIGURED — so an unconfigured controller
 # rejects it with INVALID_INDEX (0x11), the one status that reads like "no such controller" on the
@@ -104,7 +105,14 @@ class Mgmt:
     def configured_indices(self):
         """Indices in the NORMAL list. An unconfigured controller is absent from it — that absence is
         the whole bug this script exists to fix, and its disappearance is how we prove the fix."""
-        status, params = self.request(MGMT_OP_READ_INDEX_LIST)
+        return self._index_list(MGMT_OP_READ_INDEX_LIST)
+
+    def unconfigured_indices(self):
+        """Indices in the UNCONFIGURED list, where the controller waits for its address."""
+        return self._index_list(MGMT_OP_READ_UNCONF_INDEX_LIST)
+
+    def _index_list(self, opcode):
+        status, params = self.request(opcode)
         if status != 0 or len(params) < 2:
             return []
         (count,) = struct.unpack("<H", params[:2])
@@ -164,9 +172,19 @@ def main():
 
     mgmt = Mgmt()
 
-    if INDEX in mgmt.configured_indices():
-        log(f"hci{INDEX} is already configured — leaving its address alone")
-        return 0
+    # The sysfs node exists from the moment the controller registers, but mgmt lists it only once QCA
+    # setup (the firmware download) finishes; until then it is in neither list and Set Public Address
+    # answers INVALID_INDEX. A fast boot reaches here inside that window (Air X, 2026-10-31).
+    while True:
+        if INDEX in mgmt.configured_indices():
+            log(f"hci{INDEX} is already configured — leaving its address alone")
+            return 0
+        if INDEX in mgmt.unconfigured_indices():
+            break
+        if time.monotonic() >= deadline:
+            log(f"ERROR: hci{INDEX} joined neither mgmt index list within {DEV_WAIT:.0f}s")
+            return 1
+        time.sleep(0.5)
 
     address = stable_address()
     # mgmt takes the address little-endian, i.e. reversed from display order.
