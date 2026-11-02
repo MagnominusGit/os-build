@@ -1,0 +1,36 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sun, 1 Nov 2026 23:40:00 -0800
+Subject: [PATCH] Bluetooth: hci_qca: give a cold WCN3950 time to boot after
+ the power-on pulse
+
+qca_send_power_pulse() sleeps 100 ms after the power-on pulse, and
+qca_setup() then reopens the port and reads the version. A WCN3950
+powered from cold rails needs ~130 ms on the MANGMI Air X before it
+listens (its CTS pulses when it is up), so that first command is lost:
+every boot waited out the 2 s command timeout and only came up on the
+retry, where the chip, powered once already, is up in ~45 ms.
+
+Wait 200 ms after a WCN3950's power-on pulse; the other WCN399x keep
+100 ms.
+---
+ drivers/bluetooth/hci_qca.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/bluetooth/hci_qca.c b/drivers/bluetooth/hci_qca.c
+--- a/drivers/bluetooth/hci_qca.c
++++ b/drivers/bluetooth/hci_qca.c
+@@ -1461,9 +1461,11 @@ static int qca_send_power_pulse(struct hci_uart *hu, bool on)
+ 	serdev_device_wait_until_sent(hu->serdev, timeout);
+ 	hci_uart_set_flow_control(hu, false);
+
+-	/* Give to controller time to boot/shutdown */
++	/* Give to controller time to boot/shutdown. A WCN3950 booting from
++	 * cold rails takes ~130 ms, and a command sent before then is lost.
++	 */
+ 	if (on)
+-		msleep(100);
++		msleep(qca_soc_type(hu) == QCA_WCN3950 ? 200 : 100);
+ 	else
+ 		usleep_range(1000, 10000);
+
