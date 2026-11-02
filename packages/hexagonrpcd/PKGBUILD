@@ -19,6 +19,11 @@
 # also while a client streamed the accelerometer); the sensors draw power only while a client of
 # the Sensor Core has a stream open.
 #
+# Patch 0002 (gennro, kettlelinux; Armada carries it as hexagonrpc 0010) answers a request the
+# listener cannot serve with its error instead of exiting. 0.5.0 breaks out of the loop there,
+# leaving the ADSP's caller waiting and the ADSP awake; Armada saw the KONKR Pocket FIT's sensors
+# PD ask for apps_std method 36. The Air X asks for nothing unsupported (0 restarts, 2026-11-02).
+#
 # Only the sensors servers are enabled (60-retroforge-hexagonrpcd.preset). The ADSP root PD asks
 # the Air X for nothing the partitions hold (one lowi/lowi_lp.conf, a location config).
 #

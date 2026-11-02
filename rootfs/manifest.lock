@@ -103,7 +103,7 @@ gtk-update-icon-cache 1:4.22.4-1 aarch64 snapshot df321f15a92cbc0396d5c6045f771c
 gtk2 2.24.33-5 aarch64 snapshot 5b262393bbeff8c3e1e322d5b5e74c89f6a8003eaaa476b3db92a217bd42fb3f
 gzip 1.14-2.2 aarch64 snapshot e3d1fccd7eab31ab853ebf90d6ae467cfc05f4d6e5c15bc985ed8dfc2c1d2994
 harfbuzz 14.2.0-1 aarch64 snapshot 2dd0bffe3b04ddcbaa255d85734fb47b89fe9d29df3e402210f6fa15c9291fe9
-hexagonrpcd 0.5.0-1.1 aarch64 retroforge 3da7eb16b65138b261dc543aa774898f8044bab049dc64a8339e8286136eac33
+hexagonrpcd 0.5.0-1.1 aarch64 retroforge 7549a7ae1cf49652c2e8f2e63de19aa1782a4c6b6005d85126db81fb0f56a62d
 hicolor-icon-theme 0.18-1 any snapshot 22ec69012b9a55e276b5891f916366f692541dce3793bff3e85a28a10b91990a
 hidapi 0.15.0-1 aarch64 snapshot 39a25ef6e2602c6835ae971dbaec5e16340ebc61bac419f3badebac6f232f479
 highway 1.4.0-1 aarch64 snapshot 2a442db88048ffdad19422c1a52017b4f0b236fa7e979bd38a9e88fffd87e80f
