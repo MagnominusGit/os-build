@@ -4,6 +4,13 @@
 # fetch-linux-fw.sh) then firmware/qcom-fw/ (device blobs, fetch-qcom-fw.sh) and derives
 # CONFIG_EXTRA_FIRMWARE from this list. Add a SoC/board by appending its early-boot blobs
 # here — no edit to build.sh. Comments (#) and blank lines ignored.
+#
+# No AudioReach topologies, DSP images or amp ACF blobs: nothing asks for them before the root
+# mounts. q6apm (SND_SOC_QDSP6_APM=m) requests qcom/<card driver>/<card model>-tplg.bin once the
+# ADSP is up, and the ADSP boots from the QCOM_Q6V5_PAS module on the root, so the copies in the
+# root's /lib/firmware load; built in, they only lengthened Image.gz. The names follow the card:
+# the Thor's AYN-Thor is a byte-identical copy of AYN-Odin2's, and the SM4450 boards' card driver
+# reports sm8450.
 
 # --- sm8750: Adreno 830 GPU microcode + zap shader (open, linux-firmware) — shared by
 # both SM8750 boards (AYN Odin 3, KONKR Pocket FIT Elite); embedded for the usual reason:
@@ -13,14 +20,6 @@ qcom/gen80000_sqe.fw
 qcom/gen80000_gmu.bin
 qcom/sm8750/gen80000_zap.mbn
 
-# --- sm8750: AudioReach (q6apm) topology, per board card model (device) — the DP-audio
-# generation (DISPLAY_PORT_RX_0 graph), pairing with the dp-dai-link in both board DTS.
-# adsp/cdsp are NOT here: QCOM_Q6V5_PAS is =m and the per-device signed images load from
-# the mounted root (qcom-firmwares), same as sm8550/sm8650. The amp ACF blobs
-# (aw883xx/aw88261) also load from the root: the i2c codecs probe after it mounts.
-qcom/sm8750/SM8750-AYN-tplg.bin
-qcom/sm8750/SM8750-KONKR-tplg.bin
-
 # --- sm8650: Adreno 750 GPU microcode (open, linux-firmware) ---
 qcom/gen70900_aqe.fw
 qcom/gen70900_sqe.fw
@@ -29,23 +28,12 @@ qcom/gmu_gen70900.bin
 # --- sm8650: GPU zap shader (open, linux-firmware) — shared across all boards ---
 qcom/sm8650/gen70900_zap.mbn
 
-# --- sm8650: AudioReach (q6apm) topology — Pocket S2 and Pocket FIT share one card + model ---
-qcom/ayaneo-ps2/SM8650-APS2-tplg.bin
-
 # --- sm8550: Adreno 740 GPU microcode + zap shader (open, linux-firmware) ---
 # All three ship in linux-firmware (a740_zap under the qcom/sm8550/ subdir); embedded so
 # the GPU can init before the rootfs mounts. Shared across every SM8550 board.
 qcom/a740_sqe.fw
 qcom/gmu_gen70200.bin
 qcom/sm8550/a740_zap.mbn
-
-# --- sm8550: AudioReach (q6apm) topology, per card model (device) ---
-# AYN Thor shares the Odin2 topology but its sound-card model is "AYN-Thor", so the
-# driver requests a distinctly-named (byte-identical) tplg. odin2/mini/portal all
-# inherit the AYN-Odin2 model. AYANEO pockets use SM8550-APS.
-qcom/sm8550/SM8550-APS-tplg.bin
-qcom/sm8550/AYN-Odin2-tplg.bin
-qcom/sm8550/AYN-Thor-tplg.bin
 
 # --- sm8250: Adreno 650 GPU microcode + zap shader (open, linux-firmware) ---
 # Shared by all six SM8250 boards. Embedded for the same reason as the other two SoCs:
@@ -55,10 +43,6 @@ qcom/a650_sqe.fw
 qcom/a650_gmu.bin
 qcom/sm8250/a650_zap.mbn
 
-# No SM8250 tplg line, and that is not an omission: SM8250 audio runs the legacy q6asm/ADM
-# path (SND_SOC_SM8250), which has no AudioReach topology blob to load. Its adsp/cdsp are
-# likewise absent here — QCOM_Q6V5_PAS is =m, so they load from the mounted root.
-
 # --- sm6115: Adreno 610 GPU microcode ---
 # The A610 runs the A630 SQE firmware (open, linux-firmware) and has no GMU. Its zap shader is NOT
 # here: msm-firmware-loader serves the device's own from its vendor partition, and built-in
@@ -66,11 +50,8 @@ qcom/sm8250/a650_zap.mbn
 # open and retries on the next one if that fails, so nothing needs the zap before the root mounts.
 qcom/a630_sqe.fw
 
-# --- sm4450: Adreno 613 zap shader + AudioReach topologies ---
+# --- sm4450: Adreno 613 zap shader ---
 # The A613 runs the A630 SQE firmware, already listed for the SM6115 above, and has no GMU. Its
-# zap shader (shared by both boards' DTS) and the two sm8450-named topologies (the card driver
-# reports sm8450) come from the qcom-firmwares repo (firmware/QCOM_FW.pin); embedded for the same
-# reason as the other SoCs.
+# zap shader (shared by both boards' DTS) comes from the qcom-firmwares repo
+# (firmware/QCOM_FW.pin); embedded for the same reason as the other SoCs.
 qcom/sm4450/a613_zap.mbn
-qcom/sm8450/RetroidPocketClassic-tplg.bin
-qcom/sm8450/AnbernicRG55G1-tplg.bin
