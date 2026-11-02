@@ -1,0 +1,116 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Mon, 2 Nov 2026 20:10:00 +0100
+Subject: [PATCH] fix(LaunchManager): the focused app's change is handled deferred
+
+focused_app_updated is emitted from GamescopeInstance.process(), which
+holds GamescopeInstance mutably bound while gamescope's signals go out.
+Its handler did everything there: detect the app (_detect_running_app,
+_add_running and app_launched), emit app_switched, and switch the
+gamepad profile. Those and their handlers call back into the instance
+(gamescope.get_xwayland, get_xwayland_by_name), which godot-rust
+refuses ("Gd<T>::bind() failed, already bound; T = GamescopeInstance"),
+repeatedly, and OpenGamepadUI died of SIGSEGV: the store sign-in's
+Chromium window adopted while the kept Steam client ran (KONKR Pocket
+FIT, 2026-11-01, issue #28).
+
+The handler now only queues the change; _on_focused_app_changed does
+the rest after process() has returned, as 0019 already does for the
+focusable-windows handler's switch_window. Every other handler of the
+primary XWayland's signals here already defers its work.
+
+---
+ core/global/launch_manager.gd | 62 ++++++++++++++++++++++-----------------
+ 1 file changed
+
+--- a/core/global/launch_manager.gd
++++ b/core/global/launch_manager.gd
+@@ -104,39 +104,13 @@
+ 			self.check_running.call_deferred()
+ 		_xwayland_primary.focused_window_updated.connect(on_focus_changed)
+ 
+-		# When focused app changes, update the current app and gamepad profile
++		# When focused app changes, update the current app and gamepad profile. Deferred: this signal
++		# is emitted while GamescopeInstance is mutably bound (GamescopeInstance.process), and what
++		# follows (detecting the app, app_launched, app_switched and their handlers, RunningApp's
++		# window calls) calls back into it (gamescope.get_xwayland): godot-rust panics there
++		# ("Gd<T>::bind() failed, already bound") and OpenGamepadUI died of SIGSEGV.
+ 		var on_focused_app_changed := func(_from: int, to: int) -> void:
+-			if _focused_app_id == to:
+-				return
+-			logger.debug("Focused app changed from " + str(_focused_app_id) + " to " + str(to))
+-			_focused_app_id = to
+-
+-			# If OGUI was focused, set the focus profile
+-			if to in [gamescope.OVERLAY_GAME_ID, 0, 1]:
+-				set_focus_profile()
+-				return
+-
+-			# Find the running app for the given app id
+-			var last_app := self._current_app
+-			var detected_app: RunningApp
+-			for app in _running:
+-				if app.owns_app_id(to):
+-					detected_app = app
+-
+-			# If the running app was not launched by OpenGamepadUI, then detect it.
+-			if not detected_app:
+-				detected_app = _detect_running_app(to)
+-			self._current_app = detected_app
+-
+-			logger.debug("Last app: " + str(last_app) + " current_app: " + str(self._current_app))
+-			app_switched.emit(last_app, self._current_app)
+-
+-			# A game window has focus: its profile, once OpenGamepadUI is in the in-game state. A
+-			# launch passes through app 0 and OpenGamepadUI's own id before the game's window shows
+-			# up, and those load the focus profile.
+-			if state_machine.current_state() == in_game_state:
+-				_ogui_focused = false
+-			set_app_gamepad_profile(self._current_app)
++			_on_focused_app_changed.call_deferred(to)
+ 		_xwayland_primary.focused_app_updated.connect(on_focused_app_changed)
+ 
+ 		# Listen for when focusable apps change
+@@ -211,6 +185,42 @@
+ 	in_game_state.state_exited.connect(on_game_state_exited)
+ 
+ 
++## The focused app changed (on_focused_app_changed in _ready, deferred): the current app, and its
++## gamepad profile.
++func _on_focused_app_changed(to: int) -> void:
++	if _focused_app_id == to:
++		return
++	logger.debug("Focused app changed from " + str(_focused_app_id) + " to " + str(to))
++	_focused_app_id = to
++
++	# If OGUI was focused, set the focus profile
++	if to in [gamescope.OVERLAY_GAME_ID, 0, 1]:
++		set_focus_profile()
++		return
++
++	# Find the running app for the given app id
++	var last_app := self._current_app
++	var detected_app: RunningApp
++	for app in _running:
++		if app.owns_app_id(to):
++			detected_app = app
++
++	# If the running app was not launched by OpenGamepadUI, then detect it.
++	if not detected_app:
++		detected_app = _detect_running_app(to)
++	self._current_app = detected_app
++
++	logger.debug("Last app: " + str(last_app) + " current_app: " + str(self._current_app))
++	app_switched.emit(last_app, self._current_app)
++
++	# A game window has focus: its profile, once OpenGamepadUI is in the in-game state. A
++	# launch passes through app 0 and OpenGamepadUI's own id before the game's window shows
++	# up, and those load the focus profile.
++	if state_machine.current_state() == in_game_state:
++		_ogui_focused = false
++	set_app_gamepad_profile(self._current_app)
++
++
+ # Loads persistent data like recent games launched, etc.
+ func _load_persist_data():
+ 	# Create the data directory if it doesn't exist
