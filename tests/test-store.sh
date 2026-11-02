@@ -681,6 +681,18 @@ ok(r2.returncode == 0 and os.path.isfile(epic_cover) and "1 fetched" in r2.stder
 before = len(SEEN)
 r = store("gog", "art", env=art_env)
 ok(r.returncode == 0 and len(SEEN) == before and r.stderr == "", "a cached cover is not fetched again", r.stderr)
+# Epic's CDN names some covers with spaces (GTA V: ".../Portrait Store Banner-1200x1600-....jpg"):
+# http.client refuses a request line with a space, so they "failed" on every library load (issue #31).
+SPACED = "https://cdn.epic/Portrait Store Banner-1200x1600.jpg?w=360&resize=1&quality=medium"
+ROUTES["/cdn.epic/Portrait%20Store%20Banner-1200x1600.jpg?w=360&resize=1&quality=medium"] = b"\xff\xd8\xff spaced"
+lib = os.path.join(DATA, "epic-library.json")
+listed = json.load(open(lib))
+json.dump(listed + [{"id": "Spaced", "title": "Spaced", "art": {"portrait": SPACED}}], open(lib, "w"))
+r = store("epic", "art", env=art_env)
+spaced = cached("epic", "Spaced", SPACED)
+ok(r.returncode == 0 and os.path.isfile(spaced) and open(spaced, "rb").read() == b"\xff\xd8\xff spaced" and "1 fetched" in r.stderr,
+   "a cover whose URL has spaces is fetched (percent-encoded), cached under the URL as listed", r.stderr)
+json.dump(listed, open(lib, "w"))
 ROUTES["/images.gog.com/v1_glx_vertical_cover.jpg"] = None
 os.remove(gog_cover)
 store("gog", "art", env=art_env)

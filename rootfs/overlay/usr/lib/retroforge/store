@@ -1296,8 +1296,16 @@ def prefetch_art(name):
             todo.append((url, dest))
     local = threading.local()
 
+    def wire(url):
+        """url as it can go on the wire. Epic's CDN names some covers with spaces (GTA V: ".../Portrait
+        Store Banner-...jpg"), and http.client refuses a request line with one (InvalidURL): those three
+        covers "failed" on every library load (issue #31). What is already escaped or reserved is kept."""
+        parts = urllib.parse.urlsplit(url)
+        return parts._replace(path=urllib.parse.quote(parts.path, safe="/%:@!$&'()*+,;=~"),
+                              query=urllib.parse.quote(parts.query, safe="/?%:@!$&'()*+,;=~")).geturl()
+
     def get(url, dest):
-        target = urllib.parse.urlsplit(url_of(url))
+        target = urllib.parse.urlsplit(wire(url_of(url)))
         conns = local.__dict__.setdefault("conns", {})
         status, body = 0, b""
         for _ in range(2):  # a kept-alive connection the server closed: once more, on a new one
@@ -1310,7 +1318,7 @@ def prefetch_art(name):
                 r = conn.getresponse()
                 status, body = r.status, r.read()
                 if status in (301, 302, 303, 307, 308):
-                    with urllib.request.urlopen(urllib.request.Request(r.getheader("Location", ""), headers={"User-Agent": AGENT}),
+                    with urllib.request.urlopen(urllib.request.Request(wire(r.getheader("Location", "")), headers={"User-Agent": AGENT}),
                                                 timeout=20) as moved:
                         status, body = moved.status, moved.read()
                 break
