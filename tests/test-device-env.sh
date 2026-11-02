@@ -105,6 +105,36 @@ for soc in sm6115 sm8250 sm8550 sm8650; do
   [ -n "$got" ] && ok "$soc ($c) -> $got" || bad "$soc's compatible '$c' yields no chip id"
 done
 
+# =================================================================================================
+# Wi-Fi power save (issue #27). The SM4450 boards' WLAN firmware (inside wpss.mbn) keeps dozing between
+# beacons whatever power save is set to (the same under Anbernic's Android); with power save on, too,
+# pings to the RG55G1 took 129 ms on average, 582 ms at worst, against 70 / 205 ms with it off.
+# Those boards ask for it off; the rest keep NetworkManager's default. wifi-powersave turns the
+# answer into a NetworkManager drop-in under /run, before NetworkManager reads its config.
+CASE="wifi power save"
+WPS="$ROOT/rootfs/overlay/usr/lib/retroforge/wifi-powersave"
+for m in "Anbernic RG 55G1" "Retroid Pocket Classic" "Retroid Pocket Classic Rev Q" "Retroid Pocket Classic 6 Rev Q"; do
+  [ "$(value "$m" RETROFORGE_WIFI_POWERSAVE)" = off ] && ok "$m: off" \
+    || bad "$m: RETROFORGE_WIFI_POWERSAVE is '$(value "$m" RETROFORGE_WIFI_POWERSAVE)', not off"
+done
+[ "$(value "MANGMI Air X MQ66" RETROFORGE_WIFI_POWERSAVE)" = "" ] && ok "another board: unset (NetworkManager's default)" \
+  || bad "MANGMI Air X MQ66: RETROFORGE_WIFI_POWERSAVE is '$(value "MANGMI Air X MQ66" RETROFORGE_WIFI_POWERSAVE)'"
+NMD=$(mktemp -d); trap 'rm -rf "$NMD"' EXIT
+run_wps() { RETROFORGE_MODEL="$1" RETROFORGE_DEVICE_DIR="$DEVICES" RETROFORGE_DEVICE_ENV="$DEVENV" \
+            RETROFORGE_NM_CONF_DIR="$NMD" bash "$WPS"; }
+if [ ! -f "$WPS" ]; then
+  bad "no $WPS"
+else
+  run_wps "Anbernic RG 55G1"
+  grep -qx 'wifi.powersave=2' "$NMD/50-retroforge-wifi-powersave.conf" 2>/dev/null \
+    && grep -qx '\[connection\]' "$NMD/50-retroforge-wifi-powersave.conf" \
+    && ok "RG55G1: the drop-in sets wifi.powersave=2 (disable) under [connection]" \
+    || bad "RG55G1: no drop-in with wifi.powersave=2: $(cat "$NMD"/* 2>&1)"
+  run_wps "MANGMI Air X MQ66"
+  [ ! -e "$NMD/50-retroforge-wifi-powersave.conf" ] && ok "another board: no drop-in (a stale one is removed)" \
+    || bad "the drop-in is still there for a board that does not ask for it"
+fi
+
 echo
 echo "test-device-env.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
