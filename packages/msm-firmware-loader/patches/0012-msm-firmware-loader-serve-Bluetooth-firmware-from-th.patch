@@ -1,0 +1,60 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Mon, 2 Nov 2026 01:02:17 -0800
+Subject: [PATCH] msm-firmware-loader: serve Bluetooth firmware from the
+ bluetooth partition
+
+btqca asks for qca/<name>, and every board keeps exactly those names in its bluetooth partition's image/ (WCN3950, WCN7850, WCN7860, QCA6390), each with its own board NVMs. Mount it with the others and link its image/ into qca/, keeping its files out of the blobs the qcom/ folders get.
+---
+ msm-firmware-loader.sh | 15 +++++++++++++--
+ 1 file changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
+index f89d912..844e313 100644
+--- a/msm-firmware-loader.sh
++++ b/msm-firmware-loader.sh
+@@ -101,10 +101,11 @@ link_path() {
+ 
+ # Configurations:
+ 
+-# List of partitions to be mounted and inspected for blobs.
+-# bluetooth is left out: its blobs are never linked where the kernel looks.
++# List of partitions to be mounted and inspected for blobs. bluetooth's are
++# only served under qca/, where btqca asks for them.
+ FW_PARTITIONS="
+ 	apnhlos
++	bluetooth$AB_SLOT
+ 	modem$AB_SLOT
+ 	vendor$AB_SLOT
+ 	RADIO
+@@ -287,6 +288,7 @@ fi
+ # goes on with the rest, which is exactly that rule, with no loop per file.
+ for dir in "$BASEDIR"/mnt/*/firmware "$BASEDIR"/mnt/*/image
+ do
++	case "$dir" in "$BASEDIR"/mnt/bluetooth*) continue ;; esac
+ 	ln -s "$dir"/* "$BASEDIR/blobs/" 2>/dev/null || :
+ done
+ 
+@@ -295,6 +297,7 @@ done
+ # top-level blob, so a top-level name still wins.
+ for dir in "$BASEDIR"/mnt/*/image/*/
+ do
++	case "$dir" in "$BASEDIR"/mnt/bluetooth*) continue ;; esac
+ 	ln -s "$dir"* "$BASEDIR/blobs/" 2>/dev/null || :
+ done
+ 
+@@ -329,6 +332,14 @@ done
+ 		ln -s "$@" "$BASEDIR/target/$dir/"
+ 	done
+ 
++# Bluetooth firmware: the bluetooth partition's image/, as qca/<name>.
++for dir in "$BASEDIR"/mnt/bluetooth*/image
++do
++	[ -d "$dir" ] || continue
++	mkdir -p "$BASEDIR/target/qca"
++	ln -s "$dir"/* "$BASEDIR/target/qca/" 2>/dev/null || :
++done
++
+ # Set the new custom firmware path:
+ printf "%s" "$BASEDIR/target" > /sys/module/firmware_class/parameters/path
+ 

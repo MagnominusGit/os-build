@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Mon, 2 Nov 2026 00:49:04 -0800
+Subject: [PATCH] msm-firmware-loader: serve qcom/ and the SoC's folder too
+
+The GPU microcode is asked for as qcom/<name>, and the zap shaders and the SM8250 DSPs as qcom/<soc>/<name>, so they kept coming from /lib/firmware or the kernel. Link the blobs into qcom/ and into qcom/<soc> for each qcom,<soc> compatible as well as into the device folders, so the device's own copies win wherever it has them.
+---
+ msm-firmware-loader.sh | 18 +++++++++++++-----
+ 1 file changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
+index da3944e..f89d912 100644
+--- a/msm-firmware-loader.sh
++++ b/msm-firmware-loader.sh
+@@ -308,11 +308,19 @@ do
+ 	fi
+ done
+ 
+-# Expose the blobs only under the device-specific firmware folders
+-# (qcom/<soc>/<vendor>[/<device>]) named in the devicetree. Generic folders
+-# and bare file names keep resolving to the firmware shipped in /lib/firmware.
+-find /sys/firmware/devicetree -name firmware-name -exec cat {} + | tr '\000' '\n' |
+-	sed -n 's|^\(qcom/[^/]*/.*\)/[^/]*$|\1|p' | sort -u |
++# Expose the blobs where the kernel asks for this device's own firmware:
++# qcom/ (the GPU microcode the msm driver names), the SoC's folder qcom/<soc>
++# (from the devicetree's qcom,<soc> compatibles: zap shaders, DSPs) and the
++# device folders (qcom/<soc>/<vendor>[/<device>]) its firmware-names use.
++# Other folders (qcom/venus-6.0, qcom/vpu) and bare file names keep
++# resolving to the firmware shipped in /lib/firmware.
++{
++	echo qcom
++	tr '\000' '\n' < /sys/firmware/devicetree/base/compatible |
++		sed -n 's|^qcom,\([^/]*\)$|qcom/\1|p'
++	find /sys/firmware/devicetree -name firmware-name -exec cat {} + | tr '\000' '\n' |
++		sed -n 's|^\(qcom/[^/]*/.*\)/[^/]*$|\1|p'
++} | sort -u |
+ 	while read -r dir
+ 	do
+ 		set -- "$BASEDIR"/blobs/*

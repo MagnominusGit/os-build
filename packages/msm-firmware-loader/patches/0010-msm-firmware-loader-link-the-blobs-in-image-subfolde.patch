@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Mon, 2 Nov 2026 00:48:48 -0800
+Subject: [PATCH] msm-firmware-loader: link the blobs in image/ subfolders too
+
+The SM4450 boards keep their WPSS in the modem partition's image/adrastea/, which the loader never linked, so it came from /lib/firmware. Link the files of each image/ subfolder after every top-level blob, so a top-level name still wins and the .mdt alias below covers them.
+---
+ msm-firmware-loader.sh | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
+index dfbe0fc..da3944e 100644
+--- a/msm-firmware-loader.sh
++++ b/msm-firmware-loader.sh
+@@ -290,6 +290,14 @@ do
+ 	ln -s "$dir"/* "$BASEDIR/blobs/" 2>/dev/null || :
+ done
+ 
++# Some modem images keep a subsystem in a subfolder of image/: the SM4450
++# boards' WPSS is image/adrastea/wpss.mdt. Link those files too, after every
++# top-level blob, so a top-level name still wins.
++for dir in "$BASEDIR"/mnt/*/image/*/
++do
++	ln -s "$dir"* "$BASEDIR/blobs/" 2>/dev/null || :
++done
++
+ # Some kernel versions expect .mbn instead of legacy .mdt
+ # Symlink these files together, the kernel can autodetect the type.
+ for mdt in "$BASEDIR"/blobs/*.mdt

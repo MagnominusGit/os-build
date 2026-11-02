@@ -17,12 +17,15 @@
 # DT device folders; 0004 maps the active slot's dynamic partitions; 0005 drops the per-entry
 # forks; 0006 mounts persist and dsp without journal replay; 0007 prefers vendor's copy of a
 # name, as Android does; 0008 cuts the remaining forks on the boot path; 0009 moves dsp, persist
-# and the hexagonrpc tree to that second run.
+# and the hexagonrpc tree to that second run; 0010 links image/ subfolders too (SM4450 WPSS);
+# 0011 also serves qcom/ (GPU microcode) and the SoC's folder (zap shaders, SM8250 DSPs);
+# 0012 serves qca/ (Bluetooth) from the bluetooth partition.
 #
-# It runs on every board, serving whatever its partitions hold under the devicetree's device
-# folders (e.g. adsp/cdsp under qcom/sm8550/ayn/odin2portal/). A name the partitions lack falls
-# through to /lib/firmware; only the SM6115 copies are left out of the image
-# (rootfs/assemble-rootfs.sh), so those boards have no fallback.
+# It runs on every board, serving whatever its partitions hold under qcom/ (GPU microcode), the
+# SoC's qcom/<soc>/ (zap shaders, SM8250 DSPs), the devicetree's device folders (e.g. adsp/cdsp
+# under qcom/sm8550/ayn/odin2portal/) and qca/ (Bluetooth, from the bluetooth partition). The image
+# does not ship those (rootfs/assemble-rootfs.sh fw_from_device), so a name the partitions lack has
+# no fallback; only the mainline video firmware, Wi-Fi and topologies come from /lib/firmware.
 #
 # To bump: change pkgver/_dynpart and their sha256sums together (GitLab archive tarballs, taken
 # 2026-11-01). makepkg runs with --skipinteg in this tree, so prepare() verifies them itself.
