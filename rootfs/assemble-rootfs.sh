@@ -111,25 +111,38 @@ install -dm0755 "$stage/esp"
 install -dm0755 "$stage/efi"
 ln -s /efi "$stage/boot/efi"
 
+# Firmware each device's own Android partitions hold, which msm-firmware-loader serves from there, so
+# the card does not ship it: all of qcom/ (DSPs, GPU microcode and zap shaders, amp configs, WPSS) but
+# the mainline video firmware and the AudioReach topologies, all of qca/ (Bluetooth, from the bluetooth
+# partition), and the Air X/Y amp config, which its DT now names from the device. The installer medium
+# (installer/mkroot.sh) still takes both trees whole, as it has no loader yet.
+fw_from_device() {
+  case "$1" in
+    qcom/venus-*/*|qcom/vpu*/*|*-tplg.bin) return 1 ;;
+    qcom/*|qca/*|aw88261_acf.bin) return 0 ;;
+  esac
+  return 1
+}
+
 # STAGE firmware-device — device-proprietary firmware under /lib/firmware (paths are already /lib/firmware-relative).
-# Fetched from the qcom-firmwares repo by firmware/fetch-qcom-fw.sh. qcom/sm6115/mangmi/ is left out:
-# msm-firmware-loader serves those from the device's own Android partitions, with no fallback here.
-# The installer medium (installer/mkroot.sh) still takes the whole tree, as it has no loader.
+# Fetched from the qcom-firmwares repo by firmware/fetch-qcom-fw.sh, less what the device serves itself.
 if [ -d "$FW" ]; then
   while IFS= read -r f; do
     rel="${f#"$FW"/}"
+    fw_from_device "$rel" && continue
     install -Dm0644 "$f" "$stage/lib/firmware/$rel"
-  done < <(find "$FW" -type f ! -name sha256sums.txt ! -path "$FW/qcom/sm6115/mangmi/*" 2>/dev/null)
+  done < <(find "$FW" -type f ! -name sha256sums.txt 2>/dev/null)
 else
   echo "  (no device firmware at ${FW#"$ROOT"/} — run firmware/fetch-qcom-fw.sh; continuing)"
 fi
 
-# STAGE firmware-open — linux-firmware blobs (Adreno GPU, WCN7850 Wi-Fi/BT, Iris VPU) under
-# /lib/firmware. The upstream base ships no /lib/firmware, so without this the GPU/BT/VPU
-# firmware is absent at runtime. Staged by firmware/fetch-linux-fw.sh from the pin.
+# STAGE firmware-open — linux-firmware blobs (Wi-Fi, Iris/venus video) under /lib/firmware, less what
+# the device serves itself. The upstream base ships no /lib/firmware. Staged by
+# firmware/fetch-linux-fw.sh from the pin.
 if [ -d "$LFW" ]; then
   while IFS= read -r f; do
     rel="${f#"$LFW"/}"
+    fw_from_device "$rel" && continue
     install -Dm0644 "$f" "$stage/lib/firmware/$rel"
   done < <(find "$LFW" -type f ! -name .fetched.stamp 2>/dev/null)
 else

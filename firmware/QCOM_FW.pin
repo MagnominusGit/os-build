@@ -4,7 +4,11 @@
 # history-free import of Nova-Deck/qcom-firmwares dbf238b, plus the SM6115 MANGMI blobs that
 # used to come from ROCKNIX/extra-firmware 925dfb5 via a separate EXTRA_FW.pin).
 #
-# Pinned by commit: a git commit SHA is content-addressed, so it nails the exact bytes.
+# Pinned by # On the card, msm-firmware-loader serves each device's own qcom/ and qca/ firmware from its Android
+# partitions (packages/msm-firmware-loader), so rootfs/assemble-rootfs.sh ships only the video
+# firmware, Wi-Fi and topologies from this pin, and nothing is built into the kernel
+# (kernel/embed.list is empty). The other rows stay for the installer medium, which has no loader yet.
+commit: a git commit SHA is content-addressed, so it nails the exact bytes.
 # fetch-qcom-fw.sh additionally verifies every fetched file against the repo's own
 # sha256sums.txt (belt-and-suspenders against a corrupt/tampered download).
 #
@@ -21,9 +25,9 @@ repo:   https://github.com/retroforge-linux/qcom-firmwares
 # the Retroid Pocket Classic and Anbernic RG 55G1, both sm8450 AudioReach tplg, and
 # qca/cmnv13t.bin, from ROCKNIX/extra-firmware 2486a41. Everything at c849966 is contained
 # unchanged: the 90 earlier sha256sums rows are byte-identical, the commit only appends 10.
-# 785196e adds ROCKNIX's SM4450 WCN3950 Bluetooth set (BTFM 00125) under qca/sm4450/, where the
-# SM4450 DTS firmware-name points (kernel patch 1027), and moves cmnv13t.bin there; the SM6115
-# set (00116) at the default qca/ names is unchanged.
+# 785196e adds ROCKNIX's SM4450 WCN3950 Bluetooth set (BTFM 00125) under qca/sm4450/, and moves
+# cmnv13t.bin there; the SM6115 set (00116) at the default qca/ names is unchanged. The SM4450 DTS
+# no longer name it: each board's own BTFM set is served at the default qca/ names on the card.
 # Fast-forwarded to that repo's main 2026-10-27, so 785196e is the main commit itself.
 commit: 785196eda05de7832b128bdd5bf1df741f1a8311
 

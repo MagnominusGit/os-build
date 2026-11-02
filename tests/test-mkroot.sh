@@ -398,7 +398,7 @@ grep -q 'rm -f /target/usr/lib/firmware/sha256sums.txt' "$MKROOT" \
   && ok "the staging bookkeeping files are removed from the image" \
   || bad "sha256sums.txt/.fetched.stamp would ship inside /usr/lib/firmware"
 grep -q 'kernel/embed.list' "$MKROOT" \
-  && ok "it records why the GPU worked without any of this (those blobs are in the kernel)" \
+  && ok "it records why the GPU once worked without any of this (those blobs were in the kernel)" \
   || bad "the embed.list relationship is undocumented — the next reader repeats the diagnosis"
 
 CASE="kernel modules, without which firmware is inert"

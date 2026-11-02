@@ -178,8 +178,10 @@ IP_DIR="$ROOT/rootfs/overlay/etc/inputplumber"
 # that script, so the first medium had a 16 KB /usr/lib/firmware and no Wi-Fi at all: no ath12k, so
 # no wlan interface, so nothing to associate and nothing for a router to show. It read as a hostname
 # or DHCP fault and was neither. (The GPU worked regardless, which is what hid it: the Adreno
-# SQE/GMU/zap blobs are compiled INTO the kernel via kernel/embed.list, so Turnip came up on an
-# Adreno 750 with an essentially empty firmware tree.)
+# SQE/GMU/zap blobs were then compiled INTO the kernel via kernel/embed.list, so Turnip came up on an
+# Adreno 750 with an essentially empty firmware tree. That list is empty now: the card takes each
+# device's own GPU firmware through msm-firmware-loader, and this medium, which has no loader yet,
+# gets it from the two trees below.)
 #
 # WHOLESALE, NOT CURATED, and the first attempt here got that wrong (user's call, 2026-08-24). I
 # shipped a hand-written firmware.list carrying ath12k because the board on the bench was an

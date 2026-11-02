@@ -1029,7 +1029,7 @@
 	spk_amp_2: speaker-amp@35 {
 		compatible = "awinic,aw88261";
 		reg = <0x35>;
-		firmware-name = "qcom/sm8750/konkr/pfe/aw88261_acf.bin";
+		firmware-name = "qcom/sm8750/konkr/pfe/aw882xx_acf.bin";
 		#sound-dai-cells = <1>;
 		awinic,audio-channel = <2>;	/* stock sound-channel = 2 */
 		awinic,sync-flag;
@@ -1594,11 +1594,8 @@
  * i2c8 0x34 NAKs — population unknown (quad layout may be partially stuffed).
  * All four stock positions are declared; the probe results decide the final
  * dai-link codec list. No reset gpio in stock (matches driver's optional one).
- * firmware-name points the driver at the device-namespaced cal blob instead
- * of its "aw88261_acf.bin" default, so the file does not sit in the firmware
- * root where any other AW88261 board would collide with it. Built into the
- * kernel via CONFIG_EXTRA_FIRMWARE (package.mk), same mechanism as the konkr
- * zap: no SYSTEM/rootfs dependency at probe time. */
+ * firmware-name points the driver at the device's own cal blob, which its
+ * vendor partition calls aw882xx_acf.bin; msm-firmware-loader serves it. */
 &i2c15 {
 	clock-frequency = <400000>;
 	status = "okay";
@@ -1608,7 +1605,7 @@
 	spk_amp_3: speaker-amp@35 {
 		compatible = "awinic,aw88261";
 		reg = <0x35>;
-		firmware-name = "qcom/sm8750/konkr/pfe/aw88261_acf.bin";
+		firmware-name = "qcom/sm8750/konkr/pfe/aw882xx_acf.bin";
 		#sound-dai-cells = <1>;
 		awinic,audio-channel = <3>;	/* stock sound-channel = 3 */
 		awinic,sync-flag;

@@ -840,8 +840,8 @@
 	status = "okay";
 };
 
-/* GPU zap shader is shared across all SM8550 boards: the open Adreno A740 zap from
-   linux-firmware (qcom/sm8550/a740_zap.mbn), baked into the Image via embed.list.
+/* GPU zap shader: each device's own, which msm-firmware-loader serves under qcom/sm8550/
+   from its vendor partition.
    Reference the &gpu_zap_shader label from the in-tree sm8550.dtsi rather than an
    inline zap-shader child (old binding). */
 &gpu_zap_shader {

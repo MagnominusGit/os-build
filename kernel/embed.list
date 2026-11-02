@@ -1,57 +1,10 @@
-# retroforge built-in firmware list (CONFIG_EXTRA_FIRMWARE) — the union of blobs baked
-# into Image.gz so they are present before the rootfs mounts. One /lib/firmware-relative
-# path per line; kernel/build.sh resolves each against firmware/linux-fw/ (open blobs,
-# fetch-linux-fw.sh) then firmware/qcom-fw/ (device blobs, fetch-qcom-fw.sh) and derives
-# CONFIG_EXTRA_FIRMWARE from this list. Add a SoC/board by appending its early-boot blobs
-# here — no edit to build.sh. Comments (#) and blank lines ignored.
+# retroforge built-in firmware list (CONFIG_EXTRA_FIRMWARE) — blobs baked into Image.gz so they
+# are present before the rootfs mounts. One /lib/firmware-relative path per line; kernel/build.sh
+# resolves each against firmware/linux-fw/ then firmware/qcom-fw/ and derives CONFIG_EXTRA_FIRMWARE
+# from this list. Comments (#) and blank lines ignored.
 #
-# No AudioReach topologies, DSP images or amp ACF blobs: nothing asks for them before the root
-# mounts. q6apm (SND_SOC_QDSP6_APM=m) requests qcom/<card driver>/<card model>-tplg.bin once the
-# ADSP is up, and the ADSP boots from the QCOM_Q6V5_PAS module on the root, so the copies in the
-# root's /lib/firmware load; built in, they only lengthened Image.gz. The names follow the card:
-# the Thor's AYN-Thor is a byte-identical copy of AYN-Odin2's, and the SM4450 boards' card driver
-# reports sm8450.
-
-# --- sm8750: Adreno 830 GPU microcode + zap shader (open, linux-firmware) — shared by
-# both SM8750 boards (AYN Odin 3, KONKR Pocket FIT Elite); embedded for the usual reason:
-# DRM_MSM is =y and the panel is the only console, so the GPU inits before the root mounts.
-qcom/gen80000_aqe.fw
-qcom/gen80000_sqe.fw
-qcom/gen80000_gmu.bin
-qcom/sm8750/gen80000_zap.mbn
-
-# --- sm8650: Adreno 750 GPU microcode (open, linux-firmware) ---
-qcom/gen70900_aqe.fw
-qcom/gen70900_sqe.fw
-qcom/gmu_gen70900.bin
-
-# --- sm8650: GPU zap shader (open, linux-firmware) — shared across all boards ---
-qcom/sm8650/gen70900_zap.mbn
-
-# --- sm8550: Adreno 740 GPU microcode + zap shader (open, linux-firmware) ---
-# All three ship in linux-firmware (a740_zap under the qcom/sm8550/ subdir); embedded so
-# the GPU can init before the rootfs mounts. Shared across every SM8550 board.
-qcom/a740_sqe.fw
-qcom/gmu_gen70200.bin
-qcom/sm8550/a740_zap.mbn
-
-# --- sm8250: Adreno 650 GPU microcode + zap shader (open, linux-firmware) ---
-# Shared by all six SM8250 boards. Embedded for the same reason as the other two SoCs:
-# DRM_MSM is =y and the panel is the only console, so the GPU has to come up before the
-# root is mounted.
-qcom/a650_sqe.fw
-qcom/a650_gmu.bin
-qcom/sm8250/a650_zap.mbn
-
-# --- sm6115: Adreno 610 GPU microcode ---
-# The A610 runs the A630 SQE firmware (open, linux-firmware) and has no GMU. Its zap shader is NOT
-# here: msm-firmware-loader serves the device's own from its vendor partition, and built-in
-# firmware is searched first, so an embedded copy would shadow it. msm inits the GPU on first
-# open and retries on the next one if that fails, so nothing needs the zap before the root mounts.
-qcom/a630_sqe.fw
-
-# --- sm4450: Adreno 613 zap shader ---
-# The A613 runs the A630 SQE firmware, already listed for the SM6115 above, and has no GMU. Its
-# zap shader (shared by both boards' DTS) comes from the qcom-firmwares repo
-# (firmware/QCOM_FW.pin); embedded for the same reason as the other SoCs.
-qcom/sm4450/a613_zap.mbn
+# Empty: nothing needs firmware before the root mounts. msm-firmware-loader serves each device's
+# own GPU firmware from its vendor partition (SQE/GMU/AQE as qcom/<name>, the zap shader as
+# qcom/<soc>/<name>), and built-in firmware is searched first, so a copy here would shadow it. msm
+# loads the GPU on first open and retries on the next one if that fails, so an open from the
+# initramfs only defers it. DSPs, amp configs and topologies load after the root mounts too.

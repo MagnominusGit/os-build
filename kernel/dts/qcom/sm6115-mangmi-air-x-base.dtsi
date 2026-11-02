@@ -432,7 +432,7 @@
 		awinic,audio-channel = <0>;
 		awinic,sync-flag;
 		sound-name-prefix = "SPK_L";
-		firmware-name = "aw88261_acf.bin";
+		firmware-name = "qcom/sm6115/mangmi/aw882xx_acf.bin";
 
 		#sound-dai-cells = <0>;
 	};
@@ -452,7 +452,7 @@
 		awinic,audio-channel = <1>;
 		awinic,sync-flag;
 		sound-name-prefix = "SPK_R";
-		firmware-name = "aw88261_acf.bin";
+		firmware-name = "qcom/sm6115/mangmi/aw882xx_acf.bin";
 
 		#sound-dai-cells = <0>;
 	};

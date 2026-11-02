@@ -13,7 +13,12 @@
 # variant) to the exact name the kernel driver requests.
 #
 # Fetch + verify with:  firmware/fetch-linux-fw.sh   (no arguments — one flat tree for
-# every SoC; the unified Image embeds the union.)
+# every SoC.)
+#
+# On the card, msm-firmware-loader serves each device's own qcom/ and qca/ firmware from its Android
+# partitions (packages/msm-firmware-loader), so rootfs/assemble-rootfs.sh ships only the video
+# firmware, Wi-Fi and topologies from this pin, and nothing is built into the kernel
+# (kernel/embed.list is empty). The other rows stay for the installer medium, which has no loader yet.
 # Pinned to a NAMED upstream release rather than a drive-by main commit, so the pin says what
 # it is and a bump is reviewable. 20260810 is the tag; the commit below is that tag dereferenced
 # (`git ls-remote '20260810^{}'`), because the plain/?id= endpoint wants a commit.
@@ -26,12 +31,12 @@
 commit: 2135b2f7714a3a514c989b9728f51f36144cab6f
 base:   https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git/plain
 
-# Adreno gen70900 (A750 / SM8650) GPU firmware — also embedded in the kernel Image (CONFIG_EXTRA_FIRMWARE)
+# Adreno gen70900 (A750 / SM8650) GPU firmware
 qcom/gen70900_aqe.fw       qcom/gen70900_aqe.fw     25237c161d727b8ea92b4beb837a31651b44ea78bfc34d95672af8f346a45825
 qcom/gen70900_sqe.fw       qcom/gen70900_sqe.fw     f756bafe5f69a87161c7c53385386374a791861a574c244e845baba677993842
 qcom/gmu_gen70900.bin      qcom/gmu_gen70900.bin    9685f62c42543befcaee68d25355e16bf55cdb0d573bddcc9f6633f59eec3f72
 # A750 zap shader — now OPEN in linux-firmware (qcom/sm8650/), replacing the vendor-image
-# blob previously carried in qcom-firmwares. Shared across all SM8650 boards; embedded.
+# blob previously carried in qcom-firmwares. Shared across all SM8650 boards.
 qcom/sm8650/gen70900_zap.mbn  qcom/sm8650/gen70900_zap.mbn  04aced0ce55bea7c0c231e275e2d02c385085a7376606638596b2be8599adba1
 # Pocket S2 + Pocket FIT AudioReach topology, one file for both boards. The kernel requests
 # qcom/<card driver_name>/<card model>-tplg.bin, and both boards are the ayaneo,pocket-s2-sndcard
@@ -40,18 +45,18 @@ qcom/sm8650/gen70900_zap.mbn  qcom/sm8650/gen70900_zap.mbn  04aced0ce55bea7c0c23
 # copy it replaces said 7 (WSA2) and only worked behind our dropped 0810.
 qcom/sm8650/ayaneo/ps2/SM8650-APS2-tplg.bin  qcom/ayaneo-ps2/SM8650-APS2-tplg.bin  66e01a76c413928c4e0934a6e3d993c948c4594db693b8dc0c490882e847b81b
 
-# Adreno gen70200 (A740 / SM8550) GPU firmware — also embedded in the kernel Image.
+# Adreno gen70200 (A740 / SM8550) GPU firmware.
 # NOTE: unlike the A750, the A740 zap shader is OPEN and shipped by linux-firmware under
-# the qcom/sm8550/ subdir (the board DTS zap-shader firmware-name points here) — it does
+# the qcom/sm8550/ subdir (the name the board DTS zap-shader firmware-name asks for) — it does
 # NOT come from qcom-firmwares. Present at the pinned commit above.
 qcom/a740_sqe.fw           qcom/a740_sqe.fw         96fee336424b139100fc60b5b45a907360e4b3936d7e1d00406b9bd80ca48473
 qcom/gmu_gen70200.bin      qcom/gmu_gen70200.bin    1a2a419c39046d3141fc5fed5aa7f971de2db40cc7a1d89693c3e26fad64dd98
 qcom/sm8550/a740_zap.mbn   qcom/sm8550/a740_zap.mbn 386bbdc25ae94a9398e33e7580eecfdcef6c472682a1e3123e1374bcffe7cde3
 
 # Adreno gen80000 (A830 / SM8750 — AYN Odin 3, KONKR Pocket FIT Elite) GPU microcode +
-# zap shader — embedded in the kernel Image like the other SoCs' GPU sets. The zap is OPEN
-# under qcom/sm8750/ and shared by both boards (their DTS zap-shader firmware-name points
-# here); it is byte-identical to the copy armada ships, while ROCKNIX's extra-firmware
+# zap shader. The zap is OPEN
+# under qcom/sm8750/ and shared by both boards (the name their DTS zap-shader firmware-name
+# asks for); it is byte-identical to the copy armada ships, while ROCKNIX's extra-firmware
 # still carries a stale pre-upstream zap that their own build never embeds. NOTE: unlike
 # WCN7850 below, the SM8750 boards' WCN7860 Wi-Fi/BT blobs are NOT upstream yet — those
 # live in qcom-firmwares (ath12k/WCN7860/, qca/gngbt*).
@@ -95,16 +100,16 @@ qcom/vpu/vpu35_p4_s7.mbn   qcom/vpu/vpu35_p4.mbn    26c92bd0e62a131e487431cf63a1
 # genuinely missing (slpi, and the Thor Lite's amp calibration).
 # ---------------------------------------------------------------------------------------
 
-# Adreno 650 GPU microcode + zap shader (open) — also embedded in the kernel Image.
-# The zap is shared by all six boards; every board .dts points its &gpu_zap_shader at it.
+# Adreno 650 GPU microcode + zap shader (open).
+# The zap is shared by all six boards; every board .dts asks for it by this name.
 qcom/a650_sqe.fw           qcom/a650_sqe.fw         c863ceac3a823af215205d7803776bfdc68098c2c2a5d2fd05b4aa77cd336b4b
 qcom/a650_gmu.bin          qcom/a650_gmu.bin        df79fa8482fcc7587bb239b9c9e2b24bce4729893b990fe3f82b30da8175b01c
 qcom/sm8250/a650_zap.mbn   qcom/sm8250/a650_zap.mbn 0624d84e0ecc5e08dce55e33c4e0e34a4c1221bb8b9b2716c699a2cb79fe99de
 
 # adsp / cdsp DSP images. NOTE the contrast with SM8550/SM8650, where each board needs its
 # own vendor-signed pair out of qcom-firmwares: the SM8250 boards all ask for the generic
-# qcom/sm8250/ path, and linux-firmware has it. Not embedded — QCOM_Q6V5_PAS is =m and
-# loads after the root is mounted.
+# qcom/sm8250/ path, and linux-firmware has it. On the card each board's own pair is served
+# under that path instead.
 qcom/sm8250/adsp.mbn       qcom/sm8250/adsp.mbn     7fd1fa907d0cb44a87e7339ffa0ce279cf08d6a70f8e7cd199a3fcd10d000a38
 qcom/sm8250/cdsp.mbn       qcom/sm8250/cdsp.mbn     42b371d64e87b7c40775ed9474e5f4f1b5d84b3a6766ba1d74a5bcfa255016a1
 
@@ -156,7 +161,7 @@ qca/htnv20.bin             qca/htnv20.bin           a4c0cbafc102998805679a2947aa
 # msm-firmware-loader (packages/msm-firmware-loader); only these two stay open. The A610 has no
 # GMU, so there is no gmu row. Every sha below was taken from the file downloaded at the commit above.
 # ---------------------------------------------------------------------------------------
-# Adreno 610 GPU microcode — the A610 runs the A630 SQE firmware. Embedded (kernel/embed.list).
+# Adreno 610 GPU microcode — the A610 runs the A630 SQE firmware.
 qcom/a630_sqe.fw           qcom/a630_sqe.fw           1c21b527d9183487cc550dabbb3f43e555df5a977a461934fc61f0635a9aa90c
 # Venus 6.0 video firmware, for VIDEO_QCOM_VENUS=m (kernel/kernel.config; on since 2026-10-16), which
 # loads it at probe. Qualcomm-signed for QCM2290: whether MANGMI's loader accepts it is a dmesg line on
@@ -164,7 +169,7 @@ qcom/a630_sqe.fw           qcom/a630_sqe.fw           1c21b527d9183487cc550dabbb
 qcom/venus-6.0/venus.mbn   qcom/venus-6.0/venus.mbn   602d18992dbc11c7141472d4c68778d49277491ca7452ebf6115be0e6119572a
 # ---------------------------------------------------------------------------------------
 # SM4450 (Snapdragon G1 Gen 2) — Retroid Pocket Classic (all revisions) and Anbernic RG 55G1.
-# Added 2026-10-26. The A613 runs the A630 SQE (the SM6115 row above, already embedded); its zap,
+# Added 2026-10-26. The A613 runs the A630 SQE (the SM6115 row above); its zap,
 # the aDSP and the WPSS are vendor-signed and in QCOM_FW.pin. Open here: the generic WCN3990
 # ath10k pair. Neither board's wifi node names a firmware-name, so ath10k_snoc asks for these
 # default paths (the SM6115 boards use per-board copies from qcom-firmwares instead). No

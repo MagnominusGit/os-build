@@ -1735,7 +1735,7 @@
 
 		zap-shader {
 			memory-region = <&gpu_microcode_mem>;
-			firmware-name = "qcom/sm4450/a613_zap.mbn";
+			firmware-name = "qcom/sm4450/gen6_3_26_0_zap.mbn";
 		};
 
 		gpu_opp_table: opp-table {
@@ -2008,12 +2008,6 @@
 			bluetooth: bluetooth {
 				compatible = "qcom,wcn3950-bt";
 
-				/*
-				 * This SoC's Bluetooth build, beside the SM6115 one at the
-				 * default qca/ names; the NVM keeps its s/t flavour (patch 1027).
-				 */
-				firmware-name = "sm4450/cmnv13", "sm4450/cmbtfw13.tlv";
-
 				vddio-supply = <&vreg_pmu_io>;
 				vddxo-supply = <&vreg_pmu_xo>;
 				vddrf-supply = <&vreg_pmu_rf>;
@@ -2220,7 +2214,7 @@
 			compatible = "awinic,aw88166";
 			reg = <0x34>;
 			#sound-dai-cells = <0>;
-			firmware-name = "qcom/sm4450/RG55G1/aw88166_acf.bin";
+			firmware-name = "qcom/sm4450/RG55G1/aw883xx_acf.bin";
 			reset-gpios = <&tlmm 1 GPIO_ACTIVE_LOW>;
 			sound-name-prefix = "Left";
 			awinic,audio-channel = <0>;
@@ -2231,7 +2225,7 @@
 			compatible = "awinic,aw88166";
 			reg = <0x35>;
 			#sound-dai-cells = <0>;
-			firmware-name = "qcom/sm4450/RG55G1/aw88166_acf.bin";
+			firmware-name = "qcom/sm4450/RG55G1/aw883xx_acf.bin";
 			reset-gpios = <&tlmm 46 GPIO_ACTIVE_LOW>;
 			sound-name-prefix = "Right";
 			awinic,audio-channel = <1>;
