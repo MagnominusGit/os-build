@@ -19,7 +19,8 @@
 # name, as Android does; 0008 cuts the remaining forks on the boot path; 0009 moves dsp, persist
 # and the hexagonrpc tree to that second run; 0010 links image/ subfolders too (SM4450 WPSS);
 # 0011 also serves qcom/ (GPU microcode) and the SoC's folder (zap shaders, SM8250 DSPs);
-# 0012 serves qca/ (Bluetooth) from the bluetooth partition.
+# 0012 serves qca/ (Bluetooth) from the bluetooth partition; 0013 lets files under
+# /usr/lib/msm-firmware-loader/override (laid out as /lib/firmware) win for their paths.
 #
 # It runs on every board, serving whatever its partitions hold under qcom/ (GPU microcode), the
 # SoC's qcom/<soc>/ (zap shaders, SM8250 DSPs), the devicetree's device folders (e.g. adsp/cdsp

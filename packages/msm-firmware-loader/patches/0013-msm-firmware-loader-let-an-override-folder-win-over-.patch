@@ -1,0 +1,46 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Mon, 2 Nov 2026 01:25:47 -0800
+Subject: [PATCH] msm-firmware-loader: let an override folder win over the
+ partitions
+
+Files under /usr/lib/msm-firmware-loader/override, laid out as under /lib/firmware, are linked over whatever the partitions provide for the same path, so one board can be given a known-good blob without changing the rule for every board.
+---
+ msm-firmware-loader.sh | 17 +++++++++++++++++
+ 1 file changed, 17 insertions(+)
+
+diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
+index 844e313..868653e 100644
+--- a/msm-firmware-loader.sh
++++ b/msm-firmware-loader.sh
+@@ -120,6 +120,9 @@ SUPER_PARTITIONS="
+ # Base directory to be used to unfold the partitions into.
+ BASEDIR="/run/msm-firmware-loader"
+ 
++# Files here, laid out as under /lib/firmware, win over the partitions' copies.
++OVERRIDE_DIR="/usr/lib/msm-firmware-loader/override"
++
+ # hexagonrpcd's partitions are not needed before udev, so the boot run leaves
+ # them out and a later unit runs this again with "hexagonrpc" to mount them
+ # and build the tree hexagonrpcd serves, see
+@@ -340,6 +343,20 @@ do
+ 	ln -s "$dir"/* "$BASEDIR/target/qca/" 2>/dev/null || :
+ done
+ 
++# Overrides: the way to give one board a known-good blob for one path when its
++# own partitions carry a bad one. Signed images (DSPs, zap shaders) only load
++# from the same device's own copy, so this suits open ones (GPU microcode,
++# Bluetooth, amp configs) or a copy taken from that device.
++if [ -d "$OVERRIDE_DIR" ]
++then
++	(cd "$OVERRIDE_DIR" && find . -type f) | while read -r f
++	do
++		f="${f#./}"
++		case "$f" in */*) mkdir -p "$BASEDIR/target/${f%/*}" ;; esac
++		ln -sfn "$OVERRIDE_DIR/$f" "$BASEDIR/target/$f"
++	done
++fi
++
+ # Set the new custom firmware path:
+ printf "%s" "$BASEDIR/target" > /sys/module/firmware_class/parameters/path
+ 
