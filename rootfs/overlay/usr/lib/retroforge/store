@@ -164,9 +164,12 @@ def read_pin(name):
 
 
 def write_private(path, text):
-    """text into path, readable by the player only, replaced in one rename."""
+    """text into path, readable by the player only, replaced in one rename. The temporary file is this
+    process's own: OGUI loads a store's library twice at once at startup, and through one shared
+    <path>.part the second rename found it gone (FileNotFoundError, exit 1), which emptied the library
+    (issue #32)."""
     os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
-    tmp = path + ".part"
+    tmp = f"{path}.{os.getpid()}.part"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(text)

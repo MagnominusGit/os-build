@@ -37,8 +37,11 @@ func steam_root() -> String:
 
 
 func get_library_launch_items() -> Array[LibraryLaunchItem]:
-	var games := await _games()
+	var games = await _games()
 	var items: Array[LibraryLaunchItem] = []
+	if games == null:  # a failed listing is not an empty library (as library_store.gd, issue #32)
+		logger.warn("Steam library not listed: its games stay as they were")
+		return items
 	var installed := 0
 	for game in games:
 		items.append(_launch_item(game))
@@ -48,8 +51,9 @@ func get_library_launch_items() -> Array[LibraryLaunchItem]:
 	return items
 
 
-## steam-library's games, run on a worker thread: on a large account it reads tens of MB.
-func _games() -> Array:
+## steam-library's games, run on a worker thread: on a large account it reads tens of MB. null when
+## it failed.
+func _games() -> Variant:
 	var out := []
 	var task := WorkerThreadPool.add_task(func() -> void:
 		var output: Array = []
@@ -60,7 +64,7 @@ func _games() -> Array:
 	WorkerThreadPool.wait_for_task_completion(task)
 	if out.size() < 2 or out[0] != 0:
 		logger.warn("%s failed (exit %s)" % [HELPER, out[0] if out.size() > 0 else "?"])
-		return []
+		return null
 	return SteamApps.parse_library(out[1])
 
 

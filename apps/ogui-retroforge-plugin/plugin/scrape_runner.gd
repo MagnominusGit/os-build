@@ -20,6 +20,10 @@ const PREFIX := "retroforge-scrape: "
 
 var tool := TOOL
 var running := false
+## On threads of its own, not the shared worker pool: a run lasts as long as the tool (an install:
+## minutes), and its two pipe readers held both of the pool's low-priority threads, so every card's
+## art load waited behind them: all tabs showed empty cards until an install ended (issue #32).
+var _thread: Thread
 var _pid := -1
 
 
@@ -30,7 +34,8 @@ func start(args: Array, stdin_text := "") -> bool:
 		return false
 	running = true
 	_pid = -1
-	WorkerThreadPool.add_task(_run.bind(PackedStringArray(args), stdin_text))
+	_thread = Thread.new()
+	_thread.start(_run.bind(PackedStringArray(args), stdin_text))
 	return true
 
 
@@ -40,7 +45,7 @@ func cancel() -> void:
 		OS.execute("kill", ["-TERM", str(_pid)])
 
 
-# Worker thread.
+# Its own thread.
 func _run(args: PackedStringArray, stdin_text: String) -> void:
 	# Godot forks before it tries the program: a missing one still "runs" and exits 9, which is the
 	# tool's own "no developer login" code. So it must exist first.
@@ -51,7 +56,8 @@ func _run(args: PackedStringArray, stdin_text: String) -> void:
 	_pid = pipe["pid"]
 	var io: FileAccess = pipe["stdio"]
 	var errors: Array[String] = []
-	var err_task := WorkerThreadPool.add_task(_drain.bind(pipe["stderr"], errors))
+	var err_thread := Thread.new()
+	err_thread.start(_drain.bind(pipe["stderr"], errors))
 	if stdin_text != "":
 		io.store_string(stdin_text + "\n")
 		io.flush()
@@ -65,14 +71,14 @@ func _run(args: PackedStringArray, stdin_text: String) -> void:
 			progressed.emit.call_deferred(parsed["percent"])
 		elif parsed.has("summary"):
 			summary = parsed["summary"]
-	WorkerThreadPool.wait_for_task_completion(err_task)
+	err_thread.wait_to_finish()
 	while OS.is_process_running(_pid):
 		OS.delay_msec(10)
 	var code := OS.get_process_exit_code(_pid)
 	_end.call_deferred(code, summary, "" if code == 0 or errors.is_empty() else errors[-1])
 
 
-# Worker thread: read stderr to its end, keeping its lines.
+# A thread of its own: read stderr to its end, keeping its lines.
 static func _drain(err: FileAccess, lines: Array[String]) -> void:
 	while true:
 		var line := err.get_line()
@@ -83,6 +89,9 @@ static func _drain(err: FileAccess, lines: Array[String]) -> void:
 
 
 func _end(code: int, summary: Dictionary, error: String) -> void:
+	if _thread:
+		_thread.wait_to_finish()
+		_thread = null
 	running = false
 	_pid = -1
 	finished.emit(code, summary, error)

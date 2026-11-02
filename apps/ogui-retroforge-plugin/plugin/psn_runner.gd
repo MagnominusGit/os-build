@@ -17,6 +17,10 @@ const TOOL := "/usr/bin/retroforge-launch"
 
 var tool := TOOL
 var running := false
+## On threads of its own, not the shared worker pool: a run lasts as long as the tool (an install:
+## minutes), and its two pipe readers held both of the pool's low-priority threads, so every card's
+## art load waited behind them: all tabs showed empty cards until an install ended (issue #32).
+var _thread: Thread
 
 
 ## Start the install. False when a run is already going.
@@ -24,11 +28,12 @@ func start() -> bool:
 	if running:
 		return false
 	running = true
-	WorkerThreadPool.add_task(_run)
+	_thread = Thread.new()
+	_thread.start(_run)
 	return true
 
 
-# Worker thread.
+# Its own thread.
 func _run() -> void:
 	# Godot forks before it tries the program: a missing one still "runs" with a bogus exit code.
 	var pipe := OS.execute_with_pipe(tool, ["--psn-install"], true) if FileAccess.file_exists(tool) else {}
@@ -37,7 +42,8 @@ func _run() -> void:
 		return
 	var io: FileAccess = pipe["stdio"]
 	var errors: Array[String] = []
-	var err_task := WorkerThreadPool.add_task(_drain.bind(pipe["stderr"], errors))
+	var err_thread := Thread.new()
+	err_thread.start(_drain.bind(pipe["stderr"], errors))
 	var results := []
 	while true:
 		var line := io.get_line()
@@ -46,14 +52,14 @@ func _run() -> void:
 		var parsed := parse_line(line)
 		if not parsed.is_empty():
 			results.append(parsed)
-	WorkerThreadPool.wait_for_task_completion(err_task)
+	err_thread.wait_to_finish()
 	while OS.is_process_running(pipe["pid"]):
 		OS.delay_msec(10)
 	var code := OS.get_process_exit_code(pipe["pid"])
 	_end.call_deferred(code, results, "" if code == 0 or errors.is_empty() else errors[-1])
 
 
-# Worker thread: read stderr to its end, keeping its lines.
+# A thread of its own: read stderr to its end, keeping its lines.
 static func _drain(err: FileAccess, lines: Array[String]) -> void:
 	while true:
 		var line := err.get_line()
@@ -64,6 +70,9 @@ static func _drain(err: FileAccess, lines: Array[String]) -> void:
 
 
 func _end(code: int, results: Array, error: String) -> void:
+	if _thread:
+		_thread.wait_to_finish()
+		_thread = null
 	running = false
 	finished.emit(code, results, error)
 

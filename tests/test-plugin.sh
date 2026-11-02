@@ -167,6 +167,42 @@ grep -q 'out.append(OS.execute(tool, args, output, true))' "$SRC/library_store.g
   && grep -q '"sign in again" in line' "$SRC/library_store.gd" \
   && ok "a store that ended the sign-in says so when its library loads" \
   || bad "library_store.gd does not tell the player a store ended the sign-in (an empty library, silently)"
+# A listing that FAILED (exit 1: two loads at once at startup raced, Pocket FIT 2026-11-02; the Air X
+# during an install) is not an empty library: _drop_stale removed every card of the store, and the
+# Installed tab emptied until the next load (issue #32). Only exit 3 (signed out, or the sign-in
+# refused) empties it; a failure keeps the cards there are.
+python3 - "$SRC/library_store.gd" <<'PY2' \
+  && ok "a failed store listing keeps the store's cards; only signed out (exit 3) empties the library" \
+  || bad "library_store.gd drops every card of a store when its listing fails (issue #32)"
+import sys
+s = open(sys.argv[1]).read()
+get = s[s.index("func get_library_launch_items()"):s.index("func _games()")]
+games = s[s.index("func _games()"):s.index("func _drop_stale(")]
+sys.exit(0 if "if games == null:" in get and get.index("if games == null:") < get.index("_drop_stale(items)")
+         and "return null" in games and "return []" in games else 1)
+PY2
+python3 - "$SRC/library_steam.gd" <<'PY2' \
+  && ok "a failed Steam listing keeps the Steam cards" \
+  || bad "library_steam.gd drops every Steam card when steam-library fails"
+import sys
+s = open(sys.argv[1]).read()
+get = s[s.index("func get_library_launch_items()"):s.index("func _games()")]
+games = s[s.index("func _games()"):s.index("func _drop_stale(")]
+sys.exit(0 if "if games == null:" in get and get.index("if games == null:") < get.index("_drop_stale(items)")
+         and "return null" in games else 1)
+PY2
+# The runners read a tool's pipes for as long as it runs (an install: minutes). On WorkerThreadPool
+# that held both of its low-priority threads (30% of 8), and every card's art load (shared_art.gd)
+# waited behind them: all tabs showed empty cards until the install ended (issue #32). They run on
+# threads of their own.
+for f in store_runner.gd psn_runner.gd scrape_runner.gd; do
+  if ! grep -q "WorkerThreadPool" "$SRC/$f" && grep -q "_thread = Thread.new()" "$SRC/$f" \
+     && grep -q "_thread.wait_to_finish()" "$SRC/$f" && grep -q "err_thread.wait_to_finish()" "$SRC/$f"; then
+    ok "$f reads its tool on threads of its own, not the shared pool"
+  else
+    bad "$f holds WorkerThreadPool threads for its tool's whole run: art loads starve (issue #32)"
+  fi
+done
 ! grep -qiE 'qr|phone' "$SRC/store_settings.gd" && ok "no QR code or phone left on the Stores page (plan D4)" \
   || bad "store_settings.gd still mentions the QR/phone sign-in"
 # Steam's download ends with the client updated and closed: nothing said the next step is opening it,

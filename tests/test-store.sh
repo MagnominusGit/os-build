@@ -1036,6 +1036,29 @@ ok(store("epic", "sign-out").returncode == 0 and json.loads(store("epic", "statu
 CASE = "usage"
 ok(store("steam", "games").returncode == 2 and store("gog", "install").returncode == 2, "a bad invocation is exit 2")
 
+CASE = "concurrent writers"
+# OGUI loads a store's library twice at once at startup; both `games` runs write <store>-games.json and
+# <store>-library.json. Through one shared <file>.part, the second rename found it gone
+# (FileNotFoundError, exit 1), and the plugin dropped every card of that store (issue #32).
+WRITER = f"""
+import importlib.machinery, importlib.util, sys, time
+loader = importlib.machinery.SourceFileLoader("store", {STORE!r})
+spec = importlib.util.spec_from_loader("store", loader); m = importlib.util.module_from_spec(spec); loader.exec_module(m)
+start = float(sys.argv[2])
+while time.time() < start:  # both at once: imported, then writing together
+    pass
+for i in range(3000):
+    m.write_private(sys.argv[1], "x" * 4096)
+"""
+target = os.path.join(T, "race", "lib.json")
+start = str(time.time() + 1.5)
+procs = [subprocess.Popen([sys.executable, "-c", WRITER, target, start], env=BASE_ENV, stderr=subprocess.PIPE, text=True)
+         for _ in range(2)]
+errs = [(p.wait(timeout=60), p.stderr.read()) for p in procs]
+ok(all(rc == 0 for rc, _ in errs) and open(target).read() == "x" * 4096
+   and not [f for f in os.listdir(os.path.dirname(target)) if f.endswith(".part")],
+   "two writers of one file at once both succeed, and leave no .part behind", " / ".join(e[-300:] for _, e in errs))
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)
 PY

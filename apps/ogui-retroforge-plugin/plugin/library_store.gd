@@ -51,7 +51,12 @@ func get_library_launch_items() -> Array[LibraryLaunchItem]:
 	var items: Array[LibraryLaunchItem] = []
 	if not FileAccess.file_exists(tool):
 		return items
-	var games := await _games()
+	var games = await _games()
+	# A failed listing is not an empty library: dropping the store's cards for it emptied the library
+	# and its Installed tab (two loads at once at startup, an install running: issue #32).
+	if games == null:
+		logger.warn("%s library not listed: its games stay as they were" % TITLES[store])
+		return items
 	var installed := 0
 	for game in games:
 		if game is Dictionary and str(game.get("id", "")) != "" and str(game.get("title", "")) != "":
@@ -67,8 +72,9 @@ func get_library_launch_items() -> Array[LibraryLaunchItem]:
 ## `store <s> games` on a worker thread: it may ask the store's servers. Its stderr comes too
 ## (`store: ` lines), for the store refusing the sign-in (exit 3 with "sign in again": the stored
 ## refresh token was revoked or expired, and the helper signed the store out): the player is told,
-## where never having signed in is just an empty library.
-func _games() -> Array:
+## where never having signed in is just an empty library. [] when signed out (exit 3), null when the
+## listing failed otherwise.
+func _games() -> Variant:
 	var out := []
 	var args := [store, "games"]
 	var task := WorkerThreadPool.add_task(func() -> void:
@@ -91,12 +97,13 @@ func _games() -> Array:
 			notification_manager.show(Notification.new(refused[0].to_upper() + refused.substr(1) + "."))
 		elif code != 3:  # 3: not signed in, an empty library
 			logger.warn("store %s games failed (exit %d)" % [store, code])
+			return null
 		return []
 	for line in lines:
 		if line.begins_with("["):
 			var data = JSON.parse_string(line)
-			return data if data is Array else []
-	return []
+			return data if data is Array else null
+	return null
 
 
 ## OGUI's load_library only ever adds: remove our cards whose game is gone (signed out, a license
