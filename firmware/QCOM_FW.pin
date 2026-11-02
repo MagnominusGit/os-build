@@ -4,11 +4,7 @@
 # history-free import of Nova-Deck/qcom-firmwares dbf238b, plus the SM6115 MANGMI blobs that
 # used to come from ROCKNIX/extra-firmware 925dfb5 via a separate EXTRA_FW.pin).
 #
-# Pinned by # On the card, msm-firmware-loader serves each device's own qcom/ and qca/ firmware from its Android
-# partitions (packages/msm-firmware-loader), so rootfs/assemble-rootfs.sh ships only the video
-# firmware, Wi-Fi and topologies from this pin, and nothing is built into the kernel
-# (kernel/embed.list is empty). The other rows stay for the installer medium, which has no loader yet.
-commit: a git commit SHA is content-addressed, so it nails the exact bytes.
+# Pinned by commit: a git commit SHA is content-addressed, so it nails the exact bytes.
 # fetch-qcom-fw.sh additionally verifies every fetched file against the repo's own
 # sha256sums.txt (belt-and-suspenders against a corrupt/tampered download).
 #
@@ -29,6 +25,10 @@ repo:   https://github.com/retroforge-linux/qcom-firmwares
 # cmnv13t.bin there; the SM6115 set (00116) at the default qca/ names is unchanged. The SM4450 DTS
 # no longer name it: each board's own BTFM set is served at the default qca/ names on the card.
 # Fast-forwarded to that repo's main 2026-10-27, so 785196e is the main commit itself.
+# On the card, msm-firmware-loader serves each device's own qcom/ and qca/ firmware from its Android
+# partitions (packages/msm-firmware-loader), so rootfs/assemble-rootfs.sh ships only the video
+# firmware, Wi-Fi and topologies from this pin, and nothing is built into the kernel
+# (kernel/embed.list is empty). The other rows stay for the installer medium, which has no loader yet.
 commit: 785196eda05de7832b128bdd5bf1df741f1a8311
 
 # --- SM8250: OPEN, with one exception, and one still-open gap ----------------------------
