@@ -2,7 +2,7 @@
 # (postmarketOS msm-firmware-loader + make-dynpart-mappings), built FROM SOURCE via the local
 # PKGBUILD; see its header. Neither is in the holo snapshot.
 #
-# Patches, all ours (0001-0005 from ROCKNIX's SM6115 port, 0006-0008 written here):
+# Patches, all ours (0001-0005 from ROCKNIX's SM6115 port, 0006-0009 written here):
 #   0001  slot from the GPT A/B flags of boot_a/boot_b: OpenABL boots Linux with no
 #         androidboot.slot_suffix and qbootctl needs udev's by-partlabel links.
 #   0002  without a fastrpc user, link the sensors registry from the plain persist mount.
@@ -15,10 +15,12 @@
 #         ueventd searches them; OEMs put rebuilt ADSPs there (Odin 3, Odin 2 Portal, RP Nova, Classic).
 #   0008  fewer forks on the boot path: builtins for the cmdline and firmware path, od for the GPT,
 #         the cached slot, one mkdir, one ln -s per partition directory.
+#   0009  dsp, persist and the hexagonrpc tree in a second run ("hexagonrpc") for hexagonrpcd's
+#         units, not before udev: rootfs/overlay's msm-firmware-loader-hexagonrpc.service.
 #
 # After adding or bumping this: `make relock` (the package must land in rootfs/manifest.lock; it is
 # listed in PKGS in rootfs/customize-base.sh).
 name: msm-firmware-loader
 pkgbuild_local: PKGBUILD
-patches: 0001-msm-firmware-loader-read-the-active-slot-from-the-GP.patch 0002-msm-firmware-loader-link-the-sensors-registry-withou.patch 0003-msm-firmware-loader-expose-blobs-only-under-device-f.patch 0004-msm-firmware-loader-map-the-dynamic-partitions-of-th.patch 0005-msm-firmware-loader-scan-and-link-without-forking-pe.patch 0006-msm-firmware-loader-mount-persist-and-dsp-without-re.patch 0007-msm-firmware-loader-prefer-the-vendor-partition-s-bl.patch 0008-msm-firmware-loader-fork-less-on-the-boot-path.patch
+patches: 0001-msm-firmware-loader-read-the-active-slot-from-the-GP.patch 0002-msm-firmware-loader-link-the-sensors-registry-withou.patch 0003-msm-firmware-loader-expose-blobs-only-under-device-f.patch 0004-msm-firmware-loader-map-the-dynamic-partitions-of-th.patch 0005-msm-firmware-loader-scan-and-link-without-forking-pe.patch 0006-msm-firmware-loader-mount-persist-and-dsp-without-re.patch 0007-msm-firmware-loader-prefer-the-vendor-partition-s-bl.patch 0008-msm-firmware-loader-fork-less-on-the-boot-path.patch 0009-msm-firmware-loader-build-the-hexagonrpc-tree-after-.patch
 pkgrel_suffix: 1

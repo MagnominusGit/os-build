@@ -1,0 +1,59 @@
+# retroforge hexagonrpcd — serves the files Qualcomm Hexagon DSPs ask the CPU for over FastRPC,
+# built FROM SOURCE via a retroforge-owned PKGBUILD. Not in the holo snapshot; Alpine/postmarketOS
+# package it as hexagonrpcd, which is where the user and udev rule below come from.
+#
+# WHAT IT DOES ON THE AIR X. The ADSP's sensors PD reads its sensor registry (persist) and the
+# driver configs (vendor/etc/sensors) through hexagonrpcd's virtual tree; without it the Sensor
+# Core service registers but finds no sensors. packages/msm-firmware-loader builds that tree from
+# the board's own partitions under /run/msm-firmware-loader/hexagonrpc, and the drop-ins in
+# rootfs/overlay/usr/lib/systemd/system/hexagonrpcd-*.service.d point the daemons there.
+#
+# Upstream's units run as fastrpc:fastrpc. The user is pinned at 965 in
+# rootfs/overlay/usr/lib/sysusers.d/01-retroforge-enforce-ids.conf; the udev rule hands it the
+# /dev/fastrpc-* nodes, as Alpine's package does. The loader id-maps persist for that user, since
+# Android leaves the registry files 0600 to its own uid 1000.
+#
+# Patch 0001 drops the ADSP units' Conflicts=suspend.target: it stopped them on suspend and nothing
+# started them on resume, which ended the sensors until reboot (seen on the Air X, 2026-11-02).
+# Stopping them saves nothing: idle, hexagonrpcd sleeps in the FastRPC ioctl (0 wakeups in 30 s,
+# also while a client streamed the accelerometer); the sensors draw power only while a client of
+# the Sensor Core has a stream open.
+#
+# Only the sensors servers are enabled (60-retroforge-hexagonrpcd.preset). The ADSP root PD asks
+# the Air X for nothing the partitions hold (one lowi/lowi_lp.conf, a location config).
+#
+# To bump: change pkgver and its sha256sum together (GitHub tag tarball, taken 2026-11-01). makepkg
+# runs with --skipinteg in this tree, so prepare() verifies it itself.
+
+pkgname=hexagonrpcd
+pkgver=0.5.0
+pkgrel=1
+pkgdesc='FastRPC file server for Qualcomm Hexagon DSPs (sensors registry and configs)'
+arch=('aarch64')
+url='https://github.com/linux-msm/hexagonrpc'
+license=('GPL-3.0-or-later')
+depends=('glibc')
+makedepends=('meson')
+source=("hexagonrpc-${pkgver}.tar.gz::${url}/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=('2173985932ab68d8ac593f9954357123bdbbbe9ba5f1b17a098d9cbcec22c5d5')
+
+prepare() {
+  echo "${sha256sums[0]}  ${source[0]%%::*}" | sha256sum -c - >/dev/null \
+    || { echo "checksum mismatch: ${source[0]%%::*}" >&2; return 1; }
+  cd "hexagonrpc-${pkgver}"
+  # build-overlay.sh injects `patch -p1 < "$srcdir/<patch>"` for each source.pin `patches:` entry
+  # right here, after the first `cd`. Keep this `cd` as the first one in prepare().
+}
+
+build() {
+  arch-meson "hexagonrpc-${pkgver}" build
+  meson compile -C build
+}
+
+package() {
+  meson install -C build --destdir "${pkgdir}" --no-rebuild
+  install -d "${pkgdir}/usr/lib/sysusers.d" "${pkgdir}/usr/lib/udev/rules.d"
+  echo 'u fastrpc - "FastRPC" -' > "${pkgdir}/usr/lib/sysusers.d/hexagonrpcd.conf"
+  echo 'SUBSYSTEM=="misc", KERNEL=="fastrpc-*", OWNER="fastrpc", GROUP="fastrpc", MODE="0600"' \
+    > "${pkgdir}/usr/lib/udev/rules.d/10-fastrpc.rules"
+}

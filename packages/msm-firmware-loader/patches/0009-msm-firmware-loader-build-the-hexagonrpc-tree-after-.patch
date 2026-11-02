@@ -1,0 +1,169 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sun, 1 Nov 2026 16:25:54 -0800
+Subject: [PATCH] msm-firmware-loader: build the hexagonrpc tree after boot
+
+The loader gates udevd, and the dsp and persist mounts, the id-mapped
+persist mount and the hexagonrpc tree cost about 100 ms there for a daemon
+that starts with multi-user. Run with "hexagonrpc", the script now does
+only that part, and the boot run leaves it out.
+
+diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
+index 82c330b..dfbe0fc 100644
+--- a/msm-firmware-loader.sh
++++ b/msm-firmware-loader.sh
+@@ -105,9 +105,7 @@ link_path() {
+ # bluetooth is left out: its blobs are never linked where the kernel looks.
+ FW_PARTITIONS="
+ 	apnhlos
+-	dsp$AB_SLOT
+ 	modem$AB_SLOT
+-	persist
+ 	vendor$AB_SLOT
+ 	RADIO
+ "
+@@ -121,6 +119,76 @@ SUPER_PARTITIONS="
+ # Base directory to be used to unfold the partitions into.
+ BASEDIR="/run/msm-firmware-loader"
+ 
++# hexagonrpcd's partitions are not needed before udev, so the boot run leaves
++# them out and a later unit runs this again with "hexagonrpc" to mount them
++# and build the tree hexagonrpcd serves, see
++# https://github.com/linux-msm/hexagonrpc#hexagonfs
++if [ "$1" = hexagonrpc ]
++then
++	if [ -e "$BASEDIR/hexagonrpc" ]; then exit 0; fi
++	HEXAGONRPC_PARTITIONS="
++		dsp$AB_SLOT
++		persist
++	"
++	for part in /sys/block/mmcblk*/mmcblk*p* /sys/block/sd*/sd*
++	do
++		if ! [ -e "$part" ]; then continue; fi;
++
++		read_uevent "$part"
++
++		if [ -z "${HEXAGONRPC_PARTITIONS##*"$PARTNAME"*}" ] && [ -n "$PARTNAME" ] && [ ! -d "$BASEDIR/mnt/$PARTNAME" ]
++		then
++			# Both are journaled ext4, and a read-only mount still replays
++			# the journal after an unclean Android shutdown; noload does not
++			mkdir -p "$BASEDIR/mnt/$PARTNAME"
++			mount -o ro,noload,nodev,noexec,nosuid \
++				"/dev/$DEVNAME" "$BASEDIR/mnt/$PARTNAME"
++			# Some devices have 600 permissions on persist, therefore we need an additional
++			# mount with UID and GID mappings for hexagonrpcd to access it
++			sensors_file="$BASEDIR/mnt/persist/sensors/registry/registry/sensors_registry"
++			if [ "$PARTNAME" = "persist" ] && [ -f "$sensors_file" ] && id fastrpc > /dev/null 2>&1
++			then
++				source_uid="$(stat -c '%u' "$sensors_file")"
++				source_gid="$(stat -c '%g' "$sensors_file")"
++				target_uid="$(id -u fastrpc)"
++				target_gid="$(id -g fastrpc)"
++				mkdir -p "$BASEDIR/mnt/persist-fastrpc"
++				# Kernel requires both UID and GID mapped
++				mount -o ro,noload,nodev,noexec,nosuid \
++					--map-users="$source_uid:$target_uid:1" \
++					--map-groups="$source_gid:$target_gid:1" \
++					"/dev/$DEVNAME" "$BASEDIR/mnt/persist-fastrpc"
++			fi
++		fi
++	done
++
++	link_path "$BASEDIR/mnt/vendor$AB_SLOT/etc/acdbdata" "$BASEDIR/hexagonrpc/acdb"
++
++	if [ -d "$BASEDIR/mnt/dsp$AB_SLOT/adsp" ] || \
++		[ -d "$BASEDIR/mnt/dsp$AB_SLOT/cdsp" ] || \
++		[ -d "$BASEDIR/mnt/dsp$AB_SLOT/sdsp" ]
++	then
++		# Some devices with separated dsp_a/dsp_b
++		link_path "$BASEDIR/mnt/dsp$AB_SLOT" "$BASEDIR/hexagonrpc/dsp"
++	else
++		# Documented hexagonrpc path
++		link_path "$BASEDIR/mnt/vendor$AB_SLOT/dsp" "$BASEDIR/hexagonrpc/dsp"
++	fi
++
++	link_path "$BASEDIR/mnt/vendor$AB_SLOT/etc/sensors/config" "$BASEDIR/hexagonrpc/sensors/config"
++	link_path "$BASEDIR/mnt/persist-fastrpc/sensors/registry/registry" "$BASEDIR/hexagonrpc/sensors/registry"
++	# Without a fastrpc user hexagonrpcd runs as root and reads persist directly
++	if ! [ -e "$BASEDIR/hexagonrpc/sensors/registry" ]
++	then
++		link_path "$BASEDIR/mnt/persist/sensors/registry/registry" "$BASEDIR/hexagonrpc/sensors/registry"
++	fi
++	link_path "$BASEDIR/mnt/vendor$AB_SLOT/etc/sensors/sns_reg_config" "$BASEDIR/hexagonrpc/sensors/sns_reg.conf"
++	# hexagonrpc expects socinfo packaged from downstream here, but because it is
++	# runtime-specific, the closest we have is socinfo from runtime kernel.
++	link_path "/sys/devices/soc0" "$BASEDIR/hexagonrpc/socinfo"
++	exit 0
++fi
++
+ # Preparations:
+ 
+ # This script is intended to run before udev. This means that writeable fs
+@@ -188,31 +256,9 @@ do
+ 
+ 	if [ -z "${FW_PARTITIONS##*"$PARTNAME"*}" ] && [ -n "$PARTNAME" ] && [ ! -d "$BASEDIR/mnt/$PARTNAME" ]
+ 	then
+-		# persist and dsp are journaled ext4, and a read-only mount still
+-		# replays the journal after an unclean Android shutdown; noload does not
+-		case "$PARTNAME" in
+-			dsp*|persist) mount_opts=ro,noload,nodev,noexec,nosuid ;;
+-			*) mount_opts=ro,nodev,noexec,nosuid ;;
+-		esac
+ 		mkdir -p "$BASEDIR/mnt/$PARTNAME"
+-		mount -o "$mount_opts" \
++		mount -o ro,nodev,noexec,nosuid \
+ 			"/dev/$DEVNAME" "$BASEDIR/mnt/$PARTNAME"
+-		# Some devices have 600 permissions on persist, therefore we need an additional
+-		# mount with UID and GID mappings for hexagonrpcd to access it
+-		sensors_file="$BASEDIR/mnt/persist/sensors/registry/registry/sensors_registry"
+-		if [ "$PARTNAME" = "persist" ] && [ -f "$sensors_file" ] && id fastrpc > /dev/null 2>&1
+-		then
+-			source_uid="$(stat -c '%u' "$sensors_file")"
+-			source_gid="$(stat -c '%g' "$sensors_file")"
+-			target_uid="$(id -u fastrpc)"
+-			target_gid="$(id -g fastrpc)"
+-			mkdir -p "$BASEDIR/mnt/persist-fastrpc"
+-			# Kernel requires both UID and GID mapped
+-			mount -o ro,noload,nodev,noexec,nosuid \
+-				--map-users="$source_uid:$target_uid:1" \
+-				--map-groups="$source_gid:$target_gid:1" \
+-				"/dev/$DEVNAME" "$BASEDIR/mnt/persist-fastrpc"
+-		fi
+ 	fi
+ done
+ 
+@@ -244,34 +290,6 @@ do
+ 	ln -s "$dir"/* "$BASEDIR/blobs/" 2>/dev/null || :
+ done
+ 
+-# Mount hexagonrpc paths, see
+-# https://github.com/linux-msm/hexagonrpc#hexagonfs
+-
+-link_path "$BASEDIR/mnt/vendor$AB_SLOT/etc/acdbdata" "$BASEDIR/hexagonrpc/acdb"
+-
+-if [ -d "$BASEDIR/mnt/dsp$AB_SLOT/adsp" ] || \
+-	[ -d "$BASEDIR/mnt/dsp$AB_SLOT/cdsp" ] || \
+-	[ -d "$BASEDIR/mnt/dsp$AB_SLOT/sdsp" ]
+-then
+-	# Some devices with separated dsp_a/dsp_b
+-	link_path "$BASEDIR/mnt/dsp$AB_SLOT" "$BASEDIR/hexagonrpc/dsp"
+-else
+-	# Documented hexagonrpc path
+-	link_path "$BASEDIR/mnt/vendor$AB_SLOT/dsp" "$BASEDIR/hexagonrpc/dsp"
+-fi
+-
+-link_path "$BASEDIR/mnt/vendor$AB_SLOT/etc/sensors/config" "$BASEDIR/hexagonrpc/sensors/config"
+-link_path "$BASEDIR/mnt/persist-fastrpc/sensors/registry/registry" "$BASEDIR/hexagonrpc/sensors/registry"
+-# Without a fastrpc user hexagonrpcd runs as root and reads persist directly
+-if ! [ -e "$BASEDIR/hexagonrpc/sensors/registry" ]
+-then
+-	link_path "$BASEDIR/mnt/persist/sensors/registry/registry" "$BASEDIR/hexagonrpc/sensors/registry"
+-fi
+-link_path "$BASEDIR/mnt/vendor$AB_SLOT/etc/sensors/sns_reg_config" "$BASEDIR/hexagonrpc/sensors/sns_reg.conf"
+-# hexagonrpc expects socinfo packaged from downstream here, but because it is
+-# runtime-specific, the closest we have is socinfo from runtime kernel.
+-link_path "/sys/devices/soc0" "$BASEDIR/hexagonrpc/socinfo"
+-
+ # Some kernel versions expect .mbn instead of legacy .mdt
+ # Symlink these files together, the kernel can autodetect the type.
+ for mdt in "$BASEDIR"/blobs/*.mdt

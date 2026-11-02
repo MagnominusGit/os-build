@@ -103,6 +103,7 @@ gtk-update-icon-cache 1:4.22.4-1 aarch64 snapshot df321f15a92cbc0396d5c6045f771c
 gtk2 2.24.33-5 aarch64 snapshot 5b262393bbeff8c3e1e322d5b5e74c89f6a8003eaaa476b3db92a217bd42fb3f
 gzip 1.14-2.2 aarch64 snapshot e3d1fccd7eab31ab853ebf90d6ae467cfc05f4d6e5c15bc985ed8dfc2c1d2994
 harfbuzz 14.2.0-1 aarch64 snapshot 2dd0bffe3b04ddcbaa255d85734fb47b89fe9d29df3e402210f6fa15c9291fe9
+hexagonrpcd 0.5.0-1.1 aarch64 retroforge 3da7eb16b65138b261dc543aa774898f8044bab049dc64a8339e8286136eac33
 hicolor-icon-theme 0.18-1 any snapshot 22ec69012b9a55e276b5891f916366f692541dce3793bff3e85a28a10b91990a
 hidapi 0.15.0-1 aarch64 snapshot 39a25ef6e2602c6835ae971dbaec5e16340ebc61bac419f3badebac6f232f479
 highway 1.4.0-1 aarch64 snapshot 2a442db88048ffdad19422c1a52017b4f0b236fa7e979bd38a9e88fffd87e80f
@@ -293,7 +294,7 @@ mobile-broadband-provider-info 20251101-1 any snapshot 1b0146d8b72f6ffc3edcccd57
 mpdecimal 4.0.1-3 aarch64 snapshot 93a0e16603858a8d78c4ab3a924ff2ccd9554cd2019c1f65d411c5276334cb86
 mpfr 4.2.2-1 aarch64 snapshot 25f827431b1a13a6f524d76e62c0b0bdc5c1bf6ffd3d849cf73b5f840172ac2f
 mpg123 1.33.5-1 aarch64 snapshot 1a84c4c68b6843c31a1f5be957189d9402d6f3b68140329690727aa83188ed8d
-msm-firmware-loader 1.9.0-1.1 aarch64 retroforge 78563eb15fbef04df32f8d67f8781cb1f4bd0d84cc540ef873ee6ef90072e1d6
+msm-firmware-loader 1.9.0-1.1 aarch64 retroforge 24b069a7b2313b99d1f8bcb6277b0d2bf753d594d145ad8e9c45ccd5b89c69e9
 mtdev 1.1.7-1 aarch64 snapshot ddc6848de75a95048baacb5a27f06980dc1f8384f41bd5346d0dd048ee8ebd86
 ncurses 6.6-2 aarch64 snapshot 2fe037384c433ce0c80c1b6e272844ccd4850ddc7d091e060c72eec7315d756a
 nettle 4.0-1 aarch64 snapshot ab084b7ed3bebb826b6ab1b26238d451cf328806c586c3ae3a68527d840e1145

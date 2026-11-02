@@ -1,0 +1,13 @@
+# hexagonrpcd — the FastRPC file server for Qualcomm Hexagon DSPs, built FROM SOURCE via a
+# retroforge-owned PKGBUILD (packages/hexagonrpcd/PKGBUILD). The ADSP's sensors PD on the Air X
+# reads its registry and configs through it. Not in the holo snapshot.
+#
+# After adding or bumping this: `make relock` (the package must land in rootfs/manifest.lock; it is
+# listed in PKGS in rootfs/customize-base.sh).
+#
+# Patch, ours:
+#   0001  the ADSP units no longer conflict with suspend.target, which stopped them for good.
+name: hexagonrpcd
+pkgbuild_local: PKGBUILD
+patches: 0001-data-keep-the-ADSP-servers-running-across-suspend.patch
+pkgrel_suffix: 1

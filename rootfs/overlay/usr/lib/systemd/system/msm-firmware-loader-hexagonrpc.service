@@ -1,0 +1,12 @@
+# retroforge: the second run of packages/msm-firmware-loader (patch 0009). It mounts dsp and persist
+# and builds the tree hexagonrpcd serves, after boot: the loader's first run gates udevd, and none of
+# this is needed before the sensors servers start. Pulled in by their drop-ins, never enabled itself.
+[Unit]
+Description=Mount the DSP and persist partitions for hexagonrpcd
+Requires=msm-firmware-loader.service
+After=msm-firmware-loader.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/msm-firmware-loader.sh hexagonrpc

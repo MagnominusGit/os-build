@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sun, 1 Nov 2026 16:26:41 -0800
+Subject: [PATCH] data: keep the ADSP servers running across suspend
+
+Conflicts=suspend.target stops them when the system suspends, and nothing
+starts them again on resume, so the sensors PD loses its file server until
+reboot. Idle, hexagonrpcd sleeps in the FastRPC ioctl and wakes nothing,
+so there is no power to save by stopping it.
+
+diff --git a/data/hexagonrpcd-adsp-rootpd.service.in b/data/hexagonrpcd-adsp-rootpd.service.in
+index bd37175..8bd8a0c 100644
+--- a/data/hexagonrpcd-adsp-rootpd.service.in
++++ b/data/hexagonrpcd-adsp-rootpd.service.in
+@@ -1,7 +1,5 @@
+ [Unit]
+ Description=Server for FastRPC remote procedure calls from Qualcomm ADSP - RootPD
+-Conflicts=suspend.target
+-Before=suspend.target
+ # FIXME: Remove this once hexagonrpcd can serve rootpd on the ADSP
+ # of the SDM845 devices
+ ConditionPathExists=!/dev/fastrpc-sdsp
+diff --git a/data/hexagonrpcd-adsp-sensorspd.service.in b/data/hexagonrpcd-adsp-sensorspd.service.in
+index 23d31a4..4dfd98e 100644
+--- a/data/hexagonrpcd-adsp-sensorspd.service.in
++++ b/data/hexagonrpcd-adsp-sensorspd.service.in
+@@ -1,7 +1,5 @@
+ [Unit]
+ Description=Server for FastRPC remote procedure calls from Qualcomm ADSP - sensorspd
+-Conflicts=suspend.target
+-Before=suspend.target
+ # This service shouldn't be run on devices with an SDSP
+ ConditionPathExists=!/dev/fastrpc-sdsp
+ ConditionPathExists=/dev/fastrpc-adsp
