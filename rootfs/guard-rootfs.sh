@@ -456,8 +456,10 @@ else
   echo "    ok  installer artifacts: grubenv (1024 B, pristine)"
 fi
 # OpenABL's Device model list for the ESP's \dtbs\qcom: one per DTB the root boots.
-n_esp_dtbs=$(find "$STAGE/usr/lib/retroforge/boot/dtbs" -maxdepth 1 -name '*.dtb' 2>/dev/null | wc -l | tr -d ' ')
-n_dtbs=$(find "$STAGE/boot/dtbs" -maxdepth 1 -name '*.dtb' 2>/dev/null | wc -l | tr -d ' ')
+# A missing directory is a count of 0, not an exit: find fails on it, and under pipefail that would
+# end the guard here with every later assertion unrun.
+n_esp_dtbs=$({ find "$STAGE/usr/lib/retroforge/boot/dtbs" -maxdepth 1 -name '*.dtb' 2>/dev/null || true; } | wc -l | tr -d ' ')
+n_dtbs=$({ find "$STAGE/boot/dtbs" -maxdepth 1 -name '*.dtb' 2>/dev/null || true; } | wc -l | tr -d ' ')
 if [ "$n_esp_dtbs" -gt 0 ] && [ "$n_esp_dtbs" = "$n_dtbs" ]; then
   echo "    ok  installer artifacts: $n_esp_dtbs ESP DTBs for OpenABL's Device model list"
 else
