@@ -147,6 +147,20 @@ sys.exit(0 if all(x in body for x in ("if on and popup_state_machine.current_sta
          and "if popup_state_machine.current_state() == osk_state:" in s and "if _osk_ours:" in rel
          and "_field.queue_free()" in rel else 1)
 PY2
+# OGUI's keyboard hands gamescope's input focus to OGUI's window only for an X11 context; ours is GODOT,
+# so without this touches went to Chromium, the field blurred and the keyboard closed (issue #34).
+python3 - "$SRC/signin_window.gd" <<'PY2' \
+  && ok "the sign-in's keyboard takes the touches (OGUI's window gets gamescope's input focus, 2)" \
+  || bad "signin_window.gd opens its GODOT keyboard without giving OGUI's window the touches: a tap closes it"
+import sys
+s = open(sys.argv[1]).read()
+body = s[s.index("func typing(on: bool, say: Callable)"):s.index("func _open_field()")]
+take = s[s.index("func _osk_takes_touch()"):]
+sys.exit(0 if body.index("osk.open(context)") < body.index("_osk_takes_touch()")
+         and "gamescope.get_xwayland(gamescope.XWAYLAND_TYPE_OGUI)" in take
+         and "get_windows_for_pid(OS.get_process_id())" in take
+         and "set_input_focus(windows[0], 2)" in take else 1)
+PY2
 # A store refusing the stored refresh token (revoked, expired) signs it out and is exit 3, like never
 # having signed in: the library reads the helper's stderr so the player is told to sign in again.
 grep -q 'out.append(OS.execute(tool, args, output, true))' "$SRC/library_store.gd" \

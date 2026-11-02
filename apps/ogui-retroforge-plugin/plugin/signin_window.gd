@@ -112,9 +112,26 @@ func typing(on: bool, say: Callable) -> void:
 		# OGUI gives the target the focus back when the keyboard closes: not this hidden one.
 		context.exited.connect(func() -> void: _field.focus_mode = Control.FOCUS_NONE)
 		osk.open(context)
+		_osk_takes_touch()
 		_osk_ours = true
 	elif not on and _osk_ours:
 		_close_osk()
+
+
+## OGUI's keyboard gives gamescope's input focus to OGUI's own window only for an X11 context
+## (on_screen_keyboard.gd open()), and this one is GODOT. Without it gamescope kept sending touches to
+## Chromium: a tap on a key blurred the page's field, the helper said `typing` off, and the keyboard
+## closed (issue #34; the D-pad, through InputPlumber, worked). 2 is what OGUI sets for its X11
+## keyboard: OGUI's window takes the touches. The keyboard's close() puts the focus back.
+func _osk_takes_touch() -> void:
+	var xwayland := gamescope.get_xwayland(gamescope.XWAYLAND_TYPE_OGUI)
+	if not xwayland:
+		return
+	var windows := xwayland.get_windows_for_pid(OS.get_process_id())
+	if windows.is_empty():
+		logger.warn("no OGUI window: touches on the keyboard go to the sign-in window")
+		return
+	xwayland.set_input_focus(windows[0], 2)
 
 
 ## An empty _field, in the tree (the keyboard looks for the target's scroll containers) and hidden.
