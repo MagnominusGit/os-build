@@ -1,0 +1,9 @@
+# retroforge: which firmware this boot loaded, and from where (/usr/lib/retroforge/firmware-report).
+# Started once by its timer, after the DSPs, Bluetooth, Wi-Fi and the GPU have had time to load.
+[Unit]
+Description=Report where this boot's firmware came from
+After=msm-firmware-loader.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/retroforge/firmware-report

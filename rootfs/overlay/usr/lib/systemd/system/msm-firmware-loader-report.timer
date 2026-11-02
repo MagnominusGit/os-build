@@ -1,0 +1,9 @@
+# retroforge: run msm-firmware-loader-report.service once per boot, after the firmware has loaded.
+[Unit]
+Description=Report where this boot's firmware came from, once it has loaded
+
+[Timer]
+OnBootSec=90s
+
+[Install]
+WantedBy=timers.target
