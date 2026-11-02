@@ -328,16 +328,20 @@ write_efi_partition() {  # <mnt> <slot> <bootdir>
 #
 # WHY sha256sum AND NOT cmp: cmp(1) is diffutils, which this image does not carry and never has. The
 # skip below is not an optimisation -- the shared ESP is the only write in an update with no A/B
-# copy behind it, so `cp -f` over the file ABL chainloads is the one step a power cut can leave
+# copy behind it, so rewriting the file ABL chainloads is the one step a power cut can leave
 # unbootable with nothing to roll back to. Comparing first is what keeps that window closed on the
-# updates where these files did not change, which is most of them. Read from stdin so the output is
-# the digest alone. A comparator that is merely ABSENT does not announce itself -- `cmp -s` was used
+# updates where these files did not change, which is most of them; on the rest the new bytes go to
+# <dst>.new and are renamed over <dst>, so a cut leaves the old file or the new one, never a
+# half-written one (vfat's rename reuses the target's directory entry). Read from stdin so the
+# output is the digest alone. A comparator that is merely ABSENT does not announce itself -- `cmp -s` was used
 # until 2026-08-05 and "command not found" reads exactly like "the files differ", so the ESP refresh
 # degraded to unconditional copy for three releases -- which is why callers assert $SHA256 exists
 # before they touch anything, rather than discovering it here.
 refresh_if_diff() {  # <src> <dst>
   if [ ! -e "$2" ] || [ "$("$SHA256" <"$1")" != "$("$SHA256" <"$2")" ]; then
-    cp -f "$1" "$2" || die "cannot refresh $2"
+    cp -f "$1" "$2.new" || die "cannot write $2.new"
+    sync
+    mv -f "$2.new" "$2" || die "cannot rename $2.new over $2"
     sync
     log "refreshed $2"
   fi

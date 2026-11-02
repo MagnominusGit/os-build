@@ -295,11 +295,19 @@ rewritten "$esp/EFI/BOOT/bootaa64.efi" \
 CASE="refresh_esp_stage1 still refreshes what changed"
 # A skip that skipped everything would pass the case above and be just as wrong.
 mkboot "$T/boot2" 2
+# A second link to the old file sees an in-place copy but not a rename over it.
+ln "$esp/EFI/BOOT/bootaa64.efi" "$T/old-bootaa64.efi"
 refresh_esp_stage1 "$esp" "$T/boot2" >/dev/null
 expect_esp_file EFI/BOOT/bootaa64.efi 'ESPGRUB-2'
 rewritten "$esp/EFI/BOOT/bootaa64.efi" \
   && ok "and the rewrite is a real one, not a stale file with the right name" \
   || bad "bootaa64.efi carries the new bytes but was not rewritten"
+[ "$(cat "$T/old-bootaa64.efi")" = 'ESPGRUB-1' ] \
+  && ok "the new bootaa64.efi is renamed over the old one, never copied into it" \
+  || bad "bootaa64.efi was overwritten in place: a power cut mid-copy leaves half a file"
+[ ! -e "$esp/EFI/BOOT/bootaa64.efi.new" ] \
+  && ok "no bootaa64.efi.new is left beside it" \
+  || bad "bootaa64.efi.new was left on the ESP"
 
 CASE="refresh_esp_stage1 with no ESP GRUB in the root"
 # The steamcl.efi left beside it is the trap: a root from the steamcl chain carries one, and a
