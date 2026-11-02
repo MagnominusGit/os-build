@@ -1,0 +1,100 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Mon, 2 Nov 2026 21:25:00 +0100
+Subject: [PATCH] fix(LaunchManager): a focused window that goes hands the focus on
+
+Opening Steam sometimes left OpenGamepadUI's loading screen over a
+running Steam: gamescope had nothing focused (GAMESCOPE_FOCUSED_WINDOW
+empty) while Big Picture was in its focusable windows (KONKR Pocket FIT,
+2026-11-01, issue #29). OGUI had focused one of Steam's short-lived
+startup windows, and when that one went:
+- remove_focus removed the baselayer window and picked no other;
+- the focusable-windows handler (0019) dropped it too, then looked only
+  for windows that had just become focusable, and Big Picture already
+  was.
+
+Now, when the focused window goes, the app's newest window gamescope can
+focus gets the focus, in both places (whichever signal comes first); the
+focus is only removed when there is none. remove_focus also leaves a
+focused window that is still there alone: it switched to
+new_windows[0], the lowest id, which picks a helper window.
+
+---
+ core/global/launch_manager.gd | 35 +++++++++++++++++++++++++++++----------
+ 1 file changed
+
+--- a/core/global/launch_manager.gd
++++ b/core/global/launch_manager.gd
+@@ -126,26 +126,39 @@
+ 			# If focusable windows has changed and the currently focused window no longer exists,
+ 			# remove the manual focus
+ 			var baselayer_window := _xwayland_primary.baselayer_window
++			var dropped := false
+ 			if baselayer_window > 0 and not baselayer_window in to:
+ 				_xwayland_primary.remove_baselayer_window()
+ 				baselayer_window = 0
++				dropped = true
+ 			# With no window focused, a window of a running app that has just become focusable gets
+ 			# the focus. An app whose first windows never become focusable (Steam's startup and
+ 			# helper windows) otherwise leaves gamescope on our own layer: a black screen over a
+ 			# running Steam.
+ 			if baselayer_window > 0:
+ 				return
++			# And when the focused window has just gone (a launcher's splash or updater window that
++			# had the focus), the newest window of a running app gamescope can focus gets it, even
++			# one that was focusable before: Steam's Big Picture is, and gamescope was left with
++			# nothing focused, OpenGamepadUI's loading screen over a running Steam (issue #29).
+ 			var running := _running.duplicate()
+ 			running.reverse()
+ 			for app in running:
++				var newest := -1
+ 				for window in to:
+-					if window in from or not window in app.window_ids:
++					if not window in app.window_ids:
++						continue
++					if window in from:
++						newest = maxi(newest, window)
+ 						continue
+ 					# Deferred: this signal is emitted while GamescopeInstance is bound, and
+ 					# switch_window calls back into it (gamescope.get_xwayland), which godot-rust
+ 					# refuses there ("Gd<T>::bind() failed, already bound") and the switch is lost.
+ 					app.switch_window.call_deferred(window)
+ 					return
++				if dropped and newest > 0:
++					app.switch_window.call_deferred(newest)
++					return
+ 		_xwayland_primary.focusable_windows_updated.connect(on_focusable_windows_changed)
+ 
+ 	# Listen for signals from the secondary Gamescope XWayland
+@@ -299,19 +312,23 @@
+ 			running_app.switch_window(first)
+ 	running_app.window_ids_changed.connect(switch_to_new_window)
+ 
+-	# Remove/restore focus if any windows get removed
++	# When the focused window goes (a launcher's splash or updater window), the app's newest window
++	# gamescope can focus gets the focus, and only with none is it removed. Removing it outright left
++	# gamescope with nothing focused while Steam's Big Picture was there to show: OpenGamepadUI's
++	# loading screen over a running Steam (issue #29). A focused window that is still there keeps
++	# the focus: switching to new_windows[0], the lowest id, picked a helper window.
+ 	var remove_focus := func(old_windows: PackedInt64Array, new_windows: PackedInt64Array):
+ 		if not _xwayland_primary:
+ 			return
+ 		var focused_window := _xwayland_primary.baselayer_window
+-		if not focused_window in old_windows:
++		if not focused_window in old_windows or focused_window in new_windows:
+ 			return
+-		if not focused_window in new_windows:
+-			_xwayland_primary.remove_baselayer_window()
+-			return
+-		# TODO: Use the most recently created window instead of just the first in the list
+-		var new_window := new_windows[0]
+-		running_app.switch_window(new_window)
++		var focusable := _xwayland_primary.get_focusable_windows()
++		for i in range(new_windows.size() - 1, -1, -1):
++			if new_windows[i] in focusable:
++				running_app.switch_window(new_windows[i])
++				return
++		_xwayland_primary.remove_baselayer_window()
+ 	running_app.window_ids_changed.connect(remove_focus)
+ 
+ 	# Run the application
