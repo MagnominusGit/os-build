@@ -523,6 +523,10 @@ ctr run --rm --platform linux/arm64 -v "$PREBUILT_DIR":/prebuilt:ro \
   mknod -m 0666 /target/dev/random  c 1 8 2>/dev/null || true
   mknod -m 0666 /target/dev/urandom c 1 9 2>/dev/null || true
   mknod -m 0600 /target/dev/console c 5 1 2>/dev/null || true
+  # A plain directory is enough for POSIX semaphores (sem_open creates its file there). From Python
+  # 3.14.5 the parallel compileall below takes a multiprocessing lock first and, without /dev/shm,
+  # dies on FileNotFoundError before compiling anything (mash-20260528, 2026-11-03).
+  mkdir -p -m 1777 /target/dev/shm
 
   # The UID/GID pin, placed BEFORE the transaction. Order is the whole mechanism: pacman runs the
   # systemd-sysusers hook once at the END of the transaction, over every sysusers.d file present at
