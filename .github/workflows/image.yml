@@ -101,8 +101,42 @@ permissions:
   contents: read
 
 jobs:
+  # THE x86 GUEST MESA IS BUILT HERE, NATIVELY, AND HANDED TO THE arm64 BUILD (2026-11-03).
+  # packages/mesa-x86/build.sh runs an amd64 Arch container; the arm64 runner has no x86 binfmt,
+  # so inside `make rootfs`/`make sdcard` it died at once with "exec /usr/sbin/bash: exec format
+  # error" (card/v0.0.5, ota/v0.0.5). Under qemu it would be hours. Built here, the payload goes
+  # over as a tarball (an artifact zip follows symlinks and drops the hidden .inputs.sha256
+  # marker), and build.sh in the build job finds the marker matching its inputs and does nothing.
+  # The installer carries no x86 stack, so it skips this.
+  mesa-x86:
+    if: inputs.artifact != 'installer'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: build the x86 Mesa
+        run: packages/mesa-x86/build.sh
+
+      - name: pack the payload
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          tar -C work/mesa-x86 -cf upload/mesa-x86.tar out
+          ls -lh upload/ >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: retroforge-mesa-x86
+          path: upload/mesa-x86.tar
+          if-no-files-found: error
+          retention-days: 1
+
   build:
     name: ${{ inputs.artifact }}
+    needs: mesa-x86
+    # Runs when mesa-x86 was skipped (the installer), not when it failed.
+    if: ${{ !failure() && !cancelled() }}
     runs-on: ${{ vars.OVERLAY_RUNNER || 'ubuntu-24.04-arm' }}
     # THE ENVIRONMENT IS THE AUTHORIZATION BOUNDARY FOR SIGNING, and it has to be declared here
     # rather than by the caller: a reusable workflow's job cannot be attached to an environment from
@@ -132,6 +166,21 @@ jobs:
       ARTIFACT: ${{ inputs.artifact }}
     steps:
       - uses: actions/checkout@v7
+
+      - name: fetch the x86 Mesa
+        if: inputs.artifact != 'installer'
+        uses: actions/download-artifact@v8
+        with:
+          name: retroforge-mesa-x86
+          path: ${{ runner.temp }}/mesa-x86
+
+      - name: unpack the x86 Mesa
+        if: inputs.artifact != 'installer'
+        run: |
+          set -euo pipefail
+          mkdir -p work/mesa-x86
+          tar -C work/mesa-x86 -xf "$RUNNER_TEMP/mesa-x86/mesa-x86.tar"
+          test -s work/mesa-x86/out/.inputs.sha256
 
       - name: validate the requested artifact
         run: |
