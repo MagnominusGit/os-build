@@ -4,21 +4,22 @@ Subject: [PATCH] ASoC: qdsp6: q6apm-lpass-dais: start playback port at prepare
 
 Port start moved out of .prepare and into .trigger, so the MI2S bit clock
 now only comes up after the codec DAPM widgets have powered on. The aw88166
-speaker amps on the AYN SM8550 boards validate their PLL against BCLK at
-DAPM PRE_PMU, i.e. before the PCM trigger fires. With no clock present the
-PLL never locks: the amps stay silent and each attempt retries and spams
-the log, which also stretches the audio bring-up at boot.
+speaker amps on the AYN SM8550 boards and the Anbernic RG 55G1 (Senary
+MI2S) validate their PLL against BCLK at DAPM PRE_PMU, i.e. before the PCM
+trigger fires. With no clock present the PLL never locks: the amps stay
+silent and each attempt retries and spams the log, which also stretches the
+audio bring-up at boot.
 
 Start the playback port back in .prepare so BCLK is running before PRE_PMU.
 The !is_port_started guard in the trigger then no-ops, and the capture path
 is untouched.
 ---
- sound/soc/qcom/qdsp6/q6apm-lpass-dais.c | 14 ++++++++++++++
- 1 file changed, 14 insertions(+)
+ sound/soc/qcom/qdsp6/q6apm-lpass-dais.c | 19 +++++++++++++++++++
+ 1 file changed, 19 insertions(+)
 
 --- a/sound/soc/qcom/qdsp6/q6apm-lpass-dais.c
 +++ b/sound/soc/qcom/qdsp6/q6apm-lpass-dais.c
-@@ -224,6 +224,24 @@
+@@ -224,6 +224,25 @@
  		dev_err(dai->dev, "Failed to prepare Graph %d\n", rc);
  		goto err;
  	}
@@ -32,7 +33,8 @@ is untouched.
 +	 */
 +	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
 +	    ((dai->id >= PRIMARY_MI2S_RX && dai->id <= QUATERNARY_MI2S_TX) ||
-+	     (dai->id >= QUINARY_MI2S_RX && dai->id <= QUINARY_MI2S_TX))) {
++	     (dai->id >= QUINARY_MI2S_RX && dai->id <= QUINARY_MI2S_TX) ||
++	     (dai->id >= SENARY_MI2S_RX && dai->id <= SENARY_MI2S_TX))) {
 +		rc = q6apm_graph_start(dai_data->graph[dai->id]);
 +		if (rc < 0) {
 +			dev_err(dai->dev, "Failed to start APM port %d\n", dai->id);
