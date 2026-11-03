@@ -1,0 +1,30 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Mon, 2 Nov 2026 21:40:00 -0800
+Subject: [PATCH] soc: qcom: apr: register the GPR callback before probe
+
+apr_device_probe() set the service callback only after the driver's probe
+returned, so gpr_do_rx_callback() dropped every reply a GPR service got
+during its own probe. q6apm asks the SPF for its state there, so it always
+waited out the 5 s command timeout before the sound card could register,
+with the SPF long ready. Register the callback before probe and clear it
+again if probe fails.
+---
+ drivers/soc/qcom/apr.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+--- a/drivers/soc/qcom/apr.c
++++ b/drivers/soc/qcom/apr.c
+@@ -367,9 +367,11 @@
+ 	struct apr_driver *adrv = to_apr_driver(dev->driver);
+ 	int ret;
+ 
++	/* GPR drivers wait for replies during their own probe */
++	adev->svc.callback = adrv->gpr_callback;
+ 	ret = adrv->probe(adev);
+-	if (!ret)
+-		adev->svc.callback = adrv->gpr_callback;
++	if (ret)
++		adev->svc.callback = NULL;
+ 
+ 	return ret;
+ }
