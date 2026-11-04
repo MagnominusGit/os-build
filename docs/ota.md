@@ -6,9 +6,9 @@ updates are served from and the act of publishing.
 
 **Updates are served from a Cloudflare R2 bucket** since 2026-10-13, replacing a self-hosted nginx
 host (its provisioning scripts are in git history before that date), at the custom domain
-**`https://ota.retroforge.org`**. That URL is the device-side default in three places —
-`retroforge-update`'s `DEFAULT_URL` and the installer medium's `netcfg` and `release-info`
-(`tests/test-ui.sh` asserts the three agree). Images built before 2026-10-13 carry the placeholder
+**`https://ota.retroforge.org`**. That URL is the device-side default in two places —
+`retroforge-update`'s `DEFAULT_URL` and the installer's `release-info`
+(`tests/test-ui.sh` asserts they agree). Images built before 2026-10-13 carry the placeholder
 `updates.retroforge.invalid` instead, which never resolves: they fail closed and report "no update"
 until reflashed (or given `OTA_URL` in `/etc/retroforge/ota.conf`).
 
@@ -97,9 +97,9 @@ publishes to `stable`, `ota/v0.3.0-beta.1` to `beta`. Not a separate tag namespa
 version string then records the channel and duplicate detection turns on that string: two channels
 publishing the same `0.3.0` would leave a device switching stable → beta believing it is already up
 to date. A beta bundle is signed with the same release key and gated exactly as hard; the channel
-decides who is offered it, not whether it is trustworthy. `card/` and `installer/` tags refuse a
-pre-release suffix outright — there is no beta card, and a medium installs the latest `stable`
-whatever its own version says.
+decides who is offered it, not whether it is trustworthy. `card/` tags refuse a pre-release suffix
+outright: there is no beta card, and a card's installer installs from the channel picked in Updates
+whatever the card's own version says.
 
 A choice made in `~/.config` survives an OTA and a slot switch on its own: `/home` is one partition
 shared by both slots. The copy in `/etc` needs `post-install.sh` to carry it, because that one lives

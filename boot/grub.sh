@@ -4,7 +4,7 @@
 # Builds GRUB for arm64-efi from the pinned GNU GRUB 2.14 release tarball plus boot/patches/grub/
 # (the retroforge module), and generates the configs that go with it. Emits:
 #   out/boot/grub-esp.efi            \EFI\BOOT\bootaa64.efi, the slot picker embedded
-#   out/boot/grubaa64.efi            the same modules, no embedded config (the installer medium)
+#   out/boot/grubaa64.efi            the same modules, no embedded config (stage 2)
 #   out/boot/grub-a.cfg, out/boot/grub-b.cfg
 #   out/boot/fonts/dejavu-mono.pf2
 #   out/boot/grubenv

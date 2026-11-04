@@ -1,0 +1,29 @@
+# What ships into /usr/lib/retroforge/install/ on the root, from this directory. Read by
+# rootfs/lib-assemble-boot.sh (stages them), rootfs/guard-rootfs.sh (checks they arrived byte-identical),
+# the Makefile (a change rebuilds the root) and tests/test-installer-shipped.sh (checks the list is
+# complete against what the code calls). One flat directory: components find each other by $SELFDIR
+# and dirname(__file__). *.py are imported, 0444; everything else here is executed, 0555.
+#
+# One name per line. `#` comments and blank lines are ignored.
+
+# the spine and the components it delegates to
+retroforge-install
+select-target.sh
+carve.sh
+rauc-session.sh
+post-install-fresh.sh
+verify-install.sh
+release-info
+boot-medium
+
+# the consent renderers: confirm-ui shims to the running UI; confirm-tty is for a root shell
+confirm-ui
+confirm-tty
+
+# the session and the UI
+installer-session
+save-log.sh
+ui
+uipad.py
+uiflow.py
+uiview.py

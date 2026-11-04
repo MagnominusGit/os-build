@@ -2,8 +2,7 @@
 # retroforge read-only root assembler — stage `first-boot-storage`.
 #
 # SOURCED by rootfs/assemble-rootfs.sh, never executed. Split out of it for issue #43; the code
-# and its rationale are unchanged (tests/test-mkroot.sh reads the `# STAGE <name>` banners out of
-# this file set, and asserts the roster it was audited against).
+# and its rationale are unchanged.
 #
 # Carries the grow-home.sh heredoc verbatim -- do not re-indent it.
 #

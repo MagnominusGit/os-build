@@ -123,8 +123,7 @@ fi
 # A SEATD THAT IS ALREADY RUNNING IS USED, NOT DUPLICATED. seatd-launch starts its own seatd and
 # refuses outright when the socket exists ("Socket file found ... refusing to start"), and the
 # shipped image enables seatd.service -- measured on a Pocket S2, 2026-08-22, pid 710 with
-# /run/seatd.sock root:seat 0770. Whether the installer image enables it too is Phase 6's choice,
-# and this file should not care: if a seat daemon is there, take the seat from it; if not, launch
+# /run/seatd.sock root:seat 0770. If a seat daemon is there, take the seat from it; if not, launch
 # one. Forcing LIBSEAT_BACKEND is safe HERE precisely because there is no logind session to prefer
 # -- the opposite of retroforge-session, where forcing it broke polkit's allow_active.
 #

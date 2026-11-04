@@ -4,8 +4,8 @@
 #   retroforge-install --bundle <url> [--disk <dev>] [--userdata-gib N]
 #                    [--intent fresh|reinstall] [--erase-home]
 #
-# Installs RetroForge onto a device's INTERNAL storage, from an installer medium that is not a slot of
-# the system being built, beside an Android that stays bootable. It is the ordered list of steps and
+# Installs RetroForge onto a device's INTERNAL storage, from a running card whose slots are not the
+# ones being built, beside an Android that stays bootable. It is the ordered list of steps and
 # nothing else: every step is a named function, each one delegates to a component that already has
 # its own suite, and the ordering IS the contract.
 #
@@ -15,7 +15,7 @@
 #                      mkfs.btrfs is found now and not after userdata is gone
 #   select-target      pure, side-effect free, its own 83-case suite. Refuses the running disk, a
 #                      damaged GPT, a foreign bootable ESP, two eligible disks
-#   record             the pre-state, appended to the medium if it is writable. NOT A BACKUP -- see
+#   record             the pre-state, kept for the run's log. NOT A BACKUP -- see
 #                      the block at write_install_record for why the installer deliberately keeps
 #                      none, and why this can never refuse an install
 #   verify sources     the bundle verifies against THIS device's keyring. Plan §3 rule 11: before
@@ -36,7 +36,7 @@
 # CONTENT-based: it chainloads /EFI/BOOT/bootaa64.efi from an internal ESP if that file exists, and
 # measured on the Pocket ACE 2026-08-21 an internal ESP that exists but is EMPTY does not divert it
 # at all -- the device came straight back to the card. So every interruption before that one copy
-# leaves a device that still boots the installer medium and can simply be re-run, and only after it
+# leaves a device that still boots the card and can simply be re-run, and only after it
 # does recovery need ABL's "force external". That is the difference between a recoverable device and
 # one the user believes we bricked, and it is bought by ordering alone. refresh_esp_stage1() writes
 # that file last for the same reason.
@@ -76,15 +76,25 @@ SGDISK=${SGDISK:-sgdisk}
 SHA256=${SHA256:-sha256sum}
 KEYRING=${KEYRING:-/etc/rauc/keyring.pem}
 
+# The session user. The card's OS has one and a recovery medium would not: `player` is in `input`, so
+# it can open /dev/uinput, InputPlumber's bus takes calls from anyone, and the sequence is on
+# confirm-ui's command line. A process of its alive at consent could read the sequence and press it.
+# retroforge-installer.service ends the user first; assert_no_session_user() refuses if that failed.
+PGREP=${PGREP:-pgrep}
+SESSION_UID=${PLAYER_UID:-1000}
+SESSION_WAIT=${RETROFORGE_SESSION_WAIT:-5}
+# The board the running card booted with, read to save the first internal boot from the board menu.
+CARD_GRUBENV=${RETROFORGE_CARD_GRUBENV:-/esp/EFI/steamos/grubenv}
+
 # The consent program. A FIXED PATH with a seam that names WHO renders the screen -- never a value
-# that means "consent given". There is deliberately no variable, flag or file on the medium that
+# that means "consent given". There is deliberately no variable, flag or file that
 # satisfies the gate: see take_consent() for the contract, which any substitute still has to
 # implement. An installer that cannot take consent cannot install.
 CONFIRM=${RETROFORGE_CONFIRM:-/usr/lib/retroforge/install/confirm}
 
 # The components. Resolved by search rather than by repo-relative paths, exactly as carve.sh
 # resolves genpart.sh: some of these ship into the rootfs (/usr/lib/retroforge/install/) and some are
-# installer-only, so on the installer image they sit together and in the repo they do not.
+# staged from installer/, so on the device they sit together and in the repo they do not.
 find_component() {  # <name> <repo-subdir>
   local name="$1" sub="$2" c
   for c in "$SELFDIR/$name" "/usr/lib/retroforge/install/$name" "$SELFDIR/../$sub/$name"; do
@@ -169,9 +179,8 @@ unmount_at() {  # <mountpoint> -- drop it from the trap's list too, so a later f
 # =================================================================================================
 # 1. recon
 # =================================================================================================
-# EVERY EXTERNAL COMMAND, ASSERTED TOGETHER AND FIRST. The installer image is a different root from
-# the shipped one and from this repo, so "it was there yesterday" is not an argument -- and an
-# offline suite inherits the HOST's PATH, so it proves the logic and never the image's tool
+# EVERY EXTERNAL COMMAND, ASSERTED TOGETHER AND FIRST. rootfs/guard-rootfs.sh checks a release root
+# against the same tools, but a dev root skips the guard -- and an offline suite inherits the HOST's PATH, so it proves the logic and never the image's tool
 # inventory. The cost of finding out late is the point: mkfs.btrfs is not called until after
 # userdata has been destroyed, and a spine that discovered it there would have taken the user's
 # Android data to reach an error it could have printed at second zero.
@@ -182,11 +191,11 @@ recon() {
   local t missing=""
   for t in "$SGDISK" "$SHA256" \
            mkfs.vfat mkfs.ext4 mkfs.btrfs btrfstune btrfs blkid \
-           mount umount tar rauc dbus-daemon gdbus partprobe udevadm; do
+           mount umount tar rauc dbus-daemon gdbus partprobe udevadm pgrep; do
     command -v "$t" >/dev/null 2>&1 || missing="$missing $t"
   done
   [ -z "$missing" ] && log "tools: all present" \
-    || die "the installer image is missing:$missing"
+    || die "this image is missing:$missing"
 
   local c
   for c in "$SELECT" "$CARVE" "$SESSION"; do
@@ -198,7 +207,8 @@ recon() {
   [ -r "$KEYRING" ] || die "no readable RAUC keyring at $KEYRING -- nothing would be verified"
   [ -x "$CONFIRM" ] || die "no consent program at $CONFIRM -- an installer that cannot take consent cannot install"
 
-  mkdir -p "$RUNDIR" || die "cannot create $RUNDIR"
+  # 0700: rauc-session.sh's private bus and the consent facts live under it.
+  mkdir -p "$RUNDIR" && chmod 0700 "$RUNDIR" || die "cannot create $RUNDIR"
 
   # shellcheck source=../rootfs/overlay/usr/lib/retroforge/install/lib-slotwrite.sh
   . "$SLOTWRITE"
@@ -305,13 +315,9 @@ record() { [ -n "$RECORD" ] && printf '%s\n' "$*" >>"$RECORD" 2>/dev/null || tru
 
 open_install_record() {
   step "install record"
-  # The medium's own ESP if it is mounted and writable, else the run dir -- which is honest about
-  # being temporary rather than pretending to be a record.
-  local d
-  for d in /esp/retroforge "$RUNDIR"; do
-    mkdir -p "$d" 2>/dev/null && [ -w "$d" ] && { RECORD="$d/install.log"; break; }
-  done
-  [ -n "$RECORD" ] || { warn "nowhere writable for the install record; continuing without one"; return 0; }
+  # In the run dir: save-log.sh folds it into /var/log/retroforge/install.log when the unit stops.
+  RECORD="$RUNDIR/record"
+  : >"$RECORD" 2>/dev/null || { RECORD=""; warn "nowhere writable for the install record; continuing without one"; return 0; }
 
   record "=== retroforge-install $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
   record "target: $DISK  wwid: $WWID"
@@ -322,7 +328,7 @@ open_install_record() {
     record "--- pre-state (sfdisk --dump) ---"
     sfdisk --dump "$DISK" >>"$RECORD" 2>/dev/null || warn "could not dump the pre-state"
   else
-    record "--- pre-state: sfdisk is not on the installer image ---"
+    record "--- pre-state: sfdisk is not on this image ---"
   fi
   log "recording to $RECORD"
 }
@@ -380,8 +386,7 @@ verify_sources() {
 #
 # THERE IS NO VALUE OF ANY VARIABLE THAT MEANS "CONSENT GIVEN". $CONFIRM names who renders the
 # screen -- a substitute still has to run and return a sequence it was told to display. No
-# consent.txt on the medium, no --yes: the medium legitimately carries wifi.conf, so a
-# "drop a file to configure it" idiom already exists here, and consent must never join it. If an
+# consent.txt, no --yes: consent must never become a file someone can drop. If an
 # unattended path is ever wanted it is a separate, deliberately-named artifact, never a quiet bypass.
 CONFIRM_TRIES=${CONFIRM_TRIES:-5}
 # One character per button, because random_sequence concatenates them and the renderers hand back a
@@ -460,8 +465,25 @@ home_gib_or_unknown() {
   printf '%s\n' "${out:-unknown}"
 }
 
+# Fails closed: pgrep exits 1 for "none" and anything else means it could not answer. The wait is for
+# the tail of the session the unit ended; nothing starts a new one, /run/nologin sees to that.
+assert_no_session_user() {
+  local i rc pids
+  for (( i=0; ; i++ )); do
+    # -U, the real uid: a setuid program run by the user keeps it, and -u would miss that.
+    rc=0; pids="$("$PGREP" -U "$SESSION_UID")" || rc=$?
+    [ "$rc" = 1 ] && return 0
+    [ "$rc" = 0 ] || die "cannot tell whether the session user is gone (pgrep exited $rc) -- nothing has been written"
+    [ "$i" -lt "$SESSION_WAIT" ] || break
+    sleep 1
+  done
+  record "consent: refused, session user processes alive: ${pids//$'\n'/ }"
+  die "a process of the session user is still running (${pids//$'\n'/ }), and it could answer the consent screen -- nothing has been written"
+}
+
 take_consent() {
   step "CONFIRM"
+  assert_no_session_user
   local facts="$RUNDIR/confirm-facts" seq got attempt=1
   write_confirm_facts "$facts"
 
@@ -621,7 +643,7 @@ seed_home() {
 # out of the ESP GRUB's way because the grubenv says B_OK=0 (arm_esp), and its stage 2 being ready
 # means the first OTA has nothing to lay down but a root and a var.
 #
-# THE FILES COME OUT OF THE ROOT WE JUST WROTE, never off the installer medium. grubaa64.efi and
+# THE FILES COME OUT OF THE ROOT WE JUST WROTE, never off the card. grubaa64.efi and
 # grub-<slot>.cfg are boot software owned by the same build that ships /boot/vmlinuz.efi and
 # /lib/modules/<ver> inside that rootfs, so taking them from there makes the pairing true by
 # construction: there is no way to install a root whose stage 2 does not boot it.
@@ -672,8 +694,22 @@ write_efi_partitions() {
 #                 first time it writes it.
 #   extras        parts.env (from efi-a, still mounted) and OpenABL's \dtbs\qcom
 #   stage 1       refresh_esp_stage1, whose own last write is bootaa64.efi -- the byte that flips
-#                 ABL from the installer medium to this disk.
+#                 ABL from the card to this disk.
 EDITENV=${EDITENV:-}
+# saved_entry only: rf_board_ok means "this disk has confirmed a boot on it", and it has not yet.
+# Best-effort, and shaped like a board id or left out: without it the first boot shows the board menu.
+carry_board() {  # <editenv> <grubenv>
+  local board
+  [ -r "$CARD_GRUBENV" ] || { log "no card grubenv at $CARD_GRUBENV; the first boot will ask for the board"; return 0; }
+  board="$("$1" "$CARD_GRUBENV" list 2>/dev/null | sed -n 's/^saved_entry=//p')" || board=""
+  case "$board" in
+    ''|*[!a-z0-9-]*) log "no usable saved board on the card; the first boot will ask for the board"; return 0 ;;
+  esac
+  "$1" "$2" set "saved_entry=$board" || { warn "could not carry the board over"; return 0; }
+  log "board: $board, as saved on the card"
+  record "boot: board $board carried over from the card"
+}
+
 arm_esp() {
   step "ESP"
   local esp="$RUNDIR/esp" bootdir="$ROOTMNT/usr/lib/retroforge/boot"
@@ -685,12 +721,13 @@ arm_esp() {
   cp -f "$bootdir/grubenv" "$esp/EFI/steamos/grubenv" || die "cannot install the grubenv"
 
   # grub-editenv comes out of the ROOT WE JUST WROTE by preference, so the tool and the block are
-  # the pair that shipped together; the installer image's own copy is the fallback.
+  # the pair that shipped together; the running image's own copy is the fallback.
   local editenv="${EDITENV:-$ROOTMNT/usr/bin/grub-editenv}"
   [ -x "$editenv" ] || editenv="$(command -v grub-editenv 2>/dev/null || true)"
   [ -n "$editenv" ] && [ -x "$editenv" ] || die "no grub-editenv to arm the slot state with"
   "$editenv" "$esp/EFI/steamos/grubenv" set "ORDER=A B" "A_OK=1" "A_TRY=0" "B_OK=0" "B_TRY=0" \
     || die "grub-editenv could not arm the slot state"
+  carry_board "$editenv" "$esp/EFI/steamos/grubenv"
   sync
   log "slot state armed: A first, B not OK"
   record "boot: grubenv ORDER=A B, A_OK=1, B_OK=0"
@@ -727,7 +764,7 @@ main() {
 RetroForge is installed on $DISK.
 
   Android still boots and arrives factory-reset; its apps, saves and photos are gone.
-  Your SD card was never written to.
+  RetroForge on your SD card was not touched.
   The device now boots RetroForge from internal storage by default.
   To boot Android, or to boot this installer again, hold Volume Up at startup and pick it
   from the bootloader's own menu -- "force external" is what reaches the card once an

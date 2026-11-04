@@ -1,6 +1,6 @@
 # Pinned package-repo snapshot — Valve's official Steam Frame ("deckard") aarch64 Arch Linux port.
 #
-# Every snapshot/stripped row of rootfs/manifest.lock and installer/manifest.lock is installed from
+# Every snapshot/stripped row of rootfs/manifest.lock is installed from
 # this repo, and build/builder.pin pins the SAME snapshot's system.rootfs.zst as the builder, so the
 # pacman laying a root down comes from the snapshot it lays down.
 #

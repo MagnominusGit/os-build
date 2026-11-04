@@ -27,9 +27,9 @@ are invoked directly there rather than through `make test-disk` — a failure na
 - **Boot and update** — `test-bootctl.sh`, `test-post-install.sh`, `test-stage2-grub.sh`,
   `test-update.sh`, `test-units.sh`, `test-coredump-limit.sh`.
 - **Storage and layout** — `test-partition-table.sh`, `test-select-target.sh`, `test-carve.sh`,
-  `test-mkimage.sh`, `test-mkroot.sh`, with `lib-gptfixture.sh` rebuilding the real captured
+  with `lib-gptfixture.sh` rebuilding the real captured
   boards from `docs/internal-storage.md` as sparse GPTs for the two disk suites to share.
-- **The installer medium** — `test-install.sh`, `test-ui.sh`.
+- **The installer** — `test-install.sh`, `test-ui.sh`, `test-installer-shipped.sh`.
 - **Device behaviour** — `test-pairingd.sh`,
   `test-fan-curve.sh`, `test-cpu-scheduler.sh`, `test-power-led.sh`, `test-suspend.sh`,
   `test-gamescope-display.sh` (which /run/user/<uid>/ holds the live gamescope socket),

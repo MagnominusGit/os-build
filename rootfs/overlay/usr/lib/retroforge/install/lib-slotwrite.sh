@@ -185,7 +185,7 @@ parts_env_from_genpart_map() {  # reads the map on stdin, emits key=value on std
 # OTA path passes the RUNNING /var -- there is a live system to copy from and copying it is the
 # whole point. The installer passes /usr/lib/retroforge/var-seed.tar.zst out of the root it just
 # wrote, because on a disk with no retroforge on it there is nothing to copy: the running system is
-# the installer image, whose /var describes the INSTALLER, not the device being built. Everything
+# the card, whose /var describes the card, not the device being built. Everything
 # after the population is identical, which is why it is one function and not two.
 seed_var() {  # <dev> <slot> <mnt> <source>
   local dev="$1" slot="$2" mnt="$3" src="$4"
@@ -355,9 +355,9 @@ refresh_esp_stage1() {  # <esp> <bootdir>
   mkdir -p "$esp/EFI/BOOT" || die "cannot create $esp/EFI/BOOT"
   # bootaa64.efi LAST, and the order is the whole point rather than tidiness. ABL's test is
   # CONTENT-based -- it starts /EFI/BOOT/bootaa64.efi if that file is there -- so on an internal
-  # install this one copy is what flips the device from booting the installer medium to booting the
+  # install this one copy is what flips the device from booting the card to booting the
   # disk being built (measured 2026-08-21: an empty internal ESP does not divert ABL at all). Write it
-  # last and every earlier interruption still boots the medium and a re-run is free; callers write
+  # last and every earlier interruption still boots the card and a re-run is free; callers write
   # the grubenv, parts.env and \dtbs\qcom before they get here.
   #
   # The OTA path gets the same property for the same reason: the shared ESP is the one write in an

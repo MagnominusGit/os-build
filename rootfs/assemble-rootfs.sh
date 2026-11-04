@@ -114,8 +114,7 @@ ln -s /efi "$stage/boot/efi"
 # Firmware each device's own Android partitions hold, which msm-firmware-loader serves from there, so
 # the card does not ship it: all of qcom/ (DSPs, GPU microcode and zap shaders, amp configs, WPSS) but
 # the mainline video firmware and the AudioReach topologies, all of qca/ (Bluetooth, from the bluetooth
-# partition), and the Air X/Y amp config, which its DT now names from the device. The installer medium
-# (installer/mkroot.sh) still takes both trees whole, as it has no loader yet.
+# partition), and the Air X/Y amp config, which its DT now names from the device.
 fw_from_device() {
   case "$1" in
     qcom/venus-*/*|qcom/vpu*/*|*-tplg.bin) return 1 ;;

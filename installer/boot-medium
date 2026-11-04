@@ -1,0 +1,26 @@
+#!/bin/sh
+# Prints `card` when this system booted from an SD card, otherwise `internal`.
+#
+#   /usr/lib/retroforge/install/boot-medium
+#
+# Run as `player` by the Settings row, which shows only on a card, so it reads and never needs root.
+# It decides what is offered and nothing else: select-target.sh still refuses the running disk.
+#
+# An SD card is the MMC core's `SD`, the test lib-storage.sh's storage_is_sd uses: the eMMC on the
+# SM6115 boards is also mmcblk, and is typed MMC. Anything it cannot read answers `internal`, which
+# hides the row.
+set -u
+
+SYS_BLOCK=${RETROFORGE_SYS_BLOCK:-/sys/block}
+
+src=$(findmnt -no SOURCE / 2>/dev/null)
+disk=$(lsblk -no PKNAME "${src%%\[*}" 2>/dev/null | head -1)
+case "$disk" in
+  mmcblk[0-9]*)
+    if [ "$(cat "$SYS_BLOCK/$disk/device/type" 2>/dev/null)" = SD ]; then
+      echo card
+      exit 0
+    fi
+    ;;
+esac
+echo internal

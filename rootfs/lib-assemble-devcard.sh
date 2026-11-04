@@ -2,8 +2,7 @@
 # retroforge read-only root assembler — stages `dev-wifi-ssh` and `dev-ota-channel`, DEV-ONLY.
 #
 # SOURCED by rootfs/assemble-rootfs.sh, never executed. Split out of it for issue #43; the code
-# and its rationale are unchanged (tests/test-mkroot.sh reads the `# STAGE <name>` banners out of
-# this file set, and asserts the roster it was audited against).
+# and its rationale are unchanged.
 #
 # NEVER sourced on a release build -- the assembler sources it inside the RETROFORGE_DEV gate, so this file is not read at all when building a shippable image. That is the separation issue #43 asked for. 4c-3/4c-4 are NOT here: they run on every build and live in lib-assemble-decky-splash.sh.
 #

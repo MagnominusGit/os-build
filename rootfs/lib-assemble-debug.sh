@@ -2,8 +2,7 @@
 # retroforge read-only root assembler — stage `debug-capture`.
 #
 # SOURCED by rootfs/assemble-rootfs.sh, never executed. Split out of it for issue #43; the code
-# and its rationale are unchanged (tests/test-mkroot.sh reads the `# STAGE <name>` banners out of
-# this file set, and asserts the roster it was audited against).
+# and its rationale are unchanged.
 #
 # NEVER sourced unless RETROFORGE_DEBUG=1. Independent of RETROFORGE_DEV -- it applies to release builds too.
 #

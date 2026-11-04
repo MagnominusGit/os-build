@@ -1,0 +1,18 @@
+// Let the shell (player user) start the internal installer: Settings > General > Install to internal
+// storage (the RetroForge plugin's retroforge_os.gd) runs
+// `systemctl --no-block start retroforge-installer.service`.
+//
+// Exactly start, of this one unit, for the active LOCAL session (the seat0 autologin of
+// retroforge-session.service, not an ssh login) and wheel. Not stop, not restart, not enable, not any
+// other unit. tests/test-installer-shipped.sh evaluates this rule.
+//
+// Any process of `player` in that session can do this too, a game included. What that buys is the
+// session closing and the device rebooting: the unit takes no arguments, ends `player` before it asks
+// anything, and nothing is written without the four-button consent on the panel.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        action.lookup("unit") == "retroforge-installer.service" &&
+        action.lookup("verb") == "start" &&
+        subject.active && subject.local && subject.isInGroup("wheel"))
+        return polkit.Result.YES;
+});

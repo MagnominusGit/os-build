@@ -75,7 +75,7 @@ on:
   workflow_call:
     inputs:
       artifact:
-        description: 'Which release artifact to produce: sdcard | bundle | rootfs | installer'
+        description: 'Which release artifact to produce: sdcard | bundle | rootfs'
         required: true
         type: string
       version:
@@ -107,9 +107,7 @@ jobs:
   # error" (card/v0.0.5, ota/v0.0.5). Under qemu it would be hours. Built here, the payload goes
   # over as a tarball (an artifact zip follows symlinks and drops the hidden .inputs.sha256
   # marker), and build.sh in the build job finds the marker matching its inputs and does nothing.
-  # The installer carries no x86 stack, so it skips this.
   mesa-x86:
-    if: inputs.artifact != 'installer'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -135,8 +133,6 @@ jobs:
   build:
     name: ${{ inputs.artifact }}
     needs: mesa-x86
-    # Runs when mesa-x86 was skipped (the installer), not when it failed.
-    if: ${{ !failure() && !cancelled() }}
     runs-on: ${{ vars.OVERLAY_RUNNER || 'ubuntu-24.04-arm' }}
     # THE ENVIRONMENT IS THE AUTHORIZATION BOUNDARY FOR SIGNING, and it has to be declared here
     # rather than by the caller: a reusable workflow's job cannot be attached to an environment from
@@ -168,14 +164,12 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: fetch the x86 Mesa
-        if: inputs.artifact != 'installer'
         uses: actions/download-artifact@v8
         with:
           name: retroforge-mesa-x86
           path: ${{ runner.temp }}/mesa-x86
 
       - name: unpack the x86 Mesa
-        if: inputs.artifact != 'installer'
         run: |
           set -euo pipefail
           mkdir -p work/mesa-x86
@@ -186,8 +180,8 @@ jobs:
         run: |
           set -euo pipefail
           case "$ARTIFACT" in
-            sdcard|bundle|rootfs|installer) ;;
-            *) echo "::error::artifact must be sdcard, bundle, rootfs or installer, got '$ARTIFACT'"; exit 1 ;;
+            sdcard|bundle|rootfs) ;;
+            *) echo "::error::artifact must be sdcard, bundle or rootfs, got '$ARTIFACT'"; exit 1 ;;
           esac
 
       # No reclaiming of the runner image's preinstalled toolchains: there is ~109 G free and the
@@ -225,8 +219,8 @@ jobs:
       # The key below only picks WHICH repo to start from: an exact hit is a full set built from
       # these sources; a restore-keys fallback is the previous set, and the stamps sort it out.
       #
-      # WHY ONLY main's. Caches are scoped by ref. A release runs on a TAG (card/v*, ota/v*,
-      # installer/v*), which can read main's caches but saves into its own scope, where the next
+      # WHY ONLY main's. Caches are scoped by ref. A release runs on a TAG (card/v*, ota/v*),
+      # which can read main's caches but saves into its own scope, where the next
       # tag can never see it. So main warms it (overlay.yml `warm`), tags and dispatches read it,
       # and PR caches — fork PRs included — stay invisible to every release.
       - name: restore the overlay repo
@@ -291,16 +285,6 @@ jobs:
               echo "::warning::no release signing key configured — this bundle is signed with an ephemeral dev cert and is NOT shippable"
               make bundle
             fi
-          elif [ "$ARTIFACT" = installer ]; then
-            # The recovery medium. No signing key of any kind: like a card, it is flashed over USB
-            # by someone holding the device, so there is no signature for anything to verify.
-            # `make installer` bootstraps the installer root — a separate package set and lock from
-            # the shipped image — and lays the two-partition medium.
-            make installer
-            # THE ONLY THING THAT OPENS THE BUILT IMAGE. Everything in `make test` reads the
-            # scripts, and a script that says the right thing while producing the wrong image passes
-            # all of it — so this is the gate between a green build and a published medium.
-            make verify-image
           else
             make sdcard
           fi
@@ -336,26 +320,6 @@ jobs:
           cp out/images/*.raucb upload/
           ls -lh upload/ >> "$GITHUB_STEP_SUMMARY"
 
-      # Same .gz as the card, for the same compatibility reason: this is a file a person downloads
-      # and writes to a card with balenaEtcher or Raspberry Pi Imager. It compresses to ~400 MiB
-      # (2026-10-13), against the card's ~520 MiB.
-      #
-      # AND THE IDENTITY SIDECAR, which installer/mkimage.sh writes from the same values it stamped
-      # inside the image. The release job names the release from the tag, but a person
-      # holding the downloaded file needs the build to be nameable without opening a squashfs out of
-      # the middle of a GPT — and installer/verify-image.sh asserts the two are byte-identical.
-      - name: compress the installer medium
-        if: inputs.artifact == 'installer'
-        run: |
-          set -euo pipefail
-          command -v pigz >/dev/null || sudo apt-get install -y -qq pigz
-          mkdir -p upload
-          pigz -6 -c out/images/installer.img > upload/installer.img.gz
-          cp out/images/installer.release upload/
-          ls -lh upload/ >> "$GITHUB_STEP_SUMMARY"
-          { echo "### installer"; echo '```'; cat out/images/installer.release; echo '```'; } \
-            >> "$GITHUB_STEP_SUMMARY"
-
       # BOTH FILES, and the sidecar is not optional garnish. genbundle.sh reads the version out of
       # rootfs.release rather than out of its own environment, precisely so a bundle cannot claim an
       # identity its payload does not carry — ship the image without it and the sign job fails at
@@ -387,8 +351,6 @@ jobs:
           # exists, so any `ls` over both is a guaranteed non-zero exit under pipefail.
           if [ "$ARTIFACT" = sdcard ]; then
             f=upload/sdcard.img.gz
-          elif [ "$ARTIFACT" = installer ]; then
-            f=upload/installer.img.gz
           else
             f=$(find upload -maxdepth 1 -name '*.raucb' -print -quit)
           fi

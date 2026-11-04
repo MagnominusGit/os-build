@@ -64,9 +64,7 @@ test-only and debug injections are separated from the release path by constructi
 
 ### Stages are named, not numbered
 
-Every stage declares itself with a `# STAGE <name>` banner, and `tests/test-mkroot.sh` reads that
-banner set as a tripwire: a stage added to the assembler is a stage the installer medium has to
-repeat or deliberately rule out, and the test fails until someone decides which.
+Every stage declares itself with a `# STAGE <name>` banner.
 
 They used to be numbered (`1`, `2b`, `4za`, `4y-2`). The numbering was a fiction — `4g` and `4h`
 ran before `4c` — and it cost more than readability:

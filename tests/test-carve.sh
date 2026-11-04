@@ -15,8 +15,8 @@
 #                 deleted userdata and then discovered our eight would not fit is the failure this
 #                 suite exists to prevent, so every refusal case asserts the table is unchanged.
 #
-# Like test-select-target.sh this hangs off the installer image, not `make test` -- carve.sh is
-# never shipped into the rootfs. Fixtures are sparse image files; nothing is mounted, nothing needs
+# Like test-select-target.sh this runs under `make test-disk`, not `make test`: it needs sgdisk.
+# Fixtures are sparse image files; nothing is mounted, nothing needs
 # root, and a carve on an image file exercises exactly the code a carve on a device does.
 set -uo pipefail
 

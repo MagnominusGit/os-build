@@ -75,20 +75,9 @@ OVERLAY_REPO="$ROOT/work/repo/aarch64"
 . "$ROOT/build/lib-pins.sh"
 
 OUT="${1:?usage: rootfs/fetchlock.sh <install-list-out> [lock]}"
-# The lock to materialize. Defaults to the shipped image's; installer/mkroot.sh passes
-# installer/manifest.lock, which is the SAME format written by a different generator over a
-# different root (Phase 6). Nothing in this script is specific to which image a lock describes —
-# it fetches rows, verifies hashes and emits container paths — so the two share it rather than
-# growing a near-copy that would drift on the next class or provenance change.
 LOCK="${2:-$ROOT/rootfs/manifest.lock}"
 LOCKREL="${LOCK#"$ROOT"/}"
-# The command that regenerates THIS lock, named in every hint below. Sending someone to `make
-# relock` when the stale artifact is installer/manifest.lock points them at a 20-minute rebuild of
-# the wrong root, and the lock they were told to fix comes back unchanged.
-case "$LOCKREL" in
-  installer/*) RELOCK="make relock-installer" ;;
-  *)         RELOCK="make relock" ;;
-esac
+RELOCK="make relock"
 
 # Repos configured in the base's pacman.conf, in that order. See the header note on guessing.
 REPOS=(core extra)

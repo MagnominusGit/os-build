@@ -160,7 +160,7 @@ fi
 echo
 echo "the permit list itself is well formed"
 
-# Read the array back out of the guard, the way tests/test-mkroot.sh reads mkroot.sh's file lists:
+# Read the array back out of the guard:
 # a permit entry is matched against `find -printf %P`, which never has a leading slash, so a single
 # "/usr/bin/..." entry would silently never match and quietly stop permitting that file.
 permit="$(sed -n '/^SETUID_PERMITTED=(/,/^)/p' "$GUARD" | sed '1d;$d' | sed 's/#.*//' | tr -s ' \n' '\n' | grep -v '^$')"

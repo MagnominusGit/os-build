@@ -14,7 +14,7 @@ fi
 
 # uid/gid 1000, baked into the base by rootfs/customize-base.sh. Numeric rather than resolved
 # through a passwd file, because neither caller is resolving names through the target's root:
-# make-sdcard.sh runs on the build host and the installer runs from the installer image.
+# make-sdcard.sh runs on the build host and the installer writes a disk it did not boot from.
 PLAYER_UID=${PLAYER_UID:-1000}
 PLAYER_GID=${PLAYER_GID:-1000}
 

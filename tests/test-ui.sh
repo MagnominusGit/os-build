@@ -263,270 +263,47 @@ printf '%s' "$a" | grep -q 'your game library is safe' \
   || bad "the reassurance was lost on the disk where it is true"
 
 # =================================================================================================
-# §4b: the network table -- every row has a different fix
+# the stubs the sections below share
 # =================================================================================================
-# A generic "network failed" is not acceptable here and this is why: there is NO on-device
-# credential entry, so the fix for every row below costs a power-off, a pulled card, an edit on
-# another computer and a reboot. A user told only "it failed" pays that price per guess.
-NETCFG="$ROOT/installer/netcfg"
-[ -x "$NETCFG" ] || { echo "no netcfg: $NETCFG" >&2; exit 1; }
-# $T/bin is shared with the sections below, and this is the FIRST of them to write into it -- the
-# stubs silently did not exist when it was not created here, so the real ip/curl ran and every
-# diagnosis came back as whatever this build host's network happens to be.
-mkdir -p "$T/net" "$T/bin"
-
-# The stubs. Each case sets NET_* to steer them, and they record nothing the PSK could leak into.
-cat >"$T/bin/ip" <<'EOF'
-#!/usr/bin/env bash
-# NET_LEASE_AFTER models the HW 2026-08-25 failure: the address does not arrive until the Nth
-# ACTIVATION, so it is the connect count -- not elapsed time -- that decides whether there is a
-# lease. That is the whole distinction between "wait longer" and "activate again".
-if [ -n "${NET_LEASE_AFTER:-}" ]; then
-  n=$(wc -l <"${NET_CONNECT_CALLS:-/dev/null}" 2>/dev/null || echo 0)
-  [ "${n:-0}" -ge "$NET_LEASE_AFTER" ] && echo "    inet 192.168.1.50/24 scope global wlan0"
-  exit 0
-fi
-[ "${NET_LEASE:-0}" = 1 ] && echo "    inet 192.168.1.50/24 scope global wlan0"
-exit 0
-EOF
+mkdir -p "$T/bin"
 cat >"$T/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >>"${NET_CURL_CALLS:-/dev/null}"
-# A BODY, for the release-info section below. netcfg only ever asks whether the host answers and
-# sends the answer to /dev/null, so one stub serves both callers: what it says is invisible to the
-# one and the whole question for the other.
 [ -n "${NET_CURL_BODY:-}" ] && printf '%s' "$NET_CURL_BODY"
 exit "${NET_HOST_RC:-0}"
 EOF
-cat >"$T/bin/nmcli" <<'EOF'
-#!/usr/bin/env bash
-case "$*" in
-  *"device wifi list"*)
-     printf '%s\n' "$*" >>"${NET_SCAN_CALLS:-/dev/null}"
-     # A cold cache is `--rescan no` finding nothing while `--rescan yes` finds it: exactly the
-     # boot-time state that made the first connect fail in 0s (HW 2026-08-25).
-     case "$*" in
-       *"--rescan no"*) [ "${NET_CACHE_HIT:-1}" = 1 ] || exit 0 ;;
-     esac
-     [ "${NET_SCAN_HIT:-1}" = 1 ] && printf '%s\n' "${NET_SSID:-home-wifi}"; exit 0 ;;
-  *"device wifi connect"*)
-     # The PSK must never be echoed, logged or recorded. This stub asserts that by never seeing it.
-     printf 'connect\n' >>"${NET_CONNECT_CALLS:-/dev/null}"
-     [ "${NET_JOIN_RC:-0}" = 0 ] && exit 0
-     printf '%s\n' "${NET_JOIN_ERR:-Error: Secrets were required, but not provided.}" >&2
-     exit 4 ;;
-esac
-exit 0
-EOF
 chmod +x "$T/bin"/*
-
-netcfg() {  # <mode> -- prints netcfg's key=value output
-  PATH="$T/bin:$PATH" RETROFORGE_WIFI_CONF="${CONF-$T/net/wifi.conf}" \
-    RETROFORGE_OTA_URL="https://ota.example" RETROFORGE_NET_TIMEOUT=1 \
-    "$NETCFG" "${1:-diagnose}" 2>/dev/null
-}
 state() { printf '%s\n' "$1" | sed -n 's/^STATE=//p'; }
 
-printf 'SSID=home-wifi\nPSK=hunter2\n' >"$T/net/wifi.conf"
-
-CASE="§4b: a join that lands without an address activates again"
-# HW 2026-08-25, from the first ESP log this medium delivered: the first join reached no-lease 10.2s
-# into a 90s budget, the self re-check 5s later STILL found no address, and a second activation was
-# online in 3.9s. So the lease does not arrive late, it arrives on the next activation -- and this
-# is the operator's second Join press, done for them.
-: >"$T/net/connects"
-NET_CONNECT_CALLS="$T/net/connects" NET_LEASE_AFTER=2 NET_HOST_RC=0
-export NET_CONNECT_CALLS NET_LEASE_AFTER NET_HOST_RC
-unset NET_LEASE
-out="$(netcfg join)"
-[ "$(state "$out")" = online ] \
-  && ok "an address that only the second activation produces still ends as 'online'" \
-  || bad "the retry did not happen or did not help: $out"
-[ "$(wc -l <"$T/net/connects")" = 2 ] \
-  && ok "exactly two activations -- one retry, not a loop" \
-  || bad "wrong number of activations: $(wc -l <"$T/net/connects")"
-printf '%s' "$out" | grep -q '^ATTEMPT=2' \
-  && ok "and it says so while it runs, so the connecting screen can name the second attempt" \
-  || bad "nothing tells the UI a second attempt is under way"
-
-CASE="§4b: a cold scan cache is warmed before the first attempt, not after a failed one"
-# HW 2026-08-25: four seconds after the radio came up, connect failed in 0s with "No network with
-# SSID found" -- NM had no scan result yet. The retry only worked because the not-found check
-# between attempts runs a fresh sweep, i.e. the join spent a whole activation doing a scan.
-: >"$T/net/connects"; : >"$T/net/scans"
-# The case above leaves NET_LEASE_AFTER set, which would make the ip stub withhold the lease until
-# the second activation -- i.e. it would force the very retry this case exists to prove unnecessary.
-unset NET_LEASE_AFTER
-NET_CONNECT_CALLS="$T/net/connects" NET_SCAN_CALLS="$T/net/scans" NET_CACHE_HIT=0 NET_LEASE=1
-export NET_CONNECT_CALLS NET_SCAN_CALLS NET_CACHE_HIT NET_LEASE
-out="$(netcfg join)"
-[ "$(state "$out")" = online ] && [ "$(wc -l <"$T/net/connects")" = 1 ] \
-  && ok "a cold cache now joins on the FIRST attempt" \
-  || bad "the cold-cache join still costs an activation: $out"
-# The cache is PROBED first (`--rescan no`, free) and only then swept, so the sweep is the second
-# call, not the first. With one activation and no failure, any `--rescan yes` here can only be the
-# warm-up -- the post-failure sweep needs a failure it never had.
-grep -q -- "--rescan yes" "$T/net/scans" \
-  && ok "because the sweep happens before the connect, where it is worth something" \
-  || bad "no warming sweep ran: $(cat "$T/net/scans")"
-# A warm cache must not pay for a sweep it does not need.
-: >"$T/net/scans"; NET_CACHE_HIT=1
-netcfg join >/dev/null
-[ "$(grep -c -- "--rescan yes" "$T/net/scans")" = 0 ] \
-  && ok "and a warm cache is a cache read, not another sweep" \
-  || bad "a warm cache still forced a rescan: $(cat "$T/net/scans")"
-# HIDDEN NETWORKS. Not being in any scan is what hidden MEANS, so the warm-up must never decide.
-: >"$T/net/connects"; NET_CACHE_HIT=0 NET_SCAN_HIT=0; export NET_SCAN_HIT
-netcfg join >/dev/null
-[ "$(wc -l <"$T/net/connects")" -ge 1 ] \
-  && ok "an SSID no scan can see is still attempted -- that is how a hidden network joins" \
-  || bad "the pre-scan gated the attempt, which breaks hidden networks"
-unset NET_SCAN_HIT NET_CACHE_HIT NET_SCAN_CALLS NET_CONNECT_CALLS NET_LEASE
-
-CASE="§4b: the failures a retry cannot cure are never retried"
-# A key the network rejected is rejected again a second later, and an SSID that is not on the air
-# does not appear because we asked twice. Retrying either only delays the screen naming the fix.
-: >"$T/net/connects"
-# Exported HERE rather than inherited from a case above: this counts activations, and a case that
-# borrows another's recording path silently counts nothing the moment that case stops exporting it.
-NET_CONNECT_CALLS="$T/net/connects"; export NET_CONNECT_CALLS
-NET_JOIN_RC=4 NET_LEASE_AFTER=99; export NET_JOIN_RC NET_LEASE_AFTER
-out="$(netcfg join)"
-[ "$(state "$out")" = auth-failed ] && [ "$(wc -l <"$T/net/connects")" = 1 ] \
-  && ok "a rejected key is one attempt and a screen about the key" \
-  || bad "auth-failed was retried or misdiagnosed: $out"
-: >"$T/net/connects"
-NET_SCAN_HIT=0 NET_JOIN_ERR="Error: No network with SSID 'home-wifi' found."; export NET_SCAN_HIT NET_JOIN_ERR
-out="$(netcfg join)"
-[ "$(state "$out")" = not-found ] && [ "$(wc -l <"$T/net/connects")" = 1 ] \
-  && ok "an SSID that is not on the air is one attempt and a screen about the name" \
-  || bad "not-found was retried or misdiagnosed: $out"
-unset NET_SCAN_HIT NET_JOIN_ERR NET_JOIN_RC NET_CONNECT_CALLS NET_LEASE_AFTER
-
-CASE="§4b: netcfg names which failure this is"
-NET_LEASE=1 NET_HOST_RC=0; export NET_LEASE NET_HOST_RC
-[ "$(state "$(netcfg)")" = online ] \
-  && ok "a lease plus a reachable update server is 'online' -- and it never looks at wifi.conf" \
-  || bad "a working network was not reported as online"
-NET_HOST_RC=7
-[ "$(state "$(netcfg)")" = no-host ] \
-  && ok "a lease with an unreachable server is 'no-host', not a Wi-Fi problem" \
-  || bad "an unreachable server was misdiagnosed"
-printf '%s' "$(NET_HOST_RC=7 netcfg)" | grep -qi 'nothing accepted a connection' \
-  && ok "and it says WHICH failure -- curl's exit code, mapped to something a person can act on" \
-  || bad "no-host does not distinguish DNS from a refused connection"
-printf '%s' "$(NET_HOST_RC=6 netcfg)" | grep -qi 'could not be resolved' \
-  && ok "a name that does not resolve says so, because that is a different fix" \
-  || bad "a DNS failure reads the same as a dead host"
-# THE REGRESSION THIS FILE EXISTS TO HOLD. `curl -f` turns a 404 into a failure, and the OTA root
-# legitimately 404s -- it serves <channel>/latest.json, not an index. netcfg shipped with -f and
-# called a reachable server unreachable on a Pocket S2, on the very network the probe ran over.
-NET_CURL_CALLS="$T/net/curl-calls"; export NET_CURL_CALLS; : >"$NET_CURL_CALLS"
-NET_HOST_RC=0 netcfg >/dev/null
-grep -qE '(^| )-[a-zA-Z]*f' "$NET_CURL_CALLS" \
-  && bad "netcfg passes -f to curl, so any 4xx reads as an unreachable host" \
-  || ok "reachability is curl's EXIT code, never its HTTP status -- no -f is passed"
-grep -q 'ota.example' "$NET_CURL_CALLS" \
-  && ok "and it probes the OTA base URL it was configured with" \
-  || bad "it probed something other than the configured URL: $(cat "$NET_CURL_CALLS")"
-unset NET_CURL_CALLS
-NET_LEASE=0 NET_HOST_RC=0
-CONF="$T/net/absent.conf" ; [ "$(state "$(netcfg)")" = no-conf ] \
-  && ok "no wifi.conf on the card is its own state, with the path quoted" \
-  || bad "a missing wifi.conf was not diagnosed"
-unset CONF
-printf 'SSID=home-wifi\nthis is not a setting\n' >"$T/net/bad.conf"
-out="$(CONF="$T/net/bad.conf" netcfg)"
-[ "$(state "$out")" = unparsable ] && printf '%s' "$out" | grep -qx 'LINE=2' \
-  && ok "an unparseable file reports the OFFENDING LINE -- 'unparseable' alone is the same dead end" \
-  || bad "the bad line was not located: $out"
-[ "$(state "$(netcfg join)")" = no-lease ] \
-  && ok "associated but no address is the access point's DHCP, not ours" \
-  || bad "a missing lease was misdiagnosed"
-NET_JOIN_RC=4; export NET_JOIN_RC
-[ "$(state "$(netcfg join)")" = auth-failed ] \
-  && ok "a rejected key is 'auth-failed' -- the fix is the PSK and nothing else" \
-  || bad "a wrong PSK was not diagnosed"
-unset NET_JOIN_RC
-NET_SCAN_HIT=0; export NET_SCAN_HIT
-[ "$(state "$(netcfg join)")" = not-found ] \
-  && ok "an SSID missing from the scan is a typo or an AP out of range, not a bad password" \
-  || bad "a missing SSID was not diagnosed"
-unset NET_SCAN_HIT
-[ "$(state "$(netcfg)")" = need-join ] \
-  && ok "and before any attempt it asks -- the stale-file case §4b wants caught" \
-  || bad "it joined without confirming"
-# The one thing that must never appear anywhere in the output.
-netcfg join | grep -q 'hunter2' \
-  && bad "the PSK was printed" \
-  || ok "the PSK appears in no state, on any path"
-unset NET_LEASE NET_HOST_RC
-
-CASE="§4b: netcfg and retroforge-update agree on which host 'reachable' means"
-# THE URL IS WRITTEN THREE TIMES -- shell here, Python in rootfs/overlay/usr/bin/retroforge-update, Python
-# again in installer/release-info -- and this assertion is the only thing that keeps them the same
-# URL. It is not hypothetical: netcfg shipped for an hour with an invented default
-# (`ota.retroforge.org`), which would have reported every healthy network as `no-host`, the exact
-# misdiagnosis §4b's table exists to prevent. Same shape as test-update.sh's identity-rules-agree,
-# and for the same reason. The third copy is the one that would hurt most quietly: netcfg would
-# report `online` against one host while release-info fetched a manifest from another.
-net_default="$(sed -n 's/^OTA_DEFAULT_URL=//p' "$NETCFG" | head -1)"
-upd_default="$(sed -n 's/^DEFAULT_URL = "\(.*\)"$/\1/p' "$ROOT/rootfs/overlay/usr/bin/retroforge-update" | head -1)"
+CASE="release-info and retroforge-update agree on the host"
+# The literal is written twice, in two files that do not share code.
+ota_default="$(sed -n 's/^DEFAULT_URL = "\(.*\)"$/\1/p' "$ROOT/rootfs/overlay/usr/bin/retroforge-update" | head -1)"
 rel_default="$(sed -n 's/^DEFAULT_URL = "\(.*\)"$/\1/p' "$ROOT/installer/release-info" | head -1)"
-[ -n "$net_default" ] && [ "$net_default" = "$upd_default" ] \
-  && ok "both default to $net_default" \
-  || bad "netcfg says '$net_default', retroforge-update says '$upd_default'"
-[ -n "$rel_default" ] && [ "$rel_default" = "$net_default" ] \
-  && ok "and release-info fetches its manifest from the host netcfg pronounced reachable" \
-  || bad "release-info says '$rel_default', netcfg says '$net_default'"
-# And the config file the running system actually carries wins over both.
-printf 'OTA_URL=https://from-the-conf.example\n' >"$T/net/ota.conf"
-NET_LEASE=1 NET_HOST_RC=0 RETROFORGE_OTA_CONFIG="$T/net/ota.conf" PATH="$T/bin:$PATH" \
-  RETROFORGE_WIFI_CONF="$T/net/wifi.conf" "$NETCFG" diagnose 2>/dev/null \
-  | grep -q 'from-the-conf.example' \
-  && ok "and /etc/retroforge/ota.conf overrides the built-in, as it does for the OTA client" \
-  || bad "the config file was ignored"
+[ -n "$ota_default" ] && [ "$rel_default" = "$ota_default" ] \
+  && ok "both default to $ota_default" \
+  || bad "release-info says '$rel_default', retroforge-update says '$ota_default'"
 
-CASE="§5: the button that says Power off powers off"
-# A screen that says "Power off" and merely exits is worse than one that says nothing: the UI dies,
-# gamescope dies with it, and the device sits at a black panel having promised otherwise. That is
-# what it did until 2026-08-22.
-powercheck() {  # <state-or-rc> -- prints the result tuple the screen produces for SELECT / S
-  WHICH="$1" python3 -c '
+CASE="§5: Restart leaves the UI, and the unit does the rest"
+# retroforge-installer.service reboots on every stop, so leaving is what the button means.
+restartcheck() {  # <rc> <token> -- prints the result tuple the end screen produces
+  RC="$1" TOKEN="$2" python3 -c '
 import json, os, sys
 sys.path.insert(0, os.path.join(os.environ["ROOT"], "installer"))
 import uiflow
-w = os.environ["WHICH"]
-if w.startswith("net:"):
-    s = uiflow.NetworkScreen({"STATE": w[4:], "SSID": "x"}); s.handle("BACK")
-else:
-    class R: tail = []
-    s = uiflow.ProgressScreen(R()); s.finish(int(w)); s.handle("S")
+class R: tail = ["boom"]
+s = uiflow.ProgressScreen(R()); s.finish(int(os.environ["RC"]))
+s.handle(uiflow.TOKEN_BACK if os.environ["TOKEN"] == "BACK" else os.environ["TOKEN"])
 print(json.dumps(s.result))'
 }
-[ "$(powercheck 0)" = '["poweroff"]' ] \
-  && ok "a finished install powers the device off, as its button says" \
-  || bad "the success screen's Power off button does not power off: $(powercheck 0)"
-# A FAILED install offers the two actions that exist. It offered "Continue" until 2026-08-25, which
-# named nothing that happens -- it quit the UI and left a blank panel, and the operator running it on
-# a Pocket ACE said so. Trying again is the documented recovery (no backups are kept precisely
-# because re-running has to work); powering off is what gets the log onto the ESP, since save-log.sh
-# runs when the unit stops.
-[ "$(powercheck 1)" = '["retry"]' ] \
+[ "$(restartcheck 0 S)" = '["quit"]' ] \
+  && ok "a finished install leaves on its one button" \
+  || bad "the success screen does not leave: $(restartcheck 0 S)"
+[ "$(restartcheck 1 S)" = '["retry"]' ] \
   && ok "a FAILED one retries on the bottom button -- the documented recovery" \
-  || bad "the failure screen's bottom button does not retry: $(powercheck 1)"
-failsel=$(SNIPPET= python3 - <<'PY2'
-import json, os, sys
-sys.path.insert(0, os.path.join(os.environ["ROOT"], "installer"))
-import uiflow
-class R: tail = []
-s = uiflow.ProgressScreen(R()); s.finish(1); s.handle(uiflow.TOKEN_BACK)
-print(json.dumps(s.result))
-PY2
-)
-[ "$failsel" = '["poweroff"]' ] \
-  && ok "and SELECT powers off, which is what writes the log to the ESP" \
-  || bad "SELECT on a failed install does not power off: $failsel"
+  || bad "the failure screen's bottom button does not retry: $(restartcheck 1 S)"
+[ "$(restartcheck 1 BACK)" = '["quit"]' ] \
+  && ok "and SELECT leaves" \
+  || bad "SELECT on a failed install does not leave: $(restartcheck 1 BACK)"
 labels=$(SNIPPET= python3 - <<'PY2'
 import json, os, sys
 sys.path.insert(0, os.path.join(os.environ["ROOT"], "installer"))
@@ -536,74 +313,12 @@ s = uiflow.ProgressScreen(R()); s.finish(1)
 print(json.dumps([b["label"] for b in s.describe()["buttons"]]))
 PY2
 )
-printf '%s' "$labels" | grep -q Continue \
-  && bad "the failure screen still offers Continue, which continues nothing: $labels" \
-  || ok "and neither button says Continue ($labels)"
-[ "$(powercheck net:no-conf)" = '["poweroff"]' ] \
-  && ok "and a network failure's SELECT, labelled Power off, does too" \
-  || bad "the network failure screen's Power off button does not power off"
-[ "$(powercheck net:need-join)" = '["quit"]' ] \
-  && ok "while the join prompt's SELECT is Cancel, and only cancels" \
-  || bad "cancelling a join offer powered the device off"
-# The guard that keeps this suite from halting the machine it runs on.
-grep -q 'isinstance(source, ScriptedInput)' "$UI" \
-  && ok "a scripted run refuses to power off, rather than trusting every case to set the seam" \
-  || bad "nothing stops a scripted run from halting the build host"
-# NOT asserted here: the guard firing end to end. Reaching it through the loop needs a completed
-# install, i.e. the spine, and a case that passes whether or not the path was reached asserts
-# nothing at all -- which is the failure mode this suite exists to avoid. The guard is read out of
-# the source above; the four result tuples are the behaviour.
-
-CASE="§4b: the screen turns each state into a different fix"
-netscreen() {  # <key=value...>
-  FACTS="$1" python3 -c '
-import importlib.util, json, os, sys
-sys.path.insert(0, os.path.join(os.environ["ROOT"], "installer"))
-import uiflow
-s = uiflow.NetworkScreen(uiflow.kv(os.environ["FACTS"].replace(";", "\n")))
-print(json.dumps(s.describe()))'
-}
-n="$(netscreen 'STATE=no-conf;PATH_=/esp/retroforge/wifi.conf')"
-printf '%s' "$n" | grep -q 'wifi.conf.example' \
-  && ok "no-conf points at the example file that is on the card for exactly this" \
-  || bad "no-conf does not say how to create the file"
-printf '%s' "$n" | grep -qi 'Ethernet' \
-  && ok "and names the adapter path that needs no file at all" \
-  || bad "no-conf hides the zero-config alternative"
-n="$(netscreen 'STATE=unparsable;PATH_=/esp/retroforge/wifi.conf;LINE=2')"
-printf '%s' "$n" | grep -q 'line 2' \
-  && ok "unparsable quotes the line number the user has to go and look at" \
-  || bad "the line number is not on the screen"
-n="$(netscreen 'STATE=auth-failed;SSID=home-wifi')"
-printf '%s' "$n" | grep -q "home-wifi" \
-  && ok "auth-failed quotes the SSID back" \
-  || bad "the SSID is not quoted back"
-printf '%s' "$n" | grep -qi 'PSK' \
-  && ok "and names the one field to change" \
-  || bad "it does not say what to fix"
-n="$(netscreen 'STATE=no-lease;SSID=home-wifi')"
-printf '%s' "$n" | grep -qi 'not the installer\|access point' \
-  && ok "no-lease says the problem is the access point, so the user stops debugging us" \
-  || bad "no-lease blames nobody"
-n="$(netscreen 'STATE=need-join;SSID=home-wifi')"
-printf '%s' "$n" | grep -q 'Join' \
-  && ok "need-join offers a plain button press -- nothing destructive happens here" \
-  || bad "the join confirmation has no join button"
-printf '%s' "$n" | grep -qi 'never shown' \
-  && ok "and says the password is never displayed" \
-  || bad "it does not reassure about the PSK"
-printf '%s' "$n" | grep -qi 'earlier install' \
-  && ok "naming the stale-card case that is the whole reason this screen exists" \
-  || bad "the stale-file case is not mentioned"
-# Every state must produce a fix, or the table has a hole in it.
-for st in no-conf unparsable not-found auth-failed no-lease no-host netcfg-failed; do
-  if [ "$(netscreen "STATE=$st;SSID=x;LINE=1" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(len(d["blocks"]))')" = 2 ]; then
-    :
-  else
-    bad "$st does not render both what happened and what to do"
-  fi
-done
-ok "every state in the table renders both what happened and what to do"
+[ "$labels" = '["Try again", "Restart"]' ] \
+  && ok "the failure screen offers Try again and Restart" \
+  || bad "the failure screen offers: $labels"
+grep -q 'Power off\|power_off\|poweroff' "$ROOT/installer/ui" "$ROOT/installer/uiflow.py" \
+  && bad "the UI still has a power-off path, and nothing on the card behind it" \
+  || ok "no power-off path is left in the UI"
 
 # =================================================================================================
 # §4d: no controller and no keyboard -> stop
@@ -761,11 +476,11 @@ printf '%s' "$noinput" | grep -qi 'Nothing has been written' \
   || bad "it does not say whether anything was written"
 
 CASE="§6: the pygame wheel is pinned to the Python the image actually ships"
-# A WHEEL IS ABI-LOCKED. installer/pygame-ce.pin carries a cp313 build because rootfs/manifest.lock
+# A WHEEL IS ABI-LOCKED. packages/pygame-ce/prebuilt.pin carries a cp313 build because rootfs/manifest.lock
 # ships python 3.13; a python bump in the lock makes that wheel unimportable, and the symptom would
 # be an installer that comes up to a black panel with an ImportError in a child's stderr -- which
 # is exactly how the pygame.controller bug presented. Two files, one fact, so assert they agree.
-PIN="$ROOT/installer/pygame-ce.pin"
+PIN="$ROOT/packages/pygame-ce/prebuilt.pin"
 [ -f "$PIN" ] || bad "no pygame pin at $PIN"
 pin_py="$(sed -n 's/^python:[[:space:]]*//p' "$PIN" | head -1)"
 lock_py="$(awk '$1 == "python" {print $2}' "$ROOT/rootfs/manifest.lock" | head -1)"
@@ -777,11 +492,7 @@ want="cp$(printf '%s' "$lock_py" | cut -d. -f1)$(printf '%s' "$lock_py" | cut -d
 grep -q "^dest:.*python3\.$(printf '%s' "$lock_py" | cut -d. -f2)/" "$PIN" \
   && ok "and it is extracted into that interpreter's site-packages" \
   || bad "the pin's dest does not name python3.$(printf '%s' "$lock_py" | cut -d. -f2): $(grep '^dest:' "$PIN")"
-# It is deliberately NOT under packages/, which rootfs/customize-base.sh auto-discovers into the
-# RELEASE base -- 39 MB of SDL bindings on every shipped device, for a program that does not ship.
-[ -f "$ROOT/packages/pygame-ce/prebuilt.pin" ] \
-  && bad "the pygame pin is under packages/, so customize-base will put it in the release image" \
-  || ok "and it is not under packages/, where it would land in every shipped image"
+
 
 CASE="ui: the game-controller API is the one pygame actually has"
 # `pygame.controller` does not exist as a top-level module in either pygame or pygame-ce -- it is
@@ -856,11 +567,9 @@ kill "$p" 2>/dev/null; wait "$p" 2>/dev/null
 # =================================================================================================
 # release-info — what the medium would install, and why it sometimes cannot
 # =================================================================================================
-# The medium carries no bundle at all, so this is the program that turns "the network is up" into
-# "here is what will be downloaded". Every failure below reaches a person as a line on the pre-flight
-# screen; the whole reason it is a separate program from netcfg is that netcfg must treat a 404 as a
-# REACHABLE server (measured on a Pocket S2, 2026-08-22) and a 404 on <channel>/latest.json is
-# exactly the answer this file has to name.
+# The card carries no bundle at all, so this is the program that says what will be downloaded. Every
+# failure below reaches a person as a line on the pre-flight screen or the Settings row, and a 404 on
+# <channel>/latest.json is exactly the answer this file has to name.
 RELINFO="$ROOT/installer/release-info"
 [ -x "$RELINFO" ] || { echo "no release-info: $RELINFO" >&2; exit 1; }
 mkdir -p "$T/rel"
@@ -937,9 +646,41 @@ printf '%s' "$out" | grep -q 'BUNDLE=https://ota.example/dev/' \
   && ok "and the bundle comes from that channel, not from stable" \
   || bad "the bundle URL kept the default channel: $out"
 
+CASE="release-info: the channel is the one Updates shows"
+# Same order as retroforge-update's channel_setting(): env, /etc, $HOME, built-in. A dev card pins
+# OTA_CHANNEL in /etc on purpose, and the user's file must not undo that.
+mkdir -p "$T/userconf"
+relchan() {
+  NET_CURL_BODY="$MANIFEST" RETROFORGE_OTA_USER_CONFIG="$T/userconf/ota.conf" relinfo | sed -n 's/^CHANNEL=//p'
+}
+printf 'OTA_CHANNEL=beta\n' >"$T/userconf/ota.conf"
+[ "$(relchan)" = beta ] && ok "the channel picked in Updates is the one installed from" \
+  || bad "the user's channel is ignored: $(relchan)"
+[ "$(REL_CONF="$T/rel/ota.conf" relchan)" = dev ] && ok "and a dev card's pin in /etc still outranks it" \
+  || bad "the user's file undid the pin: $(REL_CONF="$T/rel/ota.conf" relchan)"
+printf 'OTA_CHANNEL=../../elsewhere\n' >"$T/userconf/ota.conf"
+[ "$(relchan)" = stable ] && ok "one that is not a path segment is refused: player writes this file, root reads it" \
+  || bad "a malformed channel was used: $(relchan)"
+printf 'OTA_URL=https://evil.example\nOTA_CHANNEL=beta\n' >"$T/userconf/ota.conf"
+REL_URL= NET_CURL_BODY="$MANIFEST" RETROFORGE_OTA_USER_CONFIG="$T/userconf/ota.conf" relinfo \
+  | grep -q 'evil.example' && bad "the host was taken from a file player writes" \
+  || ok "the host is never read from that file"
+rm -f "$T/userconf/ota.conf"
+# player owns this file and root reads it, and a home survives reboots.
+mkfifo "$T/userconf/ota.conf"
+[ "$(timeout 10 bash -c "$(declare -f relinfo relchan); $(declare -p T RELINFO REL_CALLS MANIFEST); relchan")" = stable ] \
+  && ok "a FIFO in its place cannot hang the pre-flight" || bad "a FIFO hung or steered release-info"
+rm -f "$T/userconf/ota.conf"
+ln -s /dev/zero "$T/userconf/ota.conf"
+[ "$(relchan)" = stable ] && ok "a symlink in its place is not followed" || bad "a symlink was followed: $(relchan)"
+rm -f "$T/userconf/ota.conf"
+printf 'OTA_CHANNEL=beta\n' >"$T/userconf/real"
+ln -s "$T/userconf/real" "$T/userconf/ota.conf"
+[ "$(relchan)" = stable ] && ok "not even to a real file" || bad "a symlink to a file was followed"
+rm -f "$T/userconf/ota.conf" "$T/userconf/real"
+
 CASE="release-info: a failure is an answer, not an error"
-# netcfg's contract, deliberately shared: the caller reads STATE and never a shell status, so there
-# is one rule for both tools instead of two.
+# The caller reads STATE and never a shell status.
 NET_HOST_RC=6 relinfo >/dev/null 2>&1 \
   && ok "it exits 0 even when it could not resolve a release" \
   || bad "release-info exits non-zero, and its caller only reads STATE"
@@ -1004,7 +745,7 @@ printf '%s' "$out" | grep -q 'AYANEO Pocket ACE' \
 printf '%s' "$out" | grep -q 'AYANEO\\\\ Pocket' \
   && bad "the shell escaping reached the screen -- this is the Pocket S2 backslash" \
   || ok "and the shell escaping device-env applies is undone, not printed"
-# THE OTHER PRODUCER. netcfg emits plain prose with spaces, and the parser that unescapes
+# THE OTHER PRODUCER. release-info emits plain prose with spaces, and the parser that unescapes
 # device-env's %q must not truncate it -- taking the first shlex token rendered a real device's
 # "the installer can reach https://..." as the single word "the".
 kvcheck="$(python3 -c '
@@ -1180,8 +921,8 @@ printf '%s' "$out" | grep -q '"r": \["recheck"\]' \
   && ok "and pressing it says so to the loop, which keeps the size the operator dialled in" \
   || bad "the press produced no recheck: $out"
 
-CASE="pre-flight: the hardware stager's overrides win, and cost no round trip"
-# installer/hw-install.sh serves a bundle off a laptop and names it in RETROFORGE_INSTALL_BUNDLE. With
+CASE="pre-flight: a dev run's override wins, and costs no round trip"
+# docs/install-internal.md serves a bundle off a laptop and names it in RETROFORGE_INSTALL_BUNDLE. With
 # that set there is nothing to ask.
 cat >"$T/bin/release-info-marker" <<EOF
 #!/usr/bin/env bash
@@ -1396,8 +1137,8 @@ printf '%s' "$out" | grep -qi 'Remove the SD card' \
 printf '%s' "$out" | grep -qi 'leave the SD card in' \
   && ok "and says to leave it in, which is what the check needs" \
   || bad "it does not say to leave the card in: $out"
-printf '%s' "$out" | grep -q 'Power off' \
-  && ok "Power off stays offered throughout -- a check that hangs must not trap anyone" \
+printf '%s' "$out" | grep -q 'Restart' \
+  && ok "Restart stays offered throughout -- a check that hangs must not trap anyone" \
   || bad "a running check leaves the operator with no button at all: $out"
 
 out="$(progress '
@@ -1438,9 +1179,9 @@ printf '%s' "$out" | grep -qi 'did not pass' \
   || ok "and it does not claim the install was rejected"
 
 out="$(progress 'p.finish(0); p.begin_verify(); p.finish_verify(0); print(json.dumps(p.describe()))')"
-printf '%s' "$out" | grep -qi 'Remove the SD card' \
+printf '%s' "$out" | grep -qi 'Restart to boot RetroForge from internal storage' \
   && ok "success tells the user the one thing they must do next" \
-  || bad "the success screen does not say to remove the card"
+  || bad "the success screen does not say to restart"
 printf '%s' "$out" | grep -qi 'does not prove the device boots' \
   && ok "and the check does not overclaim -- it never says the device will boot" \
   || bad "the verified screen overstates what was checked: $out"
@@ -1533,58 +1274,6 @@ RETROFORGE_INSTALLER_DRYRUN=1 RETROFORGE_XDG_RUNTIME_DIR="$T/xdg" RETROFORGE_UI=
   && ok "a socket with a live seatd behind it is left alone" \
   || bad "it removed a live seatd's socket"
 
-CASE="the clock is its own network row, and it clears itself"
-# HW 2026-08-24: these boards have no clock battery (the PMIC RTC probe defers forever, issue #38),
-# so a cold boot starts at the epoch and OpenSSL rejects every certificate as not-yet-valid. That
-# surfaced as "Connected, but the update server is unreachable" -- a row whose advice is to go and
-# check your router, for a fault in neither the router nor the server. Then, with the message fixed,
-# the operator still "had to retry a couple of times", pressing Check again at a condition that was
-# already fixing itself.
-clockrow="$(cd "$ROOT/installer" && python3 -c '
-import uiflow
-t = uiflow.NetworkScreen.TABLE["no-clock"]
-print(t[0]); print(t[1]); print(t[2])' 2>&1)"
-printf '%s' "$clockrow" | grep -qiE 'waiting for the time|clock' \
-  && ok "no-clock has its own row, not the unreachable one" \
-  || bad "no dedicated clock row: $clockrow"
-printf '%s' "$clockrow" | grep -qi 'no clock battery' \
-  && ok "it explains WHY the device does not know the date" \
-  || bad "it does not say why the clock is wrong"
-printf '%s' "$clockrow" | grep -qiE 'nothing to fix|sets itself' \
-  && ok "the advice is to change nothing (it is the only self-clearing row)" \
-  || bad "it sends the operator to fix something that fixes itself"
-# The no-host row must NOT be what a wrong clock lands on.
-hostrow="$(cd "$ROOT/installer" && python3 -c '
-import uiflow
-print(uiflow.NetworkScreen.TABLE["no-host"][2])' 2>&1)"
-printf '%s' "$hostrow" | grep -qi 'upstream or DNS' \
-  && ok "no-host still means what it meant (upstream or DNS)" \
-  || bad "the no-host row drifted: $hostrow"
-# netcfg has to EMIT the state, or the row is unreachable prose.
-grep -q 'emit STATE no-clock' "$ROOT/installer/netcfg" \
-  && ok "netcfg emits STATE=no-clock" \
-  || bad "nothing ever produces the state the row renders"
-grep -qE 'CURL_RC" = 60|CURL_RC" = 35' "$ROOT/installer/netcfg" \
-  && ok "keyed on curl's TLS exit codes, not its HTTP status" \
-  || bad "the clock state is not keyed on the exit code"
-# The UI must re-probe it without a human, and ONLY it.
-# NO ALLOWLIST. This was a tuple of "self-clearing" states, and hardware refuted the idea within the
-# hour: the operator sat on "Connected, but the update server is unreachable" while the device had
-# long since gone online, because `no-host` had been excluded BY NAME on the reasoning that it names
-# something a human must change. At boot it usually means DNS is not up yet — the very shape the
-# allowlist existed to catch. Re-probing is always safe (net_diagnose defaults to read-only
-# `diagnose`), so the screen re-checks whatever it says and no state can be forgotten by omission.
-grep -q 'SELF_CLEARING' "$ROOT/installer/ui" \
-  && bad "the allowlist is back — a state omitted from it strands the operator on a stale screen" \
-  || ok "no allowlist: every network state re-diagnoses itself"
-grep -q 'getattr(top, "name", "") == "network"' "$ROOT/installer/ui" \
-  && ok "the re-check is gated on being ON the network screen, not on which state it shows" \
-  || bad "the periodic re-check is gated on something else"
-# It must only redraw on a real change, or a stable fault becomes an unreadable flicker.
-grep -q 'if fresh.get("STATE") != top.facts.get("STATE")' "$ROOT/installer/ui" \
-  && ok "and only acts when the state actually changes" \
-  || bad "it redraws unconditionally, so a stable diagnosis would flicker"
-
 CASE="every token a screen handles must be one the pad can produce"
 # HW-FOUND 2026-08-24 (user): "left/right to change the android userdata size doesn't work".
 # PreflightScreen has handled LEFT and RIGHT since it was written -- they are how the operator
@@ -1622,223 +1311,6 @@ done
 [ -z "$unreachable" ] \
   && ok "every token the screens handle is producible ($(printf '%s' "$handled" | wc -w) checked)" \
   || bad "screens handle tokens no input can emit:$unreachable"
-
-CASE="pressing Join is acknowledged, and the frame keeps drawing"
-# HW 2026-08-24: the join was a synchronous run_tool with a 180s timeout, so pressing Join blocked
-# the whole UI loop. Nothing redrew -- no acknowledgement that the press had registered, and a slow
-# access point made the device look dead. A spinner cannot animate while the loop is blocked, so
-# the feedback and the animation are the same fix.
-conn="$(cd "$ROOT/installer" && python3 -c '
-import uiflow, time
-s = uiflow.ConnectingScreen("MYNET")
-d = s.describe()
-print(d["title"]); print(d["blocks"][0][1]); print(d["blocks"][1][1]); print("interactive=%s" % s.interactive)
-a = s.describe()["blocks"][0][1]
-time.sleep(0.6)
-b = s.describe()["blocks"][0][1]
-print("animates=%s" % (a != b))' 2>&1)"
-printf '%s' "$conn" | grep -qi "connecting to 'MYNET'" \
-  && ok "a Connecting screen names the network" || bad "no connecting screen: $conn"
-printf '%s' "$conn" | grep -q 'interactive=False' \
-  && ok "it asks for nothing, so no press is spent on it" || bad "it is interactive"
-printf '%s' "$conn" | grep -q 'animates=True' \
-  && ok "and it animates, so a slow join still looks alive" || bad "the screen is static: $conn"
-# THE SECOND ACTIVATION IS SAID OUT LOUD. netcfg re-activates once when the first join lands without
-# an address, which doubles the wait -- and an unexplained wait getting longer is exactly what
-# making the join asynchronous was meant to stop.
-conn2="$(cd "$ROOT/installer" && python3 -c '
-import uiflow
-n = [1]
-s = uiflow.ConnectingScreen("MYNET", lambda: n[0])
-print("one=%s" % " | ".join(b[1] for b in s.describe()["blocks"]))
-n[0] = 2
-print("two=%s" % " | ".join(b[1] for b in s.describe()["blocks"]))' 2>&1)"
-printf '%s' "$conn2" | grep '^one=' | grep -qi 'trying once more' \
-  && bad "the first attempt already claims to be a retry" \
-  || ok "the first attempt says nothing about retrying"
-printf '%s' "$conn2" | grep '^two=' | grep -qi 'trying once more' \
-  && ok "and the second names itself, so the longer wait has a reason on screen" \
-  || bad "the second activation is silent: $conn2"
-# The join itself must be a child process, not a blocking call.
-grep -q 'class NetJoin' "$ROOT/installer/uiflow.py" \
-  && ok "NetJoin runs netcfg as a child" || bad "the join is still synchronous"
-# ...and the loop has to ACT on a recheck, or the pre-flight screen's Check again is a button that
-# returns a result nobody reads. The screen half is asserted above; this is the other half.
-grep -q 'result\[0\] == "recheck"' "$ROOT/installer/ui" \
-  && ok "and the loop acts on a recheck, re-asking only the release" \
-  || bad "nothing in installer/ui handles the pre-flight recheck"
-grep -q 'PreflightScreen(dict(top.facts, \*\*release_facts()), top.gib)' "$ROOT/installer/ui" \
-  && ok "keeping the size the operator dialled in, which is the one thing on that screen they chose" \
-  || bad "the recheck rebuilds the screen from scratch and loses the size"
-grep -A 24 "class NetJoin" "$ROOT/installer/uiflow.py" | grep -q "subprocess.Popen" \
-  && ok "via Popen, so the loop is never blocked by it" || bad "NetJoin does not use Popen"
-grep -q 'stack\[-1\] = ConnectingScreen' "$ROOT/installer/ui" \
-  && ok "the press swaps the screen before the work starts" \
-  || bad "the operator still gets no feedback on the press"
-grep -q 'netjoin = NetJoin()' "$ROOT/installer/ui" \
-  && ok "and the join starts in the background" || bad "the loop does not start an async join"
-grep -q 'joined = netjoin.poll()' "$ROOT/installer/ui" \
-  && ok "the loop polls it and moves on when it finishes" || bad "nothing collects the result"
-# EVERYTHING THE CHILD SAID REACHES THE JOURNAL, not just the facts it emitted. netcfg writes how
-# long nmcli took and whether it returned OK to STDERR, NetJoin captures stderr into stdout, and
-# kv() keeps only the key=value lines -- so the instrumentation added for the "no address too early"
-# case was dropped on the floor. HW 2026-08-25: an ESP log that could not answer the question it
-# had been extended to answer the day before.
-cat >"$T/bin/netcfg-chatty" <<'EOF'
-#!/bin/sh
-echo '[netcfg] nmcli connect returned OK after 10s of a 90s budget' >&2
-echo 'STATE=no-lease'
-echo 'DETAIL=associated with the network, but no address was offered'
-EOF
-chmod +x "$T/bin/netcfg-chatty"
-join_out="$(RETROFORGE_NETCFG="$T/bin/netcfg-chatty" python3 - <<'PY' 2>&1
-import os, sys, time
-sys.path.insert(0, os.environ["ROOT"] + "/installer")
-import uiflow
-j = uiflow.NetJoin()
-while True:
-    f = j.poll()
-    if f is not None:
-        break
-    time.sleep(0.02)
-print("STATE=%s" % f.get("STATE"))
-PY
-)"
-printf '%s' "$join_out" | grep -q 'STATE=no-lease' \
-  && ok "the parsed facts still decide the screen" || bad "the join lost its facts: $join_out"
-printf '%s' "$join_out" | grep -q 'netcfg: .*returned OK after 10s' \
-  && ok "and netcfg's own reasoning reaches the journal, where the ESP log picks it up" \
-  || bad "the child's instrumentation is still swallowed: $join_out"
-printf '%s' "$join_out" | grep -q 'netcfg: STATE=no-lease' \
-  && bad "it re-logs the key=value lines too, doubling every fact" \
-  || ok "without re-logging the key=value lines the facts already carry"
-# nmcli's own default gave up before slow access points finished (HW 2026-08-25). Association is
-# quick; DHCP is what drags, and a timed-out join costs the operator a full retry.
-grep -q 'JOIN_TIMEOUT=${RETROFORGE_NET_JOIN_TIMEOUT:-90}' "$ROOT/installer/netcfg" \
-  && ok "the join waits 90s, not nmcli's default" || bad "the join timeout is nmcli's default again"
-grep -q '"\$NMCLI" -w "\$JOIN_TIMEOUT" device wifi connect' "$ROOT/installer/netcfg" \
-  && ok "and nmcli is actually told about it" || bad "JOIN_TIMEOUT is set but never passed to nmcli"
-# The screen must not promise seconds when it may take a minute.
-printf '%s' "$conn" | grep -qi 'up to a minute' \
-  && ok "the screen says how long it may really take" \
-  || bad "it still promises a few seconds"
-
-CASE="wifi.conf survives being written on Windows"
-# The medium's boot partition is typed 0700 SO THAT Windows and macOS will show it, which makes
-# "another computer" very often Windows and the editor very often Notepad -- which saves CRLF.
-# parse_conf did not strip the carriage return, so the PSK became "secret<CR>", the access point
-# rejected it, and the screen reported a wrong password with complete confidence. The user would
-# then check a password that was correct all along, from a photograph of a panel.
-{ sed -n '/^parse_conf/,/^}/p' "$ROOT/installer/netcfg"
-  printf 'WIFI_CONF="$1"\nif parse_conf; then printf "[%%s][%%s]" "$SSID" "$PSK"; else printf "FAIL:%%s" "$BAD_LINE"; fi\n'
-} >"$T/pc.sh"
-printf 'SSID=my net\r\nPSK=secret\r\n' >"$T/crlf.conf"
-printf 'SSID=my net\nPSK=secret\n'     >"$T/lf.conf"
-crlf="$(bash "$T/pc.sh" "$T/crlf.conf")"
-lf="$(bash "$T/pc.sh" "$T/lf.conf")"
-[ "$crlf" = "[my net][secret]" ] \
-  && ok "a CRLF file parses to the same values as a LF one ($crlf)" \
-  || bad "CRLF breaks the parse: $crlf"
-[ "$crlf" = "$lf" ] && ok "byte-identical to the LF result" || bad "CRLF=$crlf LF=$lf"
-
-CASE="the file the screen tells you to copy actually exists"
-# It told the operator to "copy wifi.conf.example next to it" and NO SUCH FILE EXISTED anywhere --
-# not in the tree, not on any medium (HW 2026-08-24). Instructions naming a file that is not there
-# read as a fault in the person following them.
-EX="$ROOT/installer/wifi.conf.example"
-[ -f "$EX" ] && ok "installer/wifi.conf.example exists" \
-  || bad "the example the screen names is still missing"
-grep -q '^SSID=' "$EX" && grep -q '^PSK=' "$EX" \
-  && ok "it carries the two keys netcfg reads" || bad "the template does not show the real keys"
-# It must parse: a template that fails the parser teaches the wrong shape.
-tmpl="$(bash "$T/pc.sh" "$EX")"
-case "$tmpl" in \[*\]\[*\]) ok "and it parses cleanly ($tmpl)" ;; *) bad "the template does not parse: $tmpl" ;; esac
-grep -qi 'wifi.conf' "$EX" && ok "it names the file to copy itself to" \
-  || bad "the template does not say what to rename it to"
-# The screen must give the steps, not just the filename.
-conf="$(cd "$ROOT/installer" && python3 -c '
-import uiflow
-print(uiflow.NetworkScreen.TABLE["no-conf"][2])' 2>&1)"
-printf '%s' "$conf" | grep -qi 'wifi.conf.example' \
-  && ok "the screen names the example file" || bad "the screen does not name it"
-printf '%s' "$conf" | grep -qi 'retroforge folder' \
-  && ok "and where to find it" || bad "the screen does not say where the file is"
-printf '%s' "$conf" | grep -qiE 'ethernet' \
-  && ok "and still offers the no-file alternative" || bad "the USB-C Ethernet route was lost"
-
-CASE="no-conf offers no retry, because a retry cannot succeed"
-# HW 2026-08-24, on the first RELEASE medium to reach this screen: it offered "Check again", which
-# cannot work. The card is inside the device, so nobody can write wifi.conf to it while it runs --
-# the remedies are power off / write the file / boot, or USB-C Ethernet, which the periodic re-probe
-# now notices by itself. The button pointed at the one thing that could not help, gave no feedback
-# when pressed (the state is unchanged, so the redraw is identical), and sat where the eye goes
-# first, while Power off -- what the advice text actually asks for -- was secondary.
-btns="$(cd "$ROOT/installer" && python3 -c '
-import uiflow
-s = uiflow.NetworkScreen({"STATE": "no-conf", "PATH_": "/esp/retroforge/wifi.conf"})
-print(",".join(b["label"] for b in s.describe()["buttons"]))
-s.handle("S"); print("S=%r" % (s.result,))' 2>&1)"
-printf '%s' "$btns" | head -1 | grep -qi 'power off' \
-  && ok "SELECT still powers off" || bad "the power-off button went too: $btns"
-printf '%s' "$btns" | head -1 | grep -qi 'check again' \
-  && bad "Check again is still offered on no-conf" \
-  || ok "no Check again — nothing on this screen could make it succeed"
-printf '%s' "$btns" | grep -q 'S=None' \
-  && ok "and the South press is inert, not a hidden control behind a removed button" \
-  || bad "S still acts on no-conf: $btns"
-# The states where a retry CAN change something must keep it.
-for st in no-host not-found no-lease; do
-  keep="$(cd "$ROOT/installer" && python3 -c "
-import uiflow
-s = uiflow.NetworkScreen({'STATE': '$st', 'URL': 'u', 'SSID': 'x', 'DETAIL': 'd'})
-print(','.join(b['label'] for b in s.describe()['buttons']))" 2>&1)"
-  printf '%s' "$keep" | grep -qi 'check again' \
-    && ok "$st keeps Check again" \
-    || bad "$st lost its retry, and a retry there can succeed: $keep"
-done
-
-CASE="associating: no wifi.conf is not the same as no configuration"
-# User's catch, 2026-08-24. have_lease is false for the WHOLE association window, so anything
-# without a lease fell through to `no-conf` -- "No Wi-Fi settings on this card" -- and told the
-# operator to write a file on another computer while the radio was mid-handshake. On a TEST medium,
-# whose network is a baked NM profile and which carries no wifi.conf at all, that was every cold
-# boot rather than a corner case. NOTE the dev build cannot reach the state this protects, so
-# `no-conf` itself still wants a release-image run before it is believed.
-assoc="$(cd "$ROOT/installer" && python3 -c '
-import uiflow
-t = uiflow.NetworkScreen.TABLE["associating"]
-print(t[0]); print(t[1]); print(t[2])' 2>&1)"
-printf '%s' "$assoc" | grep -qiE 'joining|associat' \
-  && ok "there is a row for a network that is still being joined" \
-  || bad "no associating row: $assoc"
-printf '%s' "$assoc" | grep -qi 'address' \
-  && ok "it says an address is what is being waited for" \
-  || bad "it does not name what the wait is for"
-printf '%s' "$assoc" | grep -qiE 'nothing to fix|by itself' \
-  && ok "the advice is to change nothing" \
-  || bad "it asks the operator to act on a state that clears itself"
-grep -q 'emit STATE associating' "$ROOT/installer/netcfg" \
-  && ok "netcfg emits it" || bad "nothing produces the state"
-grep -q 'has_wifi_profile' "$ROOT/installer/netcfg" \
-  && ok "it consults NM's own profiles, not just wifi.conf on the ESP" \
-  || bad "a baked profile still reads as 'no Wi-Fi settings'"
-grep -q 'wifi_busy' "$ROOT/installer/netcfg" \
-  && ok "and the radio's actual state" || bad "association is not detected"
-# Ordering is the whole bug: the busy check must precede the no-conf branch.
-awk '/emit STATE associating/{a=NR} /emit STATE no-conf/{b=NR} END{exit !(a && b && a<b)}' \
-  "$ROOT/installer/netcfg" \
-  && ok "the associating check runs BEFORE the no-conf branch" \
-  || bad "no-conf still wins during the association window, which is the defect"
-
-CASE="online is not a screen, it is the reason to leave one"
-# User's follow-on: once an address arrives, move on rather than showing a success message with a
-# button. Pressing Continue and waiting for the same condition should not be two different things.
-grep -q 'if fresh.get("STATE") == "online"' "$ROOT/installer/ui" \
-  && ok "reaching online advances instead of re-rendering the network screen" \
-  || bad "the operator is left looking at a success message with a Continue button"
-grep -A10 'if fresh.get("STATE") == "online"' "$ROOT/installer/ui" | grep -q 'gather_preflight' \
-  && ok "and it takes the same step Continue takes (pre-flight, still read-only)" \
-  || bad "the auto-advance does not go where Continue goes"
 
 CASE="no target: the screen says WHY, it does not just wait"
 # HW-FOUND 2026-08-24 (user): the medium shipped without lib-gpt.sh, select-target.sh died with
@@ -1992,189 +1464,65 @@ RETROFORGE_INSTALLER_DRYRUN=1 RETROFORGE_UI="$T/not-here" RETROFORGE_DEVICE_ENV=
   && bad "it started a session with no UI to run" \
   || ok "a missing UI is a loud failure at second zero, not a black panel"
 
-# =================================================================================================
-# the fallback — the log has to be able to leave the machine
-# =================================================================================================
+# =============================================================================================
+# the log — what is left to read after a run
+# =============================================================================================
 cat >"$T/bin/journalctl" <<'EOF'
 #!/usr/bin/env bash
 # Echoes back which query it was asked, so the suite can assert the log collects more than the
-# installer's own unit -- a network fault lives in NM's journal and the kernel ring, not in ours.
+# installer's own unit.
 printf 'Aug 22 12:00:00 player installer-session[1]: gamescope: could not open /dev/dri/card0\n'
 printf 'journalctl-args: %s\n' "$*"
 EOF
-printf '#!/bin/sh\nexit 0\n' >"$T/bin/mountpoint"      # "yes, it is mounted"
 chmod +x "$T/bin"/*
-mkdir -p "$T/esp" "$T/run/install"
+mkdir -p "$T/run/install" "$T/varlog"
 printf 'consent: given at 2026-08-22T10:00:00Z, sequence SWNE, attempt 1\n' >"$T/run/install/record"
+printf 'RETROFORGE_BUILD=20260825T090000Z\nRETROFORGE_VERSION=1.2.3\nRETROFORGE_GIT=abc1234\nRETROFORGE_MODE=release\n' >"$T/run/retroforge-release"
 
-printf 'RETROFORGE_VARIANT=installer\nRETROFORGE_BUILD=20260825T090000Z\nRETROFORGE_VERSION=1.2.3\nRETROFORGE_GIT=abc1234\nRETROFORGE_MODE=release\n' >"$T/run/retroforge-release"
-
+LOGOUT="$T/varlog/retroforge/install.log"
 savelog() {
-  PATH="$T/bin:$PATH" RETROFORGE_INSTALL_RUNDIR="$T/run" RETROFORGE_INSTALL_LOG="$T/run/install.log" \
-    RETROFORGE_INSTALLER_ESP="${ESPARG-$T/esp}" RETROFORGE_INSTALL_RECORD="$T/run/install/record" \
-    RETROFORGE_INSTALL_CONSOLE="$T/console" JOURNALCTL="${JC-$T/bin/journalctl}" \
-    RETROFORGE_INSTALL_RELEASE="${RELARG-$T/run/retroforge-release}" \
+  PATH="$T/bin:$PATH" RETROFORGE_INSTALL_LOG="$LOGOUT" RETROFORGE_INSTALL_RECORD="$T/run/install/record" \
+    JOURNALCTL="${JC-$T/bin/journalctl}" RETROFORGE_INSTALL_RELEASE="${RELARG-$T/run/retroforge-release}" \
     "$SAVELOG" "$@" 2>"$T/savelog.err"
 }
 
-CASE="fallback: the log is written and copied where a PC can read it"
+CASE="log: it lands under /var/log, never in a directory player owns"
+grep -q '^LOGFILE=.*:-/var/log/retroforge/install.log' "$SAVELOG" \
+  && ok "the default is /var/log/retroforge/install.log" || bad "the log's default path moved"
+grep -v '^#' "$SAVELOG" | grep -q '/home/player' \
+  && bad "root writes into /home/player, and follows any symlink left there" \
+  || ok "nothing in it touches /home/player"
 savelog && ok "it exits 0" || bad "save-log.sh failed"
-grep -q 'could not open /dev/dri/card0' "$T/run/install.log" \
-  && ok "the session's journal is in it -- the failure that produced a black panel" \
-  || bad "the journal is not in the log"
-grep -q 'consent: given' "$T/run/install.log" \
+[ -f "$LOGOUT" ] && ok "and creates its directory" || bad "no log at $LOGOUT"
+grep -q 'could not open /dev/dri/card0' "$LOGOUT" \
+  && ok "the session's journal is in it" || bad "the journal is not in the log"
+grep -q 'consent: given' "$LOGOUT" \
   && ok "and the spine's own install record, which the journal does not carry" \
   || bad "the install record is missing from the log"
-cmp -s "$T/run/install.log" "$T/esp/retroforge-install.log" \
-  && ok "copied to the installer medium's ESP -- pull the card, read it on a PC" \
-  || bad "the log did not reach the ESP"
-
-CASE="fallback: the log says which medium produced it"
-# This file is read on another computer, hours later, quite possibly beside a log from a different
-# build -- and every installer medium ever built answered "which image is this" identically until
-# installer/mkimage.sh started stamping one. The ESP copy is the one artefact that leaves a device
-# that could not finish, so the identity belongs in its header rather than in a journal that stays
-# on the machine.
-grep -q '^medium: .*RETROFORGE_VERSION=1.2.3' "$T/run/install.log" \
-  && ok "the header names the version the medium was built as" \
-  || bad "the log does not identify the medium: $(head -3 "$T/run/install.log")"
-grep -q '^medium: .*RETROFORGE_MODE=release' "$T/run/install.log" \
-  && ok "and whether it is a dev medium, which changes what is baked into it" \
-  || bad "the mode is not in the header"
+grep -q '^card: .*RETROFORGE_VERSION=1.2.3' "$LOGOUT" \
+  && ok "the header names the build that ran" || bad "the log does not identify the card: $(head -3 "$LOGOUT")"
 RELARG="$T/run/absent" savelog
-grep -q '^medium: no .*absent' "$T/run/install.log" \
+grep -q '^card: no .*absent' "$LOGOUT" \
   && ok "an image carrying no identity says so, rather than printing nothing" \
-  || bad "a missing release file is silent: $(head -3 "$T/run/install.log")"
-savelog   # restore the log the cases below read
+  || bad "a missing release file is silent: $(head -3 "$LOGOUT")"
+savelog
 
-CASE="fallback: the log carries the network's side of the story too"
-# HW 2026-08-25: the first join reached no-lease in 10.2s of a 90s budget and a retry was online in
-# 3.9s, and this log could say nothing about why -- only the installer's own unit was collected, so
-# the association, the DHCP transaction and any ath12k scan refusal were all absent.
-grep -q 'journalctl-args:.*-u retroforge-installer.service' "$T/run/install.log" \
-  && ok "the installer's own unit is collected" \
-  || bad "the installer's journal is missing"
-grep -q 'journalctl-args:.*-u NetworkManager.service' "$T/run/install.log" \
+CASE="log: it carries the network's side of the story too"
+# The OS is streamed, so a drop mid-stream is what this log is most likely to be read for.
+grep -q 'journalctl-args:.*-u retroforge-installer.service' "$LOGOUT" \
+  && ok "the installer's own unit is collected" || bad "the installer's journal is missing"
+grep -q 'journalctl-args:.*-u NetworkManager.service' "$LOGOUT" \
   && ok "and NetworkManager's, which owns the association and the lease" \
-  || bad "a network-only installer collects no network journal"
-grep -q 'journalctl-args:.*-k' "$T/run/install.log" \
-  && ok "and the kernel ring, where a driver-level scan refusal would show" \
-  || bad "the kernel ring is missing -- a driver fault cannot be ruled in or out"
+  || bad "no network journal is collected"
+grep -q 'journalctl-args:.*-k' "$LOGOUT" \
+  && ok "and the kernel ring" || bad "the kernel ring is missing"
 
-CASE="fallback: a log that cannot be saved never fails the unit"
-# Every branch of this exits 0 on purpose: a missing journalctl, an unmounted ESP or a read-only
-# medium must not turn a successful install into a failed one, nor mask a real failure.
+CASE="log: a log that cannot be saved never fails the unit"
 JC="$T/bin/nonexistent-journalctl" savelog \
   && ok "no journalctl on the image is a line in the log, not an error" \
   || bad "a missing journalctl failed the unit"
-grep -q 'no journalctl' "$T/run/install.log" \
-  && ok "and it says which part is missing" \
-  || bad "the log does not record why it is empty"
-printf '#!/bin/sh\nexit 1\n' >"$T/bin/mountpoint"      # "not a mount point"
-rm -f "$T/esp/retroforge-install.log"
-savelog && ok "an ESP that is not mounted is not an error either" || bad "an unmounted ESP failed"
-[ ! -e "$T/esp/retroforge-install.log" ] \
-  && ok "and nothing is copied into a directory that is merely SHAPED like the mount" \
-  || bad "it copied into an unmounted /esp, where nobody will ever find it"
-grep -qi 'not a mount point' "$T/savelog.err" \
-  && ok "saying so, so the operator knows to look at /run instead" \
-  || bad "it did not say where the log actually is"
-
-CASE="fallback: the panel shows what happened"
-printf '#!/bin/sh\nexit 0\n' >"$T/bin/mountpoint"
-# The console stands in for /dev/tty1, which exists on the device. save-log.sh writes to it only if
-# it is there and writable -- a machine with no VT at all is a skip, not a failure.
-: >"$T/console"
-savelog --console
-grep -q 'could not open /dev/dri/card0' "$T/console" \
-  && ok "the tail of the log reaches the console the OnFailure unit hands to a getty" \
-  || bad "nothing was printed to the console"
-grep -qi 'installer medium' "$T/console" \
-  && ok "and it names where the full copy is, which is the only artefact that leaves the device" \
-  || bad "the console does not say where the full log is"
-
-CASE="fallback: an ESP nobody mounted is mounted here rather than diagnosed"
-# HW 2026-08-25: a clean shutdown, and NO log on the ESP at all. Two causes produce that and they
-# are indistinguishable from inside the script -- the fstab mount was skipped (nofail plus a 5s
-# device timeout, and nothing retries), or shutdown unmounted it while gamescope was still taking
-# its time over SIGTERM. So the script tries the mount itself. These stubs make "is it mounted"
-# answer honestly by tracking one marker file, which is what lets the branch be driven without root.
-cat >"$T/bin/mountpoint" <<EOF
-#!/bin/sh
-[ -e "$T/mounted" ]
-EOF
-cat >"$T/bin/mount" <<EOF
-#!/bin/sh
-: >"$T/mounted"
-EOF
-cat >"$T/bin/umount" <<EOF
-#!/bin/sh
-rm -f "$T/mounted"
-EOF
-chmod +x "$T/bin"/*
-rm -f "$T/mounted" "$T/esp/retroforge-install.log"
-savelog && ok "it exits 0" || bad "save-log.sh failed after mounting the ESP itself"
-cmp -s "$T/run/install.log" "$T/esp/retroforge-install.log" \
-  && ok "the log reaches the ESP even though nothing had mounted it" \
-  || bad "an unmounted ESP still loses the log"
-grep -qi 'mounted it to save the log' "$T/savelog.err" \
-  && ok "and it says it had to, so the missing fstab mount is visible in the log itself" \
-  || bad "it mounted the ESP silently"
-[ ! -e "$T/mounted" ] \
-  && ok "then unmounts it -- a dirty FAT does not survive a finger on the power button" \
-  || bad "it left its own mount behind"
-
-CASE="fallback: a mount that will not mount is still not an error"
-printf '#!/bin/sh\nexit 1\n' >"$T/bin/mount"      # "no such device", a read-only medium, anything
-chmod +x "$T/bin"/*
-rm -f "$T/mounted" "$T/esp/retroforge-install.log"
-savelog && ok "an ESP that cannot be mounted exits 0 like every other saving failure" \
-  || bad "a failed mount failed the unit"
-[ ! -e "$T/esp/retroforge-install.log" ] \
-  && ok "and nothing is written into the bare directory, where nobody would ever find it" \
-  || bad "it copied into an unmounted /esp"
-grep -qi 'could not be mounted' "$T/savelog.err" \
-  && ok "saying the mount was tried and failed, not merely that nothing was mounted" \
-  || bad "the operator cannot tell a skipped mount from a failed one"
-
-CASE="fallback: an fstab mount is never stolen from whoever owns it"
-printf '#!/bin/sh\n: >"'"$T"'/mounted"\n' >"$T/bin/mount"
-chmod +x "$T/bin"/*
-: >"$T/mounted"                                   # already mounted, by fstab, before this ran
-rm -f "$T/esp/retroforge-install.log"
-savelog && ok "it exits 0" || bad "save-log.sh failed against an already-mounted ESP"
-[ -e "$T/mounted" ] \
-  && ok "and leaves the mount alone -- unmounting under a running installer is the worse bug" \
-  || bad "it unmounted an ESP it did not mount"
-
-CASE="units: the fallback is actually armed"
-UNITDIR="$ROOT/installer/units"
-grep -q '^OnFailure=retroforge-installer-console.service' "$UNITDIR/retroforge-installer.service" \
-  && ok "the session names the console unit on failure" \
-  || bad "nothing starts the fallback console"
-grep -q '^ConditionKernelCommandLine=!retroforge.install.debug' "$UNITDIR/retroforge-installer.service" \
-  && ok "retroforge.install.debug skips the GUI entirely, as a condition" \
-  || bad "the debug cmdline escape is missing"
-# An OnFailure= activation still evaluates conditions, so a condition on the console unit would
-# disarm the fallback on exactly the boots it exists for.
-grep -q '^ConditionKernelCommandLine' "$UNITDIR/retroforge-installer-console.service" \
-  && bad "the console unit carries a condition, which would disarm it on a normal boot" \
-  || ok "and the console unit carries no condition of its own"
-grep -qE '^(TTYPath|StandardInput=tty)' "$UNITDIR/retroforge-installer.service" \
-  && bad "the session unit binds a TTY -- that made gamescope exit 0 at boot on the main image" \
-  || ok "the session unit binds no TTY, which is what bring-up paid to learn"
-grep -q '^ExecStopPost=-/usr/lib/retroforge/install/save-log.sh' "$UNITDIR/retroforge-installer.service" \
-  && ok "and every stop, successful or not, tries to save the log" \
-  || bad "the log is not collected on stop"
-# The ExecStopPost above writes to /esp, and units stop in the REVERSE of their After= order, so
-# this line is the whole reason the mount is still there when it runs. fstab's `nofail` drops the
-# mount's Before=local-fs.target, so nothing else orders these two at all.
-grep -q '^After=esp.mount' "$UNITDIR/retroforge-installer.service" \
-  && ok "and /esp is ordered so shutdown cannot unmount it out from under that log" \
-  || bad "nothing keeps /esp mounted while the log is being written to it"
-grep -qE '^(Requires|RequiresMountsFor)=.*esp' "$UNITDIR/retroforge-installer.service" \
-  && bad "the session REQUIRES /esp -- an ESP that will not mount would black out the panel" \
-  || ok "and wants it rather than requiring it, so a bad ESP costs the log and not the installer"
+grep -q 'no journalctl' "$LOGOUT" && ok "and it says which part is missing" || bad "the log does not record why it is empty"
+LOGOUT="/proc/nonexistent/install.log" savelog && ok "an unwritable path exits 0 too" || bad "an unwritable log failed the unit"
 
 printf '\ntest-ui.sh: %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

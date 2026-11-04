@@ -120,6 +120,11 @@ BOOTSTRAP_PKGS=(base)
 #                       Reads /etc/rauc/system.conf: bootloader=grub over the ESP's grubenv.
 #   btrfs-progs         `btrfstune -U` in the post-install hook, so the two slots never share an fsid.
 #   rsync               the post-install hook copies the running /var into the new slot's /var.
+#   gptfdisk            sgdisk: the internal installer reads and writes the GPT with it.
+#   dosfstools          mkfs.vfat: the installer's ESP and both efi partitions.
+#   mtools              mdir: reads a foreign ESP's content, which is how select-target.sh recognises
+#                       another distribution's install. It refuses to run without it.
+#   parted              partprobe: re-reads the table after the carve; recon() requires it outright.
 #   earlyoom            userspace OOM killer, acting before allocation fails (policy in
 #                       earlyoom.service.d/retroforge.conf, enabled by 60-retroforge-earlyoom.preset).
 #   zram-generator      the image's only swap device; needs CONFIG_ZRAM (kernel/kernel.config).
@@ -204,7 +209,7 @@ BOOTSTRAP_PKGS=(base)
 #                       2x, crc32 6-10x, adler32 2-6x, on A73 and A53 alike; no LSE atomics; level-1
 #                       output ~25% bigger. It speeds what uses the system libz (our Python tools, OGUI,
 #                       PortMaster ports); emulators and Steam's runtime carry their own zlib.
-PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-mesa-layers vulkan-tools retroforge-gpu-priority mesa gamescope seatd mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit e2fsprogs xorg-xwayland noto-fonts noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl opengamepadui powerstation inputplumber which fuse3 ksmbd-tools avahi sdl2_ttf sdl2_image sdl2_mixer squashfuse mesa-utils unzip openal libtheora rmtfs msm-firmware-loader hexagonrpcd xxhash fuse-overlayfs gtk2 libibus lsof zlib-ng-compat)
+PKGS=(wpa_supplicant wireless-regdb openssh vulkan-icd-loader vulkan-freedreno vulkan-mesa-layers vulkan-tools retroforge-gpu-priority mesa gamescope seatd mangohud bluez bluez-utils networkmanager alsa-ucm-conf pipewire wireplumber pipewire-pulse pipewire-alsa rtkit e2fsprogs xorg-xwayland noto-fonts noto-fonts-emoji python python-gobject scx-scheds rauc btrfs-progs rsync gptfdisk dosfstools mtools parted earlyoom zram-generator udisks2 f3 upower libinput-tools brightnessctl opengamepadui powerstation inputplumber which fuse3 ksmbd-tools avahi sdl2_ttf sdl2_image sdl2_mixer squashfuse mesa-utils unzip openal libtheora rmtfs msm-firmware-loader hexagonrpcd xxhash fuse-overlayfs gtk2 libibus lsof zlib-ng-compat)
 
 # Dev-only packages — installed ONLY under RETROFORGE_DEV=1, NEVER in a release base.
 # On-device bring-up tools: evtest reads raw /dev/input events; usbutils provides lsusb.

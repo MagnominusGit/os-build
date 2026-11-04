@@ -43,7 +43,7 @@
 # --override-boot-slot=_external_ is rauc's own external-medium mode: determine_slot_states()
 # marks every slot ST_INACTIVE and does not require a booted one (install.c:210). The alternative
 # is `rauc.external` on the kernel cmdline (context.c:91), which would work too -- but that puts
-# the property in the installer image's grub.cfg, where nothing in this script could assert it.
+# the property in a boot config, where nothing in this script could assert it.
 # Passing it here means the process that depends on it is the process that set it.
 set -euo pipefail
 
@@ -64,7 +64,7 @@ KEYRING=${KEYRING:-/etc/rauc/keyring.pem}
 POST_INSTALL=${POST_INSTALL:-/usr/lib/retroforge/install/post-install-fresh.sh}
 DEVTEST=${DEVTEST:--b}
 COMPATIBLE=${COMPATIBLE:-retroforge}
-# How long to wait for the service to take the bus name. Generous: a cold installer medium is
+# How long to wait for the service to take the bus name. Generous: a cold card is
 # reading rauc and glib off squashfs on flash storage.
 OWN_TIMEOUT=${OWN_TIMEOUT:-30}
 
@@ -92,17 +92,17 @@ else
 fi
 
 # --- fail closed on every tool, before anything starts ------------------------------------------
-# The shipped image carries few of these and the installer image is a different root again, so a
+# An offline suite inherits the host's PATH, so a
 # missing one is a live possibility rather than a theoretical one. Asserted HERE, together, rather
 # than discovered at three different use sites -- the last of which would be after the service is
 # up and a bundle is half-streamed. See the 2026-08-21 Pocket FIT finding: a missing binary and a
 # missing file are indistinguishable to a caller that does not check.
 # The bus tools are checked even in --info mode, which does not use them. Deliberate: --info is the
-# pre-flight the spine runs BEFORE the carve, so "the installer image is missing dbus-daemon" is
+# pre-flight the spine runs BEFORE the carve, so "this image is missing dbus-daemon" is
 # exactly the kind of thing it exists to discover while the disk is still intact. Discovering it
 # after userdata is gone is the failure this ordering is for.
 for t in "$RAUC" "$DBUS_DAEMON" "$GDBUS"; do
-  command -v "$t" >/dev/null 2>&1 || die "$t is not on PATH -- the installer image is missing it"
+  command -v "$t" >/dev/null 2>&1 || die "$t is not on PATH -- this image is missing it"
 done
 [ -r "$KEYRING" ] || die "no readable RAUC keyring at $KEYRING -- nothing would be verified"
 [ -x "$POST_INSTALL" ] || die "no post-install handler at $POST_INSTALL"
@@ -189,7 +189,7 @@ fi
 
 # --- a private system bus -----------------------------------------------------------------------
 # Started BEFORE anything else touches the bus, so the service we are about to run is the only
-# thing that can ever own $BUS_NAME here. The installer image runs systemd and may well have a
+# thing that can ever own $BUS_NAME here. The running system has its own rauc service and may well have a
 # stock system bus up on /run/dbus/system_bus_socket; this listens somewhere else entirely and
 # every client below is handed the address, so the two never meet.
 #

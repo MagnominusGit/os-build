@@ -51,7 +51,7 @@ VAR_DEV=${RETROFORGE_TARGET_VAR_A:-}
 [ -n "$VAR_DEV" ] || die "RETROFORGE_TARGET_VAR_A is unset -- the spine must name the slot's /var partition"
 
 # lib-slotwrite.sh, resolved by search for the same reason carve.sh resolves genpart.sh that way:
-# on the installer image it is installed beside this file, and in the repo it lives under
+# on the device it is installed beside this file, and in the repo it lives under
 # rootfs/overlay/ because the OTA path ships it. Both are right; neither is a repo-relative constant.
 SELFDIR="$(cd "$(dirname "$0")" && pwd)"
 SLOTWRITE="${RETROFORGE_SLOTWRITE:-}"
@@ -92,7 +92,7 @@ done
 # randomised and whose /var is gone -- unbootable, and not obviously so. The installer image is a
 # different root from the shipped one, so "it was there yesterday" is not an argument here.
 for t in "$BTRFSTUNE" "$BTRFS" mkfs.ext4 tar mount umount; do
-  command -v "$t" >/dev/null 2>&1 || die "$t is not on PATH -- the installer image is missing it"
+  command -v "$t" >/dev/null 2>&1 || die "$t is not on PATH -- this image is missing it"
 done
 
 log "slot $SLOT: root $ROOT_DEV, var $VAR_DEV"
@@ -110,7 +110,7 @@ log "fsid randomised, label set to retroforge-root-$SLOT"
 # --- 2. per-slot /var -------------------------------------------------------------------------------
 # The source is a TARBALL here, and that is what makes this the installer case: the OTA path passes
 # the RUNNING /var because there is a live system whose state describes the device, and here the
-# running system is the installer image, whose /var describes the INSTALLER. So the seed comes out
+# running system is the card, whose /var describes the card. So the seed comes out
 # of the root that was just written -- rootfs/assemble-rootfs.sh packs $varstage into it for exactly
 # this. Safe to mount now: step 1 re-randomised the fsid, so this cannot alias another disk's root.
 mkdir -p "$MNT" || die "cannot create $MNT"

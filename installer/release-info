@@ -1,20 +1,11 @@
 #!/usr/bin/env python3
-# retroforge internal install — WHICH RELEASE THIS MEDIUM INSTALLS. Phase 6 of
-# .claude/plans/internal-install.plan.md, and the last unanswered question in §4b.
+# retroforge internal install — WHICH RELEASE THE INSTALLER INSTALLS.
 #
 #   release-info          resolve <OTA_URL>/<channel>/latest.json and print key=value
 #
-# IT EMITS key=value AND NO PROSE, exactly as installer/netcfg and the consent gate's facts file do:
-# the words belong to whatever is drawing the screen, the facts belong here. installer/uiflow turns
-# STATE= into a sentence; a terminal caller reads the same line. Like netcfg it always exits 0 --
-# a failure is itself an answer, and STATE is where the answer lives.
-#
-# WHY THIS IS NOT PART OF netcfg. The medium carries no OS bundle, so between "the network is up"
-# and "here is what will happen to your disk" something has to ask the server what there is to
-# install. netcfg answers whether the HOST answers; this answers what it SERVES. That split is load-bearing rather than tidy: netcfg deliberately
-# ignores HTTP status, because a server that replies 404 is a server the installer can reach
-# (measured on a Pocket S2, 2026-08-22, when the OTA root's own 404 was being read as an unreachable
-# host) -- and a 404 on <channel>/latest.json is precisely the state THIS file has to name.
+# IT EMITS key=value AND NO PROSE: the words belong to whatever is drawing the screen, the facts belong
+# here. installer/uiflow turns STATE= into a sentence, and the Settings row reads the same line. It
+# always exits 0 -- a failure is itself an answer, and STATE is where the answer lives.
 #
 # THE MANIFEST IS NOT A TRUST BOUNDARY. latest.json says which bundle to fetch and nothing more; it
 # cannot select a keyring, a verification mode or an install flag, and the bundle it names still has
@@ -26,6 +17,7 @@
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import urllib.parse
@@ -44,43 +36,84 @@ def emit(key, value):
 # Test seams, in the spirit of the rest of installer/: tests/test-ui.sh executes THIS file with curl
 # stubbed and every path redirected. What runs under test is the artifact that ships.
 CONFIG_FILE = os.environ.get("RETROFORGE_OTA_CONFIG", "/etc/retroforge/ota.conf")
+# The channel picked in Settings > General > Updates. `player` writes this file and root reads it, so
+# only OTA_CHANNEL comes from it, and only if it is a path segment (valid_channel).
+USER_CONFIG_FILE = os.environ.get(
+    "RETROFORGE_OTA_USER_CONFIG", "/home/player/.config/retroforge/ota.conf"
+)
 CURL = os.environ.get("RETROFORGE_CURL", "curl")
 TIMEOUT = os.environ.get("RETROFORGE_NET_TIMEOUT", "20")
-# The server this medium fetches from, resolved exactly as retroforge-update resolves it: the
-# environment, then OTA_URL/OTA_CHANNEL in /etc/retroforge/ota.conf, then these built-in defaults. The
-# literals are written a third time here because the other two are Python and shell in files that do
-# not ship together; tests/test-ui.sh asserts all three agree.
+# The server this fetches from, resolved as retroforge-update resolves it. The literals are written a
+# second time here because the two files share no code; tests/test-ui.sh asserts they agree.
 DEFAULT_URL = "https://ota.retroforge.org"
 DEFAULT_CHANNEL = "stable"
 
 
-def read_env_file(path):
-    """Parse a KEY=VALUE file. Not a shell: no expansion, no substitution, no execution."""
+def parse_env(text):
+    """Parse KEY=VALUE lines. Not a shell: no expansion, no substitution, no execution."""
     values = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+def read_env_file(path):
     try:
         with open(path, "r") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                values[key.strip()] = value.strip().strip('"').strip("'")
+            return parse_env(handle.read())
+    except (OSError, ValueError):
+        return {}
+
+
+def read_user_file(path):
+    """
+    USER_CONFIG_FILE, which `player` owns and root reads. A FIFO would hang the pre-flight, /dev/zero
+    behind a symlink would eat memory, and a home survives reboots, so either would stop the
+    installer for good: a small regular file or nothing.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
-        pass
-    return values
+        return {}
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            return {}
+        return parse_env(handle.read(4096).decode("utf-8", "replace"))
+
+
+def valid_channel(name):
+    """retroforge-update's grammar for a channel: it is a URL path segment."""
+    return bool(name) and len(name) <= 64 and not name.startswith(".") and all(
+        c.isalnum() or c in "._-" for c in name
+    )
 
 
 def config():
     conf = read_env_file(CONFIG_FILE)
+    # The host is never read from USER_CONFIG_FILE, for the reason retroforge-update's config() gives.
     url = os.environ.get("RETROFORGE_OTA_URL") or conf.get("OTA_URL") or DEFAULT_URL
-    channel = os.environ.get("RETROFORGE_OTA_CHANNEL") or conf.get("OTA_CHANNEL") or DEFAULT_CHANNEL
-    return url.rstrip("/"), channel
+    # retroforge-update's channel_setting() order: env, /etc, $HOME, built-in. A dev card's pin in
+    # /etc outranks the user's file on purpose.
+    for channel in (
+        os.environ.get("RETROFORGE_OTA_CHANNEL"),
+        conf.get("OTA_CHANNEL"),
+        read_user_file(USER_CONFIG_FILE).get("OTA_CHANNEL"),
+    ):
+        if valid_channel(channel):
+            return url.rstrip("/"), channel
+        if channel:
+            log("ignoring the channel %r: not a path segment" % channel)
+    return url.rstrip("/"), DEFAULT_CHANNEL
 
 
 def fetch(url):
-    """(rc, bytes) for a small document. `-f` ON PURPOSE, unlike netcfg's reachability probe: here
-    the HTTP status IS the question, and curl's 22 for a 4xx is what separates "this channel has no
-    release" from "this network cannot reach the server"."""
+    """(rc, bytes) for a small document. `-f` ON PURPOSE: the HTTP status IS the question, and curl's
+    22 for a 4xx is what separates "this channel has no release" from "this network cannot reach
+    the server"."""
     try:
         result = subprocess.run(
             [CURL, "-fsSL", "--max-time", str(TIMEOUT), url],
@@ -98,7 +131,7 @@ def manifest(raw):
 
     retroforge-update's manifest() with its download logic removed. Every check here is one of that
     file's, and for the same reason: left unchecked, `bundle` is a redirect primitive -- "../../x",
-    "http://elsewhere/x" and "/etc/passwd" all become part of a URL this medium then fetches and
+    "http://elsewhere/x" and "/etc/passwd" all become part of a URL this then fetches and
     hands to rauc. The signature would still reject whatever came back, but a manifest must not be
     able to aim the installer at another host at all.
     """

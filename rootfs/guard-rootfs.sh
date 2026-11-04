@@ -520,6 +520,34 @@ done
 if [ -e "$STAGE/usr/lib/retroforge/install/genpart.sh" ] && [ ! -x "$STAGE/usr/lib/retroforge/install/genpart.sh" ]; then
   bad "/usr/lib/retroforge/install/genpart.sh is not executable — the installer would write a GPT for a disk it then cannot populate"
 fi
+# THE INTERNAL INSTALLER, read back against installer/shipped-files. An offline suite runs it out of
+# the repo with the host's tools on PATH, so this is the only check that sees the image's inventory:
+# recon() would catch a missing tool on the device, but only after a release has shipped without it.
+while read -r f; do
+  case "$f" in ''|'#'*) continue ;; esac
+  shipped="$STAGE/usr/lib/retroforge/install/$f"
+  if ! cmp -s "$shipped" "$ROOT/installer/$f"; then
+    bad "/usr/lib/retroforge/install/$f is missing or differs from installer/$f"
+  elif [ "${f%.py}" = "$f" ] && [ ! -x "$shipped" ]; then
+    bad "/usr/lib/retroforge/install/$f is not executable"
+  fi
+done <"$ROOT/installer/shipped-files"
+cmp -s "$STAGE/usr/lib/retroforge/install/lib-homestage.sh" "$ROOT/image/lib-homestage.sh" \
+  || bad "/usr/lib/retroforge/install/lib-homestage.sh is missing or differs from image/lib-homestage.sh"
+[ "$(readlink "$STAGE/usr/lib/retroforge/install/confirm" 2>/dev/null)" = confirm-ui ] \
+  || bad "/usr/lib/retroforge/install/confirm does not point at confirm-ui — an installer that cannot take consent cannot install"
+# tests/test-installer-shipped.sh keeps this list a superset of what recon() and the components call.
+INSTALLER_TOOLS="sgdisk sfdisk mdir sha256sum mkfs.vfat mkfs.ext4 mkfs.btrfs btrfstune btrfs blkid mount umount tar rauc dbus-daemon gdbus partprobe udevadm curl gamescope seatd-launch python3 zstd grub-editenv pgrep"
+# -L as well: a link with an absolute target does not resolve inside a staged tree.
+missing_tools=""
+for t in $INSTALLER_TOOLS; do
+  [ -x "$STAGE/usr/bin/$t" ] || [ -L "$STAGE/usr/bin/$t" ] || missing_tools="$missing_tools $t"
+done
+[ -z "$missing_tools" ] || bad "missing from /usr/bin:$missing_tools — the internal installer calls them"
+[ -f "$STAGE/usr/lib/python3.14/site-packages/pygame/__init__.py" ] \
+  || bad "pygame is not in site-packages — the installer UI cannot draw (packages/pygame-ce/prebuilt.pin)"
+[ -n "$missing_tools" ] || echo "    ok  installer artifacts: ${INSTALLER_TOOLS// /, }"
+
 # The primitives the hook and the installer share. Asserted here as well as on the RAUC list above,
 # because the two readers fail differently: without it an OTA dies on post-install.sh's first line,
 # while an install has no way to write parts.env and leaves stage 2 guessing the SD card's 1..8.

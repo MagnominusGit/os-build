@@ -279,9 +279,9 @@ jobs:
           - [ ] diff the vendor \`pacman.conf\` / \`pacman.mirrorlist\` against the previous snapshot's
           - [ ] \`build/builder.pin\`: sha256 of \`<snapshot>/system.rootfs.zst\`, changed TOGETHER with snapshot.pin
           - [ ] \`make overlay\` — the builder pin is in every overlay input hash, so ALL packages rebuild
-          - [ ] \`make relock\` + \`make relock-installer\`; review added/dropped names — a package SPLIT drops a binary silently (libinput -> libinput-tools took the power key down)
+          - [ ] \`make relock\`; review added/dropped names — a package SPLIT drops a binary silently (libinput -> libinput-tools took the power key down)
           - [ ] \`packages/libinput\`: its \`libinput=\$pkgver\` dependency fails the resolve if the snapshot moved libinput — bump pkgver to match
-          - [ ] installer: \`installer/pygame-ce.pin\` is a cp3XX wheel — a Python bump invalidates it
+          - [ ] \`packages/pygame-ce/prebuilt.pin\` is a cp3XX wheel — a Python bump invalidates it
           - [ ] a RELEASE \`make sdcard\`: rootfs/guard-rootfs.sh catches a new unpinned sysusers allocation, and the assembler refuses trim.list globs that stopped matching
           - [ ] HW: boot, OGUI shell, power key suspend + wake, an emulator per GPU generation, audio, Wi-Fi
           EOF

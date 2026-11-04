@@ -382,7 +382,7 @@ printf '%s\n' "$out" | grep -q "cannot determine which disk" \
 [ -z "$(field "$out" TARGET)" ] \
   && ok "with no TARGET emitted for a caller to act on" \
   || bad "it emitted a target anyway: $out"
-# The same must hold for an explicit target, which is the path installer/hw-install.sh drives.
+# The same must hold for an explicit target, which is the path a root shell drives.
 out=$(PATH="$T/bin:$PATH" RETROFORGE_SELECT_FIXTURE= bash "$SELECT" "$T/running.img" 2>&1); rc=$?
 [ "$rc" != 0 ] && ok "an explicit target is refused too -- naming a disk does not answer the question" \
                || bad "an explicit target bypassed the refusal: $out"

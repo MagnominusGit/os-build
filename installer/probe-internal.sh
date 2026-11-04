@@ -27,9 +27,8 @@
 #   - No tool invoked below can write. sfdisk appears only as --dump and --list-free.
 #
 # TOOLING: this runs on a dev card AS IT IS TODAY — no rebuild, no added packages. sgdisk would
-# need gptfdisk added to the dev image first (it is one of the three packages the installer image
-# must gain regardless), and needing a rebuild-and-reflash before you can inspect a device is a
-# bad loop for a recon script. sfdisk --dump is the exact, restorable capture format anyway. If
+# need a card new enough to carry gptfdisk, and needing a reflash before you can inspect a device is
+# a bad loop for a recon script. sfdisk --dump is the exact, restorable capture format anyway. If
 # gptfdisk does land in dev builds this script picks sgdisk up opportunistically for its GUID
 # view; it never requires it. Building on an absent tool is the `cmp` bug that sat dead in
 # post-install.sh for three releases — see [[offline-suite-inherits-host-path]].

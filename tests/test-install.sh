@@ -1210,6 +1210,15 @@ fi
 printf '%s\n' "rauc-session install $1 $2 var=${RETROFORGE_TARGET_VAR_A:-<unset>}" >>"$SP_CALLS"
 exit "${SP_RAUC_RC:-0}"
 EOF
+  # pgrep answers the one question the consent gate asks. It has to be stubbed: the suite usually
+  # runs as uid 1000, so the host's own pgrep would find the developer's processes and refuse.
+  cat >"$SP_STUBS/pgrep" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "pgrep $*" >>"$SP_CALLS"
+[ "${SP_PGREP_RC:-1}" = 1 ] && exit 1
+[ "$SP_PGREP_RC" = 0 ] && { echo 4242; exit 0; }
+exit "$SP_PGREP_RC"
+EOF
   # sgdisk answers -i with a per-index GUID in UPPER case, so the lower-casing in part_uuid is
   # exercised end to end rather than only in its own unit case.
   cat >"$SP_STUBS/sgdisk" <<'EOF'
@@ -1317,6 +1326,8 @@ EOF
   # The default is a /home that EXISTS, so only the case that clears it exercises the refusal.
   SP_HOME_FSTYPE=ext4
   SP_PLAN_RC=0; SP_PLAN_GIB=72; SP_PLAN_REPLACES=0
+  SP_PGREP_RC=1
+  SP_CARD_GRUBENV="$SP/card-grubenv"; printf 'saved_entry=mangmi-air-x-mq66\nrf_board_ok=mangmi-air-x-mq66\n' >"$SP_CARD_GRUBENV"
 }
 
 spine_run() {  # extra args passed through to the spine
@@ -1326,7 +1337,8 @@ spine_run() {  # extra args passed through to the spine
       SP_SEL_UDINDEX="$SP_SEL_UDINDEX" SP_SEL_UDSTART="$SP_SEL_UDSTART" \
       SP_SEL_UDEND="$SP_SEL_UDEND" SP_SEL_CEIL="$SP_SEL_CEIL" \
       SP_INFO_RC="$SP_INFO_RC" SP_RAUC_RC="$SP_RAUC_RC" SP_CARVE_RC="$SP_CARVE_RC" \
-      SP_HOME_FSTYPE="$SP_HOME_FSTYPE" \
+      SP_HOME_FSTYPE="$SP_HOME_FSTYPE" SP_PGREP_RC="$SP_PGREP_RC" \
+      RETROFORGE_SESSION_WAIT=0 RETROFORGE_CARD_GRUBENV="$SP_CARD_GRUBENV" \
       SP_PLAN_RC="$SP_PLAN_RC" SP_PLAN_GIB="$SP_PLAN_GIB" SP_PLAN_REPLACES="$SP_PLAN_REPLACES" \
       RETROFORGE_INSTALL_RUN="$SP_RUN" DEVTEST=-e REQUIRE_ROOT=0 FAT_ASSERT=0 \
       PARTUUID_DIR="$SP_PART" DISKTEST=-e \
@@ -1347,8 +1359,11 @@ spine_run() {  # extra args passed through to the spine
 # What the ESP's grubenv says, read back with `<file> list` -- the stub's or, in the case that has
 # one, the real tool's -- so one assertion serves both.
 sp_env_has() {  # <key=value> [grubenv] [lister]
-  SP_CALLS=/dev/null "${3:-$SP_EDITENV_TOOL}" "${2:-$SP_RUN/esp/EFI/steamos/grubenv}" list 2>/dev/null \
-    | grep -qx -- "$1"
+  # Captured, not piped: grep -q exits at its first match, and under pipefail the lister's SIGPIPE
+  # then fails a check that matched.
+  local listed
+  listed="$(SP_CALLS=/dev/null "${3:-$SP_EDITENV_TOOL}" "${2:-$SP_RUN/esp/EFI/steamos/grubenv}" list 2>/dev/null)"
+  grep -qx -- "$1" <<<"$listed"
 }
 
 # The order of two recorded calls, by first occurrence. Returns non-zero if either never happened,
@@ -1420,9 +1435,49 @@ done
 [ ! -e "$esp/SteamOS" ] \
   && ok "no /SteamOS on the ESP -- no boot conf, no steamos-bootconf" \
   || bad "the ESP carries $(cd "$esp" && find SteamOS | tr '\n' ' ')"
-grep -q 'boot: grubenv ORDER=A B, A_OK=1, B_OK=0' "$SP_RUN/install.log" 2>/dev/null \
+grep -q 'boot: grubenv ORDER=A B, A_OK=1, B_OK=0' "$SP_RUN/record" 2>/dev/null \
   && ok "the install record says which slot state it armed" \
-  || bad "the install record does not name the slot state: $(grep '^boot:' "$SP_RUN/install.log" 2>/dev/null)"
+  || bad "the install record does not name the slot state: $(grep '^boot:' "$SP_RUN/record" 2>/dev/null)"
+
+CASE="spine: the board the card booted with comes along"
+# The card already knows the board, so the first internal boot must not stop at the board menu.
+sp_env_has 'saved_entry=mangmi-air-x-mq66' \
+  && ok "the internal grubenv carries the card's saved board" \
+  || bad "saved_entry did not reach the internal grubenv"
+sp_env_has 'rf_board_ok=mangmi-air-x-mq66' \
+  && bad "rf_board_ok was copied: this disk has not confirmed a boot yet" \
+  || ok "and not rf_board_ok, which only a confirmed boot of this disk may set"
+spine_dir noboard
+rm -f "$SP_CARD_GRUBENV"
+out="$(spine_run)" && ok "a card grubenv that cannot be read costs only the board menu" \
+  || bad "an unreadable card grubenv failed the install: $out"
+sp_env_has 'A_OK=1' && ok "and the slot state is still armed" || bad "the slot state was not armed"
+spine_dir boardshape
+printf 'saved_entry=x;$(touch pwned)\n' >"$SP_CARD_GRUBENV"
+out="$(spine_run)" && ok "a malformed saved board does not stop the install" || bad "failed: $out"
+SP_CALLS=/dev/null "$SP_EDITENV_TOOL" "$SP_RUN/esp/EFI/steamos/grubenv" list 2>/dev/null | grep -q '^saved_entry=' \
+  && bad "a malformed saved board was copied" || ok "and it is not copied"
+
+CASE="spine: no process of the session user may be alive at consent"
+# The card's OS has a `player` user: in `input` (so /dev/uinput), free to call InputPlumber, and
+# able to read the sequence off confirm-ui's command line. The installer unit ends the user; this
+# refuses if that did not work, because a press injected here is a press nobody made.
+spine_dir sessionalive
+SP_PGREP_RC=0
+out="$(spine_run)" && bad "consent was taken with a player process alive" \
+  || ok "a surviving player process stops the run"
+grep -qi 'session user' <<<"$out" && ok "and the run says why" || bad "no reason given: $out"
+grep -q '^confirm ' "$SP/calls" && bad "the consent screen was still shown" || ok "before any consent screen"
+carve_wrote && bad "the disk was written" || ok "and nothing was written"
+spine_dir sessionunknown
+SP_PGREP_RC=3
+out="$(spine_run)" && bad "a pgrep that could not answer read as nobody running" \
+  || ok "a pgrep that cannot answer refuses too: not knowing is not the same as nobody"
+grep -q '^confirm ' "$SP/calls" && bad "the consent screen was still shown" || ok "before any consent screen"
+
+# The cases below read the happy run's sandbox.
+spine_dir happy
+out="$(spine_run)" || bad "the happy run failed on its second pass: $out"
 
 CASE="spine: grub-editenv comes out of the root it just wrote"
 # The tool and the block shipped together, so the root's copy is the one to run; the installer

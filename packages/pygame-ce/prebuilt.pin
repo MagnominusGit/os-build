@@ -1,17 +1,11 @@
-# pygame-ce — precompiled aarch64 wheel pin, for the INSTALLER image only. Phase 5/6 of
-# .claude/plans/internal-install.plan.md.
-#
-# WHY THIS IS NOT UNDER packages/. Every `packages/*/prebuilt.pin` is auto-discovered by
-# rootfs/customize-base.sh and extracted into the RELEASE base. This one is 39 MB of Python SDL
-# bindings that only installer/ui uses, and installer/ui does not ship on the release image at all —
-# so it would be pure weight on every device. installer/mkroot.sh (Phase 6) reads it instead, using
-# the same field names so the parsing idiom is shared.
+# pygame-ce — precompiled aarch64 wheel pin: the SDL binding installer/ui draws with. It ships in
+# the root because the internal installer does (installer/shipped-files): 39 MB that only the
+# installer uses, the price of having one image instead of a second installer root.
 #
 # WHY A WHEEL AT ALL, rather than a repo package or an overlay build. Measured against the pinned
 # builder, 2026-08-22: **there is no `python-pygame` in the holo repos, and no `PySDL2` either.**
 # There is not even a plain `sdl2` — only `sdl2-compat`, `sdl2_ttf`, `sdl2_image` and `sdl3`. The
-# plan asserted the opposite ("all already built by the overlay ... so no new package work") and
-# mkroot.sh would have discovered otherwise. The alternatives were a from-source overlay package
+# alternatives were a from-source overlay package
 # (SDL2 + Cython + a compiled extension in the build) or a ctypes shim of our own; the wheel is
 # the one that needed no new build and no new code.
 #
@@ -33,8 +27,8 @@
 # at 2560x1440 on Wayland, the §4d consent screen drawn from real facts, both pads enumerated, and
 # the sequence completed on the panel by hand.
 #
-# THE FILE IS A ZIP, NOT A TARBALL. mkroot.sh must unzip it into the installer rootfs'
-# site-packages (/usr/lib/python3.14/site-packages/) — `strip` below is 0 because a wheel's members
+# THE FILE IS A ZIP, NOT A TARBALL. It unpacks into site-packages
+# (/usr/lib/python3.14/site-packages/) — `strip` below is 0 because a wheel's members
 # are already rooted at the package directory (pygame/, pygame_ce.libs/, *.dist-info/). It carries
 # its own libraries, so it needs no `deps:` row.
 #

@@ -101,7 +101,7 @@ CURL = os.environ.get("RETROFORGE_CURL", "curl")
 #
 # The URL is the root of the R2 bucket updates are published to, so there is no path prefix: a
 # channel is the first segment, giving /<channel>/latest.json. ota.retroforge.org is the bucket's
-# custom domain (Cloudflare); the same literal is in installer/netcfg and installer/release-info, and
+# custom domain (Cloudflare); the same literal is in installer/release-info, and
 # tests/test-ui.sh asserts all three agree. Images before 2026-10-13 carry the never-resolving
 # placeholder https://updates.retroforge.invalid instead, so they cannot see any update.
 DEFAULT_URL = "https://ota.retroforge.org"

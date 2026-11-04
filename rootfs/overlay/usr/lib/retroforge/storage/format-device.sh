@@ -208,8 +208,7 @@ log "formatting $DEVICE (label '$LABEL', owner $OWNER)"
 for p in "/dev/${DISK}"p*; do [ -b "$p" ] && wipefs --all --force "$p" >/dev/null 2>&1 || true; done
 wipefs --all --force "$DEVICE" >/dev/null 2>&1 || true
 
-# sfdisk, not sgdisk: sgdisk is not on this image (it is one of the four binaries the installer
-# stager has to push), sfdisk comes with util-linux and is always there.
+# sfdisk comes with util-linux and is always there.
 printf 'label: gpt\nname=retroforge-library, type=0FC63DAF-8483-4772-8E79-3D69D8477DE4\n' \
     | sfdisk --quiet --wipe always "$DEVICE" >/dev/null
 

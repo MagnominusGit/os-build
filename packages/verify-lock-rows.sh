@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
 # retroforge lock rows — do the manifests' `retroforge` rows still name the sources in packages/?
 #
-# BOTH LOCKS, because there are two and only one of them is in the obvious place. The installer
-# medium carries gamescope (installer/ui is a Wayland client and gamescope is its display server,
-# installer/pkgs.list:69), so a change under packages/gamescope invalidates rootfs/manifest.lock AND
-# installer/manifest.lock, and they have to move together. 3e76935 relocked one of them; the other
-# was caught by installer/mkroot.sh's own resolve — which runs AFTER the kernel, so installer/v0.0.8
-# spent 56 minutes building 7.2.5 to reach a verdict decidable here in a second from a bare clone.
-#
 #   packages/verify-lock-rows.sh
 #
 # Runs in about a second, on any machine, from COMMITTED FILES ONLY: no work/, no overlay repo, no
@@ -51,7 +44,6 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOCK="$ROOT/rootfs/manifest.lock"
-INSTALLER_LOCK="$ROOT/installer/manifest.lock"
 
 log() { printf '[lock] %s\n' "$*" >&2; }
 die() { printf '[lock] %s\n' "$*" >&2; exit 1; }
@@ -120,6 +112,5 @@ check_lock() {
 }
 
 check_lock "$LOCK" "make relock"
-check_lock "$INSTALLER_LOCK" "make relock-installer"
 
 [ "$fail" -eq 0 ] || exit 1

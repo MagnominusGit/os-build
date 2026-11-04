@@ -71,18 +71,17 @@ itself as skipped there and runs wherever a PKI is mounted:
 
 `.github/workflows/image.yml` is a `workflow_call`-only builder: restore the overlay cache `warm`
 saved on `main` → `build-overlay.sh --prune-retired` (a re-index when nothing moved, ~30 min cold) →
-`make toolchain` → `make sdcard`, `make bundle` or `make installer`, with `df -h` into the step
+`make toolchain` → `make sdcard` or `make bundle`, with `df -h` into the step
 summary.
 work/ peaks near 30 GB and out/ near 21 GB against ~109 G free on the runner, measured by
 `preflight.yml` — there is room, and an earlier design that deleted each stage's inputs as it went
 was reverted as cleverness bought against a limit that is not there. Two thin callers invoke it on
-their own triggers, because a flashable card, a field update and the installer medium are wanted at
+their own triggers, because a flashable card and a field update are wanted at
 different cadences:
 
 | workflow | trigger | secrets | ships to |
 |---|---|---|---|
 | `release-sdcard.yml` | `card/v*` tag, or manual | none — `GITHUB_TOKEN` only; `release-cards` for its reviewer | a GitHub Release carrying the card, checksums and provenance |
-| `release-installer.yml` | `installer/v*` tag, or manual | none — `GITHUB_TOKEN` only; `release-cards` for its reviewer | a GitHub Release carrying the medium, checksums and provenance |
 | `release-bundle.yml` | `ota/v*` tag, or manual | `RAUC_CERT_PEM`/`RAUC_KEY_PEM` and `R2_*` (repo-wide: no environments on this plan) | the Cloudflare R2 bucket in `vars.R2_BUCKET`, `<channel>/` prefix, served at `https://ota.retroforge.org` (see `docs/ota.md`) |
 
 **The tag namespaces are separate on purpose.** A bundle ships far more often than a card, so each
@@ -94,8 +93,8 @@ delivered two ways.
 **The card is a release asset** since 2026-10-13: a release card compresses to 524 MiB (gz -6), a
 quarter of GitHub's 2 GiB per-asset cap, and the release job checks the cap before uploading. It went
 to R2 while it measured 5.08 GiB (2026-08-04, root still carrying an x86 stack). The repo is private,
-so downloading a card needs a GitHub login with access to it. The installer medium (404 MiB) is a
-release asset the same way; nothing is published to R2 any more.
+so downloading a card needs a GitHub login with access to it. Nothing but OTA bundles is published to
+R2 any more.
 
 **CI is the only thing that PUBLISHES a release image**, because the reviewer gates and the signing
 credentials live here. Building one is not restricted: `make sdcard` with no `RETROFORGE_DEV` produces a real release

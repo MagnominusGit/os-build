@@ -328,6 +328,9 @@ PLUGIN_SRC   := apps/ogui-retroforge-plugin/build.sh $(wildcard apps/ogui-retrof
 ASSEMBLE_SRC := $(shell find $(ROOTFS_DIR)/assemble-rootfs.sh $(ROOTFS_DIR)/lib-assemble-*.sh \
                               $(ROOTFS_DIR)/seal-rootfs.sh $(ROOTFS_DIR)/conf/seal.list \
                               $(ROOTFS_DIR)/guard-rootfs.sh rootfs/overlay -type f 2>/dev/null)
+# The internal installer ships from installer/, listed in installer/shipped-files.
+ASSEMBLE_SRC += installer/shipped-files \
+                $(addprefix installer/,$(shell sed -e 's/\#.*//' installer/shipped-files 2>/dev/null))
 
 # Kernel inputs: any change re-triggers the (full, from-scratch) kernel build. The unified
 # kernel globs every fragment/patch/dts, and bakes the firmware embed list.
@@ -374,7 +377,7 @@ RETROFORGE_CCACHE ?= $(if $(CI),0,1)
 # Phony orchestration targets
 # ==============================================================================
 .PHONY: help all image toolchain kernel fw-linux fw-qcom base overlay verify-lock check-hw-paths \
-        rootfs relock installer installer-root relock-installer verify-image \
+        rootfs relock \
         initramfs splash plugin sigdefer gptk-interpose hidemenu mesa-x86 grub sdcard verify-card test test-disk bundle sign-bundle publish-bundle \
         clean clean-base clean-overlay clean-ccache distclean
 
@@ -438,9 +441,8 @@ verify-card: $(SDCARD) | $(BUILD_STAMP) ## Verify the built A/B card image (in c
 # nothing runs it until the overlay pipeline's retrieval job — hours of aarch64 compiles after the
 # wrong row was pushed. Hanging it off `test` is what puts it on every push and every PR: the ci
 # workflow runs `make test`, and it triggers on paths overlay.yml deliberately ignores, so a commit
-# touching ONLY rootfs/manifest.lock is still checked. It covers BOTH manifests — the installer
-# carries gamescope too, and its lock is the one that gets forgotten.
-verify-lock: ## Check both locks' retroforge rows against packages/ (host, seconds, no build)
+# touching ONLY rootfs/manifest.lock is still checked.
+verify-lock: ## Check the lock's retroforge rows against packages/ (host, seconds, no build)
 	bash packages/verify-lock-rows.sh
 
 # Every board profile's hardware-map pins (RETROFORGE_HW_*) against what its devicetree makes the
@@ -461,6 +463,7 @@ test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-device-env.sh
 	bash $(TESTS_DIR)/test-partition-table.sh
 	bash $(TESTS_DIR)/test-units.sh
+	bash $(TESTS_DIR)/test-installer-shipped.sh
 	bash $(TESTS_DIR)/test-session.sh
 	bash $(TESTS_DIR)/test-launch.sh
 	bash $(TESTS_DIR)/test-sigdefer.sh
@@ -500,11 +503,9 @@ test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-storage.sh
 	bash $(TESTS_DIR)/test-install.sh
 	bash $(TESTS_DIR)/test-ui.sh
-	bash $(TESTS_DIR)/test-mkroot.sh
 	bash $(TESTS_DIR)/test-lib-pins.sh
 	bash $(TESTS_DIR)/test-lib-container.sh
 	bash $(TESTS_DIR)/test-verify-lock.sh
-	bash $(TESTS_DIR)/test-mkimage.sh
 	bash $(TESTS_DIR)/test-mesa-source.sh
 	bash $(TESTS_DIR)/test-fex-guest.sh
 	bash $(TESTS_DIR)/test-guard.sh
@@ -525,9 +526,8 @@ test-signing: $(SIGN_STAMP) ## Prove the RAUC signing self-test still catches wh
 	$(DOCKER) $(PKI_MOUNT) $(SIGN_IMG) $(TESTS_DIR)/test-verify-signing.sh
 
 # The fifth suite pair, and the reason they are not in `test`: they need sgdisk, mtools and
-# dosfstools, which a plain dev box does not have (and which the shipped image never gets, because
-# select-target.sh and carve.sh are installer-only and are never staged into the rootfs). So they
-# run in the container, where those tools already live for verify-image.
+# dosfstools, which a plain dev box does not have. So they run in the container, where those tools
+# already live.
 #
 # They had no target and no CI job until 2026-08-25 — 181 assertions over the two scripts that
 # CHOOSE a stranger's disk and then DELETE partitions on it, run only when someone remembered to
@@ -719,71 +719,6 @@ relock: $(if $(OVERLAY_PINS),$(OVERLAY_STAMP)) ## Re-resolve from PKGS and regen
 	$(ROOTFS_DIR)/chromium-pin.py   # the store sign-in's Chromium follows the lock (packages the image lacks)
 	rm -f $(BASE_STAMP) work/.base-mode-*   # the tree left behind is a RESOLVE tree: claim no mode for it
 	@echo "review the diff, commit it, then rebuild: git diff $(ROOTFS_DIR)/manifest.lock $(ROOTFS_DIR)/overlay/usr/share/retroforge/stores/chromium.pin"
-
-# ==============================================================================
-# Installer image (host docker + qemu) — the standalone medium that installs to internal storage
-# ==============================================================================
-# Phase 6 of .claude/plans/internal-install.plan.md. A SEPARATE root from the shipped one, with its
-# own package declaration (installer/pkgs.list) and its own lock (installer/manifest.lock): the
-# installer carries partition and filesystem tools that no device ever gets, so folding them into
-# rootfs/manifest.lock would make the shipped image's reviewed artifact describe content that image
-# never contains. installer/genlock.sh's header carries the full reasoning.
-#
-# installer/mkroot.sh self-caches on its own input key (packages, pins, snapshot, builder, and a hash
-# over every file it places), so an unchanged tree costs the key check and nothing else. That is why
-# these are phony rather than file targets — the script owns the reuse decision, exactly as
-# rootfs/customize-base.sh does for the shipped base.
-# $(KERNEL) IS A REAL PREREQUISITE, not decoration: mkroot.sh ships the kernel's MODULES into the
-# installer root (the 802.11 stack is =m, so firmware with no driver is indistinguishable from no
-# firmware) and reads them out of out/modroot, which the kernel build produces. Without this line
-# `make installer` builds the root FIRST and dies on a tree that has never built a kernel — which is
-# every CI runner, and was the first thing the 2026-08-25 smoke run hit.
-#
-# `verify-lock` IS FIRST ON PURPOSE. mkroot.sh's resolve refuses a retroforge package built from
-# sources installer/manifest.lock does not describe — correct, and the only thing standing between a
-# stale row and a published medium — but it makes that call from inside the root bootstrap, i.e.
-# after $(KERNEL). installer/v0.0.8 spent 56 minutes building 7.2.5 to reach it. verify-lock decides
-# the same question in a second from committed files, so ordering it ahead of the kernel turns that
-# into a fast failure. Prerequisites are built left to right, which holds for `make installer`; a
-# `make -j installer` would race the kernel against it and lose the head start, not the check.
-installer-root: verify-lock $(KERNEL) $(if $(OVERLAY_PINS),$(OVERLAY_STAMP)) ## Bootstrap the installer root -> work/installer-base (host; docker+qemu)
-	installer/mkroot.sh >/dev/null
-
-# The medium itself. Host-side mkroot.sh produces the tree; this compresses it and lays the two
-# partitions, and it runs IN THE CONTAINER because the tree is root-owned — a squashfs built by the
-# build user would put every file on the medium under uid 1000, and the installer runs as root
-# against a stranger's disk. $(KERNEL) and $(GRUB) are real prerequisites: the kernel, the dtbs and
-# the stage-2 GRUB all land on the medium's ESP, since there is no slot root for them to live in.
-#
-# $(ID_ENV) because installer/mkimage.sh stamps the medium's identity (see its section 0): without it
-# every installer image ever built calls itself the same thing, which is the first question asked at
-# the fallback console. NOT $(DEV_ENV): the dev/release mode is read back out of the ROOT's own
-# reuse marker, so it cannot disagree with what was actually baked in.
-installer: installer-root $(KERNEL) $(GRUB) | $(BUILD_STAMP) ## Build the flashable installer medium -> out/images/installer.img
-	$(DOCKER) $(ID_ENV) $(BUILD_IMG) installer/mkimage.sh
-
-# Asserts the BUILT medium, the way verify-card.sh asserts the built card. The suites in `make test`
-# read the SCRIPTS — a script that says the right thing while producing the wrong image passes every
-# one of them — and this is the only thing that opens the image. No dependency on `installer`:
-# verifying a downloaded or CI-built medium is a normal thing to do, and rebuilding it here from a
-# possibly-newer tree would verify something other than the file in front of you.
-#
-# RETROFORGE_INSTALLER_ALLOW_DEV=1 to accept a dev medium (sshd + a baked Wi-Fi PSK); without it that
-# is a failure, because a dev medium must never be the one that gets published.
-verify-image: | $(BUILD_STAMP) ## Verify a built installer medium (in container; IMG= to point elsewhere)
-	$(DOCKER) -e RETROFORGE_INSTALLER_ALLOW_DEV $(BUILD_IMG) installer/verify-image.sh $(IMG)
-
-# Mirrors `relock` above, including why it must NOT go through the locked path: relocking a tree
-# that was itself installed from the lock can only ever reproduce that lock. FORCE=1 because the
-# reuse key folds the mode in, so an existing locked tree would otherwise satisfy this.
-#
-# The overlay repo IS a prerequisite: installer/pkgs.list names gamescope, which exists in no holo
-# repo, and without work/repo/aarch64 the resolve would either fail or — worse — satisfy it from a
-# snapshot and lock an unpatched upstream binary under a `snapshot` class.
-relock-installer: $(if $(OVERLAY_PINS),$(OVERLAY_STAMP)) ## Re-resolve installer/pkgs.list and regenerate installer/manifest.lock (host)
-	RETROFORGE_DEV= RETROFORGE_RESOLVE=1 FORCE=1 installer/mkroot.sh >/dev/null
-	installer/genlock.sh
-	@echo "review the diff, commit it, then rebuild: git diff installer/manifest.lock"
 
 # ==============================================================================
 # Read-only root (container) — base userspace + kernel + firmware -> Btrfs image

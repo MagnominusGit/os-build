@@ -76,8 +76,8 @@ curl -sIL $B/<snapshot>/core/os/aarch64/core.db | grep -iE 'etag|content-length|
 curl -sL $B/<snapshot>/system.rootfs.zst | sha256sum                    # -> build/builder.pin
 ```
 
-Change `build/snapshot.pin` and `build/builder.pin` together, then `make relock` and
-`make relock-installer`, and review both lock diffs. A bump moves the toolchain the overlay builds
+Change `build/snapshot.pin` and `build/builder.pin` together, then `make relock`,
+and review the lock diff. A bump moves the toolchain the overlay builds
 with, so every `packages/*` rebuilds.
 
 Diff the locked package NAMES as well as the versions. A snapshot can drop packages the image

@@ -30,11 +30,10 @@ SPINE = os.environ.get("RETROFORGE_SPINE", "/usr/lib/retroforge/install/retrofor
 VERIFY_INSTALL = os.environ.get(
     "RETROFORGE_VERIFY_INSTALL", "/usr/lib/retroforge/install/verify-install.sh")
 # WHERE THE BYTES COME FROM. The OS bundle is resolved from the update channel at install time by
-# installer/release-info, so any medium installs the current release. /home needs nothing from
+# installer/release-info, so any card installs the current release. /home needs nothing from
 # anywhere: the spine stages an empty player home exactly as the card does.
 #
-# The bundle remains overridable, for the hardware stager (installer/hw-install.sh serves one off a
-# laptop) and for the suite.
+# The bundle remains overridable, for a dev run (docs/install-internal.md) and for the suite.
 RELEASE_INFO = os.environ.get("RETROFORGE_RELEASE_INFO", "/usr/lib/retroforge/install/release-info")
 BUNDLE = os.environ.get("RETROFORGE_INSTALL_BUNDLE", "")
 
@@ -79,7 +78,7 @@ def kv(text):
         k, v = line.split("=", 1)
         try:
             # JOINED, not parts[0]. Both producers feed this: device-env emits one %q-escaped token
-            # (`AYANEO\ Pocket\ S2`), which shlex returns as a single element -- but netcfg emits
+            # (`AYANEO\ Pocket\ S2`), which shlex returns as a single element -- but release-info emits
             # plain prose with spaces (`DETAIL=the installer can reach https://...`), which splits
             # into many. Taking the first element rendered that as "the" on a real Pocket S2.
             # Joining handles both; the only loss is a run of consecutive spaces, which no producer
@@ -140,11 +139,10 @@ _RELEASE = None     # a resolved release, cached. A FAILURE IS NEVER CACHED, so 
 
 def resolve_release():
     """
-    {bundle, state, detail} -- what this medium would install, or why it cannot.
+    {bundle, state, detail} -- what this would install, or why it cannot.
 
-    THE FACTS BELONG TO release-info AND THE WORDS TO THE SCREEN, the same split as netcfg. All this
-    does is prefer the environment over the server: the hardware stager serves a bundle off a laptop
-    and names it in RETROFORGE_INSTALL_BUNDLE.
+    THE FACTS BELONG TO release-info AND THE WORDS TO THE SCREEN. All this does is prefer the
+    environment over the server: a dev run can name a bundle in RETROFORGE_INSTALL_BUNDLE.
 
     Only a resolved release is remembered. Every failure here is one a person can act on -- the
     server was not up yet, the channel had nothing published, DNS was still settling -- and a cached
@@ -155,17 +153,13 @@ def resolve_release():
         return {"bundle": BUNDLE, "state": "ok", "detail": ""}
     if _RELEASE is not None:
         return _RELEASE
-    # SYNCHRONOUS, and bounded so it can stay that way. This blocks the frame like every other tool
-    # the pre-flight gathers from (select-target.sh, carve.sh), and it is reached only after netcfg
-    # has already pronounced the same host reachable within its own 20s -- so the fetch is a few
-    # hundred bytes over a connection just proven to work. `netcfg join` is a child process instead
-    # because it waits on an access point for up to 90s, which is a frozen panel and looks like a
-    # dead device (HW 2026-08-24). Keep this the short one, or it earns the same treatment.
+    # SYNCHRONOUS, and bounded so it can stay that way: it blocks the frame like every other tool the
+    # pre-flight gathers from (select-target.sh, carve.sh), and the fetch is a few hundred bytes.
     rc, out = run_tool([RELEASE_INFO], timeout=45)
     facts = kv(out)
     state = facts.get("STATE", "")
     if not state:
-        # release-info always prints a STATE, so no STATE means it did not run: a medium that
+        # release-info always prints a STATE, so no STATE means it did not run: a card that
         # shipped without it, or a python that could not start. HW 2026-08-24 taught this shape
         # once already, with lib-gpt.sh -- a tool that is missing must not read as an answer.
         state, facts = "no-tool", {
@@ -183,7 +177,7 @@ def resolve_release():
     #
     # It exists because a run on a non-default channel could not previously be audited from its own
     # journal: release-info has always emitted URL and CHANNEL, and nothing wrote them down, so
-    # "which bundle did this medium actually stream?" was answerable only by inference from the host.
+    # "which bundle did this run actually stream?" was answerable only by inference from the host.
     # A screen may summarise; a log must not lose what the code already knew
     # ([[screens-must-say-what-the-code-knows]]).
     log("release probe: channel=%s url=%s version=%s build=%s size=%s bundle=%s"
@@ -252,193 +246,6 @@ def release_facts():
     """The three keys the pre-flight screen reads about the download, as a fresh dict."""
     r = resolve_release()
     return {"bundle": r["bundle"], "release": r["state"], "release_detail": r["detail"]}
-
-
-# =================================================================================================
-# the network screen — §4b's table, and nothing else
-# =================================================================================================
-# DIAGNOSIS ONLY. There is no SSID picker and no on-screen keyboard: §4b moved credentials to a
-# file on the installer's ESP because this device has no keyboard and no guaranteed touchscreen, so
-# the only thing a screen can usefully do here is say WHICH failure this is. Each row of §4b's
-# table has a different fix, and getting it wrong costs the user a power-off, a card pulled, an
-# edit on another computer and a reboot. That price is why "network failed" is not an option.
-#
-# The words are here and the facts are in installer/netcfg, the same split the consent gate uses.
-NETCFG = os.environ.get("RETROFORGE_NETCFG", "/usr/lib/retroforge/install/netcfg")
-
-
-def net_diagnose(action="diagnose"):
-    """Run installer/netcfg and return its key=value output. A failure is itself a diagnosis."""
-    rc, out = run_tool([NETCFG, action], timeout=180)
-    facts = kv(out)
-    if not facts.get("STATE"):
-        facts = {"STATE": "netcfg-failed", "DETAIL": out.strip().splitlines()[-1:] and
-                 out.strip().splitlines()[-1] or "netcfg produced no diagnosis (rc=%d)" % rc}
-    return facts
-
-
-class NetworkScreen:
-    """
-    §4b's table, one state at a time, with the SSID quoted back.
-
-    `need-join` is the confirm-before-connecting state, and it is deliberately a plain button press
-    rather than the §4d sequence: nothing destructive happens here. Its job is the STALE FILE — a
-    card round-tripped through an earlier install names an SSID the user recognises as wrong, and
-    they see it before a failed attempt rather than after one.
-    """
-
-    name = "network"
-
-    # state -> (title, what happened, what the user does about it)
-    TABLE = {
-        # THE STEPS ARE NUMBERED AND THE FILE IS REALLY THERE. This said "copy wifi.conf.example
-        # next to it", and until 2026-08-24 no such file existed anywhere -- not in the tree, not on
-        # any medium. Instructions naming a file that is not there read as a fault in the person
-        # following them. installer/mkimage.sh now writes it to /retroforge/ on the medium's boot
-        # partition, which is typed 0700 precisely so Windows and macOS will show it.
-        "no-conf": (
-            "No Wi-Fi settings on this card",
-            "The installer downloads RetroForge over the network, and it found no {path} telling it "
-            "which network to join.",
-            "Power off and take the card out. On another computer, open the RFINSTALLER volume and "
-            "look in the retroforge folder: copy wifi.conf.example to a file named wifi.conf, open "
-            "the copy, and put your network name and password in it. Put the card back and switch "
-            "on. Or plug in a USB-C Ethernet adapter -- that needs no file at all.",
-        ),
-        "unparsable": (
-            "The Wi-Fi settings could not be read",
-            "{path} exists, but {where}.",
-            "Edit it on another computer. Each line is SSID=... or PSK=..., and anything else is "
-            "a comment starting with #.",
-        ),
-        "not-found": (
-            "'{ssid}' was not found",
-            "The installer scanned for the network named in the settings on this card and did not "
-            "see it.",
-            "Check the name for a typo -- it is case-sensitive. A 5 GHz-only access point may "
-            "simply be out of range.",
-        ),
-        "auth-failed": (
-            "'{ssid}' rejected the password",
-            "The network is there and the installer reached it, but the key on this card was not "
-            "accepted.",
-            "Correct PSK= on another computer. Nothing else about the card needs changing.",
-        ),
-        "no-lease": (
-            "'{ssid}' gave out no address",
-            "The installer joined the network, and then waited for an address that never arrived.",
-            "This is the access point, not the installer -- its DHCP is not answering. Try another "
-            "network, or a USB-C Ethernet adapter.",
-        ),
-        # CONFIGURED BUT NOT YET JOINED. Self-clearing, like no-clock. have_lease is false for the
-        # whole association window, so before this row existed everything in that window fell
-        # through to `no-conf` and told the operator to go and write a file on another computer
-        # while the radio was mid-handshake -- and on a TEST medium, whose network is a baked NM
-        # profile with no wifi.conf at all, that was every cold boot rather than a corner case.
-        "associating": (
-            "Joining the network",
-            "{detail}. This device asks the access point for an address, and that takes a few "
-            "seconds after the radio associates.",
-            "Nothing to fix. It moves on by itself as soon as an address arrives.",
-        ),
-        # THE ONLY ROW WHOSE FIX IS TO DO NOTHING. These boards have no clock battery -- the PMIC
-        # RTC probe defers forever (issue #38) -- so on every cold boot the clock starts at the
-        # epoch and OpenSSL rejects every certificate as not-yet-valid until systemd-timesyncd has
-        # synced. HW 2026-08-24: this surfaced as "the update server is unreachable", which is a row
-        # that sends the operator to check their router, and it is neither their router nor the
-        # server. It clears itself within a few seconds of joining a network.
-        "no-clock": (
-            "Waiting for the time to be set",
-            "This device has no clock battery, so it does not know the date until the network tells "
-            "it -- {detail}. Until then every secure connection looks expired, including {url}.",
-            "Nothing to fix. Give it a few seconds and press Check again; it sets itself as soon as "
-            "the network answers.",
-        ),
-        "no-host": (
-            "Connected, but the update server is unreachable",
-            "This device has an address, and {url} does not answer.",
-            "This is upstream or DNS, not the installer. Check the connection on another device on "
-            "the same network.",
-        ),
-        "netcfg-failed": (
-            "The network could not be checked",
-            "The installer's own network helper did not answer: {detail}",
-            "Report this. The installer will not continue without knowing the network is up.",
-        ),
-    }
-
-    # STATES WITH NOTHING FOR A RETRY TO DO. HW 2026-08-24, on the first release medium to reach
-    # this screen: `no-conf` offered "Check again", and it cannot succeed. The card is inside the
-    # device, so nobody can write wifi.conf to it while it is running -- the only remedies are to
-    # power off, write the file on another computer and boot again, or to plug in USB-C Ethernet,
-    # which the periodic re-probe now notices by itself. So the button pointed at the one thing that
-    # could not help, gave no feedback when pressed (the state is unchanged, so the screen redraws
-    # identically), and sat where the eye looks first, while "Power off" -- the action the advice
-    # text actually asks for -- was the secondary.
-    #
-    # SELECT keeps Power off. Nothing replaces the South button: an installer that offers no action
-    # is telling the truth about a state that needs the operator to go and do something elsewhere.
-    NO_RETRY = ("no-conf",)
-
-    def __init__(self, facts):
-        self.facts = facts
-        self.result = None      # ("join",) | ("retry",) | ("continue",) | ("quit",)
-
-    def state(self):
-        return self.facts.get("STATE", "netcfg-failed")
-
-    def handle(self, token):
-        if token in (TOKEN_BACK, TOKEN_QUIT):
-            # SELECT is labelled Cancel while a join is being offered and Power off once something
-            # has failed. The result has to say which, or the button lies about what it does.
-            self.result = ("quit",) if self.state() == "need-join" else ("poweroff",)
-        elif token == "S":
-            st = self.state()
-            if st in self.NO_RETRY:
-                return          # no button is drawn for it, so nothing may act on the press either
-            self.result = ("join",) if st == "need-join" else \
-                          ("continue",) if st == "online" else ("retry",)
-
-    def describe(self):
-        f, st = self.facts, self.state()
-        ssid = f.get("SSID", "?")
-        if st == "online":
-            blocks = [("Network is up", f.get("DETAIL", "The installer can reach the update "
-                                                        "server."))]
-            title, buttons = "Connected", [{"pos": "S", "label": "Continue"}]
-        elif st == "need-join":
-            title = "Join '%s'?" % ssid
-            blocks = [
-                ("The settings on this card name this network",
-                 "The installer will connect to '%s' using the password stored on the card. The "
-                 "password itself is never shown." % ssid),
-                ("If that is not your network",
-                 "Cancel, power off, and edit retroforge/wifi.conf on another computer. A card used "
-                 "for an earlier install can still be carrying its old network."),
-            ]
-            buttons = [{"pos": "S", "label": "Join"}, {"pos": "SELECT", "label": "Cancel"}]
-        else:
-            title, what, fix = self.TABLE.get(st, self.TABLE["netcfg-failed"])
-            where = "it names no network" if f.get("LINE") == "0" \
-                else "line %s is not something it understands" % f.get("LINE", "?")
-            fmt = {"ssid": ssid, "path": f.get("PATH_", "the settings file"),
-                   "url": f.get("URL", "the update server"), "where": where,
-                   "detail": f.get("DETAIL", "no reason given")}
-            title = title.format(**fmt)
-            blocks = [("What happened", what.format(**fmt)), ("What to do", fix.format(**fmt))]
-            buttons = [{"pos": "SELECT", "label": "Power off"}] if st in self.NO_RETRY else \
-                      [{"pos": "S", "label": "Check again"}, {"pos": "SELECT", "label": "Power off"}]
-        return {
-            "screen": "network",
-            "state": st,
-            "title": title,
-            "blocks": blocks,
-            "diamonds": [],
-            "prompt": "",
-            "note": "Nothing has been written to this device.",
-            "buttons": buttons,
-            "abort": "",
-        }
 
 
 class PreflightScreen:
@@ -630,126 +437,6 @@ PHASES = [
 PHASE_ALIAS = {"/home (kept)": "/home"}
 
 
-class NetJoin:
-    """
-    netcfg join as a child process, so the frame keeps drawing while nmcli works.
-
-    It was a synchronous run_tool with a 180s timeout, which did not merely fail to acknowledge the
-    press -- it blocked the whole UI loop, so nothing redrew and a slow access point made the device
-    look dead. HW 2026-08-24.
-    """
-
-    def __init__(self):
-        import subprocess
-
-        log("joining the network")
-        self.proc = subprocess.Popen(
-            [NETCFG, "join"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
-        os.set_blocking(self.proc.stdout.fileno(), False)
-        self.chunks = []
-        self.started = time.monotonic()
-
-    def _drain(self):
-        try:
-            d = self.proc.stdout.read()
-            if d:
-                self.chunks.append(d)
-        except (BlockingIOError, ValueError, OSError):
-            pass
-
-    def attempt(self):
-        """
-        Which activation netcfg is on, read from the output it has produced SO FAR.
-
-        netcfg emits ATTEMPT= before each try, and this is drained mid-flight rather than at the end,
-        which is the whole point: a second activation must be something the connecting screen can
-        say while it is happening. A join that has printed nothing yet is attempt 1.
-        """
-        self._drain()
-        out = b"".join(self.chunks).decode("utf-8", "replace")
-        n = 1
-        for line in out.splitlines():
-            if line.startswith("ATTEMPT="):
-                try:
-                    n = int(line.split("=", 1)[1].strip())
-                except ValueError:
-                    pass
-        return n
-
-    def poll(self):
-        """The diagnosis once the join has finished, or None while it is still running."""
-        self._drain()
-        if self.proc.poll() is None:
-            return None
-        self._drain()
-        out = b"".join(self.chunks).decode("utf-8", "replace")
-        facts = kv(out)
-        if not facts.get("STATE"):
-            last = (out.strip().splitlines() or ["netcfg produced no diagnosis"])[-1]
-            facts = {"STATE": "netcfg-failed", "DETAIL": last}
-        log("join finished after %.1fs: %s  (%s)" % (
-            time.monotonic() - self.started, facts.get("STATE"), facts.get("DETAIL", "")))
-        # EVERYTHING THE CHILD SAID, NOT JUST THE FACTS IT EMITTED. netcfg logs how long nmcli took
-        # and whether it returned OK or failed -- the two lines that separate "we judged the lease
-        # too early" from "nmcli failed in a shape neither error grep catches" -- and it writes them
-        # to STDERR. This class captures stderr into stdout so the frame can keep drawing, so those
-        # lines land in this buffer and went NOWHERE: kv() keeps the key=value lines and the prose
-        # was dropped on the floor whenever STATE parsed. HW 2026-08-25, an installer log that could
-        # not answer the question the instrumentation had been added for a day earlier.
-        #
-        # Re-emitting is safe BECAUSE netcfg guarantees it: "THE PSK IS NEVER PRINTED, not even in a
-        # debug line". This is the loop that would publish it to the journal and the ESP if that
-        # ever stopped being true, so it is the loop that has to keep naming the guarantee.
-        for line in out.splitlines():
-            line = line.strip()
-            if line and "=" not in line.split(" ", 1)[0]:
-                log("  netcfg: %s" % line)
-        return facts
-
-
-class ConnectingScreen:
-    """Shown the instant Join is pressed, so the press is visibly registered."""
-
-    name = "connecting"
-    interactive = False          # it asks for nothing, so a scripted source spends no press on it
-
-    def __init__(self, ssid, attempt=None):
-        self.ssid = ssid or "the network"
-        self.started = time.monotonic()
-        # A callable, not a number: the attempt changes WHILE this screen is up, and a screen that
-        # took a copy at construction would keep claiming the first one through the second.
-        self.attempt = attempt or (lambda: 1)
-
-    def handle(self, token):
-        pass
-
-    def describe(self):
-        # Animated from elapsed time rather than a frame counter, so it moves at the same rate
-        # whatever the panel is doing.
-        dots = "." * (1 + int((time.monotonic() - self.started) * 2) % 3)
-        # THE SECOND ACTIVATION IS SAID OUT LOUD. netcfg re-activates once when the first join lands
-        # without an address (HW 2026-08-25), and an operator watching an unexplained wait get twice
-        # as long is exactly who this screen exists for -- silence here would undo the reason the
-        # join was made asynchronous in the first place.
-        try:
-            n = self.attempt()
-        except Exception:                                          # noqa: BLE001 - never a screen
-            n = 1
-        second = [("", "The first attempt joined without being given an address. Trying once "
-                       "more -- this is the attempt that usually succeeds.")] if n > 1 else []
-        return {
-            "screen": "connecting",
-            "title": "Connecting to '%s'" % self.ssid,
-            "blocks": [("", "Joining the network, then asking it for an address%s" % dots)] + second
-                      + [("", "Usually a few seconds. Some access points take up to a minute to "
-                              "hand out an address.")],
-            "diamonds": [],
-            "prompt": "",
-            "note": "",
-            "abort": "",
-        }
-
-
 class ChildLines:
     """
     Whole lines from a child's merged stdout/stderr, without ever blocking the frame.
@@ -911,23 +598,14 @@ class ProgressScreen:
     def handle(self, token):
         if self.rc is None:
             return
-        # A finished install offers one button and it says Power off -- §5, "Remove the SD card,
-        # then power the device off".
-        #
-        # A FAILED one offered "Continue", which named nothing that happens: it quit the UI and left
-        # a blank panel. Flagged on hardware 2026-08-25, and the operator was right to find it odd --
-        # a failure screen has exactly two useful actions, and neither of them is continuing. Trying
-        # again is the DOCUMENTED recovery (the installer takes no backups precisely because
-        # re-running has to work), and powering off is what gets the log onto the ESP, since
-        # save-log.sh runs when the unit stops.
-        # A VERIFIED install offers only Power off, so any press means that. An install the CHECK
-        # rejected offers the same two actions a failed one does -- it is the one rc==0 state where
-        # trying again is the right answer, so it must route like a failure rather than powering
-        # off on a press meant for "Try again".
+        # A failed install, or one the CHECK rejected, offers Try again and Restart: re-running is the
+        # documented recovery, the installer takes no backups precisely because it has to work. A
+        # verified install offers only Restart, so any press means that. Restart is the UI exiting:
+        # the unit saves the log and reboots.
         if self.rc == 0 and self.verify != "bad":
-            self.result = ("poweroff",)
+            self.result = ("quit",)
         else:
-            self.result = ("retry",) if token == "S" else ("poweroff",)
+            self.result = ("retry",) if token == "S" else ("quit",)
 
     def finish(self, rc):
         self.rc = rc
@@ -964,29 +642,29 @@ class ProgressScreen:
             # thing that reads back what was written, and its own header asks to be run "BEFORE the
             # card comes out, while there is still a shell that can fix things" -- so telling the
             # operator to remove it while the check is still running would waste the one window it
-            # has. Power off stays offered throughout: a check that hangs must never trap anyone.
-            buttons = [{"pos": "S", "label": "Power off"}]
+            # has. Restart stays offered throughout: a check that hangs must never trap anyone.
+            buttons = [{"pos": "S", "label": "Restart"}]
             if self.verify in (None, "running"):
                 note = "Checking the install -- leave the SD card in."
             elif self.verify == "ok":
-                note = "Remove the SD card, then power the device off."
+                note = "Restart to boot RetroForge from internal storage. The SD card can stay in."
                 blocks = blocks + [("Checked", "The eight partitions carry what the boot chain "
                                                "looks for. This does not prove the device boots -- "
                                                "that is the next thing to try.")]
             elif self.verify == "unrunnable":
                 # NOT a failed install, and it may not be reported as one. Say which question went
                 # unanswered instead of inventing an answer to it.
-                note = "Remove the SD card, then power the device off."
+                note = "Restart to boot RetroForge from internal storage. The SD card can stay in."
                 blocks = blocks + [("The check could not run",
                                     "The install finished, but the verifier did not run, so "
                                     "nothing has read back what was written.\n"
                                     + "\n".join(self.verify_tail[-4:]))]
             else:
                 title = "RetroForge is installed, but the check did not pass"
-                note = ("Do not remove the SD card. Re-running the installer is the recovery.")
+                note = "Do not remove the SD card. Re-running the installer is the recovery."
                 blocks = blocks + [("What did not check out", "\n".join(self.verify_bad))]
                 buttons = [{"pos": "S", "label": "Try again"},
-                           {"pos": "SELECT", "label": "Power off"}]
+                           {"pos": "SELECT", "label": "Restart"}]
         elif self.rc is not None:
             title = "The install did not finish"
             # THE ONE THING A FAILURE OWES THE USER: which of two states the device is in. "It
@@ -996,7 +674,7 @@ class ProgressScreen:
                     if self.reached_carve else
                     "Nothing was written. The device is exactly as it was.")
             buttons = [{"pos": "S", "label": "Try again"},
-                       {"pos": "SELECT", "label": "Power off"}]
+                       {"pos": "SELECT", "label": "Restart"}]
             blocks = blocks + [("What happened", "\n".join(self.run.tail[-6:]))]
         return {
             "screen": "progress",

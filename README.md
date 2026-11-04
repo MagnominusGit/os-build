@@ -132,7 +132,7 @@ device.
 | `rootfs/conf/` | The declarative inputs: `pacman.conf`, `os-release`, `trim.list`, `seal.list` |
 | `image/` | **Turning a root into partitions.** The A/B layout and its `sgdisk` emitter, the initramfs, the card assembler, and the verifier that reads the result back |
 | `ota/` | **Getting an image onto a device already in the field.** Signed RAUC bundles and the signing CA that mints their cert, the publishers, and the nginx/CI-user setup for the OTA host |
-| `installer/` | The standalone installer medium: the read-only board probe, the partition carve, and the on-device UI |
+| `installer/` | The internal installer, shipped in the root and started from Settings: the partition carve, the on-device UI, and the read-only board probe |
 | `packages/` | From-source overlay: PKGBUILDs + source pins for what we patch or version-bump, plus the builder that turns them into a local pacman repo |
 | `kernel/` | Unified kernel: config fragments, patches, all device trees, firmware embed list |
 | `firmware/` | Vendor firmware fetch/verify recipes + their pins |

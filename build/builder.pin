@@ -1,7 +1,7 @@
 # Pinned arm64 builder — the sha256 of the pinned snapshot's own system.rootfs.zst.
 #
 # The builder is the EXECUTION ENVIRONMENT every stage runs pacman/makepkg in under arm64 qemu
-# (rootfs/customize-base.sh, installer/mkroot.sh, packages/build-overlay.sh). It contributes no
+# (rootfs/customize-base.sh, packages/build-overlay.sh). It contributes no
 # files to any image.
 #
 # There is no URL here on purpose: it is always $(build/snapshot.pin)/system.rootfs.zst, so the

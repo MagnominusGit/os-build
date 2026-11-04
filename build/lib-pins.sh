@@ -4,8 +4,8 @@
 # SOURCED, never executed (hence mode 0644, like the other lib-*.sh). Callers set ROOT first.
 #
 # WHY THIS FILE EXISTS — the same two guards used to be copied into six scripts
-# (rootfs/customize-base.sh, installer/mkroot.sh, installer/genlock.sh, rootfs/genmanifest.sh,
-# packages/build-overlay.sh and the since-removed Steam seed fetcher), and a copy that falls behind
+# (rootfs/customize-base.sh, rootfs/genmanifest.sh, packages/build-overlay.sh and scripts since
+# removed), and a copy that falls behind
 # does not fail: it accepts a pin the others would refuse, or refuses one they accept, on whichever
 # stage happens to run it. One definition, sourced everywhere.
 #

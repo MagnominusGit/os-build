@@ -1,23 +1,16 @@
 #!/usr/bin/env bash
-# Offline check that the lock-row verifier still covers BOTH manifests.
+# Offline check that the lock-row verifier still covers the manifest.
 #
 #   tests/test-verify-lock.sh
 #
 # WHY THIS EXISTS. packages/verify-lock-rows.sh is the fast gate: it decides, from committed files
 # in about a second, whether a `retroforge` row names sources the tree can still produce. The slow
-# gates (rootfs/fetchlock.sh, installer/mkroot.sh's resolve) make the same call correctly but only
+# gate (rootfs/fetchlock.sh) makes the same call correctly but only
 # from inside a build, which is far too late to be useful — installer/v0.0.8 spent 56 minutes
 # building a kernel to reach a verdict available here immediately.
 #
-# There are TWO locks, because the installer medium carries gamescope as well (installer/ui is a
-# Wayland client and gamescope is its display server). The fast gate originally read only
-# rootfs/manifest.lock, so a packages/gamescope change that relocked one manifest and not the other
-# sailed past it — which is precisely how installer/v0.0.8 was cut against a tree that could not
-# build. Coverage of the second lock is the whole point, and it is the kind of thing that regresses
-# silently, since dropping it costs nothing until a release fails an hour in.
-#
 # The tests run the real script against a throwaway tree: packages/ symlinked per-package so the
-# input hashes are the true ones, with copies of both locks that each case is free to corrupt.
+# input hashes are the true ones, with a copy of the lock that each case is free to corrupt.
 # Host-only, no root, no network, no work/.
 set -uo pipefail
 
@@ -40,13 +33,12 @@ trap 'rm -rf "$TMP"' EXIT
 mk_tree() {
   local t="$TMP/$1" d
   rm -rf "$t"
-  mkdir -p "$t/packages" "$t/rootfs" "$t/installer" "$t/build"
+  mkdir -p "$t/packages" "$t/rootfs" "$t/build"
   for d in "$ROOT"/packages/*/; do ln -s "${d%/}" "$t/packages/$(basename "${d%/}")"; done
   cp "$ROOT/packages/inputhash.sh" "$ROOT/packages/verify-lock-rows.sh" "$t/packages/"
   # The builder pin is an input to every retroforge row's hash (inputhash.sh reads it via lib-pins.sh).
   cp "$ROOT/build/lib-pins.sh" "$ROOT/build/lib-container.sh" "$ROOT/build/snapshot.pin" "$ROOT/build/builder.pin" "$t/build/"
   cp "$ROOT/rootfs/manifest.lock" "$t/rootfs/manifest.lock"
-  cp "$ROOT/installer/manifest.lock" "$t/installer/manifest.lock"
   printf '%s\n' "$t"
 }
 
@@ -61,16 +53,13 @@ stale_first_row() {
 run() { bash "$1/packages/verify-lock-rows.sh" 2>&1; }
 
 # --- 1. the tree as committed passes ----------------------------------------------------------
-# Also the assertion that both locks are currently correct, which is worth having on every push.
+# Also the assertion that the lock is currently correct, which is worth having on every push.
 out="$(bash "$VERIFIER" 2>&1)"; rc=$?
 if [ "$rc" -eq 0 ]; then ok "the committed tree passes"
 else bad "the committed tree fails the verifier:"; printf '%s\n' "$out" | sed 's/^/       /'; fi
 
-for lock in rootfs installer; do
-  case "$lock" in
-    rootfs)    relock="make relock" ;;
-    installer) relock="make relock-installer" ;;
-  esac
+for lock in rootfs; do
+  relock="make relock"
 
   # --- 2. a stale row in this lock is caught, and names ITS OWN relock target ------------------
   t="$(mk_tree "stale-$lock")"

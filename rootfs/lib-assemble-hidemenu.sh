@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # retroforge read-only root assembler — stages `hidemenu-shim`.
 #
-# SOURCED by rootfs/assemble-rootfs.sh, never executed (tests/test-mkroot.sh reads the
-# `# STAGE <name>` banners out of this file set, and asserts the roster it was audited against).
+# SOURCED by rootfs/assemble-rootfs.sh, never executed.
 #
 # Runs on EVERY build, release included.
 #

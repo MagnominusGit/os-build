@@ -2,8 +2,7 @@
 # retroforge read-only root assembler — stage `offload-mounts`.
 #
 # SOURCED by rootfs/assemble-rootfs.sh, never executed. Split out of it for issue #43; the code
-# and its rationale are unchanged (tests/test-mkroot.sh reads the `# STAGE <name>` banners out of
-# this file set, and asserts the roster it was audited against).
+# and its rationale are unchanged.
 #
 # Carries the offload heredoc verbatim -- do not re-indent it.
 #

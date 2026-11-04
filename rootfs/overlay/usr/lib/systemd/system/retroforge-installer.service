@@ -1,0 +1,52 @@
+[Unit]
+Description=RetroForge installer session (gamescope + the installer UI)
+# Started by Settings > General > Install to internal storage (the RetroForge plugin), through
+# 50-retroforge-installer.rules, and by nothing else: there is no [Install], and an internal install
+# never shows the row. It takes over from the shell, runs as root, and reboots when it stops.
+#
+# ONE UNIT, NOT TWO. installer/installer-session runs `gamescope ... -- ui`, so the UI is gamescope's
+# own child and either half dying is one failure of this unit.
+#
+# ENDING `player` IS PART OF THE CONSENT GATE, not tidiness. It lingers, so its manager outlives the
+# session; it is in `input`, so it can open /dev/uinput; InputPlumber's bus is open to everyone; and
+# the sequence is on confirm-ui's command line. A process left over could read the sequence and press
+# it. So: the session, the user's manager, then (below) every session and any way back in. The spine
+# checks the result before it asks, and refuses (assert_no_session_user).
+#
+# retroforge-powerbuttond is here because it is the one thing outside the session that suspends the
+# device: logind ignores the keys (10-retroforge-powerkey.conf). A suspend during the carve is the
+# failure. NetworkManager and everything Wi-Fi needs keep running, because the OS is streamed.
+#
+# After= as well as Conflicts=: ordering is what makes the stops finish before this starts.
+#
+# systemd-user-sessions removes /run/nologin when it starts and writes it when it stops, so it must
+# not be able to run after the ExecStartPre below: conflicting keeps logins closed either way.
+Conflicts=retroforge-session.service user@1000.service retroforge-powerbuttond.service getty@tty1.service
+Conflicts=systemd-user-sessions.service
+After=retroforge-session.service user@1000.service retroforge-powerbuttond.service getty@tty1.service
+After=systemd-user-sessions.service retroforge-allow-login.service
+After=systemd-udevd.service dbus.service inputplumber.service NetworkManager.service
+Wants=dbus.service inputplumber.service
+
+[Service]
+Type=simple
+# pam_nologin refuses every login but root's while this exists, so a paired `player` SSH cannot come
+# back. It is on /run, so the reboot clears it. Dev cards keep root SSH.
+ExecStartPre=/usr/bin/touch /run/nologin
+ExecStartPre=-/usr/bin/loginctl terminate-user 1000
+# OGUI sets InputPlumber's profile and intercept mode, and nothing puts them back when it dies. The
+# consent screen needs the pad, so start from a fresh daemon, which is what a boot gives.
+ExecStartPre=-/usr/bin/systemctl restart inputplumber.service
+ExecStartPre=/usr/bin/mkdir -p /run/retroforge
+ExecStart=/usr/lib/retroforge/install/installer-session
+# Every stop ends in a reboot, success, Cancel, or crash: there is no session to go back to, so a
+# panel left black is the alternative. `-` so a failed save cannot stop the reboot.
+ExecStopPost=-/usr/lib/retroforge/install/save-log.sh
+ExecStopPost=-/usr/bin/systemctl --no-block reboot
+# NO TTYPath= AND NO StandardInput=tty. Binding the unit to /dev/tty1 made gamescope exit 0 at boot
+# on the main image: seatd's VT-bound seat activates a VT itself and the two clash
+# (docs/bringup-phase2.md, "a system service is NOT an interactive SSH run").
+StandardInput=null
+# Restart=no: an installer that silently restarts hides a failure from the person holding the device.
+Restart=no
+TimeoutStopSec=30

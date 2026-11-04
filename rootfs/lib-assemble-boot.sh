@@ -2,8 +2,7 @@
 # retroforge read-only root assembler — stage `rauc-boot-mirror`: RAUC keyring, boot mirror, installer GPT.
 #
 # SOURCED by rootfs/assemble-rootfs.sh, never executed. Split out of it for issue #43; the code
-# and its rationale are unchanged (tests/test-mkroot.sh reads the `# STAGE <name>` banners out of
-# this file set, and asserts the roster it was audited against).
+# and its rationale are unchanged.
 #
 # Runs at top level, in place: sourcing it IS the stage.
 #
@@ -78,5 +77,21 @@ install -D -m0444 "$ROOT/image/partition-table.txt" "$stage/usr/lib/retroforge/i
 # lib-gpt.sh is sourced by the script genpart.sh emits, so it ships beside it or the append mode
 # refuses. 0444: sourced, never executed, like lib-slotwrite.sh.
 install -D -m0444 "$ROOT/image/lib-gpt.sh"          "$stage/usr/lib/retroforge/install/lib-gpt.sh"
+# The /home layout, shared with make-sdcard.sh, and the rest of the internal installer. Settings on a
+# card starts it (retroforge-installer.service); on an internal install select-target.sh refuses the
+# disk it runs from, so there it is inert. installer/shipped-files is the list; guard-rootfs.sh reads
+# the same one back. *.py are imported, everything else is executed.
+install -D -m0444 "$ROOT/image/lib-homestage.sh"    "$stage/usr/lib/retroforge/install/lib-homestage.sh"
+while read -r f; do
+  case "$f" in
+    ''|'#'*) continue ;;
+    *.py)    mode=0444 ;;
+    *)       mode=0555 ;;
+  esac
+  install -D -m"$mode" "$ROOT/installer/$f" "$stage/usr/lib/retroforge/install/$f"
+done <"$ROOT/installer/shipped-files"
+# $CONFIRM is a fixed path the spine reads. The UI already owns the panel and the pad when the spine
+# asks, so it is the shim that hands the request to the UI, never a second SDL client.
+ln -sf confirm-ui "$stage/usr/lib/retroforge/install/confirm"
 echo "  RAUC: keyring.pem + ESP GRUB + stage-2 configs + /usr/bin/grub-editenv installed"
 
