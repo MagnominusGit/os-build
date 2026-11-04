@@ -19,8 +19,14 @@ extends OSPlatform
 ## boot (the unit has no [Install], D5); polkit 50-retroforge-pairing.rules lets the session start
 ## and stop that one unit. The switch shows the daemon's real state, read again whenever Settings >
 ## General opens, so it never claims "on" after a crash or "off" while it still listens.
+##
+## Between them, on a card only, Internal storage: one button that asks release-info what would be
+## installed, confirms in OGUI's dialog, and starts retroforge-installer.service, which ends this
+## session and takes the panel (polkit 50-retroforge-installer.rules). --no-block because the session
+## asking is the one being stopped.
 
 const UpdateStates := preload("update_states.gd")
+const InternalInstall := preload("internal_install.gd")
 const ScrapeRunner := preload("scrape_runner.gd")
 const TOOL := "/usr/bin/retroforge-update"
 const CHECK_TIMEOUT := 60.0  # s: the manifest fetch retries for at most ~30 s
@@ -29,6 +35,10 @@ const CHECK_INTERVAL := 6 * 3600.0
 const IN_GAME_RETRY := 600.0  # s: a check skipped for a running game is tried again this soon
 const PAIRING_UNIT := "retroforge-pairingd.service"
 const PAIRING_PORT := 32000  # retroforge-pairingd's SERVICE_PORT
+const INSTALLER_UNIT := "retroforge-installer.service"
+const BOOT_MEDIUM := "/usr/lib/retroforge/install/boot-medium"
+const RELEASE_INFO := "/usr/lib/retroforge/install/release-info"
+const INSTALL_TEXT := "Install RetroForge beside Android, so the device runs without this card."
 
 var notification_manager := load("res://core/global/notification_manager.tres") as NotificationManager
 var button_scene := load("res://core/ui/components/card_button_setting.tscn") as PackedScene
@@ -41,6 +51,8 @@ var general_settings_state := load("res://assets/state/states/settings_general.t
 var tool := TOOL
 var reboot_command: Array[String] = ["systemctl", "reboot"]
 var systemctl := "systemctl"
+var boot_medium := BOOT_MEDIUM
+var release_info := RELEASE_INFO
 var first_check_delay := FIRST_CHECK_DELAY
 var in_game := _game_running
 
@@ -53,6 +65,7 @@ var _channels: Array[String] = []
 var _button: Control  # card_button_setting
 var _channel: Control  # dropdown
 var _pairing: Control  # toggle
+var _install_row: Control  # card_button_setting, only on a card
 var _timer: Timer  # background checks
 var _notified := ""  # the last version a background check announced
 var _nodes: Array[Node] = []
@@ -78,6 +91,7 @@ func ready(root: Window) -> void:
 		_start_background_checks(menu)
 	_add_remote_access(box)
 	_add_separator_under(box, "Appearance")
+	_add_internal_install(box)
 
 
 func detach() -> void:
@@ -218,6 +232,62 @@ func _add_remote_access(box: Node) -> void:
 	_pairing.toggled.connect(_on_pairing_toggled)
 	general_settings_state.state_entered.connect(_on_general_entered)
 	_sync_pairing()
+
+
+## Internal storage, between Updates and Remote access, when this system runs from a card. Added once
+## boot-medium has answered, not awaited by ready(), like _load_state.
+func _add_internal_install(box: Node) -> void:
+	var medium := Command.create(boot_medium, [])
+	if medium.execute() != OK or (await medium.finished) != 0 or medium.stdout.strip_edges() != "card":
+		return
+	if not is_instance_valid(box):  # detached while it ran
+		return
+	var label = section_scene.instantiate()
+	label.text = "Internal storage"
+	_install_row = button_scene.instantiate()
+	_install_row.name = "RetroForgeInternalInstall"
+	_install_row.text = "Install to internal storage"
+	var at: int = _channel.get_index() + 1 if is_instance_valid(_channel) else 0
+	# In the tree first, for the reason _add_updater gives.
+	for node in [label, HSeparator.new(), _install_row]:
+		box.add_child(node)
+		box.move_child(node, at)
+		at += 1
+		_nodes.append(node)
+	_install_row.button_text = "Install"
+	_install_row.description = INSTALL_TEXT
+	_install_row.button_up.connect(_on_install_pressed)
+
+
+func _on_install_pressed() -> void:
+	_install_row.disabled = true
+	_install_row.description = "Looking for the latest RetroForge..."
+	var cmd := Command.create(release_info, [])
+	var out := ""
+	if cmd.execute() == OK and (await cmd.finished) == 0:
+		out = cmd.stdout
+	if not is_instance_valid(_install_row):  # detached while it ran
+		return
+	_install_row.disabled = false
+	var release := InternalInstall.parse_release(out)
+	if not InternalInstall.can_install(release):
+		_install_row.description = InternalInstall.refusal(release)
+		return
+	_install_row.description = INSTALL_TEXT
+	var dialog = (Engine.get_main_loop() as SceneTree).get_first_node_in_group("dialog")
+	if not dialog:  # never start it unconfirmed
+		logger.warn("no OGUI dialog to confirm the installer with")
+		return
+	dialog.open(_install_row, InternalInstall.confirmation(release), "Install", "Cancel")
+	if not await dialog.choice_selected:
+		return
+	var start := Command.create(systemctl, ["--no-block", "start", INSTALLER_UNIT])
+	var code := -1
+	if start.execute() == OK:
+		code = await start.finished as int
+	if code != 0:
+		logger.warn("systemctl start %s exited %d: %s" % [INSTALLER_UNIT, code, start.stderr])
+		_notify("Could not start the installer")
 
 
 func _on_general_entered(_from: State) -> void:

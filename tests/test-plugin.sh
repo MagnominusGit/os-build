@@ -279,6 +279,7 @@ const EmuOptions := preload("$SRC/emu_options.gd")
 const EmuState := preload("$SRC/emu_state.gd")
 const ArtPaths := preload("$SRC/art_paths.gd")
 const UpdateStates := preload("$SRC/update_states.gd")
+const InternalInstall := preload("$SRC/internal_install.gd")
 const SteamApps := preload("$SRC/steam_apps.gd")
 const SteamWatch := preload("$SRC/steam_watch.gd")
 const SYSTEMS := {"psx": "PlayStation", "ps2": "PlayStation 2"}
@@ -375,8 +376,24 @@ func _init() -> void:
 	test_emu_state()
 	test_art_paths()
 	test_update_states()
+	test_internal_install()
 	test_steam_apps()
 	quit(1 if failed else 0)
+
+# Settings > General > Internal storage (retroforge_os.gd): release-info's answer -> what is shown.
+func test_internal_install() -> void:
+	var ok := InternalInstall.parse_release("URL=https://x/stable/latest.json\nCHANNEL=stable\nSTATE=ok\nVERSION=0.0.6\nDETAIL=a=b\n")
+	check("release: key=value lines", [ok["STATE"], ok["VERSION"], ok["DETAIL"]], ["ok", "0.0.6", "a=b"])
+	check("release: a published version can be installed", InternalInstall.can_install(ok), true)
+	check("release: no output cannot", InternalInstall.can_install(InternalInstall.parse_release("")), false)
+	check("release: a failed resolve cannot", InternalInstall.can_install({"STATE": "unreachable"}), false)
+	check("confirmation: names the version", InternalInstall.confirmation(ok).contains("0.0.6"), true)
+	check("confirmation: says it closes the session and erases nothing yet",
+		[InternalInstall.confirmation(ok).contains("closes RetroForge"), InternalInstall.confirmation(ok).contains("Nothing is erased")], [true, true])
+	check("refusal: the channel with nothing in it is named", InternalInstall.refusal({"STATE": "no-release", "CHANNEL": "beta"}).contains("beta"), true)
+	check("refusal: unreachable points at the network", InternalInstall.refusal({"STATE": "unreachable"}).contains("Wi-Fi"), true)
+	check("refusal: nothing from the tool still says something", InternalInstall.refusal({}) != "", true)
+
 
 # Settings > General > Updates (retroforge_os.gd): retroforge-update's answers -> what is shown.
 func test_update_states() -> void:
@@ -1348,12 +1365,19 @@ SH
 echo "$*" >> "$FAKE_DIR/systemctl-calls"
 case "$1" in
   is-active) [ -e "$FAKE_DIR/pairing" ] ;;
+  --no-block) ;;
   start) touch "$FAKE_DIR/pairing" ;;
   stop) rm -f "$FAKE_DIR/pairing" ;;
   *) exit 1 ;;
 esac
 SH
-    chmod +x "$T/updates/fake-update" "$T/updates/fake-reboot" "$T/updates/fake-systemctl"
+    printf '#!/bin/sh\ncat "$FAKE_DIR/medium"\n' >"$T/updates/fake-boot-medium"
+    cat >"$T/updates/fake-release-info" <<'SH'
+#!/bin/bash
+if [ -e "$FAKE_DIR/no-release" ]; then printf 'CHANNEL=stable\nSTATE=no-release\n'; else printf 'CHANNEL=stable\nSTATE=ok\nVERSION=0.0.6\n'; fi
+SH
+    chmod +x "$T/updates/fake-update" "$T/updates/fake-reboot" "$T/updates/fake-systemctl" \
+      "$T/updates/fake-boot-medium" "$T/updates/fake-release-info"
     cat >"$OGUI_PROJECT/retroforge_updates_test.gd" <<'GD'
 extends SceneTree
 
@@ -1378,6 +1402,49 @@ func put(name: String, text: String) -> void:
 	f.store_string(text)
 	f.close()
 
+# OGUI's shared dialog, reduced to what the row uses; `answer` is the press.
+class FakeDialog extends Node:
+	signal choice_selected(accepted: bool)
+	var message := ""
+	var answer := false
+	func open(_return_node, text := "", _confirm := "", _cancel := "") -> void:
+		message = text
+		(func(): choice_selected.emit(answer)).call_deferred()
+
+func test_internal_install(os, box: Node, channel: Node) -> void:
+	var row: Node = box.get_node_or_null("RetroForgeInternalInstall")
+	check("booted from a card, the row sits under the Updates rows", row != null and row.get_index() > channel.get_index(), true)
+	var pairing_at: int = box.get_node("RetroForgePairing").get_index()
+	check("and above Remote access", row.get_index() < pairing_at, true)
+	var calls := D.path_join("systemctl-calls")
+	var dialog := FakeDialog.new()
+	dialog.add_to_group("dialog")
+	root.add_child(dialog)
+	put("no-release", "")
+	row.button_up.emit()
+	await wait(0.4)
+	check("nothing published: no dialog, and the row says why", [dialog.message, row.description.contains("nothing")], ["", true])
+	DirAccess.remove_absolute(D.path_join("no-release"))
+	row.button_up.emit()
+	await wait(0.4)
+	check("the dialog names the version", dialog.message.contains("0.0.6"), true)
+	check("Cancel starts nothing", FileAccess.get_file_as_string(calls).contains("retroforge-installer"), false)
+	dialog.answer = true
+	row.button_up.emit()
+	await wait(0.4)
+	check("Install starts the unit without blocking on it",
+		FileAccess.get_file_as_string(calls).contains("--no-block start retroforge-installer.service"), true)
+	dialog.queue_free()
+	var other = load("res://plugins/retroforge/retroforge_os.gd").new()
+	other.boot_medium = D.path_join("../fake-boot-medium")
+	var bare := VBoxContainer.new()
+	root.add_child(bare)
+	put("medium", "internal")
+	other._add_internal_install(bare)
+	await wait(0.3)
+	check("booted from internal storage, there is no row", bare.get_child_count(), 0)
+	bare.queue_free()
+
 func run() -> void:
 	var processor := ResourceProcessor.new()  # card_ui.tscn has one: it drives every Command
 	processor.registry = load("res://core/systems/resource/resource_registry.tres") as ResourceRegistry
@@ -1389,6 +1456,9 @@ func run() -> void:
 	os.tool = D.path_join("../fake-update")
 	os.reboot_command.assign([D.path_join("../fake-reboot")])
 	os.systemctl = D.path_join("../fake-systemctl")
+	os.boot_medium = D.path_join("../fake-boot-medium")
+	os.release_info = D.path_join("../fake-release-info")
+	put("medium", "card")
 	put("latest.stable", "0.0.3")
 	put("latest.beta", "0.0.4-beta.1")
 	os.ready(root)
@@ -1398,11 +1468,12 @@ func run() -> void:
 	var button: Node = box.get_node_or_null("RetroForgeUpdateButton")
 	var channel: Node = box.get_node_or_null("RetroForgeUpdateChannel")
 	check("the button and dropdown sit right under the Updates label",
-		[box.get_node("UpdatesLabel").get_index() + 1, box.get_node("UpdatesLabel").get_index() + 2], [button.get_index(), channel.get_index()])
+		[box.get_node("UpdatesLabel").get_index() + 2, box.get_node("UpdatesLabel").get_index() + 3], [button.get_index(), channel.get_index()])
 	check("focus starts on the button", box.get_node("FocusGroup").current_focus, button)
 	check("idle: Check for updates, version shown", [button.button_text, button.description], ["Check for updates", "RetroForge 0.0.3."])
 	check("dropdown: Stable, Beta; Stable selected", [channel.option_button.item_count, channel.option_button.get_item_text(0), channel.option_button.get_item_text(1), channel.selected], [2, "Stable", "Beta", 0])
 	await test_pairing(box, channel)
+	await test_internal_install(os, box, channel)
 	button.button_up.emit()
 	await wait(0.5)
 	check("stable is up to date: still Check, says so", [button.button_text, button.description], ["Check for updates", "No update found on the Stable channel."])
@@ -1519,7 +1590,7 @@ func press(toggle: Node) -> void:
 # Remote access: the switch starts and stops retroforge-pairingd and shows its real state.
 func test_pairing(box: Node, channel: Node) -> void:
 	var pairing: Node = box.get_node_or_null("RetroForgePairing")
-	check("pairing: a Remote access switch right under the update channel", pairing.get_index(), channel.get_index() + 2)
+	check("pairing: a Remote access switch under the update channel and, on a card, Internal storage", pairing.get_index(), channel.get_index() + 6)
 	check("pairing: off at start, says how to turn it on", [pairing.button_pressed, "Turn on" in pairing.description], [false, true])
 	press(pairing)
 	await wait(0.5)
