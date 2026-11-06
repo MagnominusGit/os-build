@@ -48,6 +48,8 @@ from uiflow import (                                                           #
     PreflightScreen, ProgressScreen, SpineRun, VerifyRun, gather_preflight, release_facts)
 
 SOCK_PATH = os.environ.get("RETROFORGE_UI_SOCK", "/run/retroforge/installer-ui.sock")
+# Read by `leave`, which the unit runs on stop.
+POWEROFF_MARK = os.environ.get("RETROFORGE_INSTALL_POWEROFF", "/run/retroforge/install-poweroff")
 # A file of one token per line drives the UI instead of a pad, and selects the null view. This is
 # the headless seam the plan's Tests section asks for ("no SDL window; the model is separable from
 # the view"), and it is why nothing in this file imports pygame at module scope.
@@ -432,6 +434,15 @@ def build_io():
     return view, PadInput(view.pygame)
 
 
+def ask_for_poweroff():
+    """Leave the mark `leave` reads. Without it the device reboots, into internal storage."""
+    try:
+        with open(POWEROFF_MARK, "w"):
+            pass
+    except OSError as exc:
+        log("could not leave the power-off mark: %s" % exc)
+
+
 def run(server, view, source, base, deadline=0):
     """
     Returns when the scripted source runs out (tests) or the window goes away.
@@ -576,9 +587,12 @@ def run(server, view, source, base, deadline=0):
                 stack.pop()
                 facts, why = gather_preflight()
                 stack[-1] = PreflightScreen(facts) if facts else IdleScreen(why)
+            elif result[0] == "poweroff":
+                ask_for_poweroff()
+                return 0
             elif result[0] == "quit":
-                # Done, Cancel and Restart are all this: retroforge-installer.service reboots on
-                # every stop, so leaving is what brings the device back.
+                # Cancel and Restart are this: retroforge-installer.service reboots on a stop with
+                # no mark, so leaving is what brings the device back.
                 return 0
             break
 

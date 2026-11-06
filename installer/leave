@@ -1,0 +1,20 @@
+#!/bin/sh
+# How the device goes down when retroforge-installer.service stops, after the log is saved.
+#
+#   /usr/lib/retroforge/install/leave
+#
+# Powers off when the UI left the mark, which it does for a finished install: the device is then off
+# while the card comes out. Everything else reboots, back into the card: Cancel, a failed install, a
+# crash, the power key. A mark that was never written costs a reboot into internal storage.
+#
+# THE UNIT DECIDES, NOT THE UI. A `systemctl poweroff` from the UI stops this unit, and the reboot here
+# would then land on the shutdown already running.
+set -u
+
+MARK=${RETROFORGE_INSTALL_POWEROFF:-/run/retroforge/install-poweroff}
+SYSTEMCTL=${RETROFORGE_SYSTEMCTL:-/usr/bin/systemctl}
+
+if [ -e "$MARK" ]; then
+    exec "$SYSTEMCTL" --no-block poweroff
+fi
+exec "$SYSTEMCTL" --no-block reboot

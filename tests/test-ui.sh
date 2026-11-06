@@ -283,8 +283,9 @@ rel_default="$(sed -n 's/^DEFAULT_URL = "\(.*\)"$/\1/p' "$ROOT/installer/release
   && ok "both default to $ota_default" \
   || bad "release-info says '$rel_default', retroforge-update says '$ota_default'"
 
-CASE="§5: Restart leaves the UI, and the unit does the rest"
-# retroforge-installer.service reboots on every stop, so leaving is what the button means.
+CASE="§5: a finished install powers off, anything else leaves and the unit reboots"
+# Power off is what makes the card safe to pull: booted beside a card, the card gets touched, and
+# pulled while the system runs it goes out dirty (Pocket ACE, 2026-11-06). The other exits reboot.
 restartcheck() {  # <rc> <token> -- prints the result tuple the end screen produces
   RC="$1" TOKEN="$2" python3 -c '
 import json, os, sys
@@ -295,9 +296,9 @@ s = uiflow.ProgressScreen(R()); s.finish(int(os.environ["RC"]))
 s.handle(uiflow.TOKEN_BACK if os.environ["TOKEN"] == "BACK" else os.environ["TOKEN"])
 print(json.dumps(s.result))'
 }
-[ "$(restartcheck 0 S)" = '["quit"]' ] \
-  && ok "a finished install leaves on its one button" \
-  || bad "the success screen does not leave: $(restartcheck 0 S)"
+[ "$(restartcheck 0 S)" = '["poweroff"]' ] \
+  && ok "a finished install powers off on its one button" \
+  || bad "the success screen does not power off: $(restartcheck 0 S)"
 [ "$(restartcheck 1 S)" = '["retry"]' ] \
   && ok "a FAILED one retries on the bottom button -- the documented recovery" \
   || bad "the failure screen's bottom button does not retry: $(restartcheck 1 S)"
@@ -316,9 +317,39 @@ PY2
 [ "$labels" = '["Try again", "Restart"]' ] \
   && ok "the failure screen offers Try again and Restart" \
   || bad "the failure screen offers: $labels"
-grep -q 'Power off\|power_off\|poweroff' "$ROOT/installer/ui" "$ROOT/installer/uiflow.py" \
-  && bad "the UI still has a power-off path, and nothing on the card behind it" \
-  || ok "no power-off path is left in the UI"
+# The UI only asks. It must not run `systemctl poweroff` itself: the unit's stop would then reboot
+# into the shutdown that is already running.
+grep -q 'systemctl' "$ROOT/installer/ui" \
+  && bad "the UI runs systemctl itself; the unit owns how the device goes down" \
+  || ok "the UI leaves the shutdown to the unit"
+mark="$(mktemp -u)"
+RETROFORGE_INSTALL_POWEROFF="$mark" python3 - <<'PY2' 2>/dev/null
+import importlib.machinery, importlib.util, os, sys
+path = os.path.join(os.environ["ROOT"], "installer", "ui")
+sys.path.insert(0, os.path.dirname(path))
+loader = importlib.machinery.SourceFileLoader("installer_ui", path)
+spec = importlib.util.spec_from_loader("installer_ui", loader)
+ui = importlib.util.module_from_spec(spec)
+loader.exec_module(ui)
+ui.ask_for_poweroff()
+PY2
+[ -e "$mark" ] && ok "asking leaves the mark the unit reads" || bad "ask_for_poweroff left no mark at $mark"
+rm -f "$mark"
+out="$(RETROFORGE_INSTALL_POWEROFF=/nonexistent/dir/mark python3 - <<'PY2' 2>&1
+import importlib.machinery, importlib.util, os, sys
+path = os.path.join(os.environ["ROOT"], "installer", "ui")
+sys.path.insert(0, os.path.dirname(path))
+loader = importlib.machinery.SourceFileLoader("installer_ui", path)
+spec = importlib.util.spec_from_loader("installer_ui", loader)
+ui = importlib.util.module_from_spec(spec)
+loader.exec_module(ui)
+ui.ask_for_poweroff()
+print("survived")
+PY2
+)"
+printf '%s' "$out" | grep -q survived \
+  && ok "a mark it cannot write costs a reboot, not a crash" \
+  || bad "an unwritable mark kills the UI: $out"
 
 # =================================================================================================
 # §4d: no controller and no keyboard -> stop
@@ -1137,8 +1168,8 @@ printf '%s' "$out" | grep -qi 'Remove the SD card' \
 printf '%s' "$out" | grep -qi 'leave the SD card in' \
   && ok "and says to leave it in, which is what the check needs" \
   || bad "it does not say to leave the card in: $out"
-printf '%s' "$out" | grep -q 'Restart' \
-  && ok "Restart stays offered throughout -- a check that hangs must not trap anyone" \
+printf '%s' "$out" | grep -q 'Power off' \
+  && ok "Power off stays offered throughout -- a check that hangs must not trap anyone" \
   || bad "a running check leaves the operator with no button at all: $out"
 
 out="$(progress '
@@ -1179,9 +1210,12 @@ printf '%s' "$out" | grep -qi 'did not pass' \
   || ok "and it does not claim the install was rejected"
 
 out="$(progress 'p.finish(0); p.begin_verify(); p.finish_verify(0); print(json.dumps(p.describe()))')"
-printf '%s' "$out" | grep -qi 'Restart to boot RetroForge from internal storage' \
-  && ok "success tells the user the one thing they must do next" \
-  || bad "the success screen does not say to restart"
+printf '%s' "$out" | grep -qi 'Power off, remove the SD card' \
+  && ok "success tells the user to power off and take the card out" \
+  || bad "the success screen does not say to remove the card: $out"
+printf '%s' "$out" | grep -qi 'can stay in' \
+  && bad "it still says the card can stay in: $out" \
+  || ok "and no longer says the card can stay in"
 printf '%s' "$out" | grep -qi 'does not prove the device boots' \
   && ok "and the check does not overclaim -- it never says the device will boot" \
   || bad "the verified screen overstates what was checked: $out"

@@ -121,11 +121,23 @@ grep -qE '^(TTYPath|StandardInput=tty)' "$UNIT" \
   && bad "the unit binds a TTY -- that made gamescope exit 0 at boot on the main image" \
   || ok "it binds no TTY, which is what bring-up paid to learn"
 grep -q '^ExecStopPost=-/usr/lib/retroforge/install/save-log.sh' "$UNIT" && ok "every stop saves the log" || bad "the log is not saved on stop"
-grep -q '^ExecStopPost=-/usr/bin/systemctl --no-block reboot' "$UNIT" && ok "and reboots" || bad "a stop leaves a black panel"
-[ "$(grep -n 'save-log' "$UNIT" | grep ExecStopPost | cut -d: -f1)" -lt "$(grep -n 'reboot' "$UNIT" | grep ExecStopPost | cut -d: -f1)" ] \
-  && ok "in that order" || bad "the reboot runs before the log is saved"
+grep -q '^ExecStopPost=-/usr/lib/retroforge/install/leave' "$UNIT" && ok "and takes the device down" || bad "a stop leaves a black panel"
+[ "$(grep -n 'save-log' "$UNIT" | grep ExecStopPost | cut -d: -f1)" -lt "$(grep -n 'install/leave' "$UNIT" | grep ExecStopPost | cut -d: -f1)" ] \
+  && ok "in that order" || bad "the device goes down before the log is saved"
 grep -q '^Conflicts=.*NetworkManager\|^Conflicts=.*rmtfs' "$UNIT" && bad "it stops the network the OS streams over" \
   || ok "it leaves the network alone"
+
+echo "--- leave powers off only when the UI asked, and reboots otherwise ---"
+LV="$INST/leave"
+W="$(mktemp -d)"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*"\n' >"$W/systemctl"; chmod +x "$W/systemctl"
+leave() { RETROFORGE_INSTALL_POWEROFF="$W/mark" RETROFORGE_SYSTEMCTL="$W/systemctl" sh "$LV"; }
+[ "$(leave)" = "--no-block reboot" ] && ok "no mark reboots: a crash, Cancel or a failed install is back on the card" \
+  || bad "with no mark it ran: $(leave)"
+: >"$W/mark"
+[ "$(leave)" = "--no-block poweroff" ] && ok "the mark powers off" || bad "with the mark it ran: $(leave)"
+rm -rf "$W"
+shipped | grep -qx leave && ok "and it ships" || bad "leave is not in installer/shipped-files"
 
 echo "--- boot-medium tells a card from internal storage, and defaults to internal ---"
 BM="$INST/boot-medium"

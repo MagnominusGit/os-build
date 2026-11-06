@@ -540,6 +540,10 @@ class SpineRun(ChildLines):
         self._init_lines()
 
 
+# Off first, because a card pulled from a running system goes out dirty.
+DONE_NOTE = "Power off, remove the SD card, then power on to start RetroForge from internal storage."
+
+
 class ProgressScreen:
     """A bar per phase, and the one honest sentence a failure owes the user."""
 
@@ -600,10 +604,10 @@ class ProgressScreen:
             return
         # A failed install, or one the CHECK rejected, offers Try again and Restart: re-running is the
         # documented recovery, the installer takes no backups precisely because it has to work. A
-        # verified install offers only Restart, so any press means that. Restart is the UI exiting:
-        # the unit saves the log and reboots.
+        # verified install offers only Power off, so any press means that, and it is what makes the
+        # card safe to pull. Restart is the UI exiting: the unit saves the log and reboots.
         if self.rc == 0 and self.verify != "bad":
-            self.result = ("quit",)
+            self.result = ("poweroff",)
         else:
             self.result = ("retry",) if token == "S" else ("quit",)
 
@@ -642,19 +646,19 @@ class ProgressScreen:
             # thing that reads back what was written, and its own header asks to be run "BEFORE the
             # card comes out, while there is still a shell that can fix things" -- so telling the
             # operator to remove it while the check is still running would waste the one window it
-            # has. Restart stays offered throughout: a check that hangs must never trap anyone.
-            buttons = [{"pos": "S", "label": "Restart"}]
+            # has. Power off stays offered throughout: a check that hangs must never trap anyone.
+            buttons = [{"pos": "S", "label": "Power off"}]
             if self.verify in (None, "running"):
                 note = "Checking the install -- leave the SD card in."
             elif self.verify == "ok":
-                note = "Restart to boot RetroForge from internal storage. The SD card can stay in."
+                note = DONE_NOTE
                 blocks = blocks + [("Checked", "The eight partitions carry what the boot chain "
                                                "looks for. This does not prove the device boots -- "
                                                "that is the next thing to try.")]
             elif self.verify == "unrunnable":
                 # NOT a failed install, and it may not be reported as one. Say which question went
                 # unanswered instead of inventing an answer to it.
-                note = "Restart to boot RetroForge from internal storage. The SD card can stay in."
+                note = DONE_NOTE
                 blocks = blocks + [("The check could not run",
                                     "The install finished, but the verifier did not run, so "
                                     "nothing has read back what was written.\n"

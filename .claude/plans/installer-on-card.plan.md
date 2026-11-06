@@ -11,7 +11,7 @@ AGREED 2026-11-04, branch feat/installer-on-card.
 - Launched from OGUI only, so Wi-Fi is already set up: no netcfg, no wifi.conf, no network screens.
 - Flow: row -> release-info check -> confirmation dialog -> `systemctl --no-block start
   retroforge-installer.service`; Conflicts= stops the session; preflight, consent, progress, done;
-  Cancel and Done reboot. The dialog only agrees to leave the session; the four-button sequence
+  Cancel reboots, Done powers off so the card can come out. The dialog only agrees to leave the session; the four-button sequence
   stays the real consent.
 
 ## Privilege model

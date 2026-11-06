@@ -60,7 +60,8 @@ your Wi-Fi once more after the first internal boot.
    Pocket ACE than on a Pocket S2. A wrong press re-randomises rather than locking you out. **SELECT
    aborts**, and it is never part of a sequence.
 5. **Progress.** The spine's own steps, with the download percentage read off its output.
-6. **Done.** Restart. It boots from internal storage from then on, with or without the card.
+6. **Done.** Power off, remove the card, power on. It boots from internal storage from then on, with
+   or without the card.
 
 Nothing is written to the disk until after step 4. The bundle is verified *before* consent is asked,
 so a download that will not verify costs you nothing. Cancel and Restart both reboot, back into the
@@ -107,7 +108,7 @@ paired computer can read it over SSH (`player` can read it; [remote-access.md](r
 `retroforge-installer.service` runs as root; OGUI stays `player`. The one privileged step is
 `50-retroforge-installer.rules`, which lets the active local session `start` that one unit. The unit has
 no arguments and no `[Install]`. It runs gamescope with `installer/ui` as its only client, and it
-reboots on every stop.
+reboots on every stop, except a finished install, which powers off.
 
 **`player` must not outlive the session.** It lingers, it is in `input` so it can open `/dev/uinput`,
 InputPlumber's bus takes calls from anyone, and the sequence is on `confirm-ui`'s command line, so a

@@ -23,6 +23,7 @@ confirm-tty
 # the session and the UI
 installer-session
 save-log.sh
+leave
 ui
 uipad.py
 uiflow.py

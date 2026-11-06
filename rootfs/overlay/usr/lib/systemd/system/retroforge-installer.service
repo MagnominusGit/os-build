@@ -42,7 +42,7 @@ ExecStart=/usr/lib/retroforge/install/installer-session
 # Every stop ends in a reboot, success, Cancel, or crash: there is no session to go back to, so a
 # panel left black is the alternative. `-` so a failed save cannot stop the reboot.
 ExecStopPost=-/usr/lib/retroforge/install/save-log.sh
-ExecStopPost=-/usr/bin/systemctl --no-block reboot
+ExecStopPost=-/usr/lib/retroforge/install/leave
 # NO TTYPath= AND NO StandardInput=tty. Binding the unit to /dev/tty1 made gamescope exit 0 at boot
 # on the main image: seatd's VT-bound seat activates a VT itself and the two clash
 # (docs/bringup-phase2.md, "a system service is NOT an interactive SSH run").
