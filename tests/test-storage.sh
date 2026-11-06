@@ -359,6 +359,31 @@ code "$AUTO" | grep -q 'could not mount \$DEVICE: \${reason' \
   || bad "the captured stderr is never logged"
 
 # =================================================================================================
+CASE="a-retroforge-card-is-not-storage"
+# Booted from internal with the install card still in, the mounter took the card's var-A and home
+# read-write and chmodded both 777 (Pocket ACE, 2026-11-06). Every install ends with that card in the
+# slot. "Not the disk we booted from" is not enough: it is a system, not a card to fill.
+isours() { # <partlabel> -- prints yes or no
+  PL="$1" bash -c '
+    . '"$LIB"'
+    lsblk() { printf "%s\n" "$PL"; }
+    storage_is_retroforge_partition /dev/mmcblk0p8 && echo yes || echo no' 2>/dev/null | tail -1
+}
+[ "$(isours retroforge-home)" = yes ] && ok "retroforge-home is ours" || bad "retroforge-home reads as a plain card"
+[ "$(isours retroforge-var-A)" = yes ] && ok "and so is retroforge-var-A" || bad "retroforge-var-A reads as a plain card"
+[ "$(isours RETROFORGE-ESP)" = yes ] && ok "and RETROFORGE-ESP" || bad "RETROFORGE-ESP reads as a plain card"
+# format-device.sh names the card it formats retroforge-library, and that card must keep mounting.
+[ "$(isours retroforge-library)" = no ] && ok "a card we formatted for storage is a plain card" \
+  || bad "retroforge-library is refused: every formatted card stops mounting"
+[ "$(isours '')" = no ] && ok "a partition with no label is a plain card" || bad "an unlabelled card is refused"
+[ "$(isours 'Games')" = no ] && ok "and so is one with a label of its own" || bad "a labelled card is refused"
+code "$AUTO" | grep -q 'storage_is_retroforge_partition "\$DEVICE"' \
+  && ok "the mounter asks" || bad "automount.sh does not check for a RetroForge partition"
+[ "$(code "$AUTO" | grep -n 'storage_is_retroforge_partition' | head -1 | cut -d: -f1)" -lt \
+  "$(code "$AUTO" | grep -nE '(^|[^a-z_])mount ' | head -1 | cut -d: -f1)" ] \
+  && ok "before it mounts anything" || bad "the check comes after the mount"
+
+# =================================================================================================
 CASE="only-ext4-is-automounted"
 # Upstream's reason, verbatim: "We need symlinks for Steam for now, so only automount ext4 as that's
 # what Steam will format". A vfat or exfat card cannot host a library — no symlinks, no casefolding

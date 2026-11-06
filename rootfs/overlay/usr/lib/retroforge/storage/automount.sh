@@ -59,6 +59,7 @@ DISK="$(storage_disk_of "$DEVICE")" || exit 0
 # thing offered is a format.
 storage_is_sd "$DISK"          || { log "skipping $DEVICE: not a removable SD card"; exit 0; }
 storage_is_system_disk "$DISK" && { log "skipping $DEVICE: this system runs from it"; exit 0; }
+storage_is_retroforge_partition "$DEVICE" && { log "skipping $DEVICE: a RetroForge system's own partition"; exit 0; }
 
 if findmnt -rn -o SOURCE 2>/dev/null | grep -Fxq "$DEVICE"; then
     log "skipping $DEVICE: already mounted"

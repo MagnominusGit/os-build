@@ -103,6 +103,16 @@ storage_is_sd() { # <disk kernel name>
 # The mount list is checked by SOURCE DISK rather than by device name so a bind mount or a
 # by-partlabel path cannot hide the relationship. /esp and /home are ours; / and /var are the pair
 # an A/B slot occupies; /boot is there for completeness on a layout that grows one.
+# A partition of a RetroForge system: a card that boots, not a card to fill. The install card sits in
+# the slot beside an internal install, where it is not the system disk. By name, not by prefix:
+# format-device.sh calls the storage cards it makes retroforge-library.
+storage_is_retroforge_partition() { # <partition device>
+    case "$(lsblk -no PARTLABEL "$1" 2>/dev/null | head -n1)" in
+        RETROFORGE-ESP|retroforge-efi-[AB]|retroforge-root-[AB]|retroforge-var-[AB]|retroforge-home) return 0 ;;
+    esac
+    return 1
+}
+
 storage_is_system_disk() { # <disk kernel name>
     local disk="$1" boot target src resolved=0
     [ -n "$disk" ] || return 0                    # no answer -> treat as system
