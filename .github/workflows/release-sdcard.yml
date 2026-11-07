@@ -169,18 +169,25 @@ jobs:
       # GitHub refuses an asset over 2 GiB, but only once the upload is under way. Check first, so a
       # card that has grown says so in plain words rather than as an HTTP error from gh.
       - name: check the card fits a release asset
+        env:
+          VERSION: ${{ needs.prep.outputs.version }}
         run: |
           set -euo pipefail
-          size="$(stat -c %s upload/sdcard.img.gz)"
+          size="$(stat -c %s "upload/retroforge-$VERSION.img.gz")"
           limit=$((2 * 1024 * 1024 * 1024))
           echo "card: $((size / 1048576)) MiB of a $((limit / 1048576)) MiB asset cap" | tee -a "$GITHUB_STEP_SUMMARY"
           if [ "$size" -ge "$limit" ]; then
-            echo "::error::sdcard.img.gz is $size bytes, over GitHub's 2 GiB per-asset cap. Shrink the card, or move it to a host without the cap (git history has the old R2 publisher, ota/publish-card.sh)."
+            echo "::error::retroforge-$VERSION.img.gz is $size bytes, over GitHub's 2 GiB per-asset cap. Shrink the card, or move it to a host without the cap (git history has the old R2 publisher, ota/publish-card.sh)."
             exit 1
           fi
 
-      # The asset keeps its built name, sdcard.img.gz, because sha256sums.txt names it that way —
-      # renaming it here would make `sha256sum -c` fail on a good download.
+      # The asset keeps its built name, retroforge-<version>.img.gz (set in image.yml), because
+      # sha256sums.txt names it that way — renaming it here would make `sha256sum -c` fail on a good
+      # download.
+      #
+      # THE NOTES DO NOT TELL ANYONE TO RUN `gh release download`: the image is right there in the
+      # release's assets, and a user found the CLI recipe confusing (2026-11-07). They say which
+      # file to take, how to check it, and how to write it.
       #
       # A TAG THAT ALREADY EXISTS MUST BE THIS COMMIT. When the tag is missing, the release API
       # creates it on --target; when it exists, the API uses it as-is and IGNORES --target. So a
@@ -210,13 +217,16 @@ jobs:
               exit 1
             fi
           fi
+          img="retroforge-$VERSION.img.gz"
           {
-            echo "## retroforge card \`$VERSION\`"
+            echo "## RetroForge $VERSION"
+            echo
+            echo "Download **\`$img\`** from the assets below and write it to an SD card with"
+            echo 'balenaEtcher or Raspberry Pi Imager (both take the `.img.gz` as is), or from a shell:'
             echo
             echo '```bash'
-            echo "gh release download '$tag' -R '$GITHUB_REPOSITORY' -p sdcard.img.gz -p sha256sums.txt"
-            echo 'sha256sum -c sha256sums.txt   # BEFORE writing the image to a card'
-            echo 'gzip -dc sdcard.img.gz | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress'
+            echo 'sha256sum -c sha256sums.txt   # check the download before writing it'
+            echo "gzip -dc $img | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress"
             echo '```'
             echo
             echo '`manifest.lock` records every package this card was built from — third-party ones by'
@@ -224,6 +234,6 @@ jobs:
           } > notes.md
           gh release create "$tag" \
             --target "$GITHUB_SHA" \
-            --title "retroforge card $VERSION" \
+            --title "RetroForge $VERSION" \
             --notes-file notes.md \
-            upload/sdcard.img.gz meta/sha256sums.txt meta/provenance/manifest.lock
+            "upload/$img" meta/sha256sums.txt meta/provenance/manifest.lock

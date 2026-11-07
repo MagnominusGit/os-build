@@ -75,12 +75,13 @@ tested on hardware without waiting for a run.
 The card is an asset of the `card/v*` GitHub Release, next to its checksums and the package lock it
 was built from. A release card compresses to 524 MiB (gz -6, measured 2026-10-13), well inside
 GitHub's 2 GiB per-asset cap; `release-sdcard.yml` refuses to publish one that has grown past it.
-The repo is private, so downloading needs a GitHub login with access to it:
+The asset is named for the release, `retroforge-<version>.img.gz`. The repo is private, so
+downloading it from the release page needs a GitHub login with access to it. Write it with
+balenaEtcher or Raspberry Pi Imager, or:
 
 ```sh
-gh release download card/v1.3.0 -R retroforge-linux/os-build -p sdcard.img.gz -p sha256sums.txt
-sha256sum -c sha256sums.txt                   # do this BEFORE writing the image to a card
-gzip -dc sdcard.img.gz | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress
+sha256sum -c sha256sums.txt                   # check the download before writing it
+gzip -dc retroforge-v1.3.0.img.gz | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress
 ```
 
 `.gz` rather than `.zst` on purpose: the payload is already compressed (both btrfs roots carry
