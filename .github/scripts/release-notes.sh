@@ -16,8 +16,9 @@
 #
 # FREE, AND IT STAYS FREE. The Workers Free plan includes 10,000 neurons a day and answers over that
 # with an error, not a bill (pricing page, 2026-11-07). One summary of ~3k tokens in / 500 out on
-# mistral-small-3.1 costs ~120 neurons. Cloudflare states it neither trains on nor retains the input
-# (workers-ai/platform/data-usage), which matters: these are a private repo's commit messages.
+# llama-3.3-70b fp8-fast costs ~200 neurons (mistral-small-3.1 was ~120 but looped on one bullet).
+# Cloudflare states it neither trains on nor retains the input (workers-ai/platform/data-usage),
+# which matters: these are a private repo's commit messages.
 #
 # IT NEVER FAILS A RELEASE. Any failure (no token, quota spent, an empty answer) falls back to a
 # plain list of commit subjects, with a ::warning:: saying why. A release held up by a summary is
@@ -32,7 +33,7 @@ set -euo pipefail
 TAG="${1:?usage: $0 <tag> <ref> <out-file>}"
 REF="${2:?usage: $0 <tag> <ref> <out-file>}"
 OUT="${3:?usage: $0 <tag> <ref> <out-file>}"
-MODEL="${RELEASE_NOTES_MODEL:-@cf/mistralai/mistral-small-3.1-24b-instruct}"
+MODEL="${RELEASE_NOTES_MODEL:-@cf/meta/llama-3.3-70b-instruct-fp8-fast}"
 ENDPOINT="${RELEASE_NOTES_ENDPOINT:-https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID:-}/ai/v1/chat/completions}"
 LOG_CAP="${RELEASE_NOTES_LOG_CAP:-24000}"
 PARA_CAP=600
@@ -94,17 +95,26 @@ fallback() {
 [ -n "${CF_ACCOUNT_ID:-}" ] || [ -n "${RELEASE_NOTES_ENDPOINT:-}" ] || fallback "no CF_ACCOUNT_ID (the CLOUDFLARE_ACCOUNT_ID secret)"
 command -v jq >/dev/null || fallback "jq is not installed"
 
-system='You write release notes for RetroForge, a Linux OS for ARM handheld game consoles (Qualcomm Snapdragon handhelds from AYN, AYANEO, Retroid, Anbernic, Mangmi, KONKR and others). You are given the commit log since the previous release, in Conventional Commits form (feat, fix, perf, ...; the scope is in parentheses).
+system='You write the release notes for RetroForge, a Linux OS for handheld game consoles (Snapdragon handhelds from AYN, AYANEO, Retroid, Anbernic, Mangmi, KONKR and others). The readers are players, not developers. You are given the commit log since the previous release, in Conventional Commits form (feat, fix, perf, ...; the scope is in parentheses).
 
-Write Markdown release notes for the people who use these devices:
-- Use only these level-3 sections, in this order, and leave out any that would be empty: "### New", "### Fixes", "### Devices" (support for a specific handheld or SoC: displays, audio, Wi-Fi, firmware, suspend), "### Under the hood" (performance or size changes a user would notice).
-- One short bullet per user-visible change, in plain words. Merge commits that describe one change. Name the device when a change is specific to one.
-- Leave out CI, workflow, test, build-system, packaging-pin, relock and documentation-only commits, and internal refactors with no visible effect.
-- Do not invent anything the commits do not say. No version number, no title, no preamble, no closing remarks.'
+Write short, friendly Markdown notes that tell a player what is better for them:
+- Use only these level-3 sections, in this order, and leave out any that would be empty: "### New", "### Fixes", "### Devices".
+- AT MOST 10 BULLETS IN TOTAL; fewer is better. Group every commit about the same topic into ONE bullet (all the firmware commits are one bullet, all the installer commits are one bullet). Never write two bullets that say the same thing.
+- Plain words only. Never mention kernels, modules, drivers, firmware loaders, partitions, ADSP, AudioReach, PD, WPSS, GPR, udev, snapshots, packages or file names. Say what the player sees: sound, Wi-Fi, sleep, battery, screen, controls, games, installing, updating.
+- Friendly and light, like a good app-store changelog. Lead with the benefit. No exclamation marks, no emoji, no marketing superlatives.
+- Only claim an effect the commit itself states. A "perf" commit may become "faster" or "smoother"; a "fix" commit may become "no longer ..." or "works again". Never attach a reason or a benefit the commit does not give.
+- If a commit names only a chip (SM8250, SM6115, SM4450, ...), say "more Snapdragon devices" or similar; never guess device models. Name a device only when the commit names it.
+- Leave out CI, release, workflow, test, build, pin, relock, snapshot, refactor and documentation commits, and anything a player would not notice.
+- No version number, no title, no preamble, no closing remarks.
+
+Bad: "The system should boot faster, as the loader maps super without a partition scan."
+Good: "Faster startup."
+Bad: "The Air X and Air Y now use their own ADSP on AudioReach."
+Good: "Reworked sound on the AYANEO Air X and Air Y."'
 
 body="$(jq -n --arg model "$MODEL" --arg system "$system" \
   --arg user "Release ${TAG#*/}. Commits since ${prev:-the start}:"$'\n\n'"$log" \
-  '{model: $model, temperature: 0.2, max_tokens: 1500,
+  '{model: $model, temperature: 0.3, max_tokens: 800, frequency_penalty: 0.5,
     messages: [{role: "system", content: $system}, {role: "user", content: $user}]}')"
 
 resp="$(curl -sS --max-time 120 -w '\n%{http_code}' "$ENDPOINT" \
@@ -118,6 +128,11 @@ resp="$(printf '%s' "$resp" | sed '$d')"
 # OpenAI-shaped from this endpoint; the native /ai/run shape ({result: {response}}) is accepted too,
 # so pointing RELEASE_NOTES_ENDPOINT at it needs no other change.
 notes="$(printf '%s' "$resp" | jq -r '.choices[0].message.content // .result.response // empty' 2>/dev/null || true)"
+# A small model can loop on one bullet until max_tokens: a cut-off answer is not published, and a
+# repeated line is dropped.
+[ "$(printf '%s' "$resp" | jq -r '.choices[0].finish_reason // empty' 2>/dev/null || true)" != length ] \
+  || fallback "Workers AI ran out of tokens (a looping answer)"
+notes="$(printf '%s\n' "$notes" | awk '/^[-*] / { if (seen[$0]++) next } { print }')"
 [ -n "${notes//[[:space:]]/}" ] || fallback "Workers AI returned no text"
 
 printf '%s\n' "$notes" >"$OUT"
