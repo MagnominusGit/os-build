@@ -9,7 +9,7 @@
 #   <ref>  the commit being released (GITHUB_SHA).
 #
 # THE MODEL RUNS ON CLOUDFLARE WORKERS AI, the account that already holds the OTA bucket:
-#   CF_ACCOUNT_ID  the Cloudflare account id (CI passes the R2_ACCOUNT_ID secret: same account)
+#   CF_ACCOUNT_ID  the Cloudflare account id (CI: the CLOUDFLARE_ACCOUNT_ID secret, which R2 uses too)
 #   CF_AI_TOKEN    an API token with Workers AI Read + Edit (CI: the CLOUDFLARE_AI_TOKEN secret)
 # through its OpenAI-compatible chat endpoint. Override the model with RELEASE_NOTES_MODEL.
 # NOT GitHub Models: that was the first choice and it was retired on 2026-07-30, inference API and all.
@@ -91,7 +91,7 @@ fallback() {
 }
 
 [ -n "${CF_AI_TOKEN:-}" ] || fallback "no CF_AI_TOKEN (the CLOUDFLARE_AI_TOKEN secret)"
-[ -n "${CF_ACCOUNT_ID:-}" ] || [ -n "${RELEASE_NOTES_ENDPOINT:-}" ] || fallback "no CF_ACCOUNT_ID"
+[ -n "${CF_ACCOUNT_ID:-}" ] || [ -n "${RELEASE_NOTES_ENDPOINT:-}" ] || fallback "no CF_ACCOUNT_ID (the CLOUDFLARE_ACCOUNT_ID secret)"
 command -v jq >/dev/null || fallback "jq is not installed"
 
 system='You write release notes for RetroForge, a Linux OS for ARM handheld game consoles (Qualcomm Snapdragon handhelds from AYN, AYANEO, Retroid, Anbernic, Mangmi, KONKR and others). You are given the commit log since the previous release, in Conventional Commits form (feat, fix, perf, ...; the scope is in parentheses).

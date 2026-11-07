@@ -91,7 +91,7 @@ one, not a size one, and `.gz` is what balenaEtcher and Raspberry Pi Imager open
 Both kinds of tag get a GitHub Release whose notes open with what changed, written by Cloudflare
 Workers AI (`@cf/mistralai/mistral-small-3.1-24b-instruct`, or the `RELEASE_NOTES_MODEL` repo
 variable) from the commits since the previous tag in the same series. It needs the
-`CLOUDFLARE_AI_TOKEN` secret (an API token with Workers AI Read + Edit) and reuses `R2_ACCOUNT_ID`;
+`CLOUDFLARE_AI_TOKEN` secret (an API token with Workers AI Read + Edit) and the `CLOUDFLARE_ACCOUNT_ID` secret R2 publishing uses too;
 it is free within the Workers plan's 10,000 neurons a day (~120 per release). Without the token, or
 on any failure, `.github/scripts/release-notes.sh` writes the plain commit list instead, so a release
 never waits on it. An `ota/` Release carries notes only (the bundle is on R2), is never marked

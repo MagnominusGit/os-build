@@ -304,10 +304,11 @@ Set up once, in the Cloudflare dashboard:
    choose once.
 3. **Create an API token** scoped to that one bucket with *Object Read & Write*. It needs delete as well
    as write (the prune). Its access key ID and secret are `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`;
-   the account ID is `R2_ACCOUNT_ID`.
-4. **In GitHub**: `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `RAUC_CERT_PEM` and
-   `RAUC_KEY_PEM` as repository **secrets**; `R2_BUCKET` and `R2_PUBLIC_BASE` as repository
-   **variables**. Repo-wide because this plan has no environments (above).
+   the account ID is `R2_ACCOUNT_ID` (the scripts' name for it).
+4. **In GitHub**: `CLOUDFLARE_ACCOUNT_ID` (the account ID; the workflows hand it to the scripts as
+   `R2_ACCOUNT_ID` and to the release notes), `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+   `RAUC_CERT_PEM` and `RAUC_KEY_PEM` as repository **secrets**; `R2_BUCKET` and `R2_PUBLIC_BASE` as
+   repository **variables**. Repo-wide because this plan has no environments (above).
 
 **Caching.** `latest.json` changes in place, so the publisher uploads it with
 `Cache-Control: no-cache` and reads it back over HTTPS after writing. Bundles never change once
