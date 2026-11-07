@@ -2574,6 +2574,8 @@
 		qcom,mbhc-headphone-vthreshold-microvolt = <50000>;
 		qcom,mbhc-headset-vthreshold-microvolt = <1700000>;
 
+		qcom,hphl-jack-type-normally-closed;
+
 		#sound-dai-cells = <1>;
 	};
 
