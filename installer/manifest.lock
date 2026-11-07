@@ -7,7 +7,7 @@
 # would stop meaning "this is what is on the device". See this generator's header.
 #
 # repo snapshot: https://holo-packages.steamos.cloud/archlinux-deckard/archlinux/mash-20260528.1.pvt
-# built in:      https://holo-packages.steamos.cloud/archlinux-deckard/archlinux/mash-20260528.1.pvt/system.rootfs.zst sha256:c126eed15f527ce83239bca528aaa072fd4f254136d3b0dde24cc145ede2ad53   (execution environment only — contributes no files)
+# built in:      https://holo-packages.steamos.cloud/archlinux-deckard/archlinux/mash-20260528.1.pvt/system.rootfs.zst sha256:9499e0178c21995e6b2a88b8f48d0c43857de1553102023653c2d710571283ab   (execution environment only — contributes no files)
 #
 # name version arch source sha256   (source: snapshot|retroforge|prebuilt)
 # Every row carries a real hash: the root is bootstrapped from packages, so there is no content on
@@ -54,7 +54,7 @@ findutils 4.10.0-3 aarch64 snapshot 3e131af3daed6a31324c31861686c7bb2ebc29bc39e3
 fontconfig 2:2.17.1-1 aarch64 snapshot 10c55d9d0abca7ea40d778b34cb2fce5f39974042f4f6681c4c541fa24dc771f
 freetype2 2.14.3-1 aarch64 snapshot 9778ce707e2bb2163ce2fbf5b339a55673a6a7940a0f63843fbc9310a0a23528
 fribidi 1.0.16-2 aarch64 snapshot 111a98b837dc6b5d9008b4c3a19bc5baffbcb1096625d758aeb1d51a6e507e3d
-gamescope 3.17.0-1.1 aarch64 retroforge d0d280b1cf8773b5b6b4fb437527b474670cfeb9c0cc9f42f8a6f0983e111cf9
+gamescope 3.17.0-1.1 aarch64 retroforge 05c087cf6f4695b6208ab9b3b7f6295eba0058eb7b089a593a4b4e3a637cd958
 gawk 5.4.0-1 aarch64 snapshot 379dcf5aeb42ea4b59e457692c6c91a2d974484539f122467e75a683f98b6821
 gcc-libs 16.1.1+r12+g301eb08fa2c5-1 aarch64 snapshot 03b2d6f672808522613a233de0cce7291f3be21543ef303c6d7634fdbd6417ea
 gdbm 1.26-2 aarch64 snapshot 942d709434f29db679927ac2dcddc3f3ebb9009764bdd4fc307b2b1ac1131d81
@@ -76,7 +76,7 @@ hidapi 0.15.0-1 aarch64 snapshot 39a25ef6e2602c6835ae971dbaec5e16340ebc61bac419f
 hwdata 0.407-1 any snapshot f9d54af6e90403487ebf5c1be2a6024bb5983abc0ba0d608509eb294111d6702
 iana-etc 20260511-1 any snapshot edbe53817cc188ce644178ac9f4e26a1e6cbf849c992a992bd71850e20fddfe9
 icu 78.3-1 aarch64 snapshot 8cb9a3c595ab6eeada587cfc4cc6e3e4fcba359341be7236debceaf431679296
-inputplumber 0.82.0-1.1 aarch64 retroforge b1c3e6d8f0d4dfc7d344b3d7f5d2f87df36e6a08b32afd5fbffe7a576c53b3fc
+inputplumber 0.82.0-1.1 aarch64 retroforge fb7a81387ef4b202e57a25f7a019f453d04309e565e7f5daffd6586375a45edc
 iproute2 7.0.0-1 aarch64 snapshot a015792c8a532b7fce09a149a45de63b7186fc4cc0a05d83e264c234c2daea5a
 iptables 1:1.8.13-1 aarch64 snapshot c79af48e7d982dc4749e33558acc5ce9afbba31af78f41e10ddc8f6faffacf4a
 iputils 20250605-1 aarch64 snapshot 7243effda28732780bfb297fdd9c89826ef1754b866f9857b6c2b43df5699b05
@@ -204,7 +204,7 @@ lua54 5.4.8-6 aarch64 snapshot 19cb0e9e28371e138d2f59782ed040800c98fd70c1ec6e5a7
 luajit 2.1.1774896198+18b087c-1 aarch64 snapshot 15aee2ec52f21bf174a37082445818335ff3abd41896ae2909f6193277437d51
 lz4 1:1.10.0-2 aarch64 snapshot af5d44c36259e2257ba033b623ef6104dcc2a552271264b6b433ddaf8422f3ee
 lzo 2.10-5 aarch64 snapshot ff11d9a5060ae28fbece3faad126724314232747cc09b836157f02ee09d3869a
-mesa 1:26.2.6-1.1 aarch64 retroforge 268be6f9304600b64fb87fb676564998c714d1342ac9e578285810bd974b912d
+mesa 1:26.2.6-1.1 aarch64 retroforge aa46a1dcfb749d8935a9c8d86ab649276fd44dc0257375ac07b7743c40e41482
 mobile-broadband-provider-info 20251101-1 any snapshot 1b0146d8b72f6ffc3edcccd5709d8de42798c4827a5fccd994c389584d60c56c
 mpdecimal 4.0.1-3 aarch64 snapshot 93a0e16603858a8d78c4ab3a924ff2ccd9554cd2019c1f65d411c5276334cb86
 mpfr 4.2.2-1 aarch64 snapshot 25f827431b1a13a6f524d76e62c0b0bdc5c1bf6ffd3d849cf73b5f840172ac2f
@@ -258,9 +258,9 @@ tpm2-tss 4.1.3-1 aarch64 snapshot 851d67bd6cb1a86dd405119872b19c543c4d8a982932c3
 tzdata 2026b-1 aarch64 snapshot 49d76cef7294fe0676722a7a7ebcfd3a3640be75af2226335b3b9d13a1d617cd
 util-linux 2.42.1-1 aarch64 snapshot af9be1205dfe5ea24819d172a53c9ea491d8b02e6222eae3c27b72e2f9ab4676
 util-linux-libs 2.42.1-1 aarch64 snapshot f33a6925c5d2ed70689cd5fe75dacf0cd47449e790576aee05e896eff9570ec6
-vulkan-freedreno 1:26.2.6-1.1 aarch64 retroforge 268be6f9304600b64fb87fb676564998c714d1342ac9e578285810bd974b912d
+vulkan-freedreno 1:26.2.6-1.1 aarch64 retroforge aa46a1dcfb749d8935a9c8d86ab649276fd44dc0257375ac07b7743c40e41482
 vulkan-icd-loader 1.4.350.0-1 aarch64 snapshot 90fb0013d8b8b3f19fc945431925ac49aaad0399a1d12ce2c23eb3ed5d09f2a7
-vulkan-mesa-device-select 1:26.2.6-1.1 aarch64 retroforge 268be6f9304600b64fb87fb676564998c714d1342ac9e578285810bd974b912d
+vulkan-mesa-device-select 1:26.2.6-1.1 aarch64 retroforge aa46a1dcfb749d8935a9c8d86ab649276fd44dc0257375ac07b7743c40e41482
 wayland 1.25.0-1 aarch64 snapshot ea612c6392dd9e4c1498b5cfebf28b4508029b9c54a0e47e4c5bd1e1e9e79e0f
 wireless-regdb 2026.03.18-1 any snapshot ac16e38723a1e24394373826908d824b33743b4102d1a84d54a6f07aa1820fb9
 wpa_supplicant 2:2.11-5 aarch64 snapshot 2f27be75e6273b51ba0b9a8c13d37d4074201e73f82c3f381754d00e323e2c9c
