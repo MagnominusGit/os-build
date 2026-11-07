@@ -1,0 +1,22 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sat, 7 Nov 2026 04:02:11 -0800
+Subject: [PATCH] ASoC: qcom: q6apm-dai: a push-pull stream is not a batch PCM
+
+q6apm-dai marks every PCM SNDRV_PCM_INFO_BATCH, but a push-pull graph takes its
+pointer from the position buffer the DSP updates every processing frame, not only at
+period ends. Clear the flag for those graphs, so user space stops padding them with a
+period of extra buffering.
+---
+--- a/sound/soc/qcom/qdsp6/q6apm-dai.c
++++ b/sound/soc/qcom/qdsp6/q6apm-dai.c
+@@ -400,6 +400,10 @@
+ 		runtime->hw = q6apm_dai_hardware_playback;
+ 	else if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
+ 		runtime->hw = q6apm_dai_hardware_capture;
++
++	/* A push-pull graph reports the DSP's own position, not only period ends */
++	if (q6apm_is_graph_in_push_pull_mode(prtd->graph))
++		runtime->hw.info &= ~SNDRV_PCM_INFO_BATCH;
+ 
+ 	/* Ensure that buffer size is a multiple of period size */
+ 	ret = snd_pcm_hw_constraint_integer(runtime, SNDRV_PCM_HW_PARAM_PERIODS);
