@@ -24,6 +24,9 @@
 #
 # gamescope is inside user.slice and is frozen DELIBERATELY: it holds the blank KMS modeset statically
 # while frozen, so we blank BEFORE the freeze and unblank AFTER the thaw.
+#
+# A board whose profile sets RETROFORGE_SUSPEND_MODE=mem suspends the kernel to RAM inside that same
+# blanked, frozen window instead of waiting in userspace (kernel_sleep); everything around it is shared.
 set -u
 
 CONF=/etc/retroforge/rest.conf
@@ -38,6 +41,9 @@ CONF=/etc/retroforge/rest.conf
 : "${RETROFORGE_SUSPEND_SKIP:=}"          # power ops to skip: cpu rfkill governor gpugov led (e.g. "rfkill" over SSH)
 : "${RETROFORGE_WAKE_KEY:=KEY_POWER}"
 : "${RETROFORGE_WAKE_DEBOUNCE_MS:=1000}"  # ignore a KEY_POWER within this of arming the wait (press bounce)
+# fake (default) or mem, from the board profile; rest.conf can override it.
+: "${RETROFORGE_SUSPEND_MODE:=$("${RETROFORGE_DEVICE_ENV:-/usr/lib/retroforge/device-env}" 2>/dev/null | sed -n 's/^RETROFORGE_SUSPEND_MODE=//p')}"
+: "${RETROFORGE_POWER_DIR:=/sys/power}"
 # No XDG_RUNTIME_DIR default here: this runs as root, the session as `player`, and gs_resolve_display
 # exports the runtime dir it finds the live socket in.
 
@@ -206,6 +212,36 @@ wait_for_wake() {
   wake_cleanup   # release the grab so the key works again once awake
 }
 
+# RETROFORGE_SUSPEND_MODE=mem: suspend the kernel to RAM, "deep" where the platform offers it, else
+# s2idle. The write blocks until a wakeup source (the power key) resumes the kernel. The key stays
+# grabbed across the sleep and for the debounce after it, so the wake press never reaches
+# retroforge-powerbuttond (which acts on a release it saw pressed) and suspends us again. Non-zero
+# when the kernel refuses; the caller then waits for the key as in fake suspend.
+kernel_sleep() {
+  [ -w "$RETROFORGE_POWER_DIR/state" ] || { log "no writable $RETROFORGE_POWER_DIR/state"; return 1; }
+  grep -qw deep "$RETROFORGE_POWER_DIR/mem_sleep" 2>/dev/null \
+    && echo deep > "$RETROFORGE_POWER_DIR/mem_sleep" 2>/dev/null
+  grab=""
+  if command -v libinput >/dev/null 2>&1; then
+    pdev=$(find_power_dev || true)
+    if [ -n "$pdev" ]; then
+      libinput debug-events --grab --device "$pdev" >/dev/null 2>&1 &
+    else
+      libinput debug-events --grab >/dev/null 2>&1 &
+    fi
+    grab=$!
+  fi
+  log "kernel suspend ($(cat "$RETROFORGE_POWER_DIR/mem_sleep" 2>/dev/null))"
+  if echo mem > "$RETROFORGE_POWER_DIR/state" 2>/dev/null; then
+    log "kernel resumed"; _rc=0
+  else
+    log "kernel suspend refused"; _rc=1
+  fi
+  sleep "$(( (RETROFORGE_WAKE_DEBOUNCE_MS + 999) / 1000 ))"
+  [ -n "$grab" ] && kill "$grab" 2>/dev/null
+  return "$_rc"
+}
+
 do_resume() {
   [ -e "$STATE" ] || { log "not suspended"; return 0; }
   rm -f "$STATE"
@@ -244,7 +280,11 @@ case "${1:-sleep}" in
     # force-wake), always release the grab and resume so nothing is stranded frozen.
     trap 'wake_cleanup; do_resume; exit 0' INT TERM
     do_suspend
-    wait_for_wake
+    if [ "$RETROFORGE_SUSPEND_MODE" = mem ]; then
+      kernel_sleep || wait_for_wake
+    else
+      wait_for_wake
+    fi
     do_resume
     trap - INT TERM
     ;;

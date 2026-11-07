@@ -130,6 +130,39 @@ else
   bad "${RULE##*/} sorts before 99-systemd.rules, so its clear is undone"
 fi
 
+CASE="kernel-sleep-mem-mode"
+# RETROFORGE_SUSPEND_MODE=mem boards suspend the kernel from kernel_sleep. Run the shipped function
+# against a fake /sys/power: libinput is a stub function (the real one would grab this machine's keys)
+# and the debounce is 0, so nothing sleeps or blocks.
+[ -n "$(extract kernel_sleep)" ] || { echo "could not extract kernel_sleep() from the shipped script" >&2; exit 1; }
+{ echo 'log() { :; }'; echo 'find_power_dev() { return 1; }'; echo 'libinput() { :; }'; extract kernel_sleep; } > "$W/ks.sh"
+ks() {  # $1 = power dir
+  sh -c ". $W/ks.sh; RETROFORGE_POWER_DIR=$1; RETROFORGE_WAKE_DEBOUNCE_MS=0; kernel_sleep; echo \"rc=\$?\""
+}
+mkdir -p "$W/pw1"; echo 's2idle [deep]' > "$W/pw1/mem_sleep"; : > "$W/pw1/state"
+out="$(ks "$W/pw1")"
+[ "$out" = rc=0 ] && [ "$(cat "$W/pw1/state")" = mem ] && [ "$(cat "$W/pw1/mem_sleep")" = deep ] \
+  && ok "writes mem to state and picks deep where the platform offers it" \
+  || bad "got '$out', state '$(cat "$W/pw1/state")', mem_sleep '$(cat "$W/pw1/mem_sleep")'"
+mkdir -p "$W/pw2"; echo '[s2idle]' > "$W/pw2/mem_sleep"; : > "$W/pw2/state"
+out="$(ks "$W/pw2")"
+[ "$out" = rc=0 ] && [ "$(cat "$W/pw2/mem_sleep")" = '[s2idle]' ] \
+  && ok "leaves mem_sleep alone when deep is not offered (s2idle)" \
+  || bad "got '$out', mem_sleep '$(cat "$W/pw2/mem_sleep")'"
+mkdir -p "$W/pw3"
+out="$(ks "$W/pw3")"
+[ "$out" != rc=0 ] && ok "fails when there is no writable state ($out)" || bad "returned 0 with no state file"
+if grep -qE '^\s*kernel_sleep \|\| wait_for_wake\s*$' "$SUSPEND"; then
+  ok "a refused kernel suspend falls back to waiting for the power key"
+else
+  bad "the mem dispatch does not fall back to wait_for_wake"
+fi
+if grep -qE 'RETROFORGE_SUSPEND_MODE:=.*device-env.*RETROFORGE_SUSPEND_MODE=' "$SUSPEND"; then
+  ok "the mode comes from the board profile via device-env"
+else
+  bad "retroforge-suspend does not read RETROFORGE_SUSPEND_MODE from device-env"
+fi
+
 echo
 echo "test-suspend.sh: $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
