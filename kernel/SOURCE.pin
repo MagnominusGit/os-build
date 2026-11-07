@@ -85,8 +85,8 @@ git_commit: 79a907609d53d5cd645b42c11550d295d43abf99
 #        ayaneo,pocket-s2-sndcard (62dc2554d36d) maps the stream onto the WSA2 channels instead.
 #        Pocket S2 and Pocket FIT are both that card now, model SM8650-APS2 (set once, in
 #        sm8650-ayaneo-common.dtsi), so both load qcom/ayaneo-ps2/SM8650-APS2-tplg.bin: the
-#        linux-firmware topology (qcom/sm8650/ayaneo/ps2/, HW_IF_TYPE 2 = WSA), installed under
-#        the name the kernel requests by firmware/LINUX_FW.pin. UCM: conf.d/sm8650 ->
+#        linux-firmware topology (qcom/sm8650/ayaneo/ps2/, HW_IF_TYPE 2 = WSA), now built from its
+#        source under the name the kernel requests in qcom-firmwares. UCM: conf.d/sm8650 ->
 #        conf.d/ayaneo-ps2 (the card driver name); the identical KPF profile is gone, and the FIT's
 #        card id becomes SM8650APS2. The upstream topology has no DISPLAY_PORT_RX_0 MultiMedia1
 #        (touching it killed the whole HiFi verb upstream); DP plays on MultiMedia6 / PCM 5.

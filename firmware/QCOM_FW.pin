@@ -29,7 +29,11 @@ repo:   https://github.com/retroforge-linux/qcom-firmwares
 # partitions (packages/msm-firmware-loader), so rootfs/assemble-rootfs.sh ships only the video
 # firmware, Wi-Fi and topologies from this pin, and nothing is built into the kernel
 # (kernel/embed.list is empty). The other rows stay for the installer medium, which has no loader yet.
-commit: 785196eda05de7832b128bdd5bf1df741f1a8311
+# a3cd879 (that repo's main, 2026-11-07) builds every AudioReach topology from the m4 sources in its
+# topology/, in CI whenever they change: the Air X/Y one moved there from firmware/topology and the
+# Pocket S2/FIT one taken over from linux-firmware. PCM playback streams use the DSP's push-pull
+# module, and the WSA2 SM8650 topologies no board loads are gone.
+commit: a3cd879118ee8bf792155b76f2ddc29adc6bb4b3
 
 # --- SM8250: OPEN, with one exception, and one still-open gap ----------------------------
 # The six SM8250 boards need almost nothing from this repo. Their GPU microcode, zap shader,

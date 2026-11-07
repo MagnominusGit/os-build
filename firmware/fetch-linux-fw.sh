@@ -12,8 +12,9 @@
 # Exports to firmware/linux-fw/ (git-ignored). Runs on the host (needs network),
 # like images/fetch-base.sh. Idempotent and staleness-proof by construction: each file is
 # verified against its per-file sha256 in the pin, so a pin bump (new file or changed sha)
-# re-fetches exactly the affected files. The open blobs are SoC-agnostic (the unified
-# kernel embeds the union), so this is a single flat tree, not per-SoC.
+# re-fetches exactly the affected files, and a dropped row removes its file. The open blobs
+# are SoC-agnostic (the unified kernel embeds the union), so this is a single flat tree, not
+# per-SoC.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -28,9 +29,11 @@ COMMIT="$(pin_hdr commit)"; BASE="$(pin_hdr base)"
 echo "[retroforge] linux-firmware @ ${COMMIT:0:12} -> ${DEST#"$ROOT"/}"
 mkdir -p "$DEST"
 n=0 fetched=0
+declare -A pinned=()
 while read -r src dst sha _rest; do
   case "$src" in ''|'#'* |commit:|base:) continue ;; esac
   [ -n "$dst" ] && [ -n "$sha" ] || { echo "bad pin line: '$src $dst $sha'" >&2; exit 1; }
+  pinned["$dst"]=1
   out="$DEST/$dst"
   n=$((n + 1))
   if [ -f "$out" ] && echo "$sha  $out" | sha256sum -c - >/dev/null 2>&1; then
@@ -50,4 +53,11 @@ while read -r src dst sha _rest; do
   echo "  ok   $src -> $dst"
   fetched=$((fetched + 1))
 done < "$PIN"
+# A file whose row left the pin would otherwise stay staged and still ship.
+while IFS= read -r f; do
+  rel="${f#"$DEST"/}"
+  [ -n "${pinned[$rel]:-}" ] && continue
+  rm -f "$f"
+  echo "  rm   $rel (no longer pinned)"
+done < <(find "$DEST" -type f ! -name .fetched.stamp)
 echo "[retroforge] $n firmware file(s) present in ${DEST#"$ROOT"/} ($fetched fetched this run)"
