@@ -151,6 +151,22 @@ jobs:
     # that environment's deployment policy is `ota/v*` and would reject every `card/v*` tag.
     environment: ${{ vars.CARDS_ENVIRONMENT || 'release-cards' }}
     steps:
+      # FIRST, because checkout cleans the workspace and the downloads below land in it. Full
+      # history and tags, because the notes summarise the commits since the previous card/ tag.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Never fails the release: on any Workers AI failure the script writes the plain commit list.
+      - name: write the release notes
+        env:
+          # Cloudflare Workers AI, the account that holds the OTA bucket (see the script's header).
+          CF_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          CF_AI_TOKEN: ${{ secrets.CLOUDFLARE_AI_TOKEN }}
+          RELEASE_NOTES_MODEL: ${{ vars.RELEASE_NOTES_MODEL }}
+          VERSION: ${{ needs.prep.outputs.version }}
+        run: .github/scripts/release-notes.sh "card/$VERSION" "$GITHUB_SHA" "$RUNNER_TEMP/changes.md"
+
       # download-artifact v8 ERRORS on a digest mismatch rather than warning as v4 did, and that
       # default is deliberately left alone: the alternative is attaching a corrupted card next to a
       # sha256sums.txt that describes the good bytes.
@@ -186,8 +202,9 @@ jobs:
       # download.
       #
       # THE NOTES DO NOT TELL ANYONE TO RUN `gh release download`: the image is right there in the
-      # release's assets, and a user found the CLI recipe confusing (2026-11-07). They say which
-      # file to take, how to check it, and how to write it.
+      # release's assets, and a user found the CLI recipe confusing (2026-11-07). They open with what
+      # changed (written by Cloudflare Workers AI from the commits since the previous card, see the step
+      # above), then say which file to take, how to check it, and how to write it.
       #
       # A TAG THAT ALREADY EXISTS MUST BE THIS COMMIT. When the tag is missing, the release API
       # creates it on --target; when it exists, the API uses it as-is and IGNORES --target. So a
@@ -220,6 +237,10 @@ jobs:
           img="retroforge-$VERSION.img.gz"
           {
             echo "## RetroForge $VERSION"
+            echo
+            cat "$RUNNER_TEMP/changes.md"
+            echo
+            echo '### Install'
             echo
             echo "Download **\`$img\`** from the assets below and write it to an SD card with"
             echo 'balenaEtcher or Raspberry Pi Imager (both take the `.img.gz` as is), or from a shell:'

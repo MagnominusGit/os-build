@@ -88,6 +88,15 @@ gzip -dc retroforge-v1.3.0.img.gz | sudo dd of=/dev/sdX bs=4M conv=fsync status=
 `compress=zstd`), so every wrapper lands at about the same size and the choice is a compatibility
 one, not a size one, and `.gz` is what balenaEtcher and Raspberry Pi Imager open.
 
+Both kinds of tag get a GitHub Release whose notes open with what changed, written by Cloudflare
+Workers AI (`@cf/mistralai/mistral-small-3.1-24b-instruct`, or the `RELEASE_NOTES_MODEL` repo
+variable) from the commits since the previous tag in the same series. It needs the
+`CLOUDFLARE_AI_TOKEN` secret (an API token with Workers AI Read + Edit) and reuses `R2_ACCOUNT_ID`;
+it is free within the Workers plan's 10,000 neurons a day (~120 per release). Without the token, or
+on any failure, `.github/scripts/release-notes.sh` writes the plain commit list instead, so a release
+never waits on it. An `ota/` Release carries notes only (the bundle is on R2), is never marked
+Latest, and is a pre-release for a beta tag.
+
 To cut a card: tag `card/vX.Y.Z`. To cut an update instead, tag `ota/vX.Y.Z` — the two ship on
 independent cadences and a bundle is expected far more often than a card. There is nothing to line
 up first: the release run compiles the overlay from the sources in the commit it is building
