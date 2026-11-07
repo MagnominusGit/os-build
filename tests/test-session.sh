@@ -147,7 +147,8 @@ rm -f "$GSARGS"
 
 # =================================================================================================
 CASE="environment for what gamescope hosts"
-for kv in QT_QPA_PLATFORM=xcb SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS=0 vk_xwayland_wait_ready=false; do
+for kv in QT_QPA_PLATFORM=xcb SDL_VIDEO_MINIMIZE_ON_FOCUS_LOSS=0 vk_xwayland_wait_ready=false \
+          SDL_AUDIO_DRIVER=pipewire,pulseaudio SDL_AUDIODRIVER=pipewire,pulseaudio; do
   k=${kv%%=*}; v=${kv#*=}
   got="$( (set +u; . "$CONF"; env) | sed -n "s/^$k=//p")"
   [ "$got" = "$v" ] && ok "$k=$v is exported" || bad "$k is '${got:-<not exported>}', want $v"
