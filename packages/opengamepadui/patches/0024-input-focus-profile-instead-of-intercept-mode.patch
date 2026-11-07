@@ -13,11 +13,11 @@ launcher declared in $XDG_RUNTIME_DIR/opengamepadui/game_profile (path,
 then the owning pid), the global profile.
 
 The game's profile now carries what the intercept did for Guide: a JSON
-profile that does not map Guide gets Guide -> [layer, ui_guide], and the
-layer Guide holds gets OpenGamepadUI's combos where the profile leaves
-them free (Guide+South -> ui_quick, the quick bar; Guide+North ->
-ui_osk). With InputPlumber's deferred activation outputs, a lone Guide
-tap opens the main menu and a combo does not. The JSON is edited
+profile that does not map Guide gets Guide -> layer, with ui_guide as
+its on_deactivation (only_when_unused), and that layer gets OpenGamepadUI's
+combos where the profile leaves them free (Guide+South -> ui_quick, the
+quick bar; Guide+North -> ui_osk). A lone Guide tap then opens the main
+menu and a combo does not. The JSON is edited
 directly, after the target modification, because InputPlumberProfile
 drops `layers` (save_target_modified_profile split out for that). Whole
 numbers are written back as integers: JSON.parse_string reads every
@@ -35,12 +35,12 @@ Also fixes set_gamepad_profile(): it broke out of the device loop as
 soon as a device had a gamepad target, before loading anything.
 ---
  assets/gamepad/profiles/ogui_focus.json     | 566 ++++++++++++++++++++
- core/global/launch_manager.gd               | 238 +++++++-
+ core/global/launch_manager.gd               | 240 +++++++-
  core/systems/input/input_manager.gd         |  15 +-
  core/systems/input/input_plumber.gd         |  17 +-
  core/ui/card_ui/card_ui.gd                  |  24 +-
  core/ui/card_ui/gamepad/gamepad_settings.gd |   5 +-
- 6 files changed, 812 insertions(+), 53 deletions(-)
+ 6 files changed, 814 insertions(+), 53 deletions(-)
  create mode 100644 assets/gamepad/profiles/ogui_focus.json
 
 diff --git a/assets/gamepad/profiles/ogui_focus.json b/assets/gamepad/profiles/ogui_focus.json
@@ -783,7 +783,7 @@ index 2e8b5ee..d027f50 100644
  
  		# Set the target gamepad if one was specified
  		if not target_gamepad.is_empty():
-@@ -573,6 +612,155 @@ func set_gamepad_profile(profile_path: String, target_gamepad: String = "") -> v
+@@ -573,6 +612,157 @@ func set_gamepad_profile(profile_path: String, target_gamepad: String = "") -> v
  	#notification_manager.show(notify)
  
  
@@ -841,11 +841,13 @@ index 2e8b5ee..d027f50 100644
 +## OpenGamepadUI's Guide combos, mapped inside the layer Guide holds in a game's profile: the
 +## source button and the DBus action it sends instead while Guide is held.
 +const GUIDE_COMBOS := [["South", "ui_quick"], ["North", "ui_osk"]]
++## What the Guide layer emits when Guide lets it go unused: a ui_guide tap, the main menu.
++const GUIDE_TAP := {"only_when_unused": true, "emit_events": [{"dbus": "ui_guide"}]}
 +
 +
 +## Returns a profile that carries OpenGamepadUI's Guide handling, which intercept mode used to do:
-+## Guide holds a layer and sends ui_guide (InputPlumber taps it on release only when nothing in the
-+## layer was used), and the layer maps GUIDE_COMBOS (Guide+A quick bar, Guide+X keyboard). Rows the
++## Guide holds a layer whose on_deactivation taps ui_guide only when nothing in the layer was
++## used (InputPlumber layer target option), and the layer maps GUIDE_COMBOS (Guide+A quick bar, Guide+X keyboard). Rows the
 +## profile maps itself win; a profile that maps Guide without a layer is left alone. Works on the
 +## JSON directly, after the target modification, since InputPlumberProfile drops `layers`.
 +func _with_guide_layer(profile_path: String) -> String:
@@ -872,7 +874,7 @@ index 2e8b5ee..d027f50 100644
 +		profile["mapping"].append({
 +			"name": "Guide (OpenGamepadUI)",
 +			"source_event": {"gamepad": {"button": "Guide"}},
-+			"target_events": [{"layer": {"name": layer_name}}, {"dbus": "ui_guide"}],
++			"target_events": [{"layer": {"name": layer_name, "on_deactivation": GUIDE_TAP}}],
 +		})
 +
 +	var layer = null

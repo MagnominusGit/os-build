@@ -1,0 +1,59 @@
+From 4385b3a886bf2517097635cc0a1ee7b2b734a81b Mon Sep 17 00:00:00 2001
+From: Philippe Simons <simons.philippe@gmail.com>
+Date: Sat, 7 Nov 2026 21:08:14 +0100
+Subject: [PATCH] fix(Input Layers): release layer outputs before loading a
+ profile
+
+Loading a profile resets the layer stack without releasing what the
+active layers produced, unlike removing a source device. A target then
+keeps that output pressed and drops the next press of it as a
+duplicate: with Guide+South -> dbus ui_quick, OpenGamepadUI opens its
+quick bar and loads another profile while South is still held, the
+ui_quick release never goes out, and the next Guide+South does nothing.
+
+Release the layer outputs first, as source device removal already does.
+---
+ src/input/composite_device/mod.rs | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/src/input/composite_device/mod.rs b/src/input/composite_device/mod.rs
+index f7bf970..9ab51f2 100644
+--- a/src/input/composite_device/mod.rs
++++ b/src/input/composite_device/mod.rs
+@@ -470,6 +470,7 @@ impl CompositeDevice {
+                                 continue;
+                             }
+                         };
++                        self.release_layer_outputs().await;
+                         let result = match self.load_device_profile(Some(profile.clone()), None) {
+                             Ok(_) => Ok(()),
+                             Err(e) => Err(e.to_string()),
+@@ -502,6 +503,7 @@ impl CompositeDevice {
+                                 continue;
+                             }
+                         };
++                        self.release_layer_outputs().await;
+                         let result = match self
+                             .load_device_profile(Some(profile.clone()), Some(path.clone()))
+                         {
+@@ -2241,6 +2243,17 @@ impl CompositeDevice {
+         Ok(())
+     }
+ 
++    /// Release everything the active layers produced before a profile change
++    /// resets the layer stack. Without it a target keeps an output pressed that
++    /// the new profile never releases, and drops the next press of it as a
++    /// duplicate (Guide+South -> ui_quick only working every other time).
++    async fn release_layer_outputs(&mut self) {
++        let releases = self.layers.clear();
++        if let Err(e) = self.apply_layer_releases(releases).await {
++            log::error!("Failed to release layer outputs: {e:?}");
++        }
++    }
++
+     /// Emit a DBus signal when source devices change
+     async fn signal_sources_changed(&self) {
+         let dbus_path = self.dbus.path().to_string();
+-- 
+2.55.0
+

@@ -335,9 +335,9 @@ python3 -c 'import json,os,sys; d=json.load(open(sys.argv[1])); sys.exit(any(not
 # =================================================================================================
 CASE="every emulator definition"
 # A gamepad_profile replaces what OGUI's intercept did for Guide (OGUI patch 0024 adds the same to
-# its own JSON profiles): Guide holds a layer AND sends dbus ui_guide (InputPlumber 0002 taps it on
-# release when the layer went unused), and that layer maps South -> ui_quick (quick bar) and
-# North -> ui_osk (keyboard). CPAN::Meta::YAML (core perl) reads our block-style profiles.
+# its own JSON profiles): Guide holds a layer whose on_deactivation taps dbus ui_guide only when the
+# layer went unused (InputPlumber 0002, upstream PR #771), and that layer maps South -> ui_quick
+# (quick bar) and North -> ui_osk (keyboard). CPAN::Meta::YAML (core perl) reads our block-style profiles.
 guide_layer_ok() {
   perl -MCPAN::Meta::YAML -e '
     my $p = CPAN::Meta::YAML->read($ARGV[0]) or exit 1; $p = $p->[0];
@@ -345,8 +345,11 @@ guide_layer_ok() {
     for my $m (@{ $p->{mapping} || [] }) {
       next unless ((($m->{source_event} || {})->{gamepad} || {})->{button} // "") eq "Guide";
       for my $t (@{ $m->{target_events} || [] }) {
-        $layer = $t->{layer}{name} if ref $t->{layer};
-        $tap = 1 if ($t->{dbus} // "") eq "ui_guide";
+        next unless ref $t->{layer};
+        $layer = $t->{layer}{name};
+        my $off = $t->{layer}{on_deactivation} || {};
+        next unless ($off->{only_when_unused} // "") eq "true";
+        $tap = 1 if grep { ($_->{dbus} // "") eq "ui_guide" } @{ $off->{emit_events} || [] };
       }
     }
     exit 1 unless defined $layer && $tap;
@@ -376,8 +379,8 @@ for def in "$SEED_DIR"/*/emulator.json; do
     || bad "$emu names a gamepad_profile that is not in the image"
   profile="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("gamepad_profile") or "")' "$def")"
   [ -z "$profile" ] || { guide_layer_ok "$(dirname "$def")/$profile" \
-    && ok "$emu: its gamepad profile carries OGUI's Guide (layer + ui_guide tap, Guide+A/X)" \
-    || bad "$emu: $profile lacks Guide -> [layer, dbus ui_guide] or the layer's South -> ui_quick / North -> ui_osk"; }
+    && ok "$emu: its gamepad profile carries OGUI's Guide (layer + unused ui_guide tap, Guide+A/X)" \
+    || bad "$emu: $profile lacks Guide -> layer with on_deactivation ui_guide (only_when_unused) or the layer's South -> ui_quick / North -> ui_osk"; }
 done
 for emu in $(sed -n 's/^[a-z0-9_]*=\([a-z0-9_-]*\)$/\1/p' "$LAUNCH_CONF" | sort -u); do
   [ -f "$SEED_DIR/$emu/emulator.json" ] && ok "launch.conf's $emu has a definition" || bad "launch.conf names $emu, which has no emulator.json"

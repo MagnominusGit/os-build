@@ -4,9 +4,10 @@
 # (shadowapex/input-layers-v2, opened 2026-10-19 against v0.82.0), which adds input layers to
 # device profiles — the mechanism behind the Guide-modifier emulator hotkeys (hold Guide:
 # L1 quick load, R1 quick save, R2 fast-forward, Start quits). Profiles are single-source
-# mappings without it; mGBA/Snes9x/melonDS cannot bind pad combos themselves. 0002 (ours, for
-# the PR) makes a held activator tap its other outputs only when its layer went unused. Drop
-# both when a release carries the PR.
+# mappings without it; mGBA/Snes9x/melonDS cannot bind pad combos themselves. 0002 (ours,
+# upstream PR #771) adds a layer target's on_deactivation (a tap when the layer goes, optionally
+# only when unused); 0003 (ours) releases layer outputs before a profile load. Drop each when a
+# release carries it.
 #
 # The installed file set mirrors the release tarball exactly: both are upstream's
 # `make install` (dist-archive is make install into a prefix), so the switch from prebuilt

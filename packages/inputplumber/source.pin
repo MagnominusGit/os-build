@@ -11,16 +11,20 @@
 #         (Guide+L1/R1/R2/Start), asked of ShadowApex 2026-10-18, answered with this PR.
 #         Drop when a release carries it. An older InputPlumber parses a profile with layers
 #         fine and silently ignores them (unknown fields are skipped).
-#   0002  ours, for PR #757 (agreed with ShadowApex 2026-10-26): a mapping that holds a layer
-#         down keeps its other outputs back until release, and sends them as a tap only if the
-#         layer produced nothing meanwhile. Guide -> [layer, dbus ui_guide] then opens the OGUI
-#         menu on a lone tap and stays silent after Guide+R1 (it used to send ui_guide on press,
-#         so every chord also opened the menu). A profile load also releases what the active
-#         layers produced first: OGUI loads its focus profile while Guide+South is still held, and
-#         the lost ui_quick release made the DBus target drop the next press as a duplicate (quick
-#         bar and OSK opened every other time). Upstream PR #771. Drop with 0001 once upstream
-#         carries it.
+#   0002  ours, upstream PR #771 on top of PR #757 (redesigned 2026-11-07 at ShadowApex's request
+#         there): a `layer` target event takes `on_deactivation: {only_when_unused, emit_events}`,
+#         tapped (press, then release) when its activator lets the layer go: hold released, toggle
+#         pressed again. Guide -> layer guide with on_deactivation ui_guide (only_when_unused) then
+#         opens the OGUI menu on a lone tap and stays silent after Guide+R1. Clearing the stack
+#         (profile load, device removal, suspend) emits nothing. Replaces the first design (a
+#         mapping's other outputs held back until release), so every profile and OGUI 0024 moved
+#         ui_guide under the layer target. Drop with 0001 once upstream carries it.
+#   0003  ours, split out of the first 0002 (separate upstream PR): a profile load releases what the
+#         active layers produced first, as a device removal already does. OGUI loads its focus
+#         profile while Guide+South is still held, and the lost ui_quick release made the DBus
+#         target drop the next press as a duplicate (quick bar and OSK opened every other time).
+#         Independent of 0002; drop once upstream carries it.
 name: inputplumber
 pkgbuild_local: PKGBUILD
-patches: 0001-feat-Input-Layers-add-input-layers-to-map-button-com.patch 0002-feat-Input-Layers-a-held-activator-taps-its-other-outputs.patch
+patches: 0001-feat-Input-Layers-add-input-layers-to-map-button-com.patch 0002-feat-Input-Layers-emit-events-when-a-layer-activatio.patch 0003-fix-Input-Layers-release-layer-outputs-before-loadin.patch
 pkgrel_suffix: 1

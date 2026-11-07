@@ -599,7 +599,8 @@ ok({b: m.group(1) if m else None for b, m in rows.items()} == {
     "DPadRight": "keyboard: KeyRight", "South": "keyboard: KeyEnter", "East": "keyboard: KeyEsc",
     "West": "keyboard: KeySpace", "North": "dbus: ui_osk"},
    "the pad: D-pad = arrow keys, A Enter, B Escape, Y Space, X the keyboard", str(rows))
-ok(re.search(r"button: Guide\n\s+target_events:\n\s+- layer:\n\s+name: guide\n\s+- dbus: ui_guide", profile)
+ok(re.search(r"button: Guide\n\s+target_events:\n\s+- layer:\n\s+name: guide\n\s+on_deactivation:\n"
+             r"\s+only_when_unused: true\n\s+emit_events:\n\s+- dbus: ui_guide", profile)
    and profile.count("dbus: ui_quick") == 1 and profile.count("dbus: ui_osk") == 2,
    "Guide keeps OGUI's menu, Guide+A its quick bar and Guide+X its keyboard")
 

@@ -12,10 +12,11 @@
 # Save State, Fast-forward and Exit App (names from Core/KeyMap.cpp psp_button_names). F-keys
 # because no game binds them and the handhelds have no physical keyboard to collide with.
 #
-# GUIDE -> [layer guide, dbus ui_guide]. OGUI has no intercept mode any more (patch 0024), so this
-# profile is the only way it learns Guide was pressed in game. InputPlumber patch 0002 holds the
-# ui_guide back while Guide is down: released alone, OGUI gets a ui_guide tap and opens its menu;
-# released after Guide+R1 (anything the layer mapped), nothing goes out and the menu stays shut.
+# GUIDE -> layer guide, with dbus ui_guide as its on_deactivation (only_when_unused). OGUI has no
+# intercept mode any more (patch 0024), so this profile is the only way it learns Guide was pressed
+# in game. InputPlumber patch 0002 (upstream PR #771) taps ui_guide when Guide lets the layer go:
+# released alone, OGUI opens its menu; released after Guide+R1 (anything the layer mapped), nothing
+# goes out and the menu stays shut.
 # The layer also maps OGUI's Guide+A (quick bar) and Guide+X (keyboard) to DBus, at the end.
 # InputPlumber names face buttons by evdev code: North is BTN_NORTH, the alias of BTN_X, so the
 # left button on an Xbox layout (Y is West). OGUI's own Guide+North keyboard combo is X too.
@@ -49,7 +50,10 @@ mapping:
     target_events:
       - layer:
           name: guide
-      - dbus: ui_guide
+          on_deactivation:
+            only_when_unused: true
+            emit_events:
+              - dbus: ui_guide
 
 layers:
   - name: guide

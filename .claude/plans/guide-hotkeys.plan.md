@@ -120,6 +120,13 @@ Both halves of the problem, fixed where they live:
   mappings without other outputs unchanged. LayerState::defer_tap / finish_tap, chorded flag set
   in record_outputs; handle_event emits the tap through write_chord_events. 6 new layers_test
   cases, full cargo test green (x86 rust:1 container, 2026-10-26).
+  **2026-11-07 REDESIGNED at ShadowApex's request on PR #771:** instead of holding back a
+  mapping's other outputs, the `layer` target event takes `on_deactivation: {only_when_unused,
+  emit_events}`, tapped when its activator lets the layer go (hold released, toggle pressed
+  again; stack clears emit nothing). Profiles: `layer: {name: guide, on_deactivation:
+  {only_when_unused: true, emit_events: [dbus: ui_guide]}}`; OGUI 0024 writes the same
+  (GUIDE_TAP). The profile-load release split out as IP 0003 (own upstream PR). 8 new
+  layers_test cases, cargo test 45+4 green (rust:1 container).
 - **OGUI patch 0024** (packages/opengamepadui/patches/0024-*): no intercept mode (card_ui sets
   NONE). LaunchManager is the ONE profile writer: ogui_focus.json (every pad input -> its DBus UI
   action, right stick/paddles -> none) whenever OGUI has focus (setup, game state exited, OGUI

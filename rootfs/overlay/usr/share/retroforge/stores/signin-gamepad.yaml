@@ -32,7 +32,10 @@ mapping:
     target_events:
       - layer:
           name: guide
-      - dbus: ui_guide
+          on_deactivation:
+            only_when_unused: true
+            emit_events:
+              - dbus: ui_guide
 
   - name: D-pad up -> Up
     source_event:
