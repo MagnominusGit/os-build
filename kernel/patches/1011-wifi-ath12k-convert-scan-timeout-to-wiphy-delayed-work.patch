@@ -1,4 +1,4 @@
-From: Runyu Xiao <runyu.xiao@xxxxxxxxxx>
+From: Runyu Xiao <runyu.xiao@seu.edu.cn>
 Subject: [PATCH v4 ath-current] wifi: ath12k: convert scan timeout to wiphy
  delayed work
 
@@ -23,9 +23,9 @@ racing with completion does not abort a scan whose completion has already
 queued cleanup.
 
 Fixes: b8c67509b91ec ("wifi: ath12k: switch to using wiphy_lock() and remove ar->conf_mutex")
-Suggested-by: Johannes Berg <johannes@xxxxxxxxxxxxxxxx>
-Cc: stable@xxxxxxxxxxxxxxx
-Signed-off-by: Runyu Xiao <runyu.xiao@xxxxxxxxxx>
+Suggested-by: Johannes Berg <johannes@sipsolutions.net>
+Cc: stable@vger.kernel.org
+Signed-off-by: Runyu Xiao <runyu.xiao@seu.edu.cn>
 ---
 --- a/drivers/net/wireless/ath/ath12k/core.c
 +++ b/drivers/net/wireless/ath/ath12k/core.c

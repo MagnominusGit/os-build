@@ -1,3 +1,9 @@
+From: Teguh Sobirin <teguh@sobir.in>
+Subject: [PATCH] drm/panel: add the Retroid Pocket Nova panel
+
+Teguh Sobirin's driver via ROCKNIX `0105`. Jacob Pyke posted it upstream with
+Teguh as author: <20261025133741.100490-3-jacob@pyk.ee>.
+---
 diff --git a/drivers/gpu/drm/panel/Kconfig b/drivers/gpu/drm/panel/Kconfig
 index b8edc704a..57a0c1b73 100644
 --- a/drivers/gpu/drm/panel/Kconfig

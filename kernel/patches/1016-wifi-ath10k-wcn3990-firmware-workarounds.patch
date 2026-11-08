@@ -1,10 +1,13 @@
-From: Noxwell <beebono@gmail.com>
-Date: Sat, 3 Oct 2026 12:00:00 -0500
+From: Malte Schababerle <m.schababerle@gmail.com>
+Date: Sun, 22 Mar 2026 13:48:21 +0100
 Subject: [PATCH] wifi: ath10k: WCN3990 firmware workarounds for WLAN.HL.3.x
 
 Backport of Malte Schababerle's "[PATCH 0/2] ath10k: WCN3990 firmware
 workarounds for WLAN.HL.3.2" (linux-wireless, 2026-03-22, not yet merged):
 https://ratatoskr.run/linux-wireless/2026/03/15793732/t
+<20260322124822.230492-2-m.schababerle@gmail.com> and
+<20260322124822.230492-3-m.schababerle@gmail.com>, squashed and carried
+by Noxwell (ROCKNIX SM6115 `0078`).
 
 - skip quiet mode for WCN3990: the firmware advertises
   WMI_SERVICE_THERM_THROT but crashes on the quiet mode command sent from

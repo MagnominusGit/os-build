@@ -1,4 +1,9 @@
+From: Joonhoe Kim <26rote@gmail.com>
 Subject: [PATCH] power: supply: qcom_battmgr: allow setting the USB input current limit
+
+The same change as Joonhoe Kim's posting
+<20261007123939.1679-1-26rote@gmail.com>, carried by ROCKNIX SM4450 `0051`.
+This copy also caches the new limit and does not reject negative values.
 ---
 diff --git a/drivers/power/supply/qcom_battmgr.c b/drivers/power/supply/qcom_battmgr.c
 index 0552c5e43..7264f3758 100644

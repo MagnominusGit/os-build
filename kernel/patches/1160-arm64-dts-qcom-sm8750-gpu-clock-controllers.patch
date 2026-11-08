@@ -1,12 +1,15 @@
 From cff35555a24bb9be7558c918fc505797eec4e240 Mon Sep 17 00:00:00 2001
-From: ROCKNIX <rocknix@rocknix.org>
-Date: Thu, 9 Jul 2026 00:40:08 +0100
-Subject: [PATCH] arm64: dts: qcom: sm8750: add gpucc/gxclkctl/adreno-smmu
- nodes
+From: Konrad Dybcio <konrad.dybcio@oss.qualcomm.com>
+Date: Thu, 05 Mar 2026 16:10:10 +0530
+Subject: [PATCH v5 3/3] arm64: dts: qcom: sm8750: Add GPU clock & IOMMU nodes
 
-7.1 upstreamed the GPU/clk drivers but not the SM8750 DTS wiring.
-Carry only the dtsi provider nodes + clock-binding includes (the rest
-of the old 0000_to_0025 enablement is now upstream).
+Posted as <20260305-gpucc_sm8750_v2-v5-3-78292b40b053@oss.qualcomm.com>;
+ROCKNIX SM8750 `0033` carries it byte-identical under the ROCKNIX name.
+
+Reviewed-by: Abel Vesa <abel.vesa@oss.qualcomm.com>
+Signed-off-by: Konrad Dybcio <konrad.dybcio@oss.qualcomm.com>
+Co-developed-by: Taniya Das <taniya.das@oss.qualcomm.com>
+Signed-off-by: Taniya Das <taniya.das@oss.qualcomm.com>
 ---
  arch/arm64/boot/dts/qcom/sm8750.dtsi | 68 ++++++++++++++++++++++++++++
  1 file changed, 68 insertions(+)

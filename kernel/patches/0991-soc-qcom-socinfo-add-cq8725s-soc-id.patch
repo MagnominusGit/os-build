@@ -1,4 +1,5 @@
-soc: qcom: add the CQ8725S SoC-ID (dt-bindings + socinfo)
+From: Teguh Sobirin <teguh@sobir.in>
+Subject: [PATCH] soc: qcom: add the CQ8725S SoC-ID (dt-bindings + socinfo)
 
 Squash of ROCKNIX SM8750 0026 (dt-bindings/arm/qcom,ids.h) and 0027
 (drivers/soc/qcom/socinfo.c): the CQ8725S is the gaming SKU of the SM8750
