@@ -1,0 +1,25 @@
+From: sunshineinabox <aqemail@gmail.com>
+Subject: [PATCH] wlserver: close the KMS device under the wlserver lock
+
+diff --git a/src/wlserver.cpp b/src/wlserver.cpp
+--- a/src/wlserver.cpp
++++ b/src/wlserver.cpp
+@@ -2040,12 +2040,18 @@ int wlsession_open_kms( const char *device_name ) {
+
+ void wlsession_close_kms()
+ {
++	// The DRM backend is destroyed on the steamcompmgr thread while
++	// wlserver_run() still dispatches libseat. The lock keeps that dispatch
++	// from reading this close's reply, which libseat takes as a protocol
++	// error and wlroots answers by destroying the session.
++	wlserver_lock();
+ 	if ( wlserver.wlr.device )
+ 	{
+ 		wl_list_remove( &wlserver.wlr.device_change_listener.link );
+ 	}
+ 	wlr_session_close_file( wlserver.wlr.session, wlserver.wlr.device );
+ 	wlserver.wlr.device = nullptr;
++	wlserver_unlock( false );
+ }
+
+ #endif

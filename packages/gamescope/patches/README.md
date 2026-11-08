@@ -647,6 +647,21 @@ synthetic press -> top of the panel: stock 55.0 ms, `0054` 42.9, `0055` light ga
 6 ms spike every second 23.6, 30 fps cap 24.6 (stock 113, `0054` 84), every frame shown in each; 10 ms
 frames stay unpaced (41.5); 17 ms frames 56.1 fps and 31 ms frames under the cap 30.5 fps, as without it.
 
+`0056` — **the KMS device is closed under the wlserver lock** (ours, 2026-11-04). On shutdown
+`steamcompmgr_exit()` destroys the DRM backend on the `gamescope-xwm` thread, and `finish_drm()`
+closes card0 through libseat from there while `gamescope-wl` still dispatches the same libseat
+connection. libseat is not thread-safe. When the dispatch read first, it found seatd's
+`DEVICE_CLOSED` reply where it expects only a background event (`Unexpected response: expected
+background event, got opcode 32772`), failed with `Bad message`, and wlroots destroyed the session
+from its event loop. gamescope's `session_active` listener was still attached, so
+`wlr_session_destroy` asserted: SIGABRT on a `systemctl stop retroforge-session`. The event loop
+dispatches with the wlserver lock held, so the close now takes it too. HW 2026-11-04, MANGMI Air X,
+stop/start cycles 25 s after the session came up: stock aborted on 7 of 32 stops, with the patch on
+none of 20. The Air X journal of the 2026-11-07 image without it has the same assert on 23 of 53
+stops. mangoapp's own abort on a stop (`X connection to :0 broken`, then `terminate called without
+an active exception`) is a different race and happens with or without this patch. Not fixed
+upstream as of master 89b9e6e.
+
 Drop the patch files here with those exact names (or rename and update `source.pin`'s
 `patches:` line). **Until a declared patch is present, `make overlay` / `make base` fail fast**
 with a clear "missing patch" message from `build-overlay.sh`.
