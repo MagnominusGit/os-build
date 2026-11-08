@@ -1,0 +1,24 @@
+{
+  "notes": [
+    "hakuX (Xbox): the standalone hakux of hakuX-lr, RetroForge's build (the retroforge-standalone branch: linux-v0.3.0's front end on today's core). One aarch64 executable linked against the image's libSDL3.so.0; it loads the Vulkan loader (our Turnip) at run time. HLE: no BIOS, MCPX ROM or HDD image from the player.",
+    "One build for every board: FEX's JIT picks LSE or LL/SC atomics, FlagM and RCPC per CPU, and the static code is plain ARMv8.0 with outline atomics. The SM6115's Cortex-A73/A53 run it as they are (hakuX-lr's FEX tests passed under qemu -cpu cortex-a53 on 2026-11-07, FEX reporting no atomics).",
+    "args: retroforge-launch puts options.json's arguments first; hakux tells its two operands from options (an option is name=value or uncap/relaunch/dash). The data folder ~/.local/share/hakux holds hdd/ (the emulated hard disk; only Partition1, the E: drive with the game saves, is linked to ~/saves/xbox by retroforge-home.conf: C:, the X/Y/Z caches and the core's .overwrite copies stay there), cache/ (shaders and pipelines) and hakux.log (the core's log, ~17 lines a second in a game, kept out of the session's journal; the previous run's is hakux.log.1). states= keeps the quick savestate in ~/states/xbox/<disc name>/quick.hxs.",
+    "Discs: XISO, full .iso dumps (XGD1-3) and DVD .chd; not CD CHDs or CHDs with a parent.",
+    "gui_args: the Xbox dashboard from the emulated hard disk (C:\\xboxdash.xbe) when the player installed it; otherwise hakux logs that it isn't installed and exits at once.",
+    "gamepad_profile guide-hotkeys.yaml: hold Guide for L1 load state, R1 save state, Start quit -- F5, Shift+F5 and Ctrl+Q, hakux's keys. Every gamepad is player 1 (the raw device is silent while InputPlumber grabs it); SDL's own mapping of InputPlumber's pad is used, and Guide reaches hakux as nothing (the Duke has none).",
+    "Exit: SIGTERM (OGUI's Exit) stops the core and syncs the hard disk before the process ends. A title's relaunch (another of its XBEs) and a state load run hakux again in the same process (execv), so the launcher keeps waiting on the same PID."
+  ],
+  "format": "binary",
+  "binary": "current",
+  "args": [
+    "{rom}",
+    "/home/player/.local/share/hakux",
+    "states=/home/player/states/xbox"
+  ],
+  "gui_args": [
+    "none",
+    "/home/player/.local/share/hakux",
+    "dash"
+  ],
+  "gamepad_profile": "guide-hotkeys.yaml"
+}

@@ -34,7 +34,7 @@ const SYSTEMS := {
 	"md": {"name": "Mega Drive", "exts": ["md", "gen", "bin", "zip"]},
 	"segacd": {"name": "Mega CD", "exts": ["chd", "cue"]},
 	"dc": {"name": "Dreamcast", "exts": ["chd", "gdi", "cdi", "cue"]},
-	"xbox": {"name": "Xbox", "exts": ["iso", "xiso"]},
+	"xbox": {"name": "Xbox", "exts": ["iso", "xiso", "chd"]},
 	"ports": {"name": "Ports", "exts": ["sh"]},
 }
 

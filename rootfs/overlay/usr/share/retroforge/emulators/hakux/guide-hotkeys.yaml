@@ -1,16 +1,16 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/device_profile_v1.json
 #
-# Guide-modifier hotkeys for xemu (Xbox), after the Snes9x testbed (snes9x/guide-hotkeys.yaml has
+# Guide-modifier hotkeys for hakuX (Xbox), after the Snes9x testbed (snes9x/guide-hotkeys.yaml has
 # the history). retroforge-launch declares this profile to OpenGamepadUI when the definition names
 # it (emulator.json "gamepad_profile"), and OGUI loads it whenever the game has focus (its own
 # focus profile otherwise; OGUI patch 0024).
 #
-# Hold Guide and the layer below overrides the base mappings: L1 loads the snapshot, R1 saves it,
-# Start quits. No R2: xemu has no fast-forward. Released, everything is the plain pad again.
-# xemu's keys are fixed (not bindable), so the layer sends them as they are: F5 loads the snapshot
-# named in general.snapshots.shortcuts.f5 (the seeded xemu.toml), Shift+F5 saves it, Ctrl+Q is
-# ActionShutdown (ui/xui/main.cc, ui/xui/menubar.cc, xemu v0.8.136). A two-key row relies on
-# the modifier going out first (list order), as xemu checks it when the key arrives.
+# Hold Guide and the layer below overrides the base mappings: L1 loads the quick state, R1 saves
+# it, Start quits. No R2: hakux has no fast-forward. Released, everything is the plain pad again.
+# hakux's keys are fixed (native/app/linux_main.c, hakuX-lr retroforge-standalone), so the layer
+# sends them as they are: F5 loads the game's quick state (states=, ~/states/xbox/<disc>/quick.hxs),
+# Shift+F5 saves it, Ctrl+Q leaves (the core stops and the hard disk is synced first). A two-key
+# row relies on the modifier going out first (list order), as hakux checks it when the key arrives.
 #
 # GUIDE -> layer guide, with dbus ui_guide as its on_deactivation (only_when_unused). OGUI has no
 # intercept mode any more (patch 0024), so this profile is the only way it learns Guide was pressed
@@ -30,7 +30,7 @@
 # harmless (an idle keyboard target).
 version: 1
 kind: DeviceProfile
-name: RetroForge Guide hotkeys (xemu)
+name: RetroForge Guide hotkeys (hakuX)
 description: Hold Guide for emulator hotkeys; plain pad otherwise
 target_devices:
   - xbox-elite
@@ -53,14 +53,14 @@ mapping:
 layers:
   - name: guide
     mapping:
-      - name: Guide+L1 -> F5 (load the snapshot bound to F5)
+      - name: Guide+L1 -> F5 (load the quick state)
         source_event:
           gamepad:
             button: LeftBumper
         target_events:
           - keyboard: KeyF5
 
-      - name: Guide+R1 -> Shift+F5 (save the snapshot bound to F5)
+      - name: Guide+R1 -> Shift+F5 (save the quick state)
         source_event:
           gamepad:
             button: RightBumper
@@ -68,7 +68,7 @@ layers:
           - keyboard: KeyLeftShift
           - keyboard: KeyF5
 
-      - name: Guide+Start -> Ctrl+Q (xemu's Exit; the process ends)
+      - name: Guide+Start -> Ctrl+Q (hakux leaves; the process ends)
         source_event:
           gamepad:
             button: Start

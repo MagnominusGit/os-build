@@ -1,0 +1,68 @@
+{
+  "options": [
+    {
+      "id": "scale",
+      "label": "Render resolution",
+      "description": "How many times the console's own resolution the game is drawn at. Higher is sharper and costs GPU time; 1x suits the smaller boards.",
+      "choices": [
+        {"value": "1", "label": "1x (native)", "set": [{"args": ["scale=1"]}]},
+        {"value": "2", "label": "2x", "set": [{"args": ["scale=2"]}]},
+        {"value": "3", "label": "3x", "set": [{"args": ["scale=3"]}]},
+        {"value": "4", "label": "4x", "set": [{"args": ["scale=4"]}]}
+      ]
+    },
+    {
+      "id": "video",
+      "label": "Console video mode",
+      "description": "The console's own video settings, as a game reads them: widescreen games draw 16:9 only when the console is set to it, and some offer 480p.",
+      "choices": [
+        {"value": "4:3", "label": "Standard (4:3)", "set": [{"args": ["video=0"]}]},
+        {"value": "16:9", "label": "Widescreen (16:9)", "set": [{"args": ["video=10000"]}]},
+        {"value": "16:9-480p", "label": "Widescreen, 480p", "set": [{"args": ["video=90000"]}]}
+      ]
+    },
+    {
+      "id": "aspect",
+      "label": "Aspect ratio",
+      "description": "The picture's shape on screen. Auto follows the game (16:9 when the console is set to widescreen).",
+      "choices": [
+        {"value": "auto", "label": "Auto", "set": [{"args": ["aspect=auto"]}]},
+        {"value": "4:3", "label": "4:3", "set": [{"args": ["aspect=4:3"]}]},
+        {"value": "16:9", "label": "16:9", "set": [{"args": ["aspect=16:9"]}]},
+        {"value": "stretch", "label": "Stretch", "set": [{"args": ["aspect=stretch"]}]}
+      ]
+    },
+    {
+      "id": "upscale",
+      "label": "Upscaling filter",
+      "description": "How a picture smaller than the screen is scaled up. Snapdragon GSR is sharper and costs a little GPU time.",
+      "choices": [
+        {"value": "bilinear", "label": "Bilinear", "set": [{"args": ["upscale=bilinear"]}]},
+        {"value": "sgsr", "label": "Snapdragon GSR", "set": [{"args": ["upscale=sgsr"]}]}
+      ]
+    },
+    {
+      "id": "fxaa",
+      "label": "FXAA",
+      "description": "Smooths jagged edges over each frame.",
+      "choices": [
+        {"value": "off", "label": "Off", "set": [{"args": ["fxaa=0"]}]},
+        {"value": "on", "label": "On", "set": [{"args": ["fxaa=1"]}]}
+      ]
+    },
+    {
+      "id": "asyncpipe",
+      "label": "Shader compilation",
+      "description": "In the background, a new effect can be missing for a moment instead of the game pausing while it compiles.",
+      "choices": [
+        {"value": "background", "label": "In the background", "set": [{"args": ["asyncpipe=1"]}]},
+        {"value": "wait", "label": "Wait for each shader", "set": [{"args": ["asyncpipe=0"]}]}
+      ]
+    }
+  ],
+  "notes": [
+    "Every option is a hakux argument (native/core/options.h and native/app/linux_main.c, hakuX-lr retroforge-standalone): no settings file, so the weekly key-drift check has nothing to look for (no .github/emu-sources.json entry).",
+    "video= is the console's XC_VIDEO_FLAGS word (hex): 0x10000 widescreen, 0x80000 480p (native/kernel/kernel.h NC_VIDEO_*). Unchosen, the core's default applies (render scale 1x, asynchronous shaders on, video flags the core's).",
+    "Not offered: 720p and 1080i (more GPU than the small boards have) and the console's language and network (the core's defaults: English, no cable)."
+  ]
+}

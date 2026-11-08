@@ -244,22 +244,22 @@
         "url": "https://github.com/snes9xgit/snes9x/blob/master/LICENSE"
       }
     },
-    "xemu": {
-      "name": "xemu",
-      "author": "Matt Borgerson and the xemu team",
+    "hakux": {
+      "name": "hakuX",
+      "author": "rfandango (hakuX); the PortareOS team (hakuX-lr, Linux); standalone build by RetroForge",
       "systems": [
         "xbox"
       ],
-      "github": "xemu-project/xemu",
-      "tag": "v0.8.136",
-      "tag_pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$",
-      "asset": "^xemu-[0-9.]+-aarch64\\.AppImage$",
-      "sha256": "8d2598bab0680ddd36c2d15ecccb70523e29adb852cd75e35bc5943dc0eb4816",
-      "size": 15542792,
-      "homepage": "https://xemu.app/",
+      "github": "sunshineinabox/hakux",
+      "tag": "linux-v0.22.0-rf.1",
+      "tag_pattern": "^linux-v[0-9]+\\.[0-9]+\\.[0-9]+-rf\\.[0-9]+$",
+      "asset": "^hakux-[0-9][0-9.]*-rf\\.[0-9]+-standalone-aarch64$",
+      "sha256": "f5d1695a23ff3231a0ffa53d893a43330681f01aac4db9c9b95cd5e1af0aba2f",
+      "size": 11256960,
+      "homepage": "https://github.com/rfandango/hakuX",
       "licence": {
-        "name": "GPL-2.0",
-        "url": "https://github.com/xemu-project/xemu/blob/master/LICENSE"
+        "name": "GPL-3.0-or-later",
+        "url": "https://github.com/rfandango/hakuX/blob/master/COPYING"
       }
     },
     "portmaster": {

@@ -19,6 +19,6 @@
     "md": {"ss": [1], "exts": ["md", "gen", "bin", "zip"]},
     "segacd": {"ss": [20], "exts": ["chd", "cue"]},
     "dc": {"ss": [23], "exts": ["chd", "gdi", "cdi", "cue"]},
-    "xbox": {"ss": [32], "exts": ["iso", "xiso"]}
+    "xbox": {"ss": [32], "exts": ["iso", "xiso", "chd"]}
   }
 }

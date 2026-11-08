@@ -13,7 +13,7 @@
 #
 # InputPlumber names face buttons by evdev code: North is BTN_X, the left button on an Xbox layout, and
 # West is BTN_Y, the top one. Guide holds the layer OGUI's own combos live in, and goes to OGUI's menu
-# over DBus when released alone (emulators/xemu/guide-hotkeys.yaml has why). TARGET_DEVICES is explicit
+# over DBus when released alone (emulators/hakux/guide-hotkeys.yaml has why). TARGET_DEVICES is explicit
 # for the keyboard target, as there.
 version: 1
 kind: DeviceProfile

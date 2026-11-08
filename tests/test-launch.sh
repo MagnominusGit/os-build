@@ -505,14 +505,19 @@ has cemu/controller0.xml '        <uuid>0_030010f85e040000000b000001000000</uuid
 lacks cemu/controller0.xml '<button>5</button>' "binding on Guide (gamepad button 5)"
 has cemu/settings.xml '        <api>3</api>' "audio on Cubeb (a missing key means DirectSound: no game starts)"
 has cemu/settings.xml '        <TVVolume>100</TVVolume>' "full TV volume (a missing key means 20%)"
-# xemu: SDL gamepad, its own mapping for our pad without guide; Back + Start is xemu's menu.
-python3 -c 'import json,sys; m=json.load(open(sys.argv[1]))["env"]["SDL_GAMECONTROLLERCONFIG"]
-f=m.split(","); sys.exit(not (f[0] == "030000005e040000000b000001000000" and "a:b0" in f and "b:b1" in f and "x:b2" in f
-  and "y:b3" in f and "back:b6" in f and "start:b7" in f and not any(x.startswith("guide:") for x in f)
-  and not any(x.startswith("crc:") for x in f)))' "$SEED_DIR/xemu/emulator.json" \
-  && ok "xemu: SDL mapping by position for 045e:0b00 v1, no guide (Guide never opens xemu's menu), no crc" \
-  || bad "xemu: SDL_GAMECONTROLLERCONFIG is not our pad's guide-less mapping"
-has xemu/xemu.toml 'show_welcome = false' "no first-boot window (it would hold the game)"
+# hakuX: the disc and its data folder (the hard disk links to ~/saves/xbox), the quick state in
+# ~/states/xbox; Open boots the dashboard (no disc). SDL's own mapping of our pad: no env.
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))
+sys.exit(not (d["args"] == ["{rom}", "/home/player/.local/share/hakux", "states=/home/player/states/xbox"]
+  and d["gui_args"] == ["none", "/home/player/.local/share/hakux", "dash"] and "env" not in d))' "$SEED_DIR/hakux/emulator.json" \
+  && ok "hakux: disc + data folder + states=, Open is the dashboard, no SDL mapping override" \
+  || bad "hakux: args, gui_args or env changed"
+HOMECONF="$ROOT/rootfs/overlay/usr/share/user-tmpfiles.d/retroforge-home.conf"
+grep -qxF 'L %h/.local/share/hakux/hdd/Partition1 - - - - %h/saves/xbox' "$HOMECONF" \
+  && grep -qxF 'd %h/.local/share/hakux/hdd 0755 - - -' "$HOMECONF" \
+  && ! grep -qE '^L %h/.local/share/hakux/hdd ' "$HOMECONF" \
+  && ok "hakux: only its E: drive (Partition1, the game saves) is ~/saves/xbox; caches stay in hdd/" \
+  || bad "hakux: retroforge-home.conf must make hdd/ and link only hdd/Partition1 -> ~/saves/xbox"
 # RPCS3: SDL handler defaults by position; the pad by its SDL name; PS button = Select + Start.
 has rpcs3/Default.yml '  Device: Xbox One Elite 2 Controller 1' "the pad by RPCS3's '<SDL name> <n>'"
 has rpcs3/Default.yml '    PS Button: Back&Start' "PS button (home menu) on Select + Start, not Guide"
@@ -607,7 +612,9 @@ has rpcs3/CurrentSettings.ini 'game_window_savestate_1=F1' "Guide+L1 reboots fro
 has rpcs3/CurrentSettings.ini 'game_window_savestate=F2' "Guide+R1 creates a savestate"
 has rpcs3/CurrentSettings.ini 'game_window_frame_limit=F3' "Guide+R2 toggles the frame limit"
 has rpcs3/CurrentSettings.ini 'game_window_stop=F4' "Guide+Start stops the game; --no-gui quits RPCS3"
-has xemu/xemu.toml "f5 = 'quick'" "Guide+L1/R1 (F5 / Shift+F5) load/save the 'quick' snapshot"
+# hakux's keys are fixed (linux_main.c): F5 loads the quick state, Shift+F5 saves it, Ctrl+Q leaves.
+has hakux/guide-hotkeys.yaml '          - keyboard: KeyF5' "Guide+L1/R1 send F5 (load) and Shift+F5 (save)"
+has hakux/guide-hotkeys.yaml '          - keyboard: KeyQ' "Guide+Start sends Ctrl+Q (hakux leaves)"
 # =================================================================================================
 CASE="first-run settings (SEED)"
 seeded="$HOME/.local/share/duckstation/settings.ini"
