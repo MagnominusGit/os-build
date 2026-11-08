@@ -81,7 +81,7 @@ different cadences:
 
 | workflow | trigger | secrets | ships to |
 |---|---|---|---|
-| `release-sdcard.yml` | `card/v*` tag, or manual | none — `GITHUB_TOKEN` only; `release-cards` for its reviewer | a GitHub Release carrying the card, checksums and provenance |
+| `release-sdcard.yml` | `card/v*` tag, or manual | none — `GITHUB_TOKEN` only; `release-cards` for its reviewer | a GitHub Release carrying the card and its checksums (the build's `manifest.lock` stays in the workflow artifact) |
 | `release-bundle.yml` | `ota/v*` tag, or manual | `RAUC_CERT_PEM`/`RAUC_KEY_PEM` and `R2_*` (repo-wide: no environments on this plan) | the Cloudflare R2 bucket in `vars.R2_BUCKET`, `<channel>/` prefix, served at `https://ota.retroforge.org` (see `docs/ota.md`) |
 
 **The tag namespaces are separate on purpose.** A bundle ships far more often than a card, so each

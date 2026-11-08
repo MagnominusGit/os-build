@@ -3,9 +3,9 @@
 #
 #   image/card-meta.sh <image-file>   ->  out/images/release-meta/{sha256sums.txt,provenance/}
 #
-# Its own script because more than one path needs the identical bytes: the release workflows attach
-# them to the GitHub Release next to the image, and every CI build uploads them as a workflow
-# artifact. Building them twice from two copies of the same loop is how the two quietly drift.
+# Its own script because more than one path needs the identical bytes: the card release attaches
+# sha256sums.txt to the GitHub Release next to the image, and every CI build uploads both as a
+# workflow artifact. The provenance copy is not a release asset (dropped 2026-11-08). Building them twice from two copies of the same loop is how the two quietly drift.
 #
 # WHY THE SUM IS OVER THE COMPRESSED FILE. That is what a downloader has in hand before they
 # decompress, so it is the only sum they can check without first writing 19G to disk.

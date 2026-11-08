@@ -128,7 +128,7 @@ jobs:
       artifact: sdcard
       version: ${{ needs.prep.outputs.version }}
 
-  # The publish half: the card, its checksums and its provenance, as one GitHub Release. Split from
+  # The publish half: the card and its checksums, as one GitHub Release. Split from
   # the build so the reviewer's approval lands on a finished image rather than before a six-hour
   # build, so `contents: write` is scoped to this job alone (the build, which runs far more
   # third-party code, stays read-only), and so a failed upload is "Re-run failed jobs" rather than a
@@ -249,12 +249,9 @@ jobs:
             echo 'sha256sum -c sha256sums.txt   # check the download before writing it'
             echo "gzip -dc $img | sudo dd of=/dev/sdX bs=4M conv=fsync status=progress"
             echo '```'
-            echo
-            echo '`manifest.lock` records every package this card was built from — third-party ones by'
-            echo 'sha256, ours by the digest of the sources they were compiled from in this run.'
           } > notes.md
           gh release create "$tag" \
             --target "$GITHUB_SHA" \
             --title "RetroForge $VERSION" \
             --notes-file notes.md \
-            "upload/$img" meta/sha256sums.txt meta/provenance/manifest.lock
+            "upload/$img" meta/sha256sums.txt
