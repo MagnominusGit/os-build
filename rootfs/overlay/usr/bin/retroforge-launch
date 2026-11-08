@@ -89,7 +89,8 @@
 # RETROFORGE_GAME_LOWPRIO=1, which turns on the implicit Vulkan layer VK_LAYER_RETROFORGE_game_priority
 # (packages/retroforge-gpu-priority): its queues run at LOW global priority, so OGUI's overlay,
 # Xwayland and mangoapp -- which never get the variable -- preempt it instead of waiting behind its
-# frames; and TU_AUTOTUNE_FLAGS=preempt_optimize: smaller tiles reach a preemption point sooner.
+# frames; and TU_AUTOTUNE_FLAGS=preempt_optimize,adapt: smaller tiles reach a preemption point sooner
+# (adapt again, since the variable replaces drirc's tu_autotune_flags).
 # Neither on the single-ring A650/A610 (SM8250, SM6115) nor an unknown board: they do not preempt,
 # so the layer would only be one more thing in the process; there kernel/patches/0270 keeps the UI
 # ahead. The SoC class comes from device-env (the session does not export it). A definition's "env"
@@ -194,7 +195,7 @@ def gpu_priority_env():
     """The emulator's GPU priority environment (header: GPU priority)."""
     if device_field("RETROFORGE_SOC_CLASS") not in PREEMPTING_SOCS:
         return {}
-    return {"RETROFORGE_GAME_LOWPRIO": "1", "TU_AUTOTUNE_FLAGS": "preempt_optimize"}
+    return {"RETROFORGE_GAME_LOWPRIO": "1", "TU_AUTOTUNE_FLAGS": "preempt_optimize,adapt"}
 
 
 def turnip_heap_mib():
