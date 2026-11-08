@@ -127,6 +127,9 @@ Both halves of the problem, fixed where they live:
   {only_when_unused: true, emit_events: [dbus: ui_guide]}}`; OGUI 0024 writes the same
   (GUIDE_TAP). The profile-load release split out as IP 0003 (own upstream PR). 8 new
   layers_test cases, cargo test 45+4 green (rust:1 container).
+  **HW-OK 2026-11-08 on the Pocket ACE** (dev card 0380aae6): lone Guide opens the menu, Guide
+  hotkeys in armGBA do not, Guide+A opens the quick bar every time, Guide on the store sign-in
+  window opens the menu. #771 updated to IP aabedf4; 0003 (4385b3a) is its own upstream PR.
 - **OGUI patch 0024** (packages/opengamepadui/patches/0024-*): no intercept mode (card_ui sets
   NONE). LaunchManager is the ONE profile writer: ogui_focus.json (every pad input -> its DBus UI
   action, right stick/paddles -> none) whenever OGUI has focus (setup, game state exited, OGUI
