@@ -613,6 +613,23 @@ pre-rotated, so it scans out with no copy wherever `g_uPreRotation` is set. A pa
 composite, or a frame drawn for another orientation, gets no splash. Applies with or without
 `0049`.
 
+`0054` — **the layer bounds the FIFO queue.** The layer hands the driver MAILBOX and implements
+FIFO itself through the gamescope_swapchain protocol, so the swapchain's images are all that limits
+how far a game runs ahead. With 3 images, a game faster than the panel keeps 2 frames waiting in
+gamescope and then blocks in `vkAcquireNextImageKHR` after it has already read its input.
+`vkQueuePresentKHR` on a FIFO swapchain now returns only once at most one of its frames is still
+waiting to be latched, so the game blocks before it reads its next input. `GAMESCOPE_WSI_FIFO_QUEUE`
+sets the limit (0-3, `off` restores the old queue), and `GAMESCOPE_WSI_FIFO_QUEUE_LIMITED` sets it
+while gamescope's frame limiter is active (also 1: with 0, a game needing 31 ms per frame under a
+30 fps cap ran at 20 fps). An untimed present gets an internal serial through `set_present_timing`,
+which gamescope reports once the frame is latched or discarded, for windows it does not show too.
+Presents using `VK_GOOGLE_display_timing` are left alone: that protocol reports no discarded frames,
+so a wait on it could stall. The wait starts with the swapchain's first report and gives up after
+100 ms. MAILBOX, and swapchains that fall back to Xwayland, are untouched.
+HW 2026-11-08, RG 55G1 (61 Hz), Vulkan probe through the layer, synthetic press -> top of the panel,
+`off` vs default: a light game 57.0 -> 42-44 ms at 59-61 fps either way; a 30 fps cap 112.7 ->
+84.4 ms; 17 ms frames 56.6 vs 56.3 fps; 31 ms frames under the cap 30.5 fps either way.
+
 Drop the patch files here with those exact names (or rename and update `source.pin`'s
 `patches:` line). **Until a declared patch is present, `make overlay` / `make base` fail fast**
 with a clear "missing patch" message from `build-overlay.sh`.

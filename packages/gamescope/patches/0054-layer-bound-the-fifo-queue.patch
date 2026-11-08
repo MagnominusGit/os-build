@@ -1,0 +1,260 @@
+From: sunshineinabox <aqemail@gmail.com>
+Subject: [PATCH] layer: bound the FIFO queue
+
+The layer gives the driver MAILBOX and implements FIFO through the
+gamescope_swapchain protocol, so a game's swapchain images are the only
+limit on how far it runs ahead. With 3 images, a game that renders
+faster than the panel keeps 2 frames waiting in gamescope and blocks in
+vkAcquireNextImageKHR after it has already sampled its input. On the RG
+55G1 (61 Hz) that was 32 ms from present to scanout, plus 15 ms blocked,
+and 113 ms from an input to the panel under a 30 fps cap.
+
+vkQueuePresentKHR on a FIFO swapchain now returns only once no more than
+one of its frames is still waiting to be latched, so the app blocks
+before it samples its next input instead of after. GAMESCOPE_WSI_FIFO_QUEUE
+sets the limit (0-3, or "off" for the old behaviour), and
+GAMESCOPE_WSI_FIFO_QUEUE_LIMITED sets it while gamescope's frame limiter
+is active. That one also defaults to 1: with 0, a game needing 31 ms per
+frame under a 30 fps cap ran at 20 fps instead of 30.
+
+A present the app does not time gets an internal serial through
+set_present_timing, which gamescope reports when the frame is latched or
+discarded, for windows it does not show as well. Presents using
+VK_GOOGLE_display_timing are left alone: that protocol reports no
+discarded frames. The wait starts with the swapchain's first report
+(gamescope reports nothing before it shows the window) and gives up
+after 100 ms.
+
+---
+--- a/layer/VkLayer_FROG_gamescope_wsi.cpp
++++ b/layer/VkLayer_FROG_gamescope_wsi.cpp
+@@ -11,6 +11,7 @@
+ #include "../src/layer_defines.h"
+ #include "../src/Utils/Defer.h"
+ 
++#include <array>
+ #include <atomic>
+ #include <cerrno>
+ #include <charconv>
+@@ -89,6 +90,37 @@
+     }
+   }
+ 
++  // Waits up to timeoutNs for events on queue and dispatches them. Another thread may dispatch
++  // the same queue, so callers re-check their condition after each return.
++  static int waylandWaitEvents(wl_display *display, wl_event_queue *queue, wl_event_queue *globalsQueue, uint64_t timeoutNs) {
++    if (wl_display_dispatch_queue_pending(display, globalsQueue) < 0 ||
++        wl_display_dispatch_queue_pending(display, queue) < 0)
++      return -1;
++    while (wl_display_prepare_read_queue(display, queue) < 0) {
++      if (errno != EAGAIN && errno != EINTR)
++        return -1;
++      if (wl_display_dispatch_queue_pending(display, queue) < 0)
++        return -1;
++    }
++    if (wl_display_flush(display) < 0 && errno != EAGAIN) {
++      wl_display_cancel_read(display);
++      return -1;
++    }
++    pollfd fd = { .fd = wl_display_get_fd(display), .events = POLLIN };
++    timespec timeout = { .tv_sec = time_t(timeoutNs / 1'000'000'000), .tv_nsec = long(timeoutNs % 1'000'000'000) };
++    int ret = ppoll(&fd, 1, &timeout, nullptr);
++    if (ret <= 0) {
++      wl_display_cancel_read(display);
++      return ret < 0 && errno != EINTR ? -1 : 0;
++    }
++    if (wl_display_read_events(display) < 0)
++      return -1;
++    if (wl_display_dispatch_queue_pending(display, globalsQueue) < 0 ||
++        wl_display_dispatch_queue_pending(display, queue) < 0)
++      return -1;
++    return 1;
++  }
++
+   // Unlink a layer-owned structure and restore the application's chain.
+   template<typename T>
+   class ChainRemoval {
+@@ -293,6 +325,32 @@
+     return s_minImageCount;
+   }
+ 
++  // How many FIFO frames a swapchain may have waiting in gamescope's queue before
++  // vkQueuePresentKHR holds the app until the oldest has been latched; the _LIMITED value applies
++  // while gamescope's frame limiter is active. 0 there would start each frame right after the
++  // previous one was latched, but a game needing most of the cap interval per frame then falls
++  // to the next lower rate (31 ms frames under a 30 fps cap ran at 20 fps). -1 ("off") removes
++  // the bound.
++  static constexpr int MaxFifoQueueLimit = 3;
++  static int parseFifoQueueLimit(const char *envName, int fallback) {
++    const char *str = std::getenv(envName);
++    if (!str || !*str)
++      return fallback;
++    int value = fallback;
++    if (str == "off"sv)
++      value = -1;
++    else if (auto parsed = parseEnv<int>(envName); parsed && *parsed >= 0)
++      value = std::min(*parsed, MaxFifoQueueLimit);
++    fprintf(stderr, "[Gamescope WSI] %s=%s: FIFO queue limit %d\n", envName, str, value);
++    return value;
++  }
++
++  static int getFifoQueueLimit(bool frameLimited) {
++    static const int s_limit = parseFifoQueueLimit("GAMESCOPE_WSI_FIFO_QUEUE", 1);
++    static const int s_limitedLimit = parseFifoQueueLimit("GAMESCOPE_WSI_FIFO_QUEUE_LIMITED", 1);
++    return frameLimited ? s_limitedLimit : s_limit;
++  }
++
+   static bool getEnsureMinImageCount() {
+     static bool s_ensureMinImageCount = []() -> bool {
+       if (auto ensure = parseEnv<bool>("GAMESCOPE_WSI_ENSURE_MIN_IMAGE_COUNT")) {
+@@ -722,6 +780,15 @@
+     std::unique_ptr<std::mutex> presentTimingMutex = std::make_unique<std::mutex>();
+     std::vector<VkPastPresentationTimingGOOGLE> pastPresentTimings;
+     uint64_t refreshCycle = 16'666'666;
++
++    // FIFO queue bound. The compositor reports every timed present, shown or discarded, so the
++    // highest serial reported says how far the queue has drained. recentSerials holds the serials
++    // of the last presents (0 for one that carried none).
++    bool timingEvents = false;
++    std::unique_ptr<std::atomic<uint64_t>> reportedSerial = std::make_unique<std::atomic<uint64_t>>(0);
++    std::array<uint64_t, MaxFifoQueueLimit + 1> recentSerials = {};
++    uint64_t presentCount = 0;
++    bool warnedQueueWait = false;
+   };
+   static vkroots::ObjectMap<VkSwapchainKHR, GamescopeSwapchainData> gamescopeSwapchains;
+   static constexpr gamescope_swapchain_listener s_swapchainListener = {
+@@ -777,6 +844,10 @@
+                          uint32_t queueEndHi, uint32_t queueEndLo, uint32_t dequeuedHi, uint32_t dequeuedLo,
+                          uint32_t pixelOutHi, uint32_t pixelOutLo) {
+       auto *swapchain = static_cast<GamescopeSwapchainData *>(data);
++      const uint64_t serial = (uint64_t(serialHi) << 32) | serialLo;
++      uint64_t reported = swapchain->reportedSerial->load(std::memory_order_relaxed);
++      while (reported < serial && !swapchain->reportedSerial->compare_exchange_weak(reported, serial, std::memory_order_release))
++        ;
+       std::lock_guard lock(*swapchain->presentTimingMutex);
+       swapchain->timingQueue.complete((uint64_t(serialHi) << 32) | serialLo,
+         (uint64_t(queueEndHi) << 32) | queueEndLo, (uint64_t(dequeuedHi) << 32) | dequeuedLo,
+@@ -1667,7 +1738,8 @@
+         return VK_ERROR_OUT_OF_HOST_MEMORY;
+       }
+       wl_proxy_set_queue(reinterpret_cast<wl_proxy *>(factory), eventQueue);
+-      gamescope_swapchain *gamescopeSwapchainObject = gamescope_swapchain_factory_v2_get_version(factory) >= 2
++      const bool timingEvents = gamescope_swapchain_factory_v2_get_version(factory) >= 2;
++      gamescope_swapchain *gamescopeSwapchainObject = timingEvents
+         ? gamescope_swapchain_factory_v2_create_swapchain_with_timing(factory, gamescopeSurface->surface)
+         : gamescope_swapchain_factory_v2_create_swapchain(factory, gamescopeSurface->surface);
+       wl_proxy_wrapper_destroy(factory);
+@@ -1697,6 +1769,7 @@
+           return VK_ERROR_OUT_OF_HOST_MEMORY;
+         }
+         gamescopeSwapchain->pastPresentTimings.reserve(MaxPastPresentationTimes);
++        gamescopeSwapchain->timingEvents = timingEvents;
+ 
+         gamescope_swapchain_add_listener(gamescopeSwapchainObject, &s_swapchainListener, reinterpret_cast<void*>(gamescopeSwapchain));
+       }
+@@ -1965,6 +2038,7 @@
+ 
+       std::vector<uint64_t> timingSerials(presentInfo.swapchainCount, 0);
+       std::vector<bool> timingArmed(presentInfo.swapchainCount, false);
++      std::vector<uint64_t> armedSerials(presentInfo.swapchainCount, 0);
+       for (uint32_t i = 0; i < presentInfo.swapchainCount; i++) {
+         auto swapchain = gamescopeSwapchains.find(presentInfo.pSwapchains[i]);
+         if (!swapchain)
+@@ -1986,6 +2060,7 @@
+             if (!serial)
+               serial = swapchain->timingQueue.nextSerial();
+             timingArmed[i] = true;
++            armedSerials[i] = serial;
+             gamescope_swapchain_set_present_timing(swapchain->object, serial >> 32, uint32_t(serial),
+               timing.targetTime >> 32, uint32_t(timing.targetTime), timing.flags);
+           }
+@@ -2067,6 +2142,34 @@
+         }
+       }
+ 
++      // FIFO queue bound (getFifoQueueLimit). A present the app times itself keeps its serial; an
++      // untimed one gets an internal serial so the compositor reports it as well. Apps on
++      // VK_GOOGLE_display_timing pace themselves and are left alone: that protocol reports no
++      // discarded frames, so a wait on it could stall.
++      std::vector<int> queueLimits(presentInfo.swapchainCount, -1);
++      std::vector<bool> internalArmed(presentInfo.swapchainCount, false);
++      for (uint32_t i = 0; i < presentInfo.swapchainCount; i++) {
++        auto gamescopeSwapchain = gamescopeSwapchains.find(presentInfo.pSwapchains[i]);
++        if (!gamescopeSwapchain || !gamescopeSwapchain->timingEvents ||
++            !(gamescopeSwapchain->isWayland || gamescopeSwapchain->isBypassingXWayland))
++          continue;
++        VkPresentModeKHR presentMode = oOriginalPresentModeInfo ? oOriginalPresentModeInfo->pPresentModes[i] : gamescopeSwapchain->presentMode;
++        if (forceFifo && !frameLimiterAware)
++          presentMode = VK_PRESENT_MODE_FIFO_KHR;
++        const bool fifo = presentMode == VK_PRESENT_MODE_FIFO_KHR || presentMode == VK_PRESENT_MODE_FIFO_RELAXED_KHR;
++        const int limit = fifo ? getFifoQueueLimit(forceFifo) : -1;
++        if (limit < 0 || (pPresentTimes && pPresentTimes->pTimes))
++          continue;
++        if (!armedSerials[i]) {
++          std::lock_guard lock(*gamescopeSwapchain->presentTimingMutex);
++          armedSerials[i] = gamescopeSwapchain->timingQueue.nextSerial();
++          gamescope_swapchain_set_present_timing(gamescopeSwapchain->object, armedSerials[i] >> 32, uint32_t(armedSerials[i]), 0, 0, 0);
++          internalArmed[i] = true;
++        }
++        if (armedSerials[i])
++          queueLimits[i] = limit;
++      }
++
+       std::vector<VkResult> driverResults(presentInfo.swapchainCount, VK_SUCCESS);
+       if (!presentInfo.pResults)
+         presentInfo.pResults = driverResults.data();
+@@ -2085,7 +2188,7 @@
+         };
+ 
+         if (auto gamescopeSwapchain = gamescopeSwapchains.find(swapchain)) {
+-          if (timingArmed[i] && presentInfo.pResults[i] < VK_SUCCESS)
++          if ((timingArmed[i] || internalArmed[i]) && presentInfo.pResults[i] < VK_SUCCESS)
+             gamescope_swapchain_set_present_timing(gamescopeSwapchain->object, 0, 0, 0, 0, 0);
+           if (timingSerials[i] && presentInfo.pResults[i] < VK_SUCCESS) {
+             std::lock_guard lock(*gamescopeSwapchain->presentTimingMutex);
+@@ -2132,9 +2235,45 @@
+         }
+       }
+ 
++      // Hold the app until no more than the limit of its FIFO frames is still waiting to be latched.
++      for (uint32_t i = 0; i < presentInfo.swapchainCount; i++) {
++        auto gamescopeSwapchain = gamescopeSwapchains.find(presentInfo.pSwapchains[i]);
++        if (!gamescopeSwapchain)
++          continue;
++        const bool bounded = queueLimits[i] >= 0 && presentInfo.pResults[i] >= VK_SUCCESS;
++        auto &recent = gamescopeSwapchain->recentSerials;
++        recent[gamescopeSwapchain->presentCount++ % recent.size()] = bounded ? armedSerials[i] : 0;
++        if (!bounded || gamescopeSwapchain->presentCount <= uint64_t(queueLimits[i]))
++          continue;
++        if (const uint64_t serial = recent[(gamescopeSwapchain->presentCount - 1 - queueLimits[i]) % recent.size()])
++          WaitForFifoQueue(*gamescopeSwapchain, serial);
++      }
++
+       return result;
+     }
+ 
++    // Waits until the compositor has reported serial, shown or discarded. Nothing is reported
++    // before gamescope first shows the window, so the wait starts with the first report. The bound
++    // only trims latency, so a compositor that stops reporting costs at most MaxWait per present
++    // rather than a hang.
++    static void WaitForFifoQueue(GamescopeSwapchainData &swapchain, uint64_t serial) {
++      if (!swapchain.reportedSerial->load(std::memory_order_acquire))
++        return;
++      constexpr uint64_t MaxWait = 100'000'000;
++      const uint64_t deadline = getTimeMonotonic() + MaxWait;
++      while (swapchain.reportedSerial->load(std::memory_order_acquire) < serial && !*swapchain.retired) {
++        const uint64_t now = getTimeMonotonic();
++        if (now >= deadline) {
++          if (!std::exchange(swapchain.warnedQueueWait, true))
++            fprintf(stderr, "[Gamescope WSI] FIFO queue: no report for present serial %lu in 100 ms, presenting on.\n", serial);
++          return;
++        }
++        if (waylandWaitEvents(swapchain.display, swapchain.eventQueue, swapchain.globalsQueue,
++                              std::min<uint64_t>(deadline - now, 2'000'000)) < 0)
++          return;
++      }
++    }
++
+     static void SetHdrMetadataEXT(
+       const vkroots::VkDeviceDispatch & pDispatch,
+             VkDevice                   device,
