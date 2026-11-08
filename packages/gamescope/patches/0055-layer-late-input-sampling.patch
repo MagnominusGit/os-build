@@ -1,0 +1,237 @@
+From: sunshineinabox <aqemail@gmail.com>
+Subject: [PATCH] layer: late input sampling
+
+A game that reads its input right after vkQueuePresentKHR returns still
+reads it a whole frame before it needs to with the FIFO queue bounded:
+a light game renders in a few milliseconds and then waits for the next
+latch. With GAMESCOPE_WSI_LATE_SAMPLING=1 the layer holds such a game
+until it has just enough time left to make the next latch.
+
+gamescope's present_timing reports carry, for each frame, when its
+rendering finished and the vblank that shows it. The report itself, and
+its latch time, come when gamescope takes the commit as done, which for
+FIFO can be most of a refresh before the latch that shows it, so the
+pacing works from the vblank. The layer keeps the time from releasing
+the app to the frame being ready over the last 128 frames. While the
+slowest of them, a margin (GAMESCOPE_WSI_LATE_SAMPLING_MARGIN, default
+2000 us) and gamescope's latch lead (3 ms) fit in one frame interval, a
+present waits for its own report and then sleeps until the next frame's
+vblank minus all three. When they no longer fit, presents keep the FIFO
+queue bound, so a heavy game loses no frames. A paced frame shown more
+than 1.5 intervals after the previous one missed: the margin grows
+1.5 ms and decays 1 us per frame on time, and 4 misses within 10 s stop
+the pacing for 10 s.
+
+Needs 0054.
+
+---
+--- a/layer/VkLayer_FROG_gamescope_wsi.cpp
++++ b/layer/VkLayer_FROG_gamescope_wsi.cpp
+@@ -351,6 +351,26 @@
+     return frameLimited ? s_limitedLimit : s_limit;
+   }
+ 
++  // Late input sampling. A game that reads its input right after vkQueuePresentKHR returns
++  // reads it as late as it can still make the next latch: the layer waits for the frame to be
++  // latched, then holds the app until the next latch minus the app's slowest recent frame (from
++  // release to ready, over ~2 s) minus a margin. It engages only while that fits in one frame
++  // interval, so a heavy game keeps the FIFO queue bound instead and loses no frames.
++  static bool getLateSampling() {
++    static const bool s_enabled = []() -> bool {
++      const bool enabled = parseEnv<bool>("GAMESCOPE_WSI_LATE_SAMPLING").value_or(false);
++      if (enabled)
++        fprintf(stderr, "[Gamescope WSI] Late input sampling on.\n");
++      return enabled;
++    }();
++    return s_enabled;
++  }
++
++  static uint64_t getLateSamplingMargin() {
++    static const uint64_t s_margin = uint64_t(std::clamp(parseEnv<int>("GAMESCOPE_WSI_LATE_SAMPLING_MARGIN").value_or(2000), 500, 8000)) * 1000;
++    return s_margin;
++  }
++
+   static bool getEnsureMinImageCount() {
+     static bool s_ensureMinImageCount = []() -> bool {
+       if (auto ensure = parseEnv<bool>("GAMESCOPE_WSI_ENSURE_MIN_IMAGE_COUNT")) {
+@@ -789,6 +809,29 @@
+     std::array<uint64_t, MaxFifoQueueLimit + 1> recentSerials = {};
+     uint64_t presentCount = 0;
+     bool warnedQueueWait = false;
++
++    // Late input sampling (getLateSampling). frameReports holds, by serial, when each frame was
++    // ready and the vblank that shows it (the listener writes it under presentTimingMutex; ready 0
++    // = discarded). gamescope reports a frame, and stamps its latch time, when it takes the commit
++    // as done: for FIFO that can be most of a refresh before the latch that puts it on screen.
++    // pending holds the presents whose report is still to come: the time the app was released
++    // before it made the frame, and whether the frame was paced. costs is the window of
++    // release -> ready times.
++    struct FrameReport { uint64_t serial = 0, ready = 0, shown = 0; };
++    std::array<FrameReport, 16> frameReports = {};
++    struct PendingFrame { uint64_t serial = 0, released = 0; bool paced = false; };
++    std::array<PendingFrame, 8> pendingFrames = {};
++    uint32_t pendingCount = 0;
++    std::array<uint64_t, 128> costs = {};
++    uint32_t costCount = 0;
++    uint64_t releasedAt = 0;
++    uint64_t lastShown = 0;
++    uint64_t marginFloor = 0;
++    uint64_t missWindowStart = 0;
++    uint32_t missesInWindow = 0;
++    uint64_t pausedUntil = 0;
++    uint64_t lastLateLog = 0;
++    bool latePaced = false;
+   };
+   static vkroots::ObjectMap<VkSwapchainKHR, GamescopeSwapchainData> gamescopeSwapchains;
+   static constexpr gamescope_swapchain_listener s_swapchainListener = {
+@@ -845,13 +888,19 @@
+                          uint32_t pixelOutHi, uint32_t pixelOutLo) {
+       auto *swapchain = static_cast<GamescopeSwapchainData *>(data);
+       const uint64_t serial = (uint64_t(serialHi) << 32) | serialLo;
+-      uint64_t reported = swapchain->reportedSerial->load(std::memory_order_relaxed);
+-      while (reported < serial && !swapchain->reportedSerial->compare_exchange_weak(reported, serial, std::memory_order_release))
+-        ;
+       std::lock_guard lock(*swapchain->presentTimingMutex);
++      swapchain->frameReports[serial % swapchain->frameReports.size()] = {
++        .serial = serial,
++        .ready  = (uint64_t(queueEndHi) << 32) | queueEndLo,
++        .shown  = (uint64_t(pixelOutHi) << 32) | pixelOutLo,
++      };
+       swapchain->timingQueue.complete((uint64_t(serialHi) << 32) | serialLo,
+         (uint64_t(queueEndHi) << 32) | queueEndLo, (uint64_t(dequeuedHi) << 32) | dequeuedLo,
+         (uint64_t(pixelOutHi) << 32) | pixelOutLo);
++      // Published last, so a waiter that sees the serial also sees its report.
++      uint64_t reported = swapchain->reportedSerial->load(std::memory_order_relaxed);
++      while (reported < serial && !swapchain->reportedSerial->compare_exchange_weak(reported, serial, std::memory_order_release))
++        ;
+     },
+     .timing_properties = [](void *data, gamescope_swapchain *, uint32_t durationHi, uint32_t durationLo,
+                             uint32_t intervalHi, uint32_t intervalLo) {
+@@ -2157,7 +2206,10 @@
+         if (forceFifo && !frameLimiterAware)
+           presentMode = VK_PRESENT_MODE_FIFO_KHR;
+         const bool fifo = presentMode == VK_PRESENT_MODE_FIFO_KHR || presentMode == VK_PRESENT_MODE_FIFO_RELAXED_KHR;
+-        const int limit = fifo ? getFifoQueueLimit(forceFifo) : -1;
++        int limit = fifo ? getFifoQueueLimit(forceFifo) : -1;
++        // A paced frame waits for its own latch, which is where the pacing starts from.
++        if (limit >= 0 && getLateSampling() && gamescopeSwapchain->latePaced)
++          limit = 0;
+         if (limit < 0 || (pPresentTimes && pPresentTimes->pTimes))
+           continue;
+         if (!armedSerials[i]) {
+@@ -2243,13 +2295,111 @@
+         const bool bounded = queueLimits[i] >= 0 && presentInfo.pResults[i] >= VK_SUCCESS;
+         auto &recent = gamescopeSwapchain->recentSerials;
+         recent[gamescopeSwapchain->presentCount++ % recent.size()] = bounded ? armedSerials[i] : 0;
+-        if (!bounded || gamescopeSwapchain->presentCount <= uint64_t(queueLimits[i]))
+-          continue;
+-        if (const uint64_t serial = recent[(gamescopeSwapchain->presentCount - 1 - queueLimits[i]) % recent.size()])
+-          WaitForFifoQueue(*gamescopeSwapchain, serial);
++        const bool late = bounded && getLateSampling();
++        if (late) {
++          auto &pending = gamescopeSwapchain->pendingFrames;
++          pending[gamescopeSwapchain->pendingCount++ % pending.size()] = {
++            .serial   = armedSerials[i],
++            .released = gamescopeSwapchain->releasedAt,
++            .paced    = gamescopeSwapchain->latePaced,
++          };
++        }
++        if (bounded && gamescopeSwapchain->presentCount > uint64_t(queueLimits[i])) {
++          if (const uint64_t serial = recent[(gamescopeSwapchain->presentCount - 1 - queueLimits[i]) % recent.size()])
++            WaitForFifoQueue(*gamescopeSwapchain, serial);
++        }
++        if (late)
++          SampleLate(*gamescopeSwapchain, armedSerials[i]);
++        else
++          gamescopeSwapchain->latePaced = false;
++        gamescopeSwapchain->releasedAt = getTimeMonotonic();
+       }
+ 
+       return result;
++    }
++
++    // Late input sampling (getLateSampling). Learns from the reports that have come in, then, if
++    // this frame was paced (it waited for its own report) and pacing still fits, holds the app
++    // until the next latch minus its slowest recent frame minus the margin. A paced frame shown
++    // more than 1.5 intervals after the one before missed: the margin grows 1.5 ms (decaying 1 us
++    // per frame on time), and 4 misses within 10 s stop pacing for 10 s.
++    static void SampleLate(GamescopeSwapchainData &swapchain, uint64_t serial) {
++      using Report = GamescopeSwapchainData::FrameReport;
++      // How far ahead of a vblank gamescope latches (its commit lead, measured 1.9-2.5 ms median).
++      constexpr uint64_t LatchLead = 3'000'000;
++      uint64_t period;
++      decltype(swapchain.frameReports) reports;
++      {
++        std::lock_guard lock(*swapchain.presentTimingMutex);
++        period = swapchain.refreshCycle;
++        reports = swapchain.frameReports;
++      }
++      auto findReport = [&](uint64_t s) -> const Report * {
++        const Report &report = reports[s % reports.size()];
++        return s && report.serial == s ? &report : nullptr;
++      };
++
++      const uint64_t now = getTimeMonotonic();
++      auto &pending = swapchain.pendingFrames;
++      const uint32_t first = swapchain.pendingCount > pending.size() ? swapchain.pendingCount - uint32_t(pending.size()) : 0;
++      for (uint32_t i = first; i < swapchain.pendingCount; i++) {
++        auto &frame = pending[i % pending.size()];
++        const Report *report = findReport(frame.serial);
++        if (!report)
++          continue;
++        if (report->ready && report->shown) {
++          if (frame.released && report->ready > frame.released)
++            swapchain.costs[swapchain.costCount++ % swapchain.costs.size()] = report->ready - frame.released;
++          if (swapchain.lastShown && report->shown > swapchain.lastShown) {
++            if (frame.paced && report->shown - swapchain.lastShown > period * 3 / 2) {
++              swapchain.marginFloor = std::min<uint64_t>(swapchain.marginFloor + 1'500'000, 6'000'000);
++              if (now - swapchain.missWindowStart > 10'000'000'000) {
++                swapchain.missWindowStart = now;
++                swapchain.missesInWindow = 0;
++              }
++              if (++swapchain.missesInWindow >= 4) {
++                swapchain.pausedUntil = now + 10'000'000'000;
++                swapchain.missesInWindow = 0;
++                fprintf(stderr, "[Gamescope WSI] Late input sampling: 4 missed latches in 10 s, pausing for 10 s.\n");
++              }
++            } else if (swapchain.marginFloor >= 1'000) {
++              swapchain.marginFloor -= 1'000;
++            }
++          }
++          swapchain.lastShown = report->shown;
++        }
++        frame.serial = 0;
++      }
++
++      const uint32_t samples = std::min<uint32_t>(swapchain.costCount, uint32_t(swapchain.costs.size()));
++      uint64_t worst = 0;
++      for (uint32_t i = 0; i < samples; i++)
++        worst = std::max(worst, swapchain.costs[i]);
++      const uint64_t margin = getLateSamplingMargin() + swapchain.marginFloor;
++      // Engage with half a millisecond to spare, keep going while it still fits at all.
++      const uint64_t need = worst + margin + LatchLead + (swapchain.latePaced ? 0 : 500'000);
++      const bool fits = samples >= 32 && now >= swapchain.pausedUntil && need < period;
++
++      if (swapchain.latePaced && fits) {
++        if (const Report *report = findReport(serial); report && report->shown) {
++          // The next frame is shown one interval later and has to be ready before gamescope
++          // latches it, LatchLead ahead of that vblank.
++          const uint64_t wake = report->shown + period - LatchLead - worst - margin;
++          // The report can come most of a refresh before its frame is shown, so the hold can be
++          // longer than one interval while that frame waits on screen.
++          if (wake > now && wake - now < 2 * period) {
++            timespec until = { .tv_sec = time_t(wake / 1'000'000'000), .tv_nsec = long(wake % 1'000'000'000) };
++            while (clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &until, nullptr) == EINTR)
++              ;
++          }
++        }
++      }
++      if (fits != swapchain.latePaced && now - swapchain.lastLateLog > 5'000'000'000) {
++        swapchain.lastLateLog = now;
++        fprintf(stderr, "[Gamescope WSI] Late input sampling %s: slowest frame %.1f ms, margin %.1f ms, interval %.1f ms.\n",
++          fits ? "on" : "off", worst / 1e6, margin / 1e6, period / 1e6);
++      }
++      swapchain.latePaced = fits;
+     }
+ 
+     // Waits until the compositor has reported serial, shown or discarded. Nothing is reported

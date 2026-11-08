@@ -630,6 +630,23 @@ HW 2026-11-08, RG 55G1 (61 Hz), Vulkan probe through the layer, synthetic press 
 `off` vs default: a light game 57.0 -> 42-44 ms at 59-61 fps either way; a 30 fps cap 112.7 ->
 84.4 ms; 17 ms frames 56.6 vs 56.3 fps; 31 ms frames under the cap 30.5 fps either way.
 
+`0055` — **late input sampling** (opt-in, `GAMESCOPE_WSI_LATE_SAMPLING=1`). With the queue bounded, a
+light game still reads its input right after the previous frame was taken and then waits most of a
+refresh for the next latch. The layer now holds such a game until it has just enough time left: it
+waits for its own frame's present_timing report, then sleeps until the next frame's vblank minus
+gamescope's latch lead (3 ms), the slowest release-to-ready time of the last 128 frames, and a margin
+(`GAMESCOPE_WSI_LATE_SAMPLING_MARGIN`, default 2000 us). It engages only while all of that fits in one
+frame interval, and otherwise keeps `0054`'s bound, so a heavy game loses no frames. A paced frame
+shown more than 1.5 intervals after the one before widens the margin by 1.5 ms (decaying 1 us per frame
+on time); 4 such misses in 10 s pause it for 10 s. The report arrives, and its latch time is stamped,
+when gamescope takes the commit as done, which for FIFO can be most of a refresh before the latch that
+shows it; its pixel-out time is the vblank, which is why the hold can run past one interval. Mesa's
+`vkWaitForPresentKHR` is not a latch clock here: once a game is held it returns when the game is
+released. HW 2026-11-08, RG 55G1, ground truth from `dpu_plane_set_scanout` + vblank timestamps,
+synthetic press -> top of the panel: stock 55.0 ms, `0054` 42.9, `0055` light game 15.4 (p90 22.4), with a
+6 ms spike every second 23.6, 30 fps cap 24.6 (stock 113, `0054` 84), every frame shown in each; 10 ms
+frames stay unpaced (41.5); 17 ms frames 56.1 fps and 31 ms frames under the cap 30.5 fps, as without it.
+
 Drop the patch files here with those exact names (or rename and update `source.pin`'s
 `patches:` line). **Until a declared patch is present, `make overlay` / `make base` fail fast**
 with a clear "missing patch" message from `build-overlay.sh`.
