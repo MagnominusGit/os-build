@@ -300,6 +300,35 @@
       ]
     },
     {
+      "id": "input_latency",
+      "label": "Input latency",
+      "description": "Low starts each frame as late as it can still make the screen, so the game reads the controller later and a press shows up sooner (about 25 ms sooner for a light game on a 60 Hz panel). It only acts with VSync on and the Vulkan renderer, and turns itself off while frames take most of a refresh, so a heavy game is unaffected. Normal is the standard timing.",
+      "choices": [
+        {
+          "value": "normal",
+          "label": "Normal",
+          "set": [
+            {
+              "env": {
+                "GAMESCOPE_WSI_LATE_SAMPLING": "0"
+              }
+            }
+          ]
+        },
+        {
+          "value": "low",
+          "label": "Low",
+          "set": [
+            {
+              "env": {
+                "GAMESCOPE_WSI_LATE_SAMPLING": "1"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "show_fps",
       "label": "Show FPS",
       "description": "Draw the frame rate on the picture.",
