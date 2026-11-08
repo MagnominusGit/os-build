@@ -1,0 +1,52 @@
+From: sunshineinabox <aqemail@gmail.com>
+Subject: [PATCH] clk: qcom: gcc-sm4450: switch GP clocks to clk_rcg2_gp_ops
+
+The GP clocks only listed 50/100/200 MHz, so clk-pwm could not run
+one at a PWM rate. Use the GP ops, which compute M/N/D for any rate,
+as for SM6115 (0140). The RG 55G1 drives its fan from GP2 on gpio30.
+
+Based on the equivalent sc7280 patch by Xilin Wu.
+Link: https://lore.kernel.org/linux-arm-msm/20260406-gcc-gpclk-sc7280-2b412227c5fa@radxa.com/
+---
+ drivers/clk/qcom/gcc-sm4450.c | 9 +++------
+ 1 file changed, 3 insertions(+), 6 deletions(-)
+
+--- a/drivers/clk/qcom/gcc-sm4450.c
++++ b/drivers/clk/qcom/gcc-sm4450.c
+@@ -428,9 +428,6 @@
+ };
+ 
+ static const struct freq_tbl ftbl_gcc_gp1_clk_src[] = {
+-	F(50000000, P_GCC_GPLL0_OUT_EVEN, 6, 0, 0),
+-	F(100000000, P_GCC_GPLL0_OUT_MAIN, 6, 0, 0),
+-	F(200000000, P_GCC_GPLL0_OUT_MAIN, 3, 0, 0),
+ 	{ }
+ };
+ 
+@@ -445,7 +442,7 @@
+ 		.parent_data = gcc_parent_data_1,
+ 		.num_parents = ARRAY_SIZE(gcc_parent_data_1),
+ 		.flags = CLK_SET_RATE_PARENT,
+-		.ops = &clk_rcg2_shared_ops,
++		.ops = &clk_rcg2_gp_ops,
+ 	},
+ };
+ 
+@@ -460,7 +457,7 @@
+ 		.parent_data = gcc_parent_data_1,
+ 		.num_parents = ARRAY_SIZE(gcc_parent_data_1),
+ 		.flags = CLK_SET_RATE_PARENT,
+-		.ops = &clk_rcg2_shared_ops,
++		.ops = &clk_rcg2_gp_ops,
+ 	},
+ };
+ 
+@@ -475,7 +472,7 @@
+ 		.parent_data = gcc_parent_data_1,
+ 		.num_parents = ARRAY_SIZE(gcc_parent_data_1),
+ 		.flags = CLK_SET_RATE_PARENT,
+-		.ops = &clk_rcg2_shared_ops,
++		.ops = &clk_rcg2_gp_ops,
+ 	},
+ };
+ 

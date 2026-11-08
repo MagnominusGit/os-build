@@ -102,20 +102,25 @@
 	};
 
 	/*
-	 * The stock DT clocks the fan from gcc_gp2_clk on gpio30 at 10 kHz
-	 * (period 100us) rather than from an LPG channel, so there is no PMIC
-	 * PWM to reference here as on the Retroid Pocket Classic. gpio30 is
-	 * driven as a software PWM instead; tach is on gpio93.
+	 * A 4-wire fan: fan_pwr is its supply, gpio30 its speed input, gpio93
+	 * its tach. As in the stock DT, gpio30 is muxed to gcc_gp2_clk and the
+	 * GP2 clock's M/N/D makes the PWM, so it costs no CPU (as a software
+	 * PWM at 10 kHz it was 20,000 hrtimer interrupts/s on CPU0). The fan's
+	 * controller follows the duty only from 1 kHz up (at 200-700 Hz it
+	 * stalls, at 100 Hz and below it crawls or runs flat out), so the
+	 * Air X's 15 Hz does not apply; 10 kHz is the stock rate.
 	 */
-	fan_pwm: pwm-gpio {
-		compatible = "pwm-gpio";
-		#pwm-cells = <3>;
-		gpios = <&tlmm 30 GPIO_ACTIVE_HIGH>;
+	fan_pwm: pwm-clk {
+		compatible = "clk-pwm";
+		#pwm-cells = <2>;
+		clocks = <&gcc GCC_GP2_CLK>;
+		pinctrl-0 = <&fan_pwm_default>;
+		pinctrl-names = "default";
 	};
 
 	fan: pwm-fan {
 		compatible = "pwm-fan";
-		pwms = <&fan_pwm 0 100000 0>;
+		pwms = <&fan_pwm 0 100000>;	/* 10 kHz */
 		fan-supply = <&fan_pwr>;
 		interrupts-extended = <&tlmm 93 IRQ_TYPE_EDGE_FALLING>;
 		pulses-per-revolution = <2>;
@@ -1842,6 +1847,13 @@
 };
 
 &tlmm {
+	fan_pwm_default: fan-pwm-default-state {
+		pins = "gpio30";
+		function = "gcc_gp2_clk";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
 	panel_reset_default: panel-reset-default-state {
 		pins = "gpio92";
 		function = "gpio";

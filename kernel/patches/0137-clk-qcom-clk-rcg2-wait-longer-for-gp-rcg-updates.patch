@@ -1,0 +1,70 @@
+From: sunshineinabox <aqemail@gmail.com>
+Subject: [PATCH] clk: qcom: clk-rcg2: wait longer for GP RCG rate and duty updates
+
+An MND RCG applies new M/N/D values about five periods of its output
+after CMD_UPDATE is set. For a GP clock driven as a PWM by clk-pwm that
+is ~550 us at 10 kHz (measured on SM4450 GP2), past update_config()'s
+500 us, so pwm-fan's first clk_set_rate() fails with -EBUSY. Wait up to
+20 ms in the GP set_rate and the set_duty_cycle paths.
+---
+ drivers/clk/qcom/clk-rcg2.c | 21 
+ 1 file changed, 17 insertions(+), 4 deletions(-)
+
+--- a/drivers/clk/qcom/clk-rcg2.c
++++ b/drivers/clk/qcom/clk-rcg2.c
+@@ -111,7 +111,7 @@
+ 	return __clk_rcg2_get_parent(hw, cfg);
+ }
+ 
+-static int update_config(struct clk_rcg2 *rcg)
++static int __update_config(struct clk_rcg2 *rcg, int timeout_us)
+ {
+ 	int count, ret;
+ 	u32 cmd;
+@@ -124,7 +124,7 @@
+ 		return ret;
+ 
+ 	/* Wait for update to take effect */
+-	for (count = 500; count > 0; count--) {
++	for (count = timeout_us; count > 0; count--) {
+ 		ret = regmap_read(rcg->clkr.regmap, rcg->cmd_rcgr + CMD_REG, &cmd);
+ 		if (ret)
+ 			return ret;
+@@ -137,6 +137,19 @@
+ 	return -EBUSY;
+ }
+ 
++static int update_config(struct clk_rcg2 *rcg)
++{
++	return __update_config(rcg, 500);
++}
++
++/*
++ * An MND RCG takes new M/N/D values about five periods of its output after
++ * the update is requested: ~550 us for a GP clock at a 10 kHz PWM rate, past
++ * update_config()'s 500 us. Give the GP paths up to 20 ms (outputs
++ * down to ~300 Hz).
++ */
++#define RCG2_MND_UPDATE_TIMEOUT_US	20000
++
+ static int clk_rcg2_set_parent(struct clk_hw *hw, u8 index)
+ {
+ 	struct clk_rcg2 *rcg = to_clk_rcg2(hw);
+@@ -617,7 +630,7 @@
+ 	if (ret)
+ 		return ret;
+ 
+-	return update_config(rcg);
++	return __update_config(rcg, RCG2_MND_UPDATE_TIMEOUT_US);
+ }
+ 
+ static int __clk_rcg2_set_rate(struct clk_hw *hw, unsigned long rate,
+@@ -798,7 +811,7 @@
+ 	if (ret)
+ 		return ret;
+ 
+-	return update_config(rcg);
++	return __update_config(rcg, RCG2_MND_UPDATE_TIMEOUT_US);
+ }
+ 
+ const struct clk_ops clk_rcg2_ops = {

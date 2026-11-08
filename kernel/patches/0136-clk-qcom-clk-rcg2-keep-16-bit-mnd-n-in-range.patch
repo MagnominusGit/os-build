@@ -1,0 +1,65 @@
+From: sunshineinabox <aqemail@gmail.com>
+Subject: [PATCH] clk: qcom: clk-rcg2: keep a 16-bit MND's n and the pre-divider in range in calc_mnd
+
+clk_rcg2_calc_mnd() keeps n and n_max in u16s. With a 16-bit MND,
+n_max = m + mnd_max wraps to 0, so n is never used and every factor
+goes to the pre-divider: on SM4450's GP clocks a 10 kHz request from
+XO comes out at 10.67 kHz with 1/120 duty steps instead of exactly
+10 kHz with 1/1920. Widen them and cap n at what f->n holds.
+
+It also returns a pre-divider of 0 when none is needed, which
+convert_to_reg_val() turns into 0xff: the RCG then divides by 16 and
+sets reserved CFG bits. Return 1 instead.
+---
+ drivers/clk/qcom/clk-rcg2.c | 13 
+ 1 file changed, 8 insertions(+), 5 deletions(-)
+
+--- a/drivers/clk/qcom/clk-rcg2.c
++++ b/drivers/clk/qcom/clk-rcg2.c
+@@ -425,7 +425,7 @@
+  * @pre_div_max: Pre divisor maximum value.
+  */
+ static inline void clk_rcg2_split_div(int multiplier, unsigned int *pre_div,
+-				      u16 *n, unsigned int pre_div_max)
++				      u32 *n, unsigned int pre_div_max)
+ {
+ 	*n = mult_frac(multiplier * *n, *pre_div, pre_div_max);
+ 	*pre_div = pre_div_max;
+@@ -437,7 +437,8 @@
+ 	int i = 2;
+ 	unsigned int pre_div = 1;
+ 	unsigned long rates_gcd, scaled_parent_rate;
+-	u16 m, n = 1, n_candidate = 1, n_max;
++	u16 m;
++	u32 n = 1, n_candidate = 1, n_max;
+ 
+ 	rates_gcd = gcd(parent_rate, rate);
+ 	m = div64_u64(rate, rates_gcd);
+@@ -449,14 +450,15 @@
+ 			scaled_parent_rate = mult_frac(scaled_parent_rate, m, (m + 1));
+ 		} else {
+ 			// cannot lower scale, just set max divisor values.
+-			f->n = mnd_max + m;
++			f->n = min_t(u32, mnd_max + m, U16_MAX);
+ 			f->pre_div = pre_div_max;
+ 			f->m = m;
+ 			return;
+ 		}
+ 	}
+ 
+-	n_max = m + mnd_max;
++	/* With a 16-bit MND, m + mnd_max does not fit f->n (a u16) */
++	n_max = min_t(u32, m + mnd_max, U16_MAX);
+ 
+ 	while (scaled_parent_rate > 1) {
+ 		while (scaled_parent_rate % i == 0) {
+@@ -475,7 +477,8 @@
+ 
+ 	f->m = m;
+ 	f->n = n;
+-	f->pre_div = pre_div > 1 ? pre_div : 0;
++	/* convert_to_reg_val() turns a divider of 0 into 0xff */
++	f->pre_div = pre_div;
+ }
+ 
+ static int clk_rcg2_determine_gp_rate(struct clk_hw *hw,
