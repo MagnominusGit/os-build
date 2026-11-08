@@ -78,3 +78,24 @@ With 0014, Turnip's A610 init stream matches the blob for every register above.
 
 **HW test still owed:** this was checked on drm-shim only. On the Air X, run a Vulkan title and a
 GL one and watch for hangs or corruption.
+
+## Turnip autotune (0015-0019), added 2026-11-08
+
+The GMEM/sysmem choice from per-GPU costs, split the way it is meant to go upstream.
+
+- **0015, 0016** — backports of upstream `79e16e72329` and `af16b1ceb1e` (Dhruv Mark Collins,
+  July 2026): the RP duration covers the binning pass, and the RP hash is stable across replays.
+  Both are in 26.3, so drop them at that bump.
+- **0017** — the bandwidth algorithm predicts both modes in microseconds instead of comparing byte
+  counts. Costs come from a table per GPU (A610, A613, A650, A740, A750, A830) built from probe
+  reports on retail devices, in cycles at the kernel's max clock and leaning cheap. A GPU without a
+  row borrows the closest-sized one of its generation, preferring a bigger one.
+  `TU_AUTOTUNE_CALIB=off` keeps the byte-count model.
+- **0018** — `TU_AUTOTUNE_FLAGS=adapt` (or drirc `tu_autotune_flags`) times every render pass and
+  corrects its prediction from what was measured for that pass, kept apart by draw count since one
+  pass can be 5 draws one frame and 500 the next. Close calls now and then run in the other mode. `drirc.d/01-retroforge-turnip.conf` turns it on. On SM8550/SM8650,
+  `retroforge-launch` sets `TU_AUTOTUNE_FLAGS=preempt_optimize`, which replaces the drirc flags,
+  so adapt is off there unless the launcher adds it.
+- **0019** — developer tool: `TU_AUTOTUNE_CALIB=force` probes the costs on the running GPU
+  (0.6 s on A610/A613) and `export=<path>` writes them out, which is how table rows are made.
+  Also `dump`, `log`, `payload`, `replay` and `noshade`.
