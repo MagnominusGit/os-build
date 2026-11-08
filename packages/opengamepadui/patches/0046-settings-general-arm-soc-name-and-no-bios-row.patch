@@ -1,0 +1,102 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: retroforge <retroforge@invalid>
+Date: Sun, 8 Nov 2026 12:30:00 +0000
+Subject: [PATCH] feat(GeneralSettings): an Arm SoC's own name, and no BIOS row
+ without DMI
+
+Settings > General showed "Unknown" for BIOS Version on every Arm board
+(a devicetree board has no DMI, so /sys/class/dmi/id/bios_version is
+absent) and the core types for CPU Model ("Cortex-A510 Cortex-A715
+..."), which is what lscpu gives as the model name on Arm.
+
+CPU.model is now the SoC's name when the kernel's Qualcomm socinfo has
+one (soc0/family "Snapdragon"): soc0/soc_id through a table of names
+(603 -> "Qualcomm Dragonwing QCS8550", 601 -> "Qualcomm Snapdragon G3x
+Gen 2"). The id, not soc0/machine, since gaming SKUs share a part name
+with the phone chip. An id not in the table shows "Qualcomm <machine>".
+Without socinfo (x86) it stays lscpu's, so the APU database lookups are
+as before. The BIOS Version row hides when there is no version to show.
+
+---
+ core/systems/hardware/cpu.gd                      | 41 +++++++++++++++++++++++
+ core/ui/card_ui/settings/general_settings_menu.gd |  5 ++-
+ 2 files changed, 45 insertions(+), 1 deletion(-)
+
+diff --git a/core/systems/hardware/cpu.gd b/core/systems/hardware/cpu.gd
+index efba616..4615290 100644
+--- a/core/systems/hardware/cpu.gd
++++ b/core/systems/hardware/cpu.gd
+@@ -9,6 +9,26 @@ signal boost_updated(enabled: bool)
+ signal smt_updated(enabled: bool)
+ 
+ const CPUS_PATH := "/sys/bus/cpu/devices"
++const SOC_PATH := "/sys/devices/soc0"
++## Names of Qualcomm SoCs, by the id the kernel's socinfo gives in soc0/soc_id (the SMEM SoC id,
++## which tells apart chips that share a part name, e.g. the G3x Gen 2 from the SM8550). Shown with a
++## "Qualcomm " prefix; a chip missing here shows as "Qualcomm <soc0/machine>".
++const QCOM_SOC_NAMES := {
++	321: "Snapdragon 845",
++	356: "Snapdragon 865",
++	444: "Snapdragon 662",
++	467: "Dragonwing QCS6125",
++	531: "Snapdragon 8+ Gen 1",
++	601: "Snapdragon G3x Gen 2",
++	603: "Dragonwing QCS8550",
++	634: "Snapdragon G2 Gen 1",
++	639: "Snapdragon 8 Elite",
++	654: "Snapdragon G1 Gen 2",
++	682: "Snapdragon G3 Gen 3",
++	700: "Snapdragon G2 Gen 2",
++	706: "Dragonwing Q8750",
++	732: "Dragonwing Q7790",
++}
+ 
+ var core_count := get_total_core_count()
+ var vendor: String
+@@ -34,6 +54,27 @@ func _init() -> void:
+ 			model = str(" ".join(parts))
+ 		# TODO: We can get min/max CPU freq here.
+ 
++	# On Arm, lscpu's model names are the core types (one per cluster, e.g. "Cortex-A510"), not the
++	# chip. The SoC's own name comes from socinfo.
++	var soc_name := get_soc_name()
++	if not soc_name.is_empty():
++		model = soc_name
++
++
++## Returns the marketing name of the SoC (e.g. "Qualcomm Dragonwing QCS8550"), or "" when
++## the system has no Qualcomm socinfo (x86, or an Arm SoC whose kernel exposes none).
++func get_soc_name() -> String:
++	var family := _get_property(SOC_PATH + "/family").strip_edges()
++	if family != "Snapdragon":
++		return ""
++	var soc_id := _get_property(SOC_PATH + "/soc_id").strip_edges()
++	if soc_id.is_valid_int() and soc_id.to_int() in QCOM_SOC_NAMES:
++		return "Qualcomm " + str(QCOM_SOC_NAMES[soc_id.to_int()])
++	var machine := _get_property(SOC_PATH + "/machine").strip_edges()
++	if machine.is_empty():
++		return ""
++	return "Qualcomm " + machine
++
+ 
+ ## Returns the count of number of enabled CPU cores
+ func get_enabled_core_count() -> int:
+diff --git a/core/ui/card_ui/settings/general_settings_menu.gd b/core/ui/card_ui/settings/general_settings_menu.gd
+index 9604013..577d3c7 100644
+--- a/core/ui/card_ui/settings/general_settings_menu.gd
++++ b/core/ui/card_ui/settings/general_settings_menu.gd
+@@ -53,7 +53,10 @@ func _ready() -> void:
+ 		gpu_text.text = hardware_manager.gpu.model
+ 		driver_text.text = hardware_manager.gpu.driver
+ 	kernel_text.text = hardware_manager.get_kernel_version()
+-	bios_text.text = hardware_manager.get_bios_version()
++	var bios_version := hardware_manager.get_bios_version().strip_edges()
++	bios_text.text = bios_version
++	# A devicetree board (Arm SoCs) has no DMI and so no BIOS version: hide the row, not "Unknown".
++	bios_text.visible = not bios_version.is_empty() and bios_version != "Unknown"
+ 	
+ 	# Try to detect the platform and platform image
+ 	if product_text.text == "Jupiter" and vendor_text.text == "Valve":
+-- 
+2.55.0
+
