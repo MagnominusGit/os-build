@@ -1,0 +1,184 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sat, 7 Nov 2026 20:45:00 -0800
+Subject: [PATCH] ASoC: qcom: q6apm-dai: stop the DSP graphs for system sleep
+
+A started graph keeps trading messages with the DSP on its own. A push-pull
+graph reads the ring and raises a watermark event every period, and a capture
+graph queues the next read on every read done. Each message is a GLINK
+interrupt, which wakes the SoC within milliseconds of entering suspend. The qcom
+DPCM links are ignore_suspend, so nothing stopped them: with any playback stream
+open, the RG 55G1 came straight back out of deep sleep.
+
+Stop every started graph from the driver's own system-sleep callback. It runs
+outside the PCM stream lock, because the GPR rx worker may be waiting for that
+lock in snd_pcm_period_elapsed() and is also the one that delivers the stop's
+reply. On resume a running stream reports an xrun, so user space prepares it
+again, and a prepared one is prepared here. SNDRV_PCM_INFO_RESUME goes, since a
+stream can no longer resume in place.
+---
+--- a/sound/soc/qcom/qdsp6/q6apm-dai.c
++++ b/sound/soc/qcom/qdsp6/q6apm-dai.c
+@@ -3,7 +3,9 @@
+ 
+ #include <linux/init.h>
+ #include <linux/err.h>
++#include <linux/list.h>
+ #include <linux/module.h>
++#include <linux/mutex.h>
+ #include <linux/of.h>
+ #include <linux/platform_device.h>
+ #include <linux/slab.h>
+@@ -81,16 +83,21 @@
+ 	struct q6apm_graph *graph;
+ 	spinlock_t lock;
+ 	bool notify_on_drain;
++	struct snd_soc_component *component;
++	struct list_head node;
++	bool stopped_for_sleep;
+ };
+ 
+ struct q6apm_dai_data {
+ 	long long sid;
++	struct mutex lock;	/* protects pcms */
++	struct list_head pcms;	/* open PCM streams */
+ };
+ 
+ static const struct snd_pcm_hardware q6apm_dai_hardware_capture = {
+ 	.info =                 (SNDRV_PCM_INFO_MMAP | SNDRV_PCM_INFO_BLOCK_TRANSFER |
+ 				 SNDRV_PCM_INFO_MMAP_VALID | SNDRV_PCM_INFO_INTERLEAVED |
+-				 SNDRV_PCM_INFO_PAUSE | SNDRV_PCM_INFO_RESUME |
++				 SNDRV_PCM_INFO_PAUSE |
+ 				 SNDRV_PCM_INFO_NO_REWINDS | SNDRV_PCM_INFO_SYNC_APPLPTR |
+ 				 SNDRV_PCM_INFO_BATCH),
+ 	.formats =              (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE),
+@@ -110,7 +117,7 @@
+ static const struct snd_pcm_hardware q6apm_dai_hardware_playback = {
+ 	.info =                 (SNDRV_PCM_INFO_MMAP | SNDRV_PCM_INFO_BLOCK_TRANSFER |
+ 				 SNDRV_PCM_INFO_MMAP_VALID | SNDRV_PCM_INFO_INTERLEAVED |
+-				 SNDRV_PCM_INFO_PAUSE | SNDRV_PCM_INFO_RESUME |
++				 SNDRV_PCM_INFO_PAUSE |
+ 				 SNDRV_PCM_INFO_NO_REWINDS | SNDRV_PCM_INFO_SYNC_APPLPTR |
+ 				 SNDRV_PCM_INFO_BATCH),
+ 	.formats =              (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S24_LE),
+@@ -349,7 +356,9 @@
+ 		break;
+ 	case SNDRV_PCM_TRIGGER_STOP:
+ 		/* TODO support be handled via SoftPause Module */
+-		prtd->state = Q6APM_STREAM_STOPPED;
++		/* An idle stream's graph is already stopped (system sleep) */
++		if (prtd->state != Q6APM_STREAM_IDLE)
++			prtd->state = Q6APM_STREAM_STOPPED;
+ 		prtd->queue_ptr = 0;
+ 		prtd->last_pos_index = 0;
+ 		break;
+@@ -449,6 +458,10 @@
+ 		prtd->pos_buffer = (struct sh_mem_pull_push_mode_position_buffer *)(pos_buffer);
+ 	}
+ 
++	prtd->component = component;
++	scoped_guard(mutex, &pdata->lock)
++		list_add_tail(&prtd->node, &pdata->pcms);
++
+ 	return 0;
+ err:
+ 	kfree(prtd);
+@@ -459,9 +472,13 @@
+ static int q6apm_dai_close(struct snd_soc_component *component,
+ 			   struct snd_pcm_substream *substream)
+ {
++	struct q6apm_dai_data *pdata = snd_soc_component_get_drvdata(component);
+ 	struct snd_pcm_runtime *runtime = substream->runtime;
+ 	struct q6apm_dai_rtd *prtd = runtime->private_data;
+ 
++	scoped_guard(mutex, &pdata->lock)
++		list_del(&prtd->node);
++
+ 	if (prtd->state) {
+ 		/* only stop graph that is started */
+ 		q6apm_graph_stop(prtd->graph);
+@@ -1039,11 +1056,77 @@
+ 	else
+ 		pdata->sid = args.args[0] & SID_MASK_DEFAULT;
+ 
++	rc = devm_mutex_init(dev, &pdata->lock);
++	if (rc)
++		return rc;
++	INIT_LIST_HEAD(&pdata->pcms);
++
+ 	dev_set_drvdata(dev, pdata);
+ 
+ 	return devm_snd_soc_register_component(dev, &q6apm_fe_dai_component, NULL, 0);
++}
++
++/*
++ * A started graph's DSP messages wake the SoC out of suspend, and the qcom
++ * DPCM links ignore suspend. Stop the graphs here, outside the stream lock:
++ * the GPR rx worker that brings the stop's reply may be waiting on it.
++ */
++static int q6apm_dai_suspend(struct device *dev)
++{
++	struct q6apm_dai_data *pdata = dev_get_drvdata(dev);
++	struct q6apm_dai_rtd *prtd;
++	int ret;
++
++	guard(mutex)(&pdata->lock);
++	list_for_each_entry(prtd, &pdata->pcms, node) {
++		if (prtd->state == Q6APM_STREAM_IDLE)
++			continue;
++
++		/* Idle first, so a read done during the stop queues no new read */
++		prtd->state = Q6APM_STREAM_IDLE;
++		prtd->stopped_for_sleep = true;
++		ret = q6apm_graph_stop(prtd->graph);
++		if (ret)
++			dev_warn(dev, "graph %u did not stop for sleep: %d\n", prtd->graph->id, ret);
++		q6apm_free_fragments(prtd->graph, prtd->substream->stream);
++	}
++
++	return 0;
+ }
+ 
++/* Streams stopped for sleep need a new prepare before they play again */
++static int q6apm_dai_resume(struct device *dev)
++{
++	struct q6apm_dai_data *pdata = dev_get_drvdata(dev);
++	struct q6apm_dai_rtd *prtd;
++
++	guard(mutex)(&pdata->lock);
++	list_for_each_entry(prtd, &pdata->pcms, node) {
++		struct snd_pcm_substream *substream = prtd->substream;
++		snd_pcm_state_t state;
++
++		if (!prtd->stopped_for_sleep)
++			continue;
++		prtd->stopped_for_sleep = false;
++
++		/* A started stream reports an xrun, so user space prepares it again */
++		snd_pcm_stream_lock_irq(substream);
++		state = substream->runtime->state;
++		if (state == SNDRV_PCM_STATE_RUNNING || state == SNDRV_PCM_STATE_DRAINING ||
++		    state == SNDRV_PCM_STATE_PAUSED)
++			snd_pcm_stop(substream, SNDRV_PCM_STATE_XRUN);
++		snd_pcm_stream_unlock_irq(substream);
++
++		/* A prepared one has no xrun to report: prepare it here */
++		if (state == SNDRV_PCM_STATE_PREPARED)
++			q6apm_dai_prepare(prtd->component, substream);
++	}
++
++	return 0;
++}
++
++static DEFINE_SIMPLE_DEV_PM_OPS(q6apm_dai_pm_ops, q6apm_dai_suspend, q6apm_dai_resume);
++
+ #ifdef CONFIG_OF
+ static const struct of_device_id q6apm_dai_device_id[] = {
+ 	{ .compatible = "qcom,q6apm-dais" },
+@@ -1056,6 +1139,7 @@
+ 	.driver = {
+ 		.name = "q6apm-dai",
+ 		.of_match_table = of_match_ptr(q6apm_dai_device_id),
++		.pm = pm_sleep_ptr(&q6apm_dai_pm_ops),
+ 	},
+ 	.probe = q6apm_dai_probe,
+ };
