@@ -24,18 +24,17 @@
 # SETUP, once per repo (nothing below works until this is done — the build silently falls through
 # to the dev cert, which is the safe direction):
 #
-#   ON A PLAN WITH ENVIRONMENTS (public repo, or Pro/Team/Enterprise):
 #   1. Create a PROTECTED environment (repo settings -> Environments) named `release-signing`, with
 #      required reviewers and a branch/tag restriction. The environment is what makes signing an
 #      APPROVED action rather than an available one. Override the name with the SIGNING_ENVIRONMENT
 #      repo variable if you want a different one.
 #   2. Add RAUC_CERT_PEM + RAUC_KEY_PEM, and the R2_* secrets the publish step reads, to THAT
-#      environment. Not repo-wide — repo-wide secrets reach every workflow_dispatch.
+#      environment, with the R2_BUCKET and R2_PUBLIC_BASE variables. Not repo-wide — repo-wide
+#      secrets reach every workflow_dispatch.
 #
-#   ON THIS REPO TODAY (private, GitHub Free — no environments): the same secrets go repo-wide, plus
-#   the R2_BUCKET and R2_PUBLIC_BASE variables. The sign step then passes the RAUC key on a TAG
-#   PUSH only, so a dispatch still signs with a throwaway cert; but there is no reviewer, and anyone with
-#   write access who can push an `ota/v*` tag can sign and publish.
+#   ON THIS REPO TODAY (public since 2026-11; environments are free on public repos): done, with the
+#   secrets and variables in `release-signing`, a deployment policy of `ota/v*` tags only, and a
+#   required reviewer (2026-11-09), so the `release` job waits for that single approval.
 #
 #   3. Nothing else. image.yml takes an `environment` input and declares it on its build job (a
 #      caller cannot attach an environment to a reusable workflow's job from outside), and the
@@ -67,12 +66,10 @@
 # `::notice::` at the bottom of a green run, and `ota/v0.2.1` was cut, built, signed and published
 # nowhere. The only two states are "published" and "red".
 #
-# NO ENVIRONMENTS ON THIS PLAN, as of 2026-10-13. The repo is private and the org is on GitHub Free,
-# which offers environments (and their reviewers and scoped secrets) only on public repos or paid
-# plans. So the RAUC_* and R2_* secrets have to be REPO-WIDE, where every workflow and every
-# workflow_dispatch can read them, and the `environment:` lines below gate nothing. They are kept so
-# that upgrading the plan (or making the repo public) and creating the environment restores the gate
-# with no workflow change — at which point move the secrets into it.
+# THE REPO IS PUBLIC (since 2026-11), so its fork pull requests run ci.yml — with a read-only
+# token and no secrets, which is why nothing here triggers on pull_request or pull_request_target.
+# The RAUC_* and R2_* secrets are ENVIRONMENT-scoped in `release-signing`, reachable only by a job
+# that names it, and the environment only accepts deployments from `ota/v*` tags.
 name: release bundle
 
 # TAG NAMESPACE: `ota/v*`. Bundles and cards ship on independent cadences — an update goes out far
@@ -182,15 +179,13 @@ jobs:
 
   # SIGNED AND PUBLISHED ON A TAG PUSH, dev-signed and kept on a dispatch. A tag push is the
   # deliberate act — someone decided this commit ships — and it is the only path that names the
-  # protected environment and the only one whose steps are handed the release key and the R2
-  # credentials (the `if:`s and env expressions below: on this plan the secrets are repo-wide, see
-  # the header). A bare workflow_dispatch is a smoke test: it proves the bundle assembles, signs it
+  # protected environment, so it is the only path where the release key and the R2 credentials are
+  # reachable at all (the `if:`s and env expressions below say the same thing a second time). A bare workflow_dispatch is a smoke test: it proves the bundle assembles, signs it
   # with an ephemeral dev cert every device rejects, and skips the publish steps.
   #
   # ONE JOB, ONE APPROVAL. Signing and publishing share a single deployment gate: approving it
   # means "this tag ships". Both keys live in the same environment, so a second gate on the same
-  # environment would only ask the same reviewer the same question twice. (On this plan there is no
-  # gate at all yet; creating the environment restores exactly this one.) The signed bundle is still
+  # environment would only ask the same reviewer the same question twice. The signed bundle is still
   # uploaded as an artifact BEFORE the publish step, so a publish that fails on the R2 side leaves a
   # signed bundle to hand to `make publish-bundle` from a workstation.
   #
@@ -263,9 +258,9 @@ jobs:
 
       - name: sign the bundle
         env:
-          # TAG PUSH ONLY, in the expression rather than by the environment alone: on this plan the
-          # secrets are repo-wide (see the header), so without this a dispatch would sign with the
-          # real release key — and a dispatch is meant to be the unsigned smoke test. event_name as
+          # TAG PUSH ONLY, in the expression as well as by the environment: belt and braces, from when
+          # the secrets were repo-wide (private repo, no environments, until 2026-11) and this line
+          # was all that kept a dispatch from signing with the real release key. event_name as
           # well as ref_type, because a workflow_dispatch can be started ON a tag (ref_type 'tag'),
           # and its version and channel then come from a free-text input, not the tag.
           RAUC_CERT_PEM: ${{ github.event_name == 'push' && github.ref_type == 'tag' && secrets.RAUC_CERT_PEM || '' }}

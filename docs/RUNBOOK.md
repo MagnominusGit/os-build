@@ -75,8 +75,8 @@ tested on hardware without waiting for a run.
 The card is an asset of the `card/v*` GitHub Release, next to its checksums and the package lock it
 was built from. A release card compresses to 524 MiB (gz -6, measured 2026-10-13), well inside
 GitHub's 2 GiB per-asset cap; `release-sdcard.yml` refuses to publish one that has grown past it.
-The asset is named for the release, `retroforge-<version>.img.gz`. The repo is private, so
-downloading it from the release page needs a GitHub login with access to it. Write it with
+The asset is named for the release, `retroforge-<version>.img.gz`. The repo is public, so it
+downloads from the release page with no login. Write it with
 balenaEtcher or Raspberry Pi Imager, or:
 
 ```sh

@@ -82,7 +82,7 @@ different cadences:
 | workflow | trigger | secrets | ships to |
 |---|---|---|---|
 | `release-sdcard.yml` | `card/v*` tag, or manual | none — `GITHUB_TOKEN` only; `release-cards` for its reviewer | a GitHub Release carrying the card and its checksums (the build's `manifest.lock` stays in the workflow artifact) |
-| `release-bundle.yml` | `ota/v*` tag, or manual | `RAUC_CERT_PEM`/`RAUC_KEY_PEM` and `R2_*` (repo-wide: no environments on this plan) | the Cloudflare R2 bucket in `vars.R2_BUCKET`, `<channel>/` prefix, served at `https://ota.retroforge.org` (see `docs/ota.md`) |
+| `release-bundle.yml` | `ota/v*` tag, or manual | `RAUC_CERT_PEM`/`RAUC_KEY_PEM` and `R2_*`, in the `release-signing` environment (`ota/v*` tags only) | the Cloudflare R2 bucket in `vars.R2_BUCKET`, `<channel>/` prefix, served at `https://ota.retroforge.org` (see `docs/ota.md`) |
 
 **The tag namespaces are separate on purpose.** A bundle ships far more often than a card, so each
 gets its own namespace rather than sharing a bare `v*`. That also fixes a real inversion: while
@@ -92,8 +92,8 @@ delivered two ways.
 
 **The card is a release asset** since 2026-10-13: a release card compresses to 524 MiB (gz -6), a
 quarter of GitHub's 2 GiB per-asset cap, and the release job checks the cap before uploading. It went
-to R2 while it measured 5.08 GiB (2026-08-04, root still carrying an x86 stack). The repo is private,
-so downloading a card needs a GitHub login with access to it. Nothing but OTA bundles is published to
+to R2 while it measured 5.08 GiB (2026-08-04, root still carrying an x86 stack). The repo is public
+(since 2026-11), so a card downloads with no login. Nothing but OTA bundles is published to
 R2 any more.
 
 **CI is the only thing that PUBLISHES a release image**, because the reviewer gates and the signing
@@ -117,8 +117,8 @@ the built commit (reviewer: the `release-cards` environment), after the same 2 G
 as the card. **`workflow_dispatch` is its only trigger**: no push, tag or schedule, so nothing
 starts it but a person. The version comes from the tree (`<mesa pkgver>-<guest.pin revision>`),
 not from an input. Devices only use a published guest once
-`rootfs/overlay/usr/share/retroforge/steam/x86-guest.pin` names it, and only if its url is public,
-which a private repo's Release asset is not. See `packages/mesa-x86/README.md`.
+`rootfs/overlay/usr/share/retroforge/steam/x86-guest.pin` names it; its Release asset url is
+public since the repo is (2026-11). See `packages/mesa-x86/README.md`.
 
 ## Bundle signing and publishing
 
@@ -131,11 +131,11 @@ publish can be finished from a workstation with `make publish-bundle`. `notes` t
 notes-only GitHub Release. A manual dispatch signs with an ephemeral dev cert every device rejects
 and skips publishing — it proves the bundle assembles and the verity hashes compute.
 
-- **No gate yet on this plan.** The repo is private on GitHub Free, which has no environments, so
-  `RAUC_CERT_PEM` / `RAUC_KEY_PEM` and the `R2_*` secrets are repo-wide and the job's
-  `environment:` line gates nothing; the steps hand the keys over on a tag push only. Creating the
-  environment (a paid plan or a public repo) and moving the secrets into it restores the one
-  approval with no workflow change. Keys are written to `$RUNNER_TEMP`, never the workspace — the
+- **The secrets are environment-scoped.** `RAUC_CERT_PEM` / `RAUC_KEY_PEM` and the `R2_*` secrets
+  and variables live in `release-signing`, whose deployment policy accepts `ota/v*` tags only;
+  until the repo went public (2026-11) GitHub Free had no environments and they were repo-wide.
+  It has a required reviewer (since 2026-11-09), so `release` waits for that single approval;
+  `release-cards` has the same reviewer. Keys are written to `$RUNNER_TEMP`, never the workspace — the
   repo tree gets uploaded as artifacts and cached.
 - **The run ends published or red.** Missing R2 credentials fail the job before anything is
   signed, and `ota/publish-bundle.sh` checks the bundle against the device keyring and refuses a

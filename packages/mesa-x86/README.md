@@ -125,11 +125,9 @@ commit with the four files above, after checking the image against GitHub's 2 Gi
 The version is not an input: it comes from the tree, so to publish again for the same Mesa, bump
 `revision` in `guest.pin` first. An existing release for a version is never replaced.
 
-**The repo is private.** A Release asset of a private repo needs a GitHub login to download, and a
-device has none. So a published asset is not yet something a device can fetch: before
-`x86-guest.pin` points at it, it has to be publicly reachable, by making the repo (or a releases
-repo) public, or by copying the asset to the R2 bucket served at `ota.retroforge.org` the way OTA
-bundles are.
+**The repo is public** (since 2026-11), so a published asset is something a device can fetch with
+no GitHub login, and `x86-guest.pin`'s `url` can be its release download url as-is. While the repo
+was private it could not be.
 
 ## Switching devices to it: `x86-guest.pin`
 

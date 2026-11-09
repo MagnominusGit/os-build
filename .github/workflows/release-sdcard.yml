@@ -18,9 +18,8 @@
 # per-asset cap; the 5.08 GiB that put it in R2 (2026-08-04) was a root still carrying an x86 stack.
 # The only credential left is the job-scoped GITHUB_TOKEN.
 #
-# THE REPO IS PRIVATE, so a Release asset needs a GitHub login with access to os-build to download.
-# Accepted on 2026-10-13 for now; when cards are meant for the public, either the repo goes public or
-# the release job moves to a public releases repo with a token scoped to it.
+# THE REPO IS PUBLIC (since 2026-11), so a card Release asset downloads with no login. From
+# 2026-10-13 until then it needed a GitHub login with access to os-build.
 #
 # THE `release-cards` ENVIRONMENT STILL GATES THE RELEASE JOB, for its reviewer rather than its
 # secrets: a Release is the record people flash from, so a person signs off on a finished build

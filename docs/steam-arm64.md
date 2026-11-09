@@ -578,10 +578,9 @@ library we add loads in the guest. `.github/workflows/release-fex-guest.yml` pub
 Release asset (manual dispatch only, tag `fex-guest/v<version>`).
 
 To switch devices to it, set `x86-guest.pin`'s `name`, `version`, `url` and `sha256` to the
-published image (the release notes print all four) and ship that in a bundle. One condition first:
-the repo is private, and a device cannot download a private repo's Release asset, so the image has
-to be publicly reachable (a public repo or releases repo, or a copy in the R2 bucket behind
-`ota.retroforge.org`). A Mesa bump in `packages/mesa` carries into the guest with nothing to edit
+published image (the release notes print all four) and ship that in a bundle. The Release asset's
+url works as-is since the repo went public (2026-11); before that a device, which has no GitHub
+login, could not download it. A Mesa bump in `packages/mesa` carries into the guest with nothing to edit
 there; it needs a new dispatch and a pin bump. Details and the bump steps:
 [`packages/mesa-x86/README.md`](../packages/mesa-x86/README.md).
 

@@ -19,10 +19,9 @@
 # tag fex-guest/v26.2.4-1, asset retroforge-fex-guest-26.2.4-1.sqsh. To publish a new guest for the
 # same Mesa, bump guest.pin's revision in a commit, then dispatch.
 #
-# THE REPO IS PRIVATE, and that matters more here than for a card: a Release asset of a private
-# repo needs a GitHub login to download, and a device has none. x86-guest.pin can point at this
-# asset only once it is publicly reachable (the repo goes public, or the release moves to a public
-# releases repo, or the asset is mirrored to the R2 bucket at ota.retroforge.org). See the README.
+# THE REPO IS PUBLIC (since 2026-11), and that matters more here than for a card: a device has no
+# GitHub login, so while the repo was private x86-guest.pin could not point at this asset at all.
+# Now a published asset's browser_download_url is fetchable as-is. See the README.
 name: release fex guest
 
 on:

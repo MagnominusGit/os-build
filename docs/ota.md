@@ -268,11 +268,11 @@ the publish step fails, the signed bundle is still kept as the run's `retroforge
 `make publish-bundle`. The signing key reaches the job on a tag push only, so a manual run still
 produces a throwaway-cert bundle and never publishes.
 
-**No approval gate on this plan.** The `release` job names the `release-signing` environment, but
-the repo is private on GitHub Free, which has no environments: the secrets are repo-wide and nothing
-waits for a reviewer. Anyone who can push an `ota/v*` tag can sign and publish. Creating the
-environment (a paid plan or a public repo) and moving the secrets into it restores **one** approval
-— signing and publishing behind a single gate, "this tag ships" — with no workflow change.
+**One approval.** The `release` job names the `release-signing` environment, which holds the
+secrets, accepts `ota/v*` tags only, and has a required reviewer (since 2026-11-09): the job waits
+for that **one** approval — signing and publishing behind a single gate, "this tag ships". The
+build before it needs no key and runs without waiting. Until the repo went public (2026-11) GitHub
+Free had no environments, the secrets were repo-wide, and nothing waited.
 
 A publish ends in exactly one of two states, **published** or **red**: a missing credential is an
 error, not a skipped step, because nobody reads a skipped step at the bottom of an hour-long success.
@@ -308,8 +308,9 @@ Set up once, in the Cloudflare dashboard:
    the account ID is `R2_ACCOUNT_ID` (the scripts' name for it).
 4. **In GitHub**: `CLOUDFLARE_ACCOUNT_ID` (the account ID; the workflows hand it to the scripts as
    `R2_ACCOUNT_ID` and to the release notes), `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
-   `RAUC_CERT_PEM` and `RAUC_KEY_PEM` as repository **secrets**; `R2_BUCKET` and `R2_PUBLIC_BASE` as
-   repository **variables**. Repo-wide because this plan has no environments (above).
+   `RAUC_CERT_PEM` and `RAUC_KEY_PEM` as **secrets** of the `release-signing` environment;
+   `R2_BUCKET` and `R2_PUBLIC_BASE` as **variables** of it. `CLOUDFLARE_ACCOUNT_ID` stays a repository
+   secret, because the release notes job, which names no environment, reads it too.
 
 **Caching.** `latest.json` changes in place, so the publisher uploads it with
 `Cache-Control: no-cache` and reads it back over HTTPS after writing. Bundles never change once

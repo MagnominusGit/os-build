@@ -18,7 +18,7 @@
 # with an error, not a bill (pricing page, 2026-11-07). One summary of ~3k tokens in / 500 out on
 # llama-3.3-70b fp8-fast costs ~200 neurons (mistral-small-3.1 was ~120 but looped on one bullet).
 # Cloudflare states it neither trains on nor retains the input (workers-ai/platform/data-usage),
-# which matters: these are a private repo's commit messages.
+# (the repo was private when this was chosen; its commit messages are public since 2026-11).
 #
 # IT NEVER FAILS A RELEASE. Any failure (no token, quota spent, an empty answer) falls back to a
 # plain list of commit subjects, with a ::warning:: saying why. A release held up by a summary is
