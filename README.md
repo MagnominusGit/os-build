@@ -17,7 +17,7 @@ a liveness placeholder (`vkcube`) where the shell will be. Not yet a usable prod
 | 0 | Base system: the Holo aarch64 root, unified kernel, A/B updates, boots to a gamescope session |
 | 1 | [OpenGamepadUI](https://github.com/ShadowBlip/OpenGamepadUI) as the shell |
 | 2 | Handheld features in the shell: power profiles, suspend, brightness, updates, first-boot Wi-Fi |
-| 3 | Emulators: RetroArch + cores and standalone emulators, built natively against our Mesa/Turnip |
+| 3 | Emulators, downloaded on demand: RetroArch + cores for the older systems (with RetroAchievements), standalone emulators for the rest, on our Mesa/Turnip |
 | 4 | A ROM library in the shell |
 | 5 | Release infrastructure: signing CA, update server, release channel |
 

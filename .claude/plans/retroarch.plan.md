@@ -1,7 +1,7 @@
 # RetroArch + RetroAchievements for the pre-PS1 systems (and N64) — plan
 
-Status: decisions D1-D7 AGREED 2026-11-09 (branch plan/retroarch). Phase 0 DONE on the Air X 2026-11-09
-(gate passed; RetroAchievements and Mega CD checks moved to Phases 3/5). Next: Phase 1.
+Status: decisions D1-D7 AGREED 2026-11-09 (branch plan/retroarch). Phases 0-4 DONE 2026-11-09
+(1-4 offline; RetroAchievements, Mega CD and every on-device check are in Phase 5). Next: Phase 5 (HW).
 
 ## Why
 
@@ -295,6 +295,14 @@ PHASE 0 DONE 2026-11-09: gate passed (steps 1-3 OK). Next: Phase 1.
 - Seed + `system_settings`: `sort_savefiles_enable = "false"`, `sort_savestates_enable = "false"`
   (Phase 0: per-core subfolders otherwise).
 - Docs: README row 3, `retroforge.plan.md` notes, RUNBOOK.
+
+### Phase 4 notes (2026-11-09)
+
+- DONE: `apps/retroforge-sigdefer`, `rootfs/lib-assemble-sigdefer.sh`, `tests/test-sigdefer.sh` and
+  their Makefile / assemble-rootfs.sh / .gitignore rows removed (Snes9x was its only user); the
+  launcher's core_dumps comment no longer names it. README row 3 says what ships now.
+  The emulator definitions, catalog rows and tmpfiles links went in Phase 2b. Nothing on devices
+  is touched (no cleanup, no save migration).
 
 ## Phase 5 — HW validation, merge, push
 

@@ -307,12 +307,8 @@ SPLASH_GEOM  := $(wildcard rootfs/overlay/usr/lib/retroforge/devices/*.conf)
 # device) and steamcl-version (what an older root's update hook expects beside the ESP GRUB).
 GRUB         := $(OUT)/boot/grubaa64.efi
 SDCARD       := $(OUT)/images/sdcard.img
-# The LD_PRELOAD shim that moves a program's SIGTERM handler onto its GLib main loop
-# (apps/retroforge-sigdefer; Snes9x's Exit crash). aarch64, built in the container like the splash.
-SIGDEFER_LIB := apps/retroforge-sigdefer/build/libretroforge-sigdefer.so
-SIGDEFER_SRC := apps/retroforge-sigdefer/Makefile apps/retroforge-sigdefer/src/retroforge-sigdefer.c
 # The LD_PRELOAD library PortMaster's gptokeyb2 runs with (apps/retroforge-gptk-interpose; its exclusive
-# pad grab under sdl2-compat). aarch64, built in the container like sigdefer.
+# pad grab under sdl2-compat). aarch64, built in the container like the splash.
 GPTK_LIB     := apps/retroforge-gptk-interpose/build/libretroforge-gptk-interpose.so
 GPTK_SRC     := apps/retroforge-gptk-interpose/Makefile apps/retroforge-gptk-interpose/src/retroforge-gptk-interpose.c
 # The LD_PRELOAD shim that hides the menu bar of every QMainWindow after the first
@@ -403,7 +399,7 @@ RETROFORGE_CCACHE ?= $(if $(CI),0,1)
 # ==============================================================================
 .PHONY: help all image toolchain kernel fw-linux fw-qcom base overlay verify-lock check-hw-paths \
         rootfs relock \
-        initramfs splash plugin sigdefer gptk-interpose hidemenu mesa-x86 grub sdcard verify-card test test-disk bundle sign-bundle publish-bundle \
+        initramfs splash plugin gptk-interpose hidemenu mesa-x86 grub sdcard verify-card test test-disk bundle sign-bundle publish-bundle \
         clean clean-base clean-overlay clean-ccache distclean
 
 # An always-out-of-date prerequisite, for rules that must re-evaluate their own inputs every run
@@ -433,7 +429,6 @@ rootfs:    $(ROOTFS)       ## Assemble the read-only root + var images (in conta
 initramfs: $(INITRAMFS)    ## Build the initramfs that mounts ro-root + /etc overlay (in container)
 splash:    $(SPLASH_BIN) $(SPLASH_ASSET) ## Build the boot-splash drawer + flattened logo (in container)
 plugin:    $(PLUGIN_ZIP) ## Build the RetroForge OpenGamepadUI plugin zip (host, python3)
-sigdefer:  $(SIGDEFER_LIB) ## Build the Snes9x SIGTERM shim, libretroforge-sigdefer.so (in container)
 hidemenu:  $(HIDEMENU_LIB) ## Build the melonDS second-window menu shim, libretroforge-hidemenu.so (in container)
 mesa-x86:  $(MESA_X86_STAMP) ## Build our x86_64 + i686 Mesa for the FEX guest's overlay (x86_64 container)
 gptk-interpose: $(GPTK_LIB) ## Build PortMaster gptokeyb2's pad interposer (in container)
@@ -491,7 +486,6 @@ test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-installer-shipped.sh
 	bash $(TESTS_DIR)/test-session.sh
 	bash $(TESTS_DIR)/test-launch.sh
-	bash $(TESTS_DIR)/test-sigdefer.sh
 	bash $(TESTS_DIR)/test-hidemenu.sh
 	bash $(TESTS_DIR)/test-catalog.sh
 	bash $(TESTS_DIR)/test-plugin.sh
@@ -777,7 +771,7 @@ $(SSHKEY_STAMP):
 # /usr/lib/retroforge/boot mirror the RAUC hook refreshes the ESP and the slot's efi partition FROM.
 # That is what makes "this root and the software that boots it came from one build" true by
 # construction. No cycle: the initramfs is built from work/base, never from the assembled root.
-$(ROOTFS): $(KERNEL) $(INITRAMFS) $(GRUB) boot/esp-dtbs.sh $(BASE_STAMP) $(FW_LINUX) $(FW_QCOM) $(PLUGIN_ZIP) $(SIGDEFER_LIB) $(GPTK_LIB) $(HIDEMENU_LIB) $(MESA_X86_DEP) $(ASSEMBLE_SRC) $(MODE_STAMP) $(VERSION_STAMP) $(SCRAPER_STAMP) $(SSHKEY_STAMP) $(DEV_CA) | $(BUILD_STAMP)
+$(ROOTFS): $(KERNEL) $(INITRAMFS) $(GRUB) boot/esp-dtbs.sh $(BASE_STAMP) $(FW_LINUX) $(FW_QCOM) $(PLUGIN_ZIP) $(GPTK_LIB) $(HIDEMENU_LIB) $(MESA_X86_DEP) $(ASSEMBLE_SRC) $(MODE_STAMP) $(VERSION_STAMP) $(SCRAPER_STAMP) $(SSHKEY_STAMP) $(DEV_CA) | $(BUILD_STAMP)
 	$(DOCKER) $(DEV_ENV) $(SCRAPER_ENV) $(ID_ENV) -e RETROFORGE_DEBUG -e RETROFORGE_X86_MESA $(BUILD_IMG) \
 	  $(ROOTFS_DIR)/assemble-rootfs.sh /src/work/base
 
@@ -797,9 +791,6 @@ $(PLUGIN_ZIP): $(PLUGIN_SRC)
 
 $(SPLASH_BIN): $(SPLASH_SRC) | $(BUILD_STAMP)
 	$(INBUILD) -c 'make -C apps/retroforge-splash'
-
-$(SIGDEFER_LIB): $(SIGDEFER_SRC) | $(BUILD_STAMP)
-	$(INBUILD) -c 'make -C apps/retroforge-sigdefer'
 
 $(GPTK_LIB): $(GPTK_SRC) | $(BUILD_STAMP)
 	$(INBUILD) -c 'make -C apps/retroforge-gptk-interpose'
