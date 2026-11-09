@@ -24,6 +24,14 @@
 # leaving the ADSP's caller waiting and the ADSP awake; Armada saw the KONKR Pocket FIT's sensors
 # PD ask for apps_std method 36. The Air X asks for nothing unsupported (0 restarts, 2026-11-02).
 #
+# Patches 0003-0006 (gennro, kettlelinux) let a sensors PD rebuild its registry. The KONKR Pocket
+# FIT's rebuilds it at every start and writes persist's registry/DIR; 0.5.0 refused, and ~80 ms
+# later the ADSP took a fatal error in qsh_process and reset the whole device (2026-11-09). 0003
+# serves sns_reg_version, which alone did not stop the rebuild; 0004 serves the tree's
+# sensors/persist, a per-boot tmpfs copy msm-firmware-loader makes, writable in place of persist;
+# 0005-0006 carry the larger and higher-numbered calls the rebuild makes. Verified on the FIT:
+# no fatal, the Sensor Core service (QRTR 400) up.
+#
 # Only the sensors servers are enabled (60-retroforge-hexagonrpcd.preset). The ADSP root PD asks
 # the Air X for nothing the partitions hold (one lowi/lowi_lp.conf, a location config).
 #

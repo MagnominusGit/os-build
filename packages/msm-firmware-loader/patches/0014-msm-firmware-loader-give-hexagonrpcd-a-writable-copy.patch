@@ -1,0 +1,43 @@
+From 0441740d043bdb0d0cda0d9074f146e278fe32dc Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Mon, 9 Nov 2026 00:05:00 -0800
+Subject: [PATCH 1/2] msm-firmware-loader: give hexagonrpcd a writable copy of
+ persist's sensors directory
+
+The KONKR Pocket FIT's sensors PD rebuilds its registry under persist at every start, as Android lets it. hexagonrpcd served the registry read-only, so the write was refused and the ADSP took a fatal error. Link sns_reg_version beside the registry, and copy persist's sensors directory to sensors/persist in the tmpfs tree, owned by fastrpc, which hexagonrpcd serves writable in place of persist. Persist itself stays mounted read-only.
+---
+ msm-firmware-loader.sh | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
+index 868653e..644d1dd 100644
+--- a/msm-firmware-loader.sh
++++ b/msm-firmware-loader.sh
+@@ -187,6 +187,27 @@ then
+ 		link_path "$BASEDIR/mnt/persist/sensors/registry/registry" "$BASEDIR/hexagonrpc/sensors/registry"
+ 	fi
+ 	link_path "$BASEDIR/mnt/vendor$AB_SLOT/etc/sensors/sns_reg_config" "$BASEDIR/hexagonrpc/sensors/sns_reg.conf"
++	link_path "$BASEDIR/mnt/persist-fastrpc/sensors/registry/sns_reg_version" "$BASEDIR/hexagonrpc/sensors/sns_reg_version"
++	if ! [ -e "$BASEDIR/hexagonrpc/sensors/sns_reg_version" ]
++	then
++		link_path "$BASEDIR/mnt/persist/sensors/registry/sns_reg_version" "$BASEDIR/hexagonrpc/sensors/sns_reg_version"
++	fi
++	# Some sensors PDs rebuild their registry under persist at every start, as
++	# Android lets them. hexagonrpcd serves sensors/persist writable in place
++	# of persist when it is there: a copy in tmpfs, so persist stays read-only.
++	for sensors in "$BASEDIR/mnt/persist-fastrpc/sensors" "$BASEDIR/mnt/persist/sensors"
++	do
++		if [ -d "$sensors" ]
++		then
++			mkdir -p "$BASEDIR/hexagonrpc/sensors"
++			cp -a "$sensors" "$BASEDIR/hexagonrpc/sensors/persist"
++			if id fastrpc > /dev/null 2>&1
++			then
++				chown -R fastrpc:fastrpc "$BASEDIR/hexagonrpc/sensors/persist"
++			fi
++			break
++		fi
++	done
+ 	# hexagonrpc expects socinfo packaged from downstream here, but because it is
+ 	# runtime-specific, the closest we have is socinfo from runtime kernel.
+ 	link_path "/sys/devices/soc0" "$BASEDIR/hexagonrpc/socinfo"
