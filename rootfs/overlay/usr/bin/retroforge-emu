@@ -78,6 +78,11 @@
 # offered, and install on an existing install downloads nothing. No rollback either: an unpacked
 # folder keeps no previous version.
 #
+# CORES (catalog "cores", RetroArch): libretro cores installed with the AppImage, after it (progress
+# 0-80 for the AppImage, 80-99 for the cores), updated by every install, one core rolled back with
+# `rollback <emulator> --core=<core>`; `list` and `check` report them under "cores". Sources, layout
+# and checks: /usr/lib/retroforge/python/emu_cores.py.
+#
 # Layout (what retroforge-launch runs): /home/player/emulators/<emulator>/{<tag>.AppImage, current}, or
 # for an unpacked archive the catalog's `to` (/home/player/emulators/<emulator>/ then only holds the
 # install lock and the download in progress).
@@ -106,6 +111,9 @@ import sys
 import time
 import zlib
 import zipfile
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "lib", "retroforge", "python"))
+import emu_cores  # noqa: E402
 
 EXIT_OK, EXIT_USAGE, EXIT_NET, EXIT_VERIFY, EXIT_LOCAL, EXIT_RATE = 0, 2, 3, 4, 5, 6
 
@@ -344,9 +352,18 @@ def remember_newest(emu, e, tag):
     write_check_cache(cache)
 
 
+SCALE = [0, 99]  # where a download's 0-99% lands on stdout (an entry with cores: 0-80)
+SHOWN = [-1]      # the highest N% printed: stdout never goes back
+
+
+def emit(pct):
+    if pct > SHOWN[0]:
+        print(f"{pct}%", flush=True)
+        SHOWN[0] = pct
+
+
 def download(url, part, size):
     """curl into `part`, printing forward-only N% (capped at 99 until verified)."""
-    shown = -1
     try:
         proc = subprocess.Popen(curl_base() + ["-o", part, url],
                                 stdout=subprocess.DEVNULL)
@@ -356,9 +373,7 @@ def download(url, part, size):
         rc = proc.poll()
         done = os.path.getsize(part) if os.path.exists(part) else 0
         pct = min(99, done * 100 // size) if size else 0
-        if pct > shown:
-            print(f"{pct}%", flush=True)
-            shown = pct
+        emit(SCALE[0] + (SCALE[1] - SCALE[0]) * pct // 99)
         if rc is not None:
             break
         time.sleep(POLL)
@@ -530,16 +545,31 @@ def cmd_install(emu, tested=False):
     e = checked_entry(emu, entry(load_catalog(), emu))
     if tested and tested_tag(e) is None:
         raise Fail(EXIT_USAGE, f"{emu} has no tested build: it follows {e['tag']}")
+    if "cores" in e:
+        emu_cores.specs(CTX, emu, e)  # a bad core is refused before anything is downloaded
+        SCALE[1] = 80
+    install_build(emu, e, tested)
+    if "cores" in e:
+        d = os.path.join(EMU_DIR, emu)
+        lock = lock_dir(d)
+        try:
+            emu_cores.install(CTX, emu, e, d, tested)
+        finally:
+            os.close(lock)
+    emit(100)
+    return EXIT_OK
+
+
+def install_build(emu, e, tested):
+    """The AppImage (or unpacked archive) part of an install; prints no 100%."""
     newest = tag_pattern(e) is not None and not tested
     spec = unpack_spec(emu, e)
     inst = installed_tag(emu, e)
     if inst is not None and e.get("self_update"):
-        print("100%", flush=True)
         log(f"{emu} {inst} is installed and updates itself")
-        return EXIT_OK
+        return
     if not newest and inst == e["tag"]:
-        print("100%", flush=True)
-        return EXIT_OK
+        return
     d = os.path.join(EMU_DIR, emu)
     lock = lock_dir(d)
     # Named after the catalog tag, so the plugin can follow its size for a newest build too (and for
@@ -552,9 +582,8 @@ def cmd_install(emu, tested=False):
         if newest:
             remember_newest(emu, e, tag)
         if newest and installed_tag(emu, e) == tag:
-            print("100%", flush=True)
             log(f"{emu} {tag} is already the latest")
-            return EXIT_OK
+            return
         if shutil.disk_usage(d).free < build["size"] + SPACE_MARGIN:
             raise Fail(EXIT_LOCAL, f"not enough free space in {d} for {build['size']} bytes")
         download(build["url"], part, build["size"])
@@ -572,9 +601,7 @@ def cmd_install(emu, tested=False):
             os.unlink(part)
         os.close(lock)
     fetch_data(emu, e)
-    print("100%", flush=True)
     log(f"{emu} {tag} installed")
-    return EXIT_OK
 
 
 def steam_entries():
@@ -636,6 +663,8 @@ def cmd_list():
             "homepage": e.get("homepage"),
             "licence": e.get("licence"),
         }
+        if "cores" in e:
+            out[emu]["cores"] = emu_cores.listing(CTX, e, os.path.join(EMU_DIR, emu))
     out.update(steam_entries())
     print(json.dumps({"emulators": out}, sort_keys=True))
     return EXIT_OK
@@ -671,25 +700,36 @@ def cmd_check(only, refresh):
             checked_entry(emu, e)
             if tag_pattern(e) is None:
                 out[emu] = {"latest": e["tag"], "error": None}
-                continue
-            hit = cache.get(emu)
-            if (not refresh and isinstance(hit, dict) and hit.get("key") == check_key(e)
-                    and isinstance(hit.get("at"), (int, float)) and 0 <= now - hit["at"] < CHECK_TTL):
-                out[emu] = {"latest": hit.get("latest"), "error": None}
-                continue
-            tag = newest_build(e)["tag"]
-            cache[emu] = {"key": check_key(e), "at": now, "latest": tag}
-            out[emu] = {"latest": tag, "error": None}
+            elif cached(cache, emu, e, refresh, now) is not None:
+                out[emu] = {"latest": cache[emu].get("latest"), "error": None}
+            else:
+                tag = newest_build(e)["tag"]
+                cache[emu] = {"key": check_key(e), "at": now, "latest": tag}
+                out[emu] = {"latest": tag, "error": None}
         except Fail as f:
             out[emu] = {"latest": None, "error": str(f)}
         except (KeyError, TypeError, re.error) as err:  # one bad entry must not hide the others
             out[emu] = {"latest": None, "error": f"bad catalog entry: {err!r}"}
+        if "cores" in e:
+            try:
+                out[emu]["cores"] = emu_cores.check(CTX, emu, e, cache, refresh, now)
+            except Fail as f:
+                out[emu]["cores"] = {"error": str(f)}
     write_check_cache(cache)
     print(json.dumps({"emulators": out}, sort_keys=True))
     return EXIT_OK
 
 
-def cmd_rollback(emu):
+def cached(cache, key, e, refresh, now):
+    """The check cache's answer for `key` when still good for this entry (CHECK_TTL), else None."""
+    hit = cache.get(key)
+    if (not refresh and isinstance(hit, dict) and hit.get("key") == check_key(e)
+            and isinstance(hit.get("at"), (int, float)) and 0 <= now - hit["at"] < CHECK_TTL):
+        return hit
+    return None
+
+
+def cmd_rollback(emu, core=None):
     e = entry(load_catalog(), emu)
     if unpack_spec(emu, e) is not None:
         raise Fail(EXIT_USAGE, f"{emu} is an unpacked folder: it keeps no previous version")
@@ -698,6 +738,9 @@ def cmd_rollback(emu):
         raise Fail(EXIT_USAGE, f"{emu} is not installed")
     lock = lock_dir(d)
     try:
+        if core is not None:
+            log(f"{emu}: core {core} back to {emu_cores.rollback(CTX, d, core, e)}")
+            return EXIT_OK
         prev = previous_tag(emu)
         if prev is None:
             raise Fail(EXIT_USAGE, f"{emu} has no previous build to go back to")
@@ -754,7 +797,7 @@ def remove_unpacked(emu):
 
 def main(argv):
     usage = ("usage: retroforge-emu list | check [<emulator>] [--refresh] | install <emulator> [--tested]"
-             " | rollback <emulator> | remove <emulator>")
+             " | rollback <emulator> [--core=<core>] | remove <emulator>")
     cmd, args = (argv[0], argv[1:]) if argv else ("", [])
     flags = {a for a in args if a.startswith("--")}
     names = [a for a in args if not a.startswith("--")]
@@ -769,9 +812,18 @@ def main(argv):
         return cmd_check(names[0] if names else None, "--refresh" in flags)
     if cmd == "install" and flags <= {"--tested"} and len(names) == 1:
         return cmd_install(names[0], "--tested" in flags)
+    cores = [f[len("--core="):] for f in flags if f.startswith("--core=")]
+    if cmd == "rollback" and len(cores) == 1 and len(flags) == 1 and len(names) == 1:
+        return cmd_rollback(names[0], cores[0])
     if cmd in ("rollback", "remove") and not flags and len(names) == 1:
         return cmd_rollback(names[0]) if cmd == "rollback" else cmd_remove(names[0])
     raise Fail(EXIT_USAGE, usage)
+
+
+CTX = emu_cores.Ctx(Fail=Fail, EXIT_USAGE=EXIT_USAGE, EXIT_NET=EXIT_NET, EXIT_VERIFY=EXIT_VERIFY,
+                    EXIT_LOCAL=EXIT_LOCAL, log=log, curl_base=curl_base, tested_build=tested_build,
+                    newest_build=newest_build, verify=verify, emit=emit, cached=cached,
+                    check_key=check_key, SAFE_TAG=SAFE_TAG, SPACE_MARGIN=SPACE_MARGIN)
 
 
 if __name__ == "__main__":

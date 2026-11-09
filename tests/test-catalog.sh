@@ -77,7 +77,7 @@ for line in open(launch_conf):
 
 ROLLING = {"latest", "preview", "nightly", "continuous", "dev", "master", "main"}
 REQUIRED = {"name", "author", "systems", "github", "tag", "asset", "sha256", "size", "homepage", "licence"}
-OPTIONAL = {"data", "unpack", "self_update", "tag_pattern"}
+OPTIONAL = {"data", "unpack", "self_update", "tag_pattern", "cores"}
 
 def check_github(case, e, rx):
     url = f"https://api.github.com/repos/{e['github']}/releases/tags/{e['tag']}"
@@ -118,6 +118,55 @@ def check_github(case, e, rx):
     else:
         bad(case, f"download URL {a.get('browser_download_url')!r} is not https")
 
+sys.path.insert(0, os.path.join(emu_conf_dir, "..", "..", "..", "lib", "retroforge", "python"))
+import emu_cores
+
+class CoreFail(Exception):
+    def __init__(self, code, msg):
+        super().__init__(msg)
+
+CORE_CTX = emu_cores.Ctx(Fail=CoreFail, EXIT_USAGE=2, EXIT_NET=3, EXIT_VERIFY=4, EXIT_LOCAL=5,
+                         SAFE_TAG=re.compile(r"[A-Za-z0-9._@-]+"))
+
+def check_cores(case, emu, e):
+    try:
+        cores = emu_cores.specs(CORE_CTX, emu, e)
+    except CoreFail as err:
+        bad(case, f"cores refused by retroforge-emu: {err}")
+        return
+    ok(case, f"cores {[c for c, _ in cores]} pass retroforge-emu's checks")
+    for core, src in cores:
+        if "buildbot" in src:
+            ok(case, f"core {core}: libretro buildbot nightly (no tested build)")
+            continue
+        a = src["asset"]
+        if a.startswith("^") and a.endswith("$") and "aarch64" in a and a.endswith(r"\.zip$"):
+            ok(case, f"core {core}: asset {a} is an anchored aarch64 zip")
+        else:
+            bad(case, f"core {core}: asset {a!r} must be ^...aarch64...\\.zip$")
+        if "tag_pattern" in src and not re.fullmatch(src["tag_pattern"], src["tag"]):
+            bad(case, f"core {core}: tag_pattern {src['tag_pattern']!r} does not match its pin {src['tag']!r}")
+        if net and "sha256" in src:
+            check_github(f"emulator {emu} core {core} (GitHub)", src, re.compile(a))
+    try:
+        with open(os.path.join(emu_conf_dir, emu, "emulator.json")) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return  # reported by the emulator.json check
+    loaded = set()
+    for args in (d.get("system_args") or {}).values():
+        for arg in args:
+            m = re.search(r"/cores/([a-z0-9_]+)_libretro\.so$", str(arg))
+            if m:
+                loaded.add(m.group(1))
+    names = {c for c, _ in cores}
+    if loaded - names:
+        bad(case, f"emulator.json loads cores the catalog does not install: {sorted(loaded - names)}")
+    if names - loaded:
+        bad(case, f"catalog cores no system loads (installed for nothing): {sorted(names - loaded)}")
+    if loaded == names:
+        ok(case, "every catalog core is loaded by a system, and only those")
+
 for emu, e in emus.items():
     case = f"emulator {emu}"
     if not re.fullmatch(r"[a-z0-9_-]+", emu):
@@ -146,6 +195,13 @@ for emu, e in emus.items():
             ok(case, f"data files: {[d['to'] for d in data]} (https, under the player's home)")
     else:
         bad(case, f"bad data entries {data!r}: each needs an https url and a relative path, nothing else")
+
+    # Libretro cores (RetroArch, plan retroarch): checked by the shipped emu_cores.specs (what
+    # retroforge-emu refuses, this refuses); a GitHub core's asset is an anchored aarch64 zip and its
+    # tag_pattern matches its pin; every core is loaded by a system in the image's emulator.json
+    # (system_args "-L .../cores/<core>_libretro.so") and every core loaded there is in the catalog.
+    if "cores" in e:
+        check_cores(case, emu, e)
 
     # An unpacked archive (PortMaster): a folder under the player's home and the version file in it,
     # both normalised relative paths; self_update only on one (retroforge-emu refuses it otherwise).
@@ -281,6 +337,11 @@ if net:
             ok(case, f"{emu}: newest is {a['latest']}")
         else:
             bad(case, f"{emu}: no newest build resolves: {a.get('error')}")
+        for core, c in (a.get("cores") or {}).items():
+            if isinstance(c, dict) and c.get("error") is None and c.get("latest"):
+                ok(case, f"{emu} core {core}: newest is {c['latest']}")
+            else:
+                bad(case, f"{emu} core {core}: no newest build resolves: {c}")
 
 # Every system the image launches has an emulator in the catalog, or the plugin cannot offer it.
 case = "coverage"

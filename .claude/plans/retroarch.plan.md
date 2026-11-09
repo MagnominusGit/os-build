@@ -183,6 +183,25 @@ PHASE 0 DONE 2026-11-09: gate passed (steps 1-3 OK). Next: Phase 1.
   missing index row -> exit 3, per-core rollback, zip with extra/evil members refused),
   `tests/test-catalog.sh` (schema + live with `RETROFORGE_NET_TEST=1`).
 
+### Phase 1 notes (2026-11-09)
+
+- Code: `rootfs/overlay/usr/lib/retroforge/python/emu_cores.py` (new) + `retroforge-emu` (install
+  split into `cmd_install` + `install_build`, `emit()`/`SCALE` progress 0-80 AppImage, 80-99 cores,
+  one 100%; `list`/`check` "cores"; `rollback <emu> --core=<core>`; check cache shared via `cached()`).
+- Layout as built: `core-builds/<core>/<build>.so` + `cores/<core>_libretro.so` -> relative link
+  (RetroArch sees normal core file names in `libretro_directory`). Only the `.so` is installed, never
+  the `.info` (Phase 0: RetroArch runs fine without core info).
+- `--tested`: GitHub core = its pin; buildbot core = installed only when missing, never moved.
+- Tests: new `tests/test-emu-cores.sh` (46, offline, in `make test`); `test-emu.sh` 151,
+  `test-catalog.sh` 204 (+ cores schema via the shipped `emu_cores.specs`, aarch64 zip asset,
+  emulator.json `-L` cores == catalog cores, live core pins + newest), `test-launch.sh`,
+  `test-plugin.sh`, `test-steam-install.sh` green. Live `retroforge-emu check` with the real pins:
+  armgba v1.5, buildbot nightly-2026-11-07-<crc> x3.
+- MOVED to Phase 2: the real `retroarch` catalog entry (test-catalog requires its emulator.json and
+  launch.conf mapping, so they ship together) and `.github/emu-sources.json` (key drift needs
+  options.json).
+- `retroforge-emu` is 836 lines (was 784): over the 800 limit; candidate split = the unpack code.
+
 ## Phase 2 — launch definition and seeds
 
 - `rootfs/overlay/usr/share/retroforge/emulators/retroarch/`:
