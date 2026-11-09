@@ -239,6 +239,15 @@ PHASE 0 DONE 2026-11-09: gate passed (steps 1-3 OK). Next: Phase 1.
   seed checks replaced by RetroArch's. Still Phase 4: sigdefer shim,
   docs (no save migration, user 2026-11-09).
 - Seed autoconfig renamed `retroforge-pad.cfg` (no space in the path).
+- 2b COMMITTED 0f9746ef. `make test`: everything green but test-hw-dtb (2 backlight pins on the
+  Retroid Flip 2 / RP5 Visionox DTBs from work/, unrelated to this branch).
+- 2c COMMITTED f5202c43 (plugin 0.1.109): emu_state.gd reads "cores" (newer core = Update, missing
+  core = Repair naming it, a Revert row per core with a kept build); apps_page.gd reverts with the
+  row's own args (--core=). FIXED there: 9c4a1a16's library_roms.gd did not parse (loop var `path`
+  shadowed a local) -- caught by compiling against OGUI; test-plugin.sh now parses every plugin
+  script when RETROFORGE_OGUI_PROJECT is set (526 passed with it).
+- Phase 2 HW check still to do (Air X off the network): a game per system from a dev card or the
+  spike, Repair after deleting a core, a core Revert from the Apps page.
 
 ## Phase 3 — RetroAchievements sign-in
 
