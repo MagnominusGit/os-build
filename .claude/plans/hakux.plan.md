@@ -46,17 +46,16 @@ Its linux-v0.1.0-v0.3.x releases also had a standalone `hakux`, removed in 0.4.0
 - hakux offscreen on lavapipe: options before operands, Vulkan device + swapchain, SDL audio, a guest
   HLT, SIGTERM (core stopped, hdd/ made), the missing dashboard, a bad option; 2026-11-08 SIGTERM and
   exitafter on a spinning guest, native and under qemu cortex-a53 (exit 0, core stopped).
-- Release file hakux-0.22.0-rf.1-standalone-aarch64: 11256960 bytes, sha256 f5d1695a...e1af0aba2f,
-  the catalog pin: the fork's CI build (linux.yml on the tag, GitHub's arm64 runner, Ubuntu 22.04
-  sysroot). The file uploaded from here (9560c192..., then 6b930e4d for 0.20.0-rf.1) was replaced
-  by that build minutes later (the release job's `--clobber`): releases come from CI only, the pin
-  is what CI uploads. Base: hakuX-lr master b7b240f, after 0.22.0. Needs libSDL3.so.0, libz,
-  libstdc++ (rootfs: SDL3 3.4.8, glibc 2.43, gcc-libs 16).
+- Release file hakux-0.25.2-rf.1-standalone-aarch64: 12640256 bytes, sha256 434a069e...5e74817b,
+  the catalog pin (2026-11-09): hakuX-lr 0.25.2, built by the fork's CI from the tag
+  linux-v0.25.2-rf.1 (54b0f897a7) on GitHub's arm64 runner, Ubuntu 22.04 sysroot. Not run on
+  hardware yet. Releases come from CI only: its release job `--clobber`s anything uploaded by
+  hand (that replaced both earlier hand-uploaded pins). Needs libSDL3.so.0, libz, libstdc++
+  (rootfs: SDL3 3.4.8, glibc 2.43, gcc-libs 16).
 - The fork's retroforge-standalone (its default branch) is rebased onto each new upstream linux-v
-  release by .github/workflows/upstream-sync.yml (every 6 h); it was on linux-v0.25.2 at 5eb73c95b2
-  on 2026-11-09 (54b0f897a7). CHANGELOG.md conflicts are settled by the script; any other conflict
-  opens an upstream-sync issue with its hunks (alert only: GitHub Models, the first choice, was
-  retired 2026-07-30). No release or pin change is automatic.
+  release once a day by .github/workflows/upstream-sync.yml (a411f5b0a0). CHANGELOG.md conflicts
+  are settled by its script; any other conflict, or a failing build, opens an upstream-sync issue.
+  Tagging a release and moving this pin stay manual.
 - os-build suites: launch 605/0 (with perl's CPAN::Meta::YAML, missing from rf-trixie-py), catalog
   204/0, emu 151/0, emuopts 654/0, key-drift 45/0, plugin 130/0, plugin-install 14/0, portmaster
   39/0, scrape 112/1 (the image has no git: the hygiene check), shares 30/0.
@@ -80,15 +79,16 @@ Its linux-v0.1.0-v0.3.x releases also had a standalone `hakux`, removed in 0.4.0
 ## Phases
 
 1. DONE — hakuX-lr branch: front end, audio sink, build and package scripts, CI artifact paths,
-   README.linux.md section, CHANGELOG `linux-v0.22.0-rf.1` (was 0.20.0-rf.1 before the rebase).
+   README.linux.md section, CHANGELOG `linux-v0.25.2-rf.1` (0.20.0-rf.1, then 0.22.0-rf.1 before).
 2. DONE — os-build: catalog hakux (xemu's slot), launch.conf xbox=hakux, emulators/hakux
    (emulator.json, options.json, guide-hotkeys.yaml moved from xemu), xemu files and its
    emu-sources row removed, retroforge-home.conf link, library/scraper xbox `chd`, plugin 0.1.107,
    tests.
 3. DONE — the offline checks above.
 4. DONE 2026-11-08 — forked to sunshineinabox/hakux, `retroforge-standalone` pushed (f90b59d), releases
-   `linux-v0.20.0-rf.1`, then `linux-v0.22.0-rf.1` (rebased onto b7b240f, branch at a1b1bf5) with the pinned file; retroforge-emu's tested_build() on the Air X resolves it
-   and the download hashes to the pin.
+   `linux-v0.20.0-rf.1`, then `linux-v0.22.0-rf.1` (rebased onto b7b240f, branch at a1b1bf5);
+   2026-11-09 rebased onto upstream linux-v0.25.2 and released `linux-v0.25.2-rf.1` from CI, the
+   pin; `retroforge-emu check hakux` resolves it as the newest build.
 5. PENDING — HW: an SM6115 board (A610: Vulkan through noconform, FEX without LSE, 3.5 GB) and an
    A7xx board: a real game boots and draws, sound, pad, Guide keys, Exit (hard disk synced), a
    title's relaunch, the quick state, install/update/rollback from Main menu > Emulators.

@@ -251,11 +251,11 @@
         "xbox"
       ],
       "github": "sunshineinabox/hakux",
-      "tag": "linux-v0.22.0-rf.1",
+      "tag": "linux-v0.25.2-rf.1",
       "tag_pattern": "^linux-v[0-9]+\\.[0-9]+\\.[0-9]+-rf\\.[0-9]+$",
       "asset": "^hakux-[0-9][0-9.]*-rf\\.[0-9]+-standalone-aarch64$",
-      "sha256": "f5d1695a23ff3231a0ffa53d893a43330681f01aac4db9c9b95cd5e1af0aba2f",
-      "size": 11256960,
+      "sha256": "434a069e3ef0cb1b08a328d0cbb6ca8a2145c14ffc471eec0aa82be59e74817b",
+      "size": 12640256,
       "homepage": "https://github.com/rfandango/hakuX",
       "licence": {
         "name": "GPL-3.0-or-later",
