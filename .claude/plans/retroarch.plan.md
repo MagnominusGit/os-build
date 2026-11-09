@@ -1,7 +1,7 @@
 # RetroArch + RetroAchievements for the pre-PS1 systems (and N64) — plan
 
-Status: decisions D1-D7 AGREED 2026-11-09 (branch plan/retroarch). Phases 0-5 DONE 2026-11-09
-(Phase 5 HW-OK on the Pocket ACE, SM8550); merged to main. Next: Phase 6 (N64).
+Status: decisions D1-D7 AGREED 2026-11-09 (branch plan/retroarch). Phases 0-6 DONE 2026-11-09
+(Phase 5 HW-OK on the Pocket ACE, SM8550; Phase 6 HW-OK on the Air X, SM6115); merged to main.
 
 ## Why
 
@@ -345,6 +345,15 @@ DONE 2026-11-09 on the Pocket ACE (SM8550, dev card fea75717, plugin 0.1.110):
 - HW: the Air X games that run on RMG at the same speed, one SM8250/SM8550 game, one achievement,
   clean Exit.
 
+DONE 2026-11-09 (HW-OK on the Air X, SM6115/A610, user: "it's fine"): Download installed four cores
+(mupen64plus_next nightly-2026-11-09-224c9ab0); first run seeded Mupen64Plus-Next.opt (GLideN64, HLE,
+dynarec); Super Mario 64 ran on glcore (RetroArch's switch; the main thread ~50% of one core), RetroAchievements
+signed in, `<rom>.srm` written to ~/saves/n64 on Exit, `~/bios/Mupen64plus` created (accepted). RetroArch
+writes video_driver = glcore into retroarch.cfg while the N64 game runs, but the next game (armGBA) was back
+on vulkan (Turnip loaded): the switch does not stick. Vulkan for N64 = paraLLEl-RDP (in the buildbot core),
+not the default (A610; no per-SoC defaults): Quick Menu > Core Options per game. armN64 tried in between
+(D7b), reverted. Pocket ACE: a dead pad after boot was InputPlumber losing the re-enumerated xpad (not this plan).
+
 ## Risks
 
 | Risk | Level | Mitigation |
@@ -367,4 +376,4 @@ DONE 2026-11-09 on the Pocket ACE (SM8550, dev card fea75717, plugin 0.1.110):
 - [ ] armgba/snes9x/clownmdemu/sigdefer gone from the image (no cleanup on devices, no save migration)
 - [ ] Offline tests green (`tests/test-emu.sh`, `test-launch.sh`, `test-catalog.sh`, `test-emuopts.sh`,
       `test-key-drift.sh`, `test-cheevos.sh`, plugin suite)
-- [ ] Phase 6 done or dropped by the D7 rule
+- [x] Phase 6 done or dropped by the D7 rule
