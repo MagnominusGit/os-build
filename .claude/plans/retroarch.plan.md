@@ -1,7 +1,7 @@
 # RetroArch + RetroAchievements for the pre-PS1 systems (and N64) — plan
 
-Status: decisions D1-D7 AGREED 2026-11-09 (branch plan/retroarch). Nothing implemented. Next: Phase 0
-(HW spike), which can stop the plan.
+Status: decisions D1-D7 AGREED 2026-11-09 (branch plan/retroarch). Phase 0 on the Air X 2026-11-09: steps 1-5 OK,
+6-7 open (RetroAchievements sign-in + unlock, menu walk), 8 moved to Phase 5 unless a disc + BIOS show up.
 
 ## Why
 
@@ -104,6 +104,51 @@ hand to `~/emulators/retroarch`, cores by hand:
 
 GATE: 1, 2 or 3 failing stops the plan. 5 failing for N64 drops Phase 6 (D7).
 
+### Phase 0 notes (2026-11-09, Air X MQ66 = A610, dev card 78354ddb, kernel 7.3.3, 192.168.1.100)
+
+Set-up (gone at reboot): bind mounts over `/usr/share/retroforge/emulators` (+ `retroarch/` spike
+definition), `/usr/share/retroforge/catalog.json` (+ `retroarch` entry) and `/etc/retroforge/launch.conf`
+(gb/gbc/gba/snes/md/segacd/n64 = retroarch); AppImage as `~/emulators/retroarch/<tag>.AppImage`, cores
+by hand in `cores/`. `retroforge-emu list` sees it installed = tested.
+
+- Downloads: AppImage and armGBA zip match GitHub's sha256 digests. Buildbot `.index-extended` CRC32 is
+  the CRC of the `.so` INSIDE the zip (= the zip member's CRC), not of the zip: Phase 1 checks the
+  unpacked core.
+- AppImage (DwarFS, uruntime): bundles glibc **2.43**, Mesa 26.2.6 (Arch) for GL/EGL/gbm, SDL2/3,
+  PipeWire, Pulse, ALSA. `share/retroarch` holds only `filters`: NO assets (ozone/xmb unusable ->
+  `menu_driver = rgui`), NO autoconfig, NO core info, NO database. RetroAchievements compiled in
+  (`cheevos_*`, `dorequest.php`). Build's `core_updater_buildbot_cores_url` is empty: its Online
+  Updater cannot fetch cores anyway (D1b holds even before hiding it).
+- Cores (readelf): armGBA glibc 2.34 (libz, libstdc++); Snes9x 2.33; Genesis Plus GX 2.33;
+  Mupen64Plus-Next 2.34 and **libGL.so.1** (desktop GL; no GLES build on the aarch64 buildbot) ->
+  N64 needs RetroArch's `gl`/`glcore` driver, on the bundled Mesa GL as RMG does today. Step 2 OK on
+  paper (2.43 >= 2.34); real `dlopen` per core still to see with a game.
+- Step 1 OK (menu): `video_driver = vulkan` -> "Turnip Adreno (TM) 610" through the launcher's
+  `SHARUN_ALLOW_SYS_VKICD`, X11 (Xwayland) fullscreen 1920x1080, 3 swapchain images; `audio_driver =
+  pipewire` -> Speaker sink. Harmless noise: GameMode, xdg-screensaver, MIDI /dev/snd/seq.
+- Step 4 pad: seeded `autoconfig/sdl2/RetroForge pad.cfg` matched by vid/pid 1118/2816 ("Xbox One
+  Elite 2 Controller configured in port 1"). Buttons not yet checked on screen.
+- Step 3 OK (menu): ONE SIGTERM to RetroArch (what OGUI's Exit sends; the launcher never forwards) ->
+  normal exit in ~800 ms, config + playlists written, launcher returned, mount released.
+  `quit_press_twice` does not apply to signals. No `SDL_NO_SIGNAL_HANDLERS` / `exit_resend` needed.
+- RetroArch rewrites the cfg on exit (3377 lines) and keeps our keys; it writes paths back as `~/...`.
+- Games from OGUI cards (user: "everything seems to work"; history playlist confirms the core per
+  system): gba TMNT (armGBA core, .7z), snes Super Mario All-Stars (Snes9x), md Kunio (Genesis Plus
+  GX), n64 Super Mario 64 (Mupen64Plus-Next; RetroArch switched to a GL context for it by itself
+  with `video_driver = vulkan`). All four cores `dlopen` fine: step 2 OK. SRAM written (gba, snes);
+  Guide hotkey save states written (snes, md).
+- FOUND: `sort_savefiles_enable` / `sort_savestates_enable` default to true -> saves landed in
+  `~/saves/<system>/<core name>/` (`armGBA/`, `Snes9x/`, `Genesis Plus GX/`). Must be "false" in the
+  seed AND in `system_settings` (RetroArch writes its in-memory value back on exit). Spike fixed,
+  test files moved up.
+- Mupen64Plus-Next writes `Mupen64plus/mupen64plus.ini` + `shaders/` into `system_directory`
+  (= the flat `~/bios`): ACCEPTED (user 2026-11-09).
+- Step 5 OK (user 2026-11-09): N64 speed on the A610 is fine -> D7 holds, Phase 6 stays. More
+  emulator-default and per-ROM options later, if needed.
+- Save states: no migration, old states may break (user 2026-11-09). SRAM migration stays (Phase 4).
+- Still open: step 6 (RetroAchievements: not signed in yet), step 7 (menu walk), step 8 + segacd (no
+  disc, no BIOS on the Air X; can move to the Phase 5 card), gb/gbc.
+
 ## Phase 1 — catalog and `retroforge-emu`
 
 - `catalog.json`: new `retroarch` entry (pkgforge AppImage, tag_pattern `^[0-9][0-9.]*@...$` as
@@ -173,7 +218,9 @@ GATE: 1, 2 or 3 failing stops the plan. 5 failing for N64 drops Phase 6 (D7).
   `packages/inputplumber/PKGBUILD` (testbed reference).
 - Existing devices: orphaned `~/emulators/<old>` removed (plugin row or first RetroArch install).
   armGBA `.srm` saves keep their names; check Snes9x and ClownMDEmu SRAM naming and rename to
-  `<rom>.srm` where the bytes match. Save states do not carry over (documented).
+  `<rom>.srm` where the bytes match. Save states: no migration, old ones may break (user 2026-11-09).
+- Seed + `system_settings`: `sort_savefiles_enable = "false"`, `sort_savestates_enable = "false"`
+  (Phase 0: per-core subfolders otherwise).
 - Docs: README row 3, `retroforge.plan.md` notes, RUNBOOK.
 
 ## Phase 5 — HW validation, merge, push
