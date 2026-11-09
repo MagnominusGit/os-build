@@ -246,6 +246,11 @@
 	status = "okay";
 };
 
+/* This unit's own image (modem partition image/), replacing the bootloader's early one (1185) */
+&remoteproc_soccp {
+	firmware-name = "qcom/sm8750/ayn/odin3/soccp.mbn";
+};
+
 &spk_amp_l {
 	firmware-name = "qcom/sm8750/ayn/odin3/aw883xx_acf.bin";
 };

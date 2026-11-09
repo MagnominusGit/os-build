@@ -1725,3 +1725,8 @@
 			"qcom/sm8750/konkr/pfe/cdsp_dtb.mbn";
 	status = "okay";
 };
+
+/* This unit's own image (modem partition image/), replacing the bootloader's early one (1185) */
+&remoteproc_soccp {
+	firmware-name = "qcom/sm8750/konkr/pfe/soccp.mbn";
+};
