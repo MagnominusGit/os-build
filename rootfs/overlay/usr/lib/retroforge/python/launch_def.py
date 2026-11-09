@@ -36,8 +36,6 @@
 #    "install": [{"from": "bios/fw.bin",            a one-time step with the emulator's own binary
 #                 "unless": ".config/x/fw/ok",       (below); paths under $HOME
 #                 "args": ["--installfw", "{file}"]}],
-#    "setup_args": ["--assign-controller", "1"],   run the emulator's binary with these arguments
-#                                                  before EVERY start, game and --gui (below)
 #    "stub": {"psn": "%RPCS3_GAMEID%:{text}"},     a ROM with this extension is a stub: a text file
 #                                                  whose first line replaces "{text}", and the
 #                                                  result replaces "{rom}" (below)
@@ -58,7 +56,7 @@
 #
 # Per-system settings (system_settings): one emulator serving several systems that has ONE save or
 # state folder, set only in its config file -- no flag, no -C (armGBA: gb, gbc, gba). Before every
-# game, each entry's settings are written into its file (emuopts' patchers: ini/toml/yaml/xml/json,
+# game, each entry's settings are written into its file (emuopts' patchers: ini/toml/yaml/xml,
 # a missing file is created) with "{system}" in the file path and the values replaced by the card's
 # system, so saves land in ~/saves/<system> as the shared layout says. Never for --gui (Open has no
 # system): the file keeps the last game's values, or the seed's. A setting the player changes in the
@@ -94,7 +92,7 @@ SEED_BOARD_DIR = os.path.join(HOME, ".config", "retroforge", "seed-board")
 SYSTEM_ID = re.compile(r"[a-z0-9_]+")
 DEFINITION_KEYS = {"format", "root", "binary", "args", "gui_args", "system_args", "system_requires",
                    "system_settings", "env",
-                   "seed", "sync", "install", "setup_args", "stub", "core_dumps", "exit_resend",
+                   "seed", "sync", "install", "stub", "core_dumps", "exit_resend",
                    "gamepad_profile", "notes"}
 EXIT_RESEND_MAX = 30  # s: an exit_resend longer than this is a typo, not a plan
 ROM = "{rom}"
@@ -231,11 +229,6 @@ def load_definition(emulator):
         raise bad('install entries must be {"from": <path under $HOME>, "unless": <path under $HOME>, '
                   f'"args": [... "{FILE}" once, no "{ROM}" or "{SYSTEM}" ...]}}, paths relative, '
                   "without '..' or whitespace")
-    setup_args = d.get("setup_args", [])
-    if not str_list(setup_args) or any(p in setup_args for p in (ROM, FILE)) \
-            or any(SYSTEM in a for a in setup_args):
-        raise bad(f'setup_args must be a list of strings without "{ROM}", "{FILE}" or "{SYSTEM}" '
-                  "(a setup run has no game)")
     stub = d.get("stub", {})
     if not (isinstance(stub, dict)
             and all(isinstance(k, str) and re.fullmatch(r"[a-z0-9]+", k)
@@ -257,7 +250,7 @@ def load_definition(emulator):
         raise bad(f"exit_resend must be a number of seconds, more than 0 and at most {EXIT_RESEND_MAX}")
     return {"format": d["format"], "root": d.get("root"), "binary": d["binary"], "args": args, "gui_args": gui_args,
             "system_args": system_args, "system_requires": system_requires, "system_settings": system_settings, "env": env, "seed": seed,
-            "sync": sync, "install": install, "setup_args": setup_args, "stub": stub, "core_dumps": core_dumps,
+            "sync": sync, "install": install, "stub": stub, "core_dumps": core_dumps,
             "exit_resend": exit_resend, "gamepad_profile": gamepad_profile}
 
 

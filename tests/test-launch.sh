@@ -72,11 +72,6 @@ read -r _ _ _ _ pgid sid _< <(cut -d' ' -f1-7 /proc/\$\$/stat)
   echo "vram_on=\${ENABLE_MESA_VRAM_REPORT_LIMIT-}"; echo "vram_mib=\${VK_VRAM_REPORT_LIMIT_HEAP_SIZE-}"
   echo "vram_id=\${VK_VRAM_REPORT_LIMIT_DEVICE_ID-}"; echo "opt_env=\${FAKE_OPT-}"; echo "oom=\$(cat /proc/self/oom_score_adj)"
   printf 'arg=%s\n' "\$@"; } >> "\$log"
-if [ "\${1-}" = --fake-setup ]; then  # a setup run (emulator.json "setup_args"), not a game
-  echo "setup \$*" >> "$T/setup.log"; echo "oom=\$(cat /proc/self/oom_score_adj)" >> "$T/setup.log"
-  [ -f "$T/setup-fails" ] && exit 9
-  exit 0
-fi
 if [ "\${1-}" = --headless ] && [ "\${2-}" = --installpkg ]; then  # the PSN inbox (--psn-install)
   echo "psn-install \$*" >> "$T/psn.log"; echo "oom=\$(cat /proc/self/oom_score_adj)" >> "$T/psn.log"
   echo "RPCS3-LOG-NOISE"  # RPCS3 logs to stdout: it must never land on the result lines
@@ -1508,44 +1503,16 @@ RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-badbin.conf" "$L
   || bad "binary != current: exit $rc"
 
 # =================================================================================================
-CASE="setup runs (setup_args)"
-# Some emulators only read state their own binary wrote for this boot (gopher64 stored the pad's
-# /dev/input/eventN path, which no board or boot guarantees): setup_args runs the emulator's binary
-# before EVERY start (game and --gui) so the emulator itself rewrites it. A failed setup is a
-# warning, never a blocked game.
+CASE="setup_args is gone"
+# gopher64 (N64, retired) was the only emulator with a setup run (setup_args): the key is no longer
+# read, so a definition still holding it is refused like any unknown key, not silently ignored.
 mkdir -p "$BD/fakeset"
 cat > "$BD/fakeset/emulator.json" <<'EOF'
-{"format": "binary", "binary": "current", "args": ["{rom}"], "gui_args": [],
- "setup_args": ["--fake-setup"]}
+{"format": "binary", "binary": "current", "args": ["{rom}"], "setup_args": ["--fake-setup"]}
 EOF
 echo "n64=fakeset" > "$T/launch-setup.conf"
-stl() { RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-setup.conf" "$LAUNCH" "$@"; }
-mkdir -p "$T/emus/fakeset"; cp "$T/fake-emu" "$T/emus/fakeset/v1.0.0.AppImage"
-ln -s v1.0.0.AppImage "$T/emus/fakeset/current"
-reset_logs; rm -f "$T/setup.log" "$T/setup-fails"
-stl n64 "$NROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
-wait_for emu_up || bad "the game never started: $(cat "$T/launch.err")"
-grep -qx "setup --fake-setup" "$T/setup.log" 2>/dev/null \
-  && ok "the setup ran with the definition's setup_args before the game" || bad "no setup run: $(cat "$T/setup.log" 2>/dev/null)"
-grep -qx "oom=900" "$T/setup.log" 2>/dev/null && ok "the setup run is at oom_score_adj 900" \
-  || bad "setup oom_score_adj: $(grep '^oom=' "$T/setup.log" 2>/dev/null)"
-touch "$T/stop-emu"; reap_launcher "$lpid"
-reset_logs; rm -f "$T/setup.log"
-stl --gui fakeset 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
-wait_for emu_up || bad "--gui never started: $(cat "$T/launch.err")"
-[ -s "$T/setup.log" ] && ok "--gui runs the setup too" || bad "--gui skipped the setup"
-touch "$T/stop-emu"; reap_launcher "$lpid"
-reset_logs; rm -f "$T/setup.log"; : > "$T/setup-fails"
-stl n64 "$NROM" 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
-wait_for emu_up && grep -q "setup run ended with 9" "$T/launch.err" \
-  && ok "a failed setup is a warning and the game still starts" \
-  || bad "setup exit 9: game up=$(emu_up && echo yes || echo no), err: $(tail -1 "$T/launch.err" 2>/dev/null)"
-touch "$T/stop-emu"; reap_launcher "$lpid"; rm -f "$T/setup-fails"
-cat > "$BD/fakeset/emulator.json" <<'EOF'
-{"format": "binary", "binary": "current", "args": ["{rom}"], "setup_args": ["--load", "{rom}"]}
-EOF
 [ "$(RETROFORGE_EMU_DATA_DIR="$BD" RETROFORGE_LAUNCH_CONF="$T/launch-setup.conf" code n64 "$NROM")" = 2 ] \
-  && ok 'setup_args holding "{rom}" is refused (a setup run has no game)' || bad 'accepted {rom} in setup_args'
+  && ok "a definition with setup_args is refused (exit 2)" || bad "setup_args accepted"
 
 # =================================================================================================
 CASE="gamepad profile (emulator.json gamepad_profile -> OpenGamepadUI declaration)"

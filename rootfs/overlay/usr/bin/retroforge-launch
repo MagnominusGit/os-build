@@ -41,15 +41,6 @@
 # <from>` in the status file, so the plugin can tell the player where to put it. --gui still opens
 # without it.
 #
-# Setup runs (setup_args): the emulator's own binary, run with these arguments and waited for before
-# EVERY start, game and --gui, windowless. For a setting that must follow the device, so no file can
-# seed it: gopher64 (N64, since retired) stored the assigned pad's /dev/input/eventN path, which
-# no board or boot guarantees -- `--assign-controller 1 --port 1` at every launch made gopher64
-# itself look up InputPlumber's virtual pad (the one SDL joystick on a RetroForge session) and write
-# its current path (HW 2026-10-20, Pocket ACE: fresh config = every port unassigned = no controls).
-# A setup run that fails is a warning, never a blocked game: the emulator still starts, at worst as
-# it would have without the step.
-#
 # Stub ROMs (stub): a card for a game that lives inside the emulator's own data, not in ~/roms — a
 # PSN game RPCS3 installed into dev_hdd0 (plan psn-pkg). The card's file is a stub the installer
 # wrote: its first line is a game id, and the definition maps the stub's extension to what the
@@ -159,7 +150,6 @@ MEMINFO = ENV.get("RETROFORGE_MEMINFO", "/proc/meminfo")
 VRAM_REPORT_LIMIT_MIB = 4096
 TURNIP_HEAP_SHARE = 15 / 16  # heap_memory_percent in drirc.d/01-retroforge-turnip.conf
 INSTALL_SETTLE = 1.0  # s to wait after an install step for OGUI's Exit to reach us too (below)
-SETUP_TIMEOUT = 20   # s for a setup run (setup_args): a hung one must not hold the launch forever
 
 USAGE = "usage: retroforge-launch <system> <rom> | --gui <emulator> | --psn-install"
 EMU_ID = re.compile(r"[a-z0-9_-]+")
@@ -332,28 +322,6 @@ def run_installs(emulator, binary, env, todo, interrupted):
                 f"~/{step['unless']} is there: installed")
 
 
-def run_setup(emulator, binary, env, setup_args, interrupted):
-    """The definition's setup run (setup_args above): the emulator's binary, before every start,
-    waited for. A failure is a warning, never a blocked game: the emulator starts at worst as it
-    would have without the step."""
-    if not setup_args:
-        return
-    log(f"{emulator}: setup: {binary} {' '.join(setup_args)}")
-    try:
-        rc = subprocess.run([binary] + setup_args, env=env, start_new_session=True,
-                            preexec_fn=emulator_child(), timeout=SETUP_TIMEOUT).returncode
-    except subprocess.TimeoutExpired:
-        log(f"warning: {emulator}: the setup run did not finish in {SETUP_TIMEOUT} s")
-    except (OSError, ValueError) as err:
-        log(f"warning: {emulator}: could not run the setup: {err}")
-    else:
-        if rc != 0:
-            log(f"warning: {emulator}: the setup run ended with {rc}")
-    # OGUI's Exit reached the setup run (and us): the player left; never start the game after that.
-    if interrupted:
-        raise Exit(128 + interrupted[0], f"{emulator}: interrupted during setup; not starting")
-
-
 # ------------------------------------------------------------ gamepad profile (gamepad_profile) --
 # The definition's InputPlumber device profile (the Guide-modifier hotkey layer) is DECLARED to
 # OpenGamepadUI, which owns every profile load: its focus profile while it has focus, this one
@@ -519,7 +487,6 @@ def run(argv):
         env = {**inherited, **gpu_priority_env(), **vram_limit_env(), **package.env(), **definition["env"],
                **opt_env}
         run_installs(emulator, binary, env, todo, interrupted)
-        run_setup(emulator, binary, env, definition["setup_args"], interrupted)
         # Last before the start: nothing below but the start itself can fail, so no declaration
         # outlives a launch that said no.
         profile_declared = declare_gamepad_profile(emulator, definition["gamepad_profile"])
