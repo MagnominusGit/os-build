@@ -1,7 +1,7 @@
 # RetroArch + RetroAchievements for the pre-PS1 systems (and N64) — plan
 
-Status: decisions D1-D7 AGREED 2026-11-09 (branch plan/retroarch). Phase 0 on the Air X 2026-11-09: steps 1-5 OK,
-6-7 open (RetroAchievements sign-in + unlock, menu walk), 8 moved to Phase 5 unless a disc + BIOS show up.
+Status: decisions D1-D7 AGREED 2026-11-09 (branch plan/retroarch). Phase 0 DONE on the Air X 2026-11-09
+(gate passed; RetroAchievements and Mega CD checks moved to Phases 3/5). Next: Phase 1.
 
 ## Why
 
@@ -146,8 +146,19 @@ by hand in `cores/`. `retroforge-emu list` sees it installed = tested.
 - Step 5 OK (user 2026-11-09): N64 speed on the A610 is fine -> D7 holds, Phase 6 stays. More
   emulator-default and per-ROM options later, if needed.
 - Save states: no migration, old states may break (user 2026-11-09). SRAM migration stays (Phase 4).
-- Still open: step 6 (RetroAchievements: not signed in yet), step 7 (menu walk), step 8 + segacd (no
-  disc, no BIOS on the Air X; can move to the Phase 5 card), gb/gbc.
+- Menu: Select+Start opens RGUI in game (`input_menu_toggle_gamepad_combo = 4`), HW-OK.
+- Step 6 MOVED to Phase 3/5 (user 2026-11-09: not expected to fail): the `retroforge-cheevos` sign-in
+  and one unlock are tested there anyway.
+- Step 7 (from the written cfg): Online Updater and Load Core hidden. NO menu path downloads a core:
+  this build's `core_updater_buildbot_cores_url` is empty. What is left needs a `.so` already on disk
+  or deliberate tinkering: Settings > User Interface > Menu Item Visibility can show Load Core again
+  ("Install or Restore a Core" from a file), Settings > Directory can move the cores folder, Settings
+  > Core > Manage Cores backs up / restores / deletes existing cores. DECISION: leave those settings
+  visible (kiosk mode would also hide Achievements); seed `core_updater_buildbot_cores_url = ""`
+  explicitly so a later build that sets it changes nothing.
+- Step 8 + segacd, gb/gbc: MOVED to the Phase 5 card (no disc, BIOS or GB game on the Air X).
+
+PHASE 0 DONE 2026-11-09: gate passed (steps 1-3 OK). Next: Phase 1.
 
 ## Phase 1 — catalog and `retroforge-emu`
 
