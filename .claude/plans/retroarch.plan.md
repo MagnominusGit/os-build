@@ -262,6 +262,25 @@ PHASE 0 DONE 2026-11-09: gate passed (steps 1-3 OK). Next: Phase 1.
   password never on disk, cfg perms); plugin Godot suite (see the plugin-godot-tests memory).
 - Security review of the helper and the plugin rows before commit.
 
+### Phase 3 notes (2026-11-09)
+
+- `retroforge-cheevos login|logout|hardcore on|off|status` (exit 0/2/3/5/7/8). Live check against
+  retroachievements.org with a made-up account: HTTP 401 `"Code":"invalid_credentials"` -> exit 7,
+  nothing written; the `RetroForge/<VERSION_ID> retroforge-cheevos` User-Agent is accepted.
+- Writes only cheevos_username (the name RetroAchievements answers with) + cheevos_token, empties
+  cheevos_password, sets cheevos_enable; retroarch.cfg 0600 before the token; seeded from the image
+  when missing; refused while RetroArch runs (it rewrites the file on exit).
+- Plugin 0.1.110: Settings > Library > RetroAchievements (cheevos_settings.gd: user, password on
+  stdin via scrape_runner.gd, Sign in/out, Hardcore toggle), wording in cheevos_text.gd (stock-Godot
+  tested). Tests: tests/test-cheevos.sh (38, in make test), test-plugin.sh 543 with OGUI.
+- Security review (no CRITICAL/HIGH), all fixed: umask 077 in the tool (write_atomic's temp file
+  held the token at the default mode), RetroArch also detected by comm / ld.so argument, the running
+  check repeated after the request, curl -q (no ~/.curlrc), control characters stripped from the
+  server's Error. Tests 43.
+- HW still to do (Phase 5): sign in with a real account, one unlock, hardcore refuses Guide+L1,
+  check retroarch.cfg's mode after RetroArch rewrote it on exit (if 0644: the launcher must chmod it
+  back after a RetroArch game -- the token would be world-readable).
+
 ## Phase 4 — removal
 
 - Delete `emulators/{armgba,snes9x,clownmdemu}`, their catalog and emu-sources rows, the ClownMDEmu

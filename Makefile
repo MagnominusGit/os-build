@@ -510,6 +510,7 @@ test: verify-lock ## Run every offline suite (host, no build needed)
 	bash $(TESTS_DIR)/test-store-browser.sh
 	bash $(TESTS_DIR)/test-emu.sh
 	bash $(TESTS_DIR)/test-emu-cores.sh
+	bash $(TESTS_DIR)/test-cheevos.sh
 	bash $(TESTS_DIR)/test-scrape.sh
 	bash $(TESTS_DIR)/test-sysctl.sh
 	bash $(TESTS_DIR)/test-oom.sh

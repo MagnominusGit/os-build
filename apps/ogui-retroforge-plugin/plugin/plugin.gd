@@ -53,6 +53,7 @@ var _buttons: RefCounted  # button_layout.gd
 var _pause: RefCounted  # pause_on_menu.gd
 var _scraper: RefCounted  # scraper_settings.gd
 var _psn: RefCounted  # psn_settings.gd
+var _cheevos: RefCounted  # cheevos_settings.gd
 var _art_fetch: RefCounted  # art_fetch.gd: new ROMs' art, fetched when their card asks for it
 var _os: Resource  # retroforge_os.gd, installed as OGUI's platform.os
 var _tool: RefCounted  # proton_tool.gd
@@ -112,7 +113,11 @@ func _ready() -> void:
 	_pause = load(plugin_base.path_join("pause_on_menu.gd")).new().setup(get_tree())
 	if not _pause.attach():
 		logger.warn("OGUI general settings layout not found; no pause-in-menus toggle")
-	# Before the scraper: both insert after Refresh Library, so the later one lands on top.
+	# Every Library section inserts right after Refresh Library, so the later one lands on top:
+	# RetroAchievements first (the bottom), then PSN, then ROM art.
+	_cheevos = load(plugin_base.path_join("cheevos_settings.gd")).new().setup(get_tree())
+	if not _cheevos.attach():
+		logger.warn("OGUI library settings layout not found; no RetroAchievements section")
 	_psn = load(plugin_base.path_join("psn_settings.gd")).new().setup(get_tree())
 	if not _psn.attach():
 		logger.warn("OGUI library settings layout not found; no PSN packages row")
@@ -171,6 +176,8 @@ func unload() -> void:
 		_scraper.detach()
 	if _psn:
 		_psn.detach()
+	if _cheevos:
+		_cheevos.detach()
 	if _art_fetch:
 		_art_fetch.allowed = Callable()
 		_art_fetch.runner.cancel()

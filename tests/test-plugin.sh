@@ -89,6 +89,16 @@ grep -q '_rollback.bind(id, name_text, args, row)' "$SRC/apps_page.gd" \
   && ok "apps_page.gd reverts with the row's own args (a core's --core=)" \
   || bad "apps_page.gd reverts with a fixed [rollback, id]: a core's Revert would revert RetroArch"
 
+# The RetroAchievements password goes to retroforge-cheevos on stdin (the runner's second argument),
+# never in its argv, and the field is emptied after every attempt.
+grep -q '_login.start(\["login", user\], password)' "$SRC/cheevos_settings.gd" \
+  && ! grep -qE 'OS.execute\(TOOL, \[[^]]*password' "$SRC/cheevos_settings.gd" \
+  && grep -q '_password.text = ""' "$SRC/cheevos_settings.gd" \
+  && ok "cheevos_settings.gd hands the password over on stdin only, then clears it" \
+  || bad "cheevos_settings.gd: the password must go on stdin (start(args, password)) and be cleared"
+grep -q 'load(plugin_base.path_join("cheevos_settings.gd"))' "$SRC/plugin.gd" && grep -q '_cheevos.detach()' "$SRC/plugin.gd" \
+  && ok "plugin.gd attaches and detaches the RetroAchievements section" || bad "plugin.gd does not load cheevos_settings.gd"
+
 # OGUI never calls ready() on our OS platform (it knows no `retroforge` OS): plugin.gd must, and
 # only where OGUI detected none.
 grep -q 'if platform.os or not platform.os_info or platform.os_info.id != "retroforge":' "$SRC/plugin.gd" \
@@ -297,6 +307,7 @@ const UpdateStates := preload("$SRC/update_states.gd")
 const InternalInstall := preload("$SRC/internal_install.gd")
 const SteamApps := preload("$SRC/steam_apps.gd")
 const SteamWatch := preload("$SRC/steam_watch.gd")
+const CheevosText := preload("$SRC/cheevos_text.gd")
 const SYSTEMS := {"psx": "PlayStation", "ps2": "PlayStation 2"}
 var failed := 0
 
@@ -393,7 +404,28 @@ func _init() -> void:
 	test_update_states()
 	test_internal_install()
 	test_steam_apps()
+	test_cheevos_text()
 	quit(1 if failed else 0)
+
+# Settings > Library > RetroAchievements (cheevos_settings.gd): retroforge-cheevos' exit codes and
+# status -> what the player reads.
+func test_cheevos_text() -> void:
+	check("cheevos: wrong password", CheevosText.failure_text(7, "retroforge-cheevos: Invalid user/password combination."),
+		"RetroAchievements refused your user name or password.")
+	check("cheevos: offline", CheevosText.failure_text(3, "retroforge-cheevos: retroachievements.org not reached"),
+		"RetroAchievements could not be reached. Check the network and try again.")
+	check("cheevos: RetroArch running is its own message",
+		CheevosText.failure_text(5, "retroforge-cheevos: RetroArch is running: close the game first (RetroArch writes...)"),
+		"Close the game first: RetroArch is running and would undo this.")
+	check("cheevos: any other local failure", CheevosText.failure_text(5, "retroforge-cheevos: cannot write x"),
+		"RetroArch's settings could not be saved.")
+	check("cheevos: a strange answer", CheevosText.failure_text(8, ""), "RetroAchievements did not answer as expected. Try again later.")
+	check("cheevos: the tool missing (-1)", CheevosText.failure_text(-1, ""), "This build has no RetroAchievements sign-in.")
+	check("cheevos: signed in", CheevosText.account_text({"signed_in": true, "user": "Player1"}),
+		"Signed in as Player1. Game Boy, SNES and Mega Drive games earn achievements.")
+	check("cheevos: signed out", CheevosText.account_text({"signed_in": false, "user": null}),
+		"Not signed in. A free account from retroachievements.org.")
+	check("cheevos: no status (tool missing)", CheevosText.account_text({}), "Not signed in. A free account from retroachievements.org.")
 
 # Settings > General > Internal storage (retroforge_os.gd): release-info's answer -> what is shown.
 func test_internal_install() -> void:
