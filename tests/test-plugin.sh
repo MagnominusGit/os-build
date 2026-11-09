@@ -74,6 +74,13 @@ add, fill = s.find("box.add_child(node)"), s.find("_channel.item_selected.connec
 sys.exit(0 if 0 <= add < fill and s.find("await _fill_channels()") > s.find("func _load_state()") > 0
          and s.find("_channel.clear()") > 0 and s.find("_channel.add_item") > 0 else 1)
 PY2
+# retroforge-launch's missing-file status names every choice of a system_requires "any" (the Mega CD
+# BIOS of any region): the message must take them all, not only exactly one path.
+grep -q 'if words.size() < 3:' "$SRC/library_roms.gd" && grep -q 'for path in words.slice(2):' "$SRC/library_roms.gd" \
+  && grep -q '"one of " + ", ".join(files)' "$SRC/library_roms.gd" \
+  && ok "library_roms.gd names every file a missing-file status lists" \
+  || bad "library_roms.gd reads only one missing-file path (system_requires lists choices)"
+
 # OGUI never calls ready() on our OS platform (it knows no `retroforge` OS): plugin.gd must, and
 # only where OGUI detected none.
 grep -q 'if platform.os or not platform.os_info or platform.os_info.id != "retroforge":' "$SRC/plugin.gd" \

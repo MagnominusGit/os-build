@@ -210,11 +210,16 @@ class LaunchFailure extends AppLifecycleHook:
 			"mount-failed":
 				msg = "%s could not be started.\nDelete it and download it again from Apps in the main menu." % name
 			"missing-file":
-				# retroforge-launch: `missing-file <emulator> <path under the player's home>`
-				if words.size() != 3:
+				# retroforge-launch: `missing-file <emulator> <path under the player's home>...`; several
+				# paths are choices, one is enough (system_requires "any": the Mega CD BIOS of any region).
+				if words.size() < 3:
 					return
+				var files := PackedStringArray()
+				for path in words.slice(2):
+					files.append(path.get_file())
+				var what := files[0] if files.size() == 1 else "one of " + ", ".join(files)
 				msg = "%s needs %s.\nCopy it to the %s folder (network share), then start the game again." \
-						% [name, words[2].get_file(), words[2].get_base_dir()]
+						% [name, what, words[2].get_base_dir()]
 			"install-failed":
 				msg = "%s could not install its firmware or system files.\nCheck the file in the bios folder, then try again." % name
 			"bad-stub":

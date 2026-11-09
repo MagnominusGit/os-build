@@ -949,6 +949,48 @@ for broken in '[{"from": "a", "unless": "b", "args": ["x"]}]' '[{"from": "../a",
 done
 
 # =================================================================================================
+# =================================================================================================
+CASE="per-system requirements (emulator.json system_requires)"
+# RetroArch serves several systems, each with its own core, and the Mega CD core needs a BIOS the
+# player provides: a ROM launch whose requirement is missing never starts the emulator (black
+# screen); it ends with exit 3 and a status the plugin turns into a message. "any": one of the
+# files is enough (the Mega CD BIOS of any region).
+REQ="$T/data-req"; mkdir -p "$REQ/duckstation"; cp "$DS_SEED" "$REQ/duckstation/"
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["system_requires"] = {
+  "psx": [{"any": ["bios/cd_u.bin", "bios/cd_e.bin"]},
+          {"any": ["emulators/duckstation/cores/x_libretro.so"], "status": "not-installed"}]}
+json.dump(d, open(sys.argv[2], "w"))' "$DS_DEF" "$REQ/duckstation/emulator.json"
+ST="$T/launch.status"; rm -f "$HOME/bios/cd_u.bin" "$HOME/bios/cd_e.bin"; reset_logs
+rc=$(RETROFORGE_EMU_DATA_DIR="$REQ" RETROFORGE_LAUNCH_STATUS="$ST" code psx "$ROM")
+[ "$rc" = 3 ] && [ "$(cat "$ST" 2>/dev/null)" = "missing-file duckstation bios/cd_u.bin bios/cd_e.bin" ] && [ ! -e "$T/emu.log" ] \
+  && ok "none of the files: exit 3, status 'missing-file <emu> <path>...' (every choice), no game" \
+  || bad "missing requirement: rc=$rc status='$(cat "$ST" 2>/dev/null)' emu ran=$([ -e "$T/emu.log" ] && echo yes || echo no)"
+RETROFORGE_EMU_DATA_DIR="$REQ" "$LAUNCH" --gui duckstation 2>"$T/launch.err" & lpid=$!; echo "$lpid" >> "$T/pids"
+wait_for emu_up && ok "--gui opens without them (no system)" || bad "--gui did not start without the requirement"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
+mkdir -p "$HOME/bios"; : > "$HOME/bios/cd_e.bin"
+rc=$(RETROFORGE_EMU_DATA_DIR="$REQ" RETROFORGE_LAUNCH_STATUS="$ST" code psx "$ROM")
+[ "$rc" = 3 ] && [ "$(cat "$ST" 2>/dev/null)" = "not-installed duckstation" ] && [ ! -e "$T/emu.log" ] \
+  && ok "one choice is enough; the next requirement (a core) reports not-installed" \
+  || bad "second requirement: rc=$rc status='$(cat "$ST" 2>/dev/null)'"
+mkdir -p "$HOME/emulators/duckstation/cores"; : > "$HOME/emulators/duckstation/cores/x_libretro.so"; reset_logs
+RETROFORGE_EMU_DATA_DIR="$REQ" start_launcher
+wait_for emu_up && ok "every requirement met: the game starts" || bad "the game did not start: $(cat "$T/launch.err")"
+touch "$T/stop-emu"; reap_launcher "$lpid" >/dev/null; reset_logs
+rm -rf "$HOME/emulators/duckstation/cores" "$HOME/bios/cd_e.bin"
+ln -s /nonexistent "$HOME/bios/cd_u.bin"
+rc=$(RETROFORGE_EMU_DATA_DIR="$REQ" RETROFORGE_LAUNCH_STATUS="$ST" code psx "$ROM")
+[ "$rc" = 3 ] && ok "a dangling link does not count as the file" || bad "a dangling link passed (rc=$rc)"
+rm -f "$HOME/bios/cd_u.bin" "$ST"; reset_logs
+bad_def "system_requires that are not an object" 'd["system_requires"] = [{"any": ["bios/x"]}]'
+bad_def "a system_requires path out of \$HOME (..)" 'd["system_requires"] = {"psx": [{"any": ["../x"]}]}'
+bad_def "a system_requires path that is absolute" 'd["system_requires"] = {"psx": [{"any": ["/etc/passwd"]}]}'
+bad_def "a system_requires path with whitespace (the status line is split on spaces)" 'd["system_requires"] = {"psx": [{"any": ["bios/a b.bin"]}]}'
+bad_def "a system_requires entry with no file" 'd["system_requires"] = {"psx": [{"any": []}]}'
+bad_def "a system_requires status the plugin does not know" 'd["system_requires"] = {"psx": [{"any": ["bios/x"], "status": "boom"}]}'
+bad_def "a system_requires entry with an unknown key" 'd["system_requires"] = {"psx": [{"any": ["bios/x"], "run": "sh"}]}'
+bad_def "system_requires for a bad system name" 'd["system_requires"] = {"../x": [{"any": ["bios/x"]}]}'
+
 CASE="first-run settings on a dual-screen board"
 # A dual-screen board (device-env declares a second panel) gets the seed's dual_screen_file instead.
 DUAL="$T/data-dual"; mkdir -p "$DUAL/duckstation"; cp "$DS_SEED" "$DUAL/duckstation/"

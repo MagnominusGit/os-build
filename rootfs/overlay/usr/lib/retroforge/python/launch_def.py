@@ -19,6 +19,9 @@
 #    "system_args": {"md": ["--system", "Mega Drive"]},  put before args when the card's system has
 #                                                  an entry (one emulator, several systems it must
 #                                                  be told about); "{system}" allowed
+#    "system_requires": {"segacd": [{"any": ["bios/a.bin", "bios/b.bin"]}],   files under $HOME a
+#                        "snes": [{"any": ["emulators/x/cores/c.so"],        game of that system
+#                                  "status": "not-installed"}]},              needs (below)
 #    "system_settings": [{"file": ".config/x/x.cfg",  settings written into the emulator's own file
 #                         "format": "ini", "separator": " = ",   before every GAME, "{system}" in the
 #                         "set": [{"section": "", "key": "save_folder",   file and the values = the
@@ -62,6 +65,15 @@
 # emulator's own menu is put back at the next game -- these are RetroForge's, as system_args are. A
 # file that cannot be written is a warning, not a blocked game (as with sync).
 #
+# Per-system requirements (system_requires): files a game of that system cannot run without, that no
+# seed provides -- RetroArch's core for the system (installed with RetroArch: "status": "not-installed",
+# the plugin says to download it again) or a BIOS the player copies in (the default status,
+# "missing-file": the plugin names every file of "any", one is enough: the Mega CD BIOS of any
+# region). Checked before a game starts, after the not-installed check; a missing one ends the
+# launch with exit 3 and `<status> <emulator>[ <path>...]` in the status file, without starting the
+# emulator (a core it cannot load, or a BIOS it does not have, is a black screen). Never for --gui.
+# Paths are relative to $HOME, no '..', no whitespace (the status line is split on spaces).
+#
 # Kept current (sync): files that are RetroForge's, not the player's, placed into the download's world --
 # PortMaster's mod_RetroForge.txt and libgl_RetroForge.txt, which every port sources from PortMaster's
 # folder. Copied from the image at every launch when missing or different (an image update must
@@ -80,7 +92,8 @@ from launch_formats import FORMATS
 LAUNCH_CONF = ENV.get("RETROFORGE_LAUNCH_CONF", "/etc/retroforge/launch.conf")
 SEED_BOARD_DIR = os.path.join(HOME, ".config", "retroforge", "seed-board")
 SYSTEM_ID = re.compile(r"[a-z0-9_]+")
-DEFINITION_KEYS = {"format", "root", "binary", "args", "gui_args", "system_args", "system_settings", "env",
+DEFINITION_KEYS = {"format", "root", "binary", "args", "gui_args", "system_args", "system_requires",
+                   "system_settings", "env",
                    "seed", "sync", "install", "setup_args", "stub", "core_dumps", "exit_resend",
                    "gamepad_profile", "notes"}
 EXIT_RESEND_MAX = 30  # s: an exit_resend longer than this is a typo, not a plan
@@ -177,6 +190,13 @@ def load_definition(emulator):
             and all(isinstance(k, str) and SYSTEM_ID.fullmatch(k) and str_list(v) and ROM not in v
                     for k, v in system_args.items())):
         raise bad(f'system_args must map system names to lists of strings without "{ROM}"')
+    system_requires = d.get("system_requires", {})
+    if not (isinstance(system_requires, dict)
+            and all(isinstance(k, str) and SYSTEM_ID.fullmatch(k) and isinstance(v, list)
+                    and all(requirement_ok(r) for r in v) for k, v in system_requires.items())):
+        raise bad('system_requires must map system names to lists of {"any": [<path under $HOME>, ...]'
+                  f'[, "status": one of {sorted(REQUIRE_STATUSES)}]}}, paths relative, without '
+                  "'..' or whitespace")
     system_settings = d.get("system_settings", [])
     if not (isinstance(system_settings, list) and all(system_settings_entry_ok(s) for s in system_settings)):
         raise bad('system_settings entries must be {"file": <path under $HOME>, "format": <one of '
@@ -236,9 +256,28 @@ def load_definition(emulator):
                                         and 0 < exit_resend <= EXIT_RESEND_MAX):
         raise bad(f"exit_resend must be a number of seconds, more than 0 and at most {EXIT_RESEND_MAX}")
     return {"format": d["format"], "root": d.get("root"), "binary": d["binary"], "args": args, "gui_args": gui_args,
-            "system_args": system_args, "system_settings": system_settings, "env": env, "seed": seed,
+            "system_args": system_args, "system_requires": system_requires, "system_settings": system_settings, "env": env, "seed": seed,
             "sync": sync, "install": install, "setup_args": setup_args, "stub": stub, "core_dumps": core_dumps,
             "exit_resend": exit_resend, "gamepad_profile": gamepad_profile}
+
+
+REQUIRE_STATUSES = {"missing-file", "not-installed"}  # what the plugin turns into a message
+
+
+def requirement_ok(r):
+    """One system_requires entry: {"any": [paths], "status"?}."""
+    return (isinstance(r, dict) and {"any"} <= set(r) <= {"any", "status"}
+            and isinstance(r["any"], list) and r["any"]
+            and all(safe_relative(p) and not re.search(r"\s", p) for p in r["any"])
+            and r.get("status", "missing-file") in REQUIRE_STATUSES)
+
+
+def missing_requirement(entries):
+    """The first entry none of whose files exists under $HOME, or None."""
+    for r in entries:
+        if not any(os.path.isfile(os.path.join(HOME, p)) for p in r["any"]):
+            return r
+    return None
 
 
 def system_settings_entry_ok(s):
