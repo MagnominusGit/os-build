@@ -43,7 +43,7 @@
 #
 # Setup runs (setup_args): the emulator's own binary, run with these arguments and waited for before
 # EVERY start, game and --gui, windowless. For a setting that must follow the device, so no file can
-# seed it: gopher64 (since replaced by RMG) stored the assigned pad's /dev/input/eventN path, which
+# seed it: gopher64 (N64, since retired) stored the assigned pad's /dev/input/eventN path, which
 # no board or boot guarantees -- `--assign-controller 1 --port 1` at every launch made gopher64
 # itself look up InputPlumber's virtual pad (the one SDL joystick on a RetroForge session) and write
 # its current path (HW 2026-10-20, Pocket ACE: fresh config = every port unassigned = no controls).

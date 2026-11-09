@@ -207,34 +207,9 @@ grep -qx 'psx=duckstation' "$LAUNCH_CONF" && ok "launch.conf maps psx to ducksta
   && ok "duckstation: an AppImage, its real binary (not AppRun)" || bad "duckstation emulator.json format/binary: $(jget "$DS_DEF" format) $(jget "$DS_DEF" binary)"
 [ "$(jget "$DS_DEF" args)" = '["-batch", "-fullscreen", "--", "{rom}"]' ] \
   && ok "duckstation args: -batch (back to OGUI on close), -- before the ROM" || bad "duckstation args: $(jget "$DS_DEF" args)"
-RMG_DEF="$SEED_DIR/rmg/emulator.json"
-RMG_SEED="$SEED_DIR/rmg/mupen64plus.cfg"
-grep -qx 'n64=rmg' "$LAUNCH_CONF" && ok "launch.conf maps n64 to rmg" || bad "launch.conf does not map n64=rmg"
-[ "$(jget "$RMG_DEF" format)" = '"appimage-sharun"' ] && [ "$(jget "$RMG_DEF" binary)" = '"bin/RMG"' ] \
-  && ok "rmg: a sharun AppImage, its real binary (not AppRun)" || bad "rmg emulator.json format/binary: $(jget "$RMG_DEF" format) $(jget "$RMG_DEF" binary)"
-[ "$(jget "$RMG_DEF" args)" = '["-f", "-n", "-q", "{rom}"]' ] \
-  && ok "rmg args: fullscreen, no GUI chrome, quit when emulation ends" || bad "rmg args: $(jget "$RMG_DEF" args)"
-python3 -c 'import json,sys; sys.exit(json.load(open(sys.argv[1]))["env"].get("SDL_NO_SIGNAL_HANDLERS") != "1")' "$RMG_DEF" \
-  && ok "rmg: SDL_NO_SIGNAL_HANDLERS=1 (RMG-Input's SDL would swallow OGUI Exit's SIGTERM)" || bad "rmg env lacks SDL_NO_SIGNAL_HANDLERS=1"
-rmgini() { awk -v sec="[$1]" -v key="$2" '$0 == sec {in_s=1; next} /^\[/ {in_s=0}
-  in_s { split($0, kv, " = "); if (kv[1] == key) { print kv[2]; exit } }' "$RMG_SEED"; }
-[ "$(rmgini "Rosalie's Mupen GUI" ConfirmExitWhileInGame)" = False ] \
-  && ok "rmg seed: no exit confirmation (OGUI's Exit would hang on 'are you sure?')" \
-  || bad "rmg seed lacks ConfirmExitWhileInGame = False"
-[ "$(rmgini "Rosalie's Mupen GUI" CheckForUpdates)" = False ] && ok "rmg seed: self-updater off (RetroForge ships the version)" \
-  || bad "rmg seed leaves RMG's update check on"
-[ "$(rmgini "Rosalie's Mupen GUI Core" GFX_Plugin)" = '"mupen64plus-video-GLideN64.so"' ] \
-  && ok "rmg seed: GLideN64 video pinned (paraLLEl-RDP does not run on A610)" \
-  || bad "rmg seed video plugin: $(rmgini "Rosalie's Mupen GUI Core" GFX_Plugin)"
-[ "$(rmgini Core SaveSRAMPath)" = '"/home/player/saves/n64"' ] && [ "$(rmgini Core SaveStatePath)" = '"/home/player/states/n64"' ] \
-  && ok "rmg seed: saves and states in the shared layout" || bad "rmg seed save paths do not match the layout"
-[ "$(rmgini "Rosalie's Mupen GUI - Input Plugin Profile 0" PluggedIn)" = True ] \
-  && [ "$(rmgini "Rosalie's Mupen GUI - Input Plugin Profile 0" DeviceType)" = 2 ] \
-  && ok "rmg seed: player 1 plugged in on the Automatic device (no profile = no pad at all)" \
-  || bad "rmg seed: no Automatic player-1 input profile"
-[ "$(rmgini "Rosalie's Mupen GUI - Input Plugin Profile 0" Hotkey_Shutdown_Data)" = '"4;6"' ] \
-  && ok "rmg seed: Select+Start stops emulation (with -q, back to OGUI)" \
-  || bad "rmg seed: no Select+Start shutdown combo"
+grep -qx 'n64=retroarch' "$LAUNCH_CONF" && ok "launch.conf maps n64 to retroarch (RMG retired, plan retroarch Phase 6)" \
+  || bad "launch.conf does not map n64=retroarch"
+[ ! -e "$SEED_DIR/rmg" ] && ok "rmg's definition is gone" || bad "emulators/rmg still ships"
 
 # DuckStation reads INI values as "key = value"; check the keys the hardware test needed.
 ini() { awk -v sec="[$1]" -v key="$2" '$0 == sec {in_s=1; next} /^\[/ {in_s=0}
@@ -397,7 +372,7 @@ CASE="controller mappings"
 # careless edit or a bad pin bump shows here, not on a handheld.
 has() { grep -qxF -- "$2" "$SEED_DIR/$1" && ok "$1: $3" || bad "$1 lacks '$2' ($3)"; }
 lacks() { grep -qE -- "$2" "$SEED_DIR/$1" && bad "$1: $3" || ok "$1: no $3"; }
-# RetroArch (gb, gbc, gba, snes, md, segacd; plan retroarch): RetroAchievements, one core per system.
+# RetroArch (gb, gbc, gba, snes, md, segacd, n64; plan retroarch): RetroAchievements, one core per system.
 # The AppImage ships no autoconfig, so the seed brings one for InputPlumber's virtual pad (matched by
 # its ids); RGUI needs no assets; the Online Updater and Load Core stay hidden and the buildbot URL
 # empty (players never install cores for other systems); saves sorted by core would miss ~/saves/<system>.
@@ -408,9 +383,20 @@ for line in 'video_driver = "vulkan"' 'audio_driver = "pipewire"' 'input_joypad_
             'menu_show_online_updater = "false"' 'menu_show_core_updater = "false"' \
             'menu_show_load_core = "false"' 'core_updater_buildbot_cores_url = ""' \
             'cheevos_enable = "true"' 'cheevos_hardcore_mode_enable = "false"' \
-            'input_menu_toggle_gamepad_combo = "4"' 'pause_nonactive = "false"'; do
+            'input_menu_toggle_gamepad_combo = "4"' 'pause_nonactive = "false"' \
+            'driver_switch_enable = "true"' 'global_core_options = "false"'; do
   has retroarch/retroarch.cfg "$line" "seeded"
 done
+# N64 (Phase 6): Mupen64Plus-Next is desktop GL only (no GLES build on the aarch64 buildbot), so
+# RetroArch switches from Vulkan to GL for it (driver_switch_enable; HW 2026-11-09, Air X). Its
+# options file pins what RMG ran: GLideN64 (paraLLEl-RDP locks the A610 up), HLE RSP, the dynarec.
+for line in 'mupen64plus-rdp-plugin = "gliden64"' 'mupen64plus-rsp-plugin = "hle"' \
+            'mupen64plus-cpucore = "dynamic_recompiler"'; do
+  has retroarch/Mupen64Plus-Next.opt "$line" "N64 core option"
+done
+grep -qF '"to": ".config/retroarch/config/Mupen64Plus-Next/Mupen64Plus-Next.opt"' "$SEED_DIR/retroarch/emulator.json" \
+  && ok "retroarch: Mupen64Plus-Next.opt seeds the core's per-core options file" \
+  || bad "retroarch: Mupen64Plus-Next.opt is not seeded as config/Mupen64Plus-Next/Mupen64Plus-Next.opt"
 has retroarch/retroforge-pad.cfg 'input_vendor_id = "1118"' "pad matched by InputPlumber's vendor id (045e)"
 has retroarch/retroforge-pad.cfg 'input_product_id = "2816"' "pad matched by InputPlumber's product id (0b00)"
 has retroarch/retroforge-pad.cfg 'input_b_btn = "0"' "RetroPad B on south"
@@ -419,7 +405,8 @@ RA_DEF="$SEED_DIR/retroarch/emulator.json"
 python3 - "$RA_DEF" <<'PY' && ok "retroarch: sharun AppImage, -L the system's core, which system_requires checks" || bad "retroarch emulator.json: cores, requirements or args"
 import json, sys
 d = json.load(open(sys.argv[1]))
-want = {"gb": "armgba", "gbc": "armgba", "gba": "armgba", "snes": "snes9x", "md": "genesis_plus_gx", "segacd": "genesis_plus_gx"}
+want = {"gb": "armgba", "gbc": "armgba", "gba": "armgba", "snes": "snes9x", "md": "genesis_plus_gx", "segacd": "genesis_plus_gx",
+        "n64": "mupen64plus_next"}
 assert d["format"] == "appimage-sharun" and d["binary"] == "bin/retroarch", d["binary"]
 assert d["args"][-1] == "{rom}" and "--menu" in d["gui_args"]
 for s, c in want.items():
@@ -582,13 +569,6 @@ has retroarch/retroarch.cfg 'input_hold_fast_forward = "f3"' "F3 fast-forwards (
 has retroarch/retroarch.cfg 'input_exit_emulator = "f4"' "F4 quits (pressed twice): Guide+Start"
 has retroarch/retroarch.cfg 'quit_press_twice = "true"' "quit asks for a second press"
 has retroarch/retroarch.cfg 'input_menu_toggle = "f5"' "the menu off F1 (RetroArch's default)"
-has rmg/mupen64plus.cfg 'LoadState = "F1"' "Guide+L1 loads state"
-has rmg/mupen64plus.cfg 'SaveState = "F2"' "Guide+R1 saves state"
-has rmg/mupen64plus.cfg 'LimitFPS = "F3"' "Guide+R2 toggles the speed limiter"
-has rmg/mupen64plus.cfg 'Shutdown = "F4"' "Guide+Start stops emulation; -q quits RMG"
-has rmg/mupen64plus.cfg 'SoftReset = ""' "F1 no longer soft-resets"
-has rmg/mupen64plus.cfg 'Resume = ""' "F2 no longer pauses"
-has rmg/mupen64plus.cfg 'Screenshot = ""' "F3 no longer takes a screenshot"
 has rpcs3/CurrentSettings.ini 'game_window_savestate_1=F1' "Guide+L1 reboots from the newest savestate"
 has rpcs3/CurrentSettings.ini 'game_window_savestate=F2' "Guide+R1 creates a savestate"
 has rpcs3/CurrentSettings.ini 'game_window_frame_limit=F3' "Guide+R2 toggles the frame limit"
@@ -1471,8 +1451,8 @@ rm -f "$T/bin/fusermount"
 
 # =================================================================================================
 CASE="plain binary format"
-# A release asset that is ONE plain executable, no AppImage (gopher64 shipped this way until RMG
-# replaced it; the format stays for the next such emulator): retroforge-emu still saves it as
+# A release asset that is ONE plain executable, no AppImage (hakuX's standalone build ships this
+# way): retroforge-emu still saves it as
 # <tag>.AppImage and points `current` at it; the binary format runs `current` in place, no mount.
 BD="$T/defs-binary"; mkdir -p "$BD/fakebin"
 cat > "$BD/fakebin/emulator.json" <<'EOF'

@@ -8,6 +8,5 @@
   "melonds": {"repo": "melonDS-emu/melonDS", "tag": "([^@-]+)(?:-[0-9]+)?@.*", "ref": "{0}"},
   "ppsspp": {"repo": "hrydgard/ppsspp", "tag": "(v[0-9.]+)", "ref": "{0}"},
   "retroarch": {"repo": "libretro/RetroArch", "tag": "([^@-]+)(?:-[0-9]+)?@.*", "ref": "v{0}"},
-  "rmg": {"repo": "Rosalie241/RMG", "tag": "([^@-]+)(?:-[0-9]+)?@.*", "ref": "v{0}"},
   "rpcs3": {"repo": "RPCS3/rpcs3", "tag": "build-([0-9a-f]{40})", "ref": "{0}"}
 }

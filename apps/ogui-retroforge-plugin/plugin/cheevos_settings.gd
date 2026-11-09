@@ -1,6 +1,6 @@
 extends RefCounted
 ## Settings > Library > "RetroAchievements": the player's RetroAchievements account for RetroArch
-## (gb, gbc, gba, snes, md, segacd; plan retroarch Phase 3), and RetroArch's hardcore mode.
+## (gb, gbc, gba, snes, md, segacd, n64; plan retroarch), and RetroArch's hardcore mode.
 ##
 ## Everything goes through /usr/bin/retroforge-cheevos. The password goes to the tool on stdin
 ## (scrape_runner.gd, the ScreenScraper sign-in's runner) and is cleared from the field after every

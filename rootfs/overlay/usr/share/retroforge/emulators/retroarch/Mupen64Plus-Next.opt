@@ -1,0 +1,3 @@
+mupen64plus-rdp-plugin = "gliden64"
+mupen64plus-rsp-plugin = "hle"
+mupen64plus-cpucore = "dynamic_recompiler"

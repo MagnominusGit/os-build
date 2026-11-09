@@ -14,7 +14,7 @@
 # $RETROFORGE_PM_MOUNTS (default $XDG_RUNTIME_DIR/retroforge-portmaster-mounts), whose squashfuse daemons
 # outlive the port's session when OGUI's Exit skips the port's own umount.
 #
-# The binary format (gopher64 shipped this way until RMG replaced it) is a download that is ONE
+# The binary format (hakuX's standalone build ships this way) is a download that is ONE
 # plain executable: retroforge-emu names it
 # <tag>.AppImage all the same (the name is only a name; nothing checks the file is an AppImage) and
 # points `current` at it. It runs in place, nothing to mount: the definition's binary is `current`
@@ -267,7 +267,7 @@ class Scripts:
 
 
 class Binary:
-    """A download that is one plain executable (gopher64, until RMG replaced it): retroforge-emu names it <tag>.AppImage
+    """A download that is one plain executable (hakuX's standalone build): retroforge-emu names it <tag>.AppImage
     all the same, `current` points at it, and it runs in place. Nothing to mount or release: the
     definition's binary is `current` itself, relative to the emulator's folder."""
 

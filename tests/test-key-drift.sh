@@ -86,7 +86,7 @@ CASE="ref"
 ref() { python3 "$KD" ref "$SOURCES" "$1" "$2" 2>/dev/null; }
 [ "$(ref azahar "2126.1.2@2026-10-01_1790876552")" = "azahar-emu/azahar 2126.1.2" ] && ok "pkgforge <ver>@<date>_<id> -> upstream tag <ver>" || bad "azahar ref"
 [ "$(ref flycast "2.7@2026-10-01_1790875174")" = "flyinghead/flycast v2.7" ] && ok "flycast -> v<ver>" || bad "flycast ref"
-[ "$(ref rmg "0.8.4-1@2026-10-01_1790876690")" = "Rosalie241/RMG v0.8.4" ] && ok "pkgforge's -<rev> is dropped" || bad "rmg ref"
+[ "$(ref retroarch "1.22.2-1@2026-11-01_1793557998")" = "libretro/RetroArch v1.22.2" ] && ok "pkgforge's -<rev> is dropped" || bad "retroarch -<rev> ref"
 [ "$(ref ppsspp "v1.19.3")" = "hrydgard/ppsspp v1.19.3" ] && ok "an upstream's own release tag is its ref" || bad "ppsspp ref"
 [ "$(ref retroarch "1.22.2@2026-11-01_1793557998")" = "libretro/RetroArch v1.22.2" ] && ok "retroarch -> v<ver>" || bad "retroarch ref"
 [ "$(ref cemu "nightly-a53cf0ece")" = "cemu-project/Cemu a53cf0ece" ] && ok "a nightly-<commit> -> that commit" || bad "cemu ref"

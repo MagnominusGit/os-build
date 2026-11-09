@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/device_profile_v1.json
 #
-# Guide-modifier hotkeys for RetroArch (gb, gbc, gba, snes, md, segacd). Same design as
+# Guide-modifier hotkeys for RetroArch (gb, gbc, gba, snes, md, segacd, n64). Same design as
 # snes9x/guide-hotkeys.yaml (the testbed; its header explains the Guide row, the deferred ui_guide
 # tap, the explicit target_devices and why R2 appears twice); only the layer's keyboard outputs are
 # bound elsewhere.
