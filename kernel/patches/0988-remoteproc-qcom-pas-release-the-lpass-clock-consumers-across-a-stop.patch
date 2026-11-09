@@ -1,0 +1,209 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Mon, 9 Nov 2026 00:30:00 -0800
+Subject: [PATCH] remoteproc: qcom: pas: release the LPASS clock consumers across a stop
+
+On the KONKR Pocket FIT (SM8650) every ADSP stop reset the whole device a
+few seconds later: a fatal error and its recovery, a crash reported through
+debugfs, and a plain stop through sysfs. With recovery disabled the crashed
+ADSP sat harmlessly, and with the APPS-side LPASS audio drivers unloaded
+first, stop and start both survived.
+
+The LPASS codec macros and the LPI pinctrl take their clocks from q6prm,
+whose clock controller sits under the ADSP's glink-edge. That node has no
+device when the remoteproc binds, so fw_devlink's dangling-consumer pickup
+makes the remoteproc device their supplier, and it stays bound across a
+stop. The q6prm clocks are unregistered under them, and they keep the
+SoundWire buses and macros live while TrustZone powers LPASS down. The same
+wrong supplier was reported upstream on qcs6490 and sm8750 ("fw_devlink:
+incorrect ancestor fallback for intermediate bus topologies", 2026-07-01),
+with no fix merged.
+
+Add a subdevice, ahead of glink so it stops after it, that releases every
+bound device clocked from a node under the remote processor once its
+services are gone and before the shutdown call. Their own consumers (the
+SoundWire masters and codecs, the card) are released with them through
+their device links. On start they are attached again: they defer until
+q6prm's clocks are back, and their consumers follow through the same links.
+This is what the mainline slimbus NGD controller does for its own bus on an
+lpass SSR notification, applied to the devices fw_devlink hid behind the
+remoteproc.
+---
+--- a/drivers/remoteproc/qcom_q6v5_pas.c
++++ b/drivers/remoteproc/qcom_q6v5_pas.c
+@@ -28,6 +28,7 @@
+ #include <linux/firmware/qcom/qcom_scm.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/remoteproc.h>
++#include <linux/slab.h>
+ #include <linux/soc/qcom/mdt_loader.h>
+ #include <linux/soc/qcom/smem.h>
+ #include <linux/soc/qcom/smem_state.h>
+@@ -70,6 +71,18 @@ struct qcom_pas_data {
+ 	bool boot_bus_vote;
+ };
+ 
++/* Devices clocked from inside the remote processor, released while it is down */
++struct qcom_pas_consumers {
++	struct rproc_subdev subdev;
++	struct device *dev;
++	struct list_head released;
++};
++
++struct qcom_pas_consumer {
++	struct list_head node;
++	struct device *dev;
++};
++
+ struct qcom_pas {
+ 	struct device *dev;
+ 	struct rproc *rproc;
+@@ -122,6 +135,7 @@ struct qcom_pas {
+ 	struct qcom_rproc_subdev smd_subdev;
+ 	struct qcom_rproc_pdm pdm_subdev;
+ 	struct qcom_rproc_ssr ssr_subdev;
++	struct qcom_pas_consumers consumers;
+ 	struct qcom_sysmon *sysmon;
+ 	struct platform_device *bam_dmux;
+ 
+@@ -890,6 +904,116 @@ static void qcom_pas_unassign_memory_region(struct qcom_pas *pas)
+ 	}
+ }
+ 
++static bool qcom_pas_node_is_under(struct device_node *np, struct device_node *root)
++{
++	struct device_node *p;
++
++	for (p = of_node_get(np); p; p = of_get_next_parent(p)) {
++		if (p == root) {
++			of_node_put(p);
++			return true;
++		}
++	}
++
++	return false;
++}
++
++static int qcom_pas_collect_consumer(struct device *dev, void *data)
++{
++	struct qcom_pas_consumers *c = data;
++	struct device_node *root = c->dev->of_node;
++	struct qcom_pas_consumer *e;
++	struct of_phandle_args args;
++	bool clocked = false;
++	int i;
++
++	if (!dev->of_node || !device_is_bound(dev) ||
++	    qcom_pas_node_is_under(dev->of_node, root))
++		return 0;
++
++	for (i = 0; !clocked && !of_parse_phandle_with_args(dev->of_node, "clocks",
++							   "#clock-cells", i, &args); i++) {
++		clocked = qcom_pas_node_is_under(args.np, root);
++		of_node_put(args.np);
++	}
++	if (!clocked)
++		return 0;
++
++	list_for_each_entry(e, &c->released, node)
++		if (e->dev == dev)
++			return 0;
++
++	e = kzalloc(sizeof(*e), GFP_KERNEL);
++	if (!e)
++		return -ENOMEM;
++
++	e->dev = get_device(dev);
++	list_add_tail(&e->node, &c->released);
++
++	return 0;
++}
++
++/*
++ * The LPASS codec macros and LPI pinctrl run on clocks the ADSP serves (q6prm),
++ * but fw_devlink hangs them off the remoteproc device, which stays bound. Left
++ * bound across a stop, they keep the SoundWire buses and macros running while
++ * TrustZone powers LPASS down, and the SoC resets. Release them once the
++ * remote's services are gone (glink is stopped before this) and before the
++ * shutdown call; their own consumers go with them through their device links.
++ */
++static void qcom_pas_consumers_stop(struct rproc_subdev *subdev, bool crashed)
++{
++	struct qcom_pas_consumers *c = container_of(subdev, struct qcom_pas_consumers, subdev);
++	struct qcom_pas_consumer *e;
++
++	bus_for_each_dev(&platform_bus_type, NULL, c, qcom_pas_collect_consumer);
++
++	list_for_each_entry(e, &c->released, node) {
++		if (!device_is_bound(e->dev))
++			continue;
++
++		dev_info(c->dev, "releasing %s while the remote processor is down\n",
++			 dev_name(e->dev));
++		device_release_driver(e->dev);
++	}
++}
++
++/* They probe again once the remote's services are back (deferred until then) */
++static int qcom_pas_consumers_start(struct rproc_subdev *subdev)
++{
++	struct qcom_pas_consumers *c = container_of(subdev, struct qcom_pas_consumers, subdev);
++	struct qcom_pas_consumer *e, *tmp;
++	int ret;
++
++	list_for_each_entry_safe(e, tmp, &c->released, node) {
++		ret = device_attach(e->dev);
++		if (ret < 0 && ret != -EPROBE_DEFER)
++			dev_warn(c->dev, "failed to attach %s: %d\n", dev_name(e->dev), ret);
++
++		list_del(&e->node);
++		put_device(e->dev);
++		kfree(e);
++	}
++
++	return 0;
++}
++
++static void qcom_pas_add_consumers_subdev(struct rproc *rproc, struct qcom_pas_consumers *c)
++{
++	c->dev = rproc->dev.parent;
++	INIT_LIST_HEAD(&c->released);
++	c->subdev.start = qcom_pas_consumers_start;
++	c->subdev.stop = qcom_pas_consumers_stop;
++
++	rproc_add_subdev(rproc, &c->subdev);
++}
++
++static void qcom_pas_remove_consumers_subdev(struct rproc *rproc, struct qcom_pas_consumers *c)
++{
++	rproc_remove_subdev(rproc, &c->subdev);
++	qcom_pas_consumers_start(&c->subdev);
++}
++
+ static int qcom_pas_probe(struct platform_device *pdev)
+ {
+ 	const struct qcom_pas_data *desc;
+@@ -998,6 +1122,8 @@ static int qcom_pas_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		goto detach_proxy_pds;
+ 
++	/* Added before glink, so it stops after glink and starts before it */
++	qcom_pas_add_consumers_subdev(rproc, &pas->consumers);
+ 	qcom_add_glink_subdev(rproc, &pas->glink_subdev, desc->ssr_name);
+ 	qcom_add_smd_subdev(rproc, &pas->smd_subdev);
+ 	qcom_add_pdm_subdev(rproc, &pas->pdm_subdev);
+@@ -1033,6 +1159,7 @@ static int qcom_pas_probe(struct platform_device *pdev)
+ 	qcom_remove_pdm_subdev(rproc, &pas->pdm_subdev);
+ 	qcom_remove_smd_subdev(rproc, &pas->smd_subdev);
+ 	qcom_remove_glink_subdev(rproc, &pas->glink_subdev);
++	qcom_pas_remove_consumers_subdev(rproc, &pas->consumers);
+ 	qcom_q6v5_deinit(&pas->q6v5);
+ detach_proxy_pds:
+ 	qcom_pas_pds_detach(pas, pas->proxy_pds, pas->proxy_pd_count);
+@@ -1060,6 +1187,7 @@ static void qcom_pas_remove(struct platform_device *pdev)
+ 	qcom_remove_smd_subdev(pas->rproc, &pas->smd_subdev);
+ 	qcom_remove_pdm_subdev(pas->rproc, &pas->pdm_subdev);
+ 	qcom_remove_ssr_subdev(pas->rproc, &pas->ssr_subdev);
++	qcom_pas_remove_consumers_subdev(pas->rproc, &pas->consumers);
+ 	qcom_pas_pds_detach(pas, pas->proxy_pds, pas->proxy_pd_count);
+ 	device_init_wakeup(pas->dev, false);
+ }

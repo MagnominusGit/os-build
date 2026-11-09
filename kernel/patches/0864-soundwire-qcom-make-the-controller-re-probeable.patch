@@ -1,0 +1,105 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Mon, 9 Nov 2026 00:30:00 -0800
+Subject: [PATCH] soundwire: qcom: make the controller re-probeable
+
+A controller that is unbound and probed again did not come back, and the
+card on it did not either. The ADSP stop path unbinds it (0988), so audio
+stayed dead after every ADSP restart.
+
+- The IRQ is requested rising-edge while the DTs describe it as level-high.
+  The mapping outlives the device with the edge type, and the next probe
+  fails with "irq: type mismatch, failed to map hwirq". Dispose of the
+  mapping when the device goes away, after devres has freed the IRQ.
+- Runtime PM is enabled at the end of probe and never disabled. The next
+  probe's sdw_bus_master_add() resumes the controller through
+  swrm_runtime_resume() before the bus is set up, which oopses in
+  sdw_bus_exit_clk_stop(). Use devm_pm_runtime_enable().
+- The DAI names were devm strings. A card keeps pointers to them in its
+  links and rebinds to the re-probed controller by name, so it compared
+  against freed memory and never bound again. Use static names.
+---
+--- a/drivers/soundwire/qcom.c
++++ b/drivers/soundwire/qcom.c
+@@ -1420,6 +1420,21 @@
+ 
+ static const struct snd_soc_component_driver qcom_swrm_dai_component = {
+ 	.name = "soundwire",
++};
++
++/*
++ * Static DAI names: a card keeps pointers to them in its links, and rebinds to
++ * a re-probed controller by name, so they must outlive one probe.
++ */
++#define SWRM_DAI_NAMES(t) "SDW Pin" #t "0", "SDW Pin" #t "1", "SDW Pin" #t "2", \
++	"SDW Pin" #t "3", "SDW Pin" #t "4", "SDW Pin" #t "5", "SDW Pin" #t "6", \
++	"SDW Pin" #t "7", "SDW Pin" #t "8", "SDW Pin" #t "9"
++
++static const char * const qcom_swrm_dai_names[] = {
++	"SDW Pin0", "SDW Pin1", "SDW Pin2", "SDW Pin3", "SDW Pin4",
++	"SDW Pin5", "SDW Pin6", "SDW Pin7", "SDW Pin8", "SDW Pin9",
++	SWRM_DAI_NAMES(1), SWRM_DAI_NAMES(2), SWRM_DAI_NAMES(3),
++	SWRM_DAI_NAMES(4), SWRM_DAI_NAMES(5), SWRM_DAI_NAMES(6),
+ };
+ 
+ static int qcom_swrm_register_dais(struct qcom_swrm_ctrl *ctrl)
+@@ -1430,6 +1445,9 @@
+ 	struct device *dev = ctrl->dev;
+ 	int i;
+ 
++	if (num_dais > ARRAY_SIZE(qcom_swrm_dai_names))
++		return -EINVAL;
++
+ 	ctrl->sruntime = devm_kcalloc(dev, num_dais, sizeof(*ctrl->sruntime), GFP_KERNEL);
+ 	if (!ctrl->sruntime)
+ 		return -ENOMEM;
+@@ -1440,9 +1458,7 @@
+ 		return -ENOMEM;
+ 
+ 	for (i = 0; i < num_dais; i++) {
+-		dais[i].name = devm_kasprintf(dev, GFP_KERNEL, "SDW Pin%d", i);
+-		if (!dais[i].name)
+-			return -ENOMEM;
++		dais[i].name = qcom_swrm_dai_names[i];
+ 
+ 		if (i < ctrl->num_dout_ports)
+ 			stream = &dais[i].playback;
+@@ -1582,6 +1598,11 @@
+ DEFINE_SHOW_ATTRIBUTE(swrm_reg);
+ #endif
+ 
++static void qcom_swrm_dispose_irq(void *data)
++{
++	irq_dispose_mapping((unsigned int)(uintptr_t)data);
++}
++
+ static int qcom_swrm_probe(struct platform_device *pdev)
+ {
+ 	struct device *dev = &pdev->dev;
+@@ -1635,6 +1656,15 @@
+ 		ret = ctrl->irq;
+ 		goto err_init;
+ 	}
++
++	/*
++	 * The IRQ is requested rising-edge below while DT describes it as a level.
++	 * Drop the mapping on unbind, or the next probe fails with a type mismatch.
++	 */
++	ret = devm_add_action_or_reset(dev, qcom_swrm_dispose_irq,
++				       (void *)(uintptr_t)ctrl->irq);
++	if (ret)
++		goto err_init;
+ 
+ 	ctrl->hclk = devm_clk_get(dev, "iface");
+ 	if (IS_ERR(ctrl->hclk)) {
+@@ -1730,7 +1760,10 @@
+ 	pm_runtime_use_autosuspend(dev);
+ 	pm_runtime_mark_last_busy(dev);
+ 	pm_runtime_set_active(dev);
+-	pm_runtime_enable(dev);
++	/* devm: a plain enable outlives unbind, and the next probe resumes a half-set-up bus */
++	ret = devm_pm_runtime_enable(dev);
++	if (ret)
++		goto err_master_add;
+ 
+ #ifdef CONFIG_DEBUG_FS
+ 	ctrl->debugfs = debugfs_create_dir("qualcomm-sdw", ctrl->bus.debugfs);
