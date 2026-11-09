@@ -261,17 +261,18 @@ own is you doing something explicit. The gate is on publishing, not installing.
 
 Only once that passes: tag `card/vX.Y.Z`, then `ota/vX.Y.Z`.
 
-**`ota/vX.Y.Z` publishes by itself.** `release-bundle.yml` builds the rootfs, signs the bundle with
-the release cert (`sign`), and `publish` runs `ota/publish-bundle.sh` against the bucket with the
-`R2_*` secrets and variables — `make publish-bundle` by hand is the fallback, not the route. The
-signing key reaches the `sign` step on a tag only, so a manual run still produces a throwaway-cert
-bundle and never publishes.
+**`ota/vX.Y.Z` publishes by itself.** `release-bundle.yml` builds the rootfs, then its `release`
+job signs the bundle with the release cert and runs `ota/publish-bundle.sh` against the bucket with
+the `R2_*` secrets and variables — `make publish-bundle` by hand is the fallback, not the route. If
+the publish step fails, the signed bundle is still kept as the run's `retroforge-bundle` artifact for
+`make publish-bundle`. The signing key reaches the job on a tag push only, so a manual run still
+produces a throwaway-cert bundle and never publishes.
 
-**No approval gates on this plan.** The jobs name the `release-signing` environment, but the repo is
-private on GitHub Free, which has no environments: the secrets are repo-wide and nothing waits for a
-reviewer. Anyone who can push an `ota/v*` tag can sign and publish. Creating the environment (a paid
-plan or a public repo) and moving the secrets into it restores the two approvals — reaching the
-signing key, then reaching the bucket — with no workflow change.
+**No approval gate on this plan.** The `release` job names the `release-signing` environment, but
+the repo is private on GitHub Free, which has no environments: the secrets are repo-wide and nothing
+waits for a reviewer. Anyone who can push an `ota/v*` tag can sign and publish. Creating the
+environment (a paid plan or a public repo) and moving the secrets into it restores **one** approval
+— signing and publishing behind a single gate, "this tag ships" — with no workflow change.
 
 A publish ends in exactly one of two states, **published** or **red**: a missing credential is an
 error, not a skipped step, because nobody reads a skipped step at the bottom of an hour-long success.

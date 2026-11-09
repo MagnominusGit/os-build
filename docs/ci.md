@@ -120,27 +120,36 @@ not from an input. Devices only use a published guest once
 `rootfs/overlay/usr/share/retroforge/steam/x86-guest.pin` names it, and only if its url is public,
 which a private repo's Release asset is not. See `packages/mesa-x86/README.md`.
 
-## Not here yet, and why
+## Bundle signing and publishing
 
-**Bundle signing, beyond a CI secret.** `release-bundle.yml` signs only on an `ota/v*` tag, in its
-`sign` job, inside the protected `release-signing` environment that holds `RAUC_CERT_PEM` /
-`RAUC_KEY_PEM`; a dispatch builds with an ephemeral dev cert — it proves the bundle assembles and the
-verity hashes compute, while producing something every device will reject. The open question is
-whether the release private key belongs in GitHub at all. The shape is settled by the PKI:
+An `ota/v*` tag runs `release-bundle.yml` as `prep` → `build` → `release` → `notes`. `build`
+assembles the rootfs with no key and no environment, so it never waits on a reviewer. `release`
+signs the bundle (`make sign-bundle PKIDIR=$RUNNER_TEMP/pki`) and publishes it to the R2 bucket
+behind **one** deployment gate, the `release-signing` environment: approving it means "this tag
+ships". The signed bundle is uploaded as a workflow artifact before the publish step, so a failed
+publish can be finished from a workstation with `make publish-bundle`. `notes` then cuts the
+notes-only GitHub Release. A manual dispatch signs with an ephemeral dev cert every device rejects
+and skips publishing — it proves the bundle assembles and the verity hashes compute.
 
-- **one secret**, the release signing key, scoped to a protected *environment* (not the repo, where
-  any workflow on any branch can read it). Write it to `$RUNNER_TEMP`, never the workspace — the
+- **No gate yet on this plan.** The repo is private on GitHub Free, which has no environments, so
+  `RAUC_CERT_PEM` / `RAUC_KEY_PEM` and the `R2_*` secrets are repo-wide and the job's
+  `environment:` line gates nothing; the steps hand the keys over on a tag push only. Creating the
+  environment (a paid plan or a public repo) and moving the secrets into it restores the one
+  approval with no workflow change. Keys are written to `$RUNNER_TEMP`, never the workspace — the
   repo tree gets uploaded as artifacts and cached.
-- `PKIDIR=$RUNNER_TEMP/pki make bundle` mounts it read-only at `/pki` and points `RAUC_CERT` /
-  `RAUC_KEY` at it. Copy the committed `ota/rauc/release.cert.pem` in alongside the key.
-- `verify-signing.sh` then asserts the key matches the committed cert *as public-key digests*, so a
+- **The run ends published or red.** Missing R2 credentials fail the job before anything is
+  signed, and `ota/publish-bundle.sh` checks the bundle against the device keyring and refuses a
+  DEV-image payload before it moves a byte.
+- `verify-signing.sh` asserts the key matches the committed cert *as public-key digests*, so a
   stale or truncated secret fails there instead of producing bundles no device accepts.
-- **the CA key never reaches a runner.** That is what the two-level PKI is for: if the release key
-  leaks, mint a new cert offline under the same CA, commit it, update the one secret — no device is
+- **The CA key never reaches a runner.** That is what the two-level PKI is for: if the release key
+  leaks, mint a new cert offline under the same CA, commit it, update the secret — no device is
   affected. See `ota/gen-signing-ca.sh`.
-- worth considering before real releases: signing off-CI, or via an HSM/KMS the runner reaches by
-  OIDC, so the key never exists as a file. A key that can push arbitrary code to devices with no
-  serial console is a large thing to keep in a CI secret store.
+- Still worth considering: signing via an HSM/KMS the runner reaches by OIDC, so the key never
+  exists as a file. A key that can push arbitrary code to devices with no serial console is a
+  large thing to keep in a CI secret store.
+
+## Not here yet, and why
 
 **cosign-signed artifacts and published update manifests** — the original Phase 7 scope, CI
 patterns borrowed from ublue-os/image-template, for the single unified image (every supported SoC

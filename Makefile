@@ -846,9 +846,9 @@ bundle: $(ROOTFS) | $(BUILD_STAMP) ## Build a signed RAUC update bundle (in cont
 
 # The same wrap, minus the $(ROOTFS) PREREQUISITE, for signing an image this tree did not build.
 #
-# WHY IT EXISTS. CI splits the release into build -> sign -> publish so a 30-minute build does not
+# WHY IT EXISTS. CI splits the release into build -> release (sign + publish) so a 30-minute build does not
 # sit behind a human approving the signing environment (see .github/workflows/release-bundle.yml).
-# The sign job restores out/images/rootfs.img from a workflow artifact and holds nothing else the
+# The release job restores out/images/rootfs.img from a workflow artifact and holds nothing else the
 # build produced -- no kernel, no base, no overlay. `make bundle` there would see rootfs.img present
 # but every one of ITS prerequisites missing, and cheerfully rebuild the entire image before signing
 # it: a second full build, and one whose bytes nobody reviewed.
