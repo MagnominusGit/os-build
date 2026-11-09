@@ -24,7 +24,7 @@ system, and one RetroAchievements sign-in.
 | gb, gbc, gba | **armGBA** (`armgba_libretro.so` + `.info`) | `MagnominusGit/armGBA` release zip `armGBA-<v>-aarch64.zip`, GitHub sha256 digest | yes (memory described as mGBA's / gambatte-libretro's) |
 | snes | Snes9x (`snes9x_libretro`) | libretro buildbot nightly linux/aarch64 | yes |
 | md, segacd | Genesis Plus GX (`genesis_plus_gx_libretro`) | buildbot | yes |
-| n64 (Phase 6) | armN64 (`armn64_libretro`, MagnominusGit v1.1; was Mupen64Plus-Next, D7b) | GitHub release | yes |
+| n64 (Phase 6) | Mupen64Plus-Next (`mupen64plus_next_libretro`), GLideN64 | buildbot | yes |
 
 RetroArch itself: `pkgforge-dev/RetroArch-AppImage-Enhanced`, `RetroArch-<v>-anylinux-aarch64.AppImage`
 (1.22.2, 35 MB, sharun, GitHub digests), format `appimage-sharun`.
@@ -56,10 +56,8 @@ RetroArch itself: `pkgforge-dev/RetroArch-AppImage-Enhanced`, `RetroArch-<v>-any
 - **D7 N64 moves too, in its own phase (Phase 6)**, after the pre-PS1 systems are HW-OK. Same mupen64plus
   core and GLideN64 as RMG, so the A610 should cope. If Phase 0/6 measures it slower than RMG on the
   A610, N64 stays on RMG without achievements.
-- **D7b (2026-11-09, change of plans) N64 core = armN64** (MagnominusGit/armN64 v1.1, GPL-2.0), not
-  Mupen64Plus-Next: a GitHub catalog core like armGBA, its own defaults (Fast/HLE, GL renderer in its
-  own context beside RetroArch's Vulkan, so no driver switch and no seeded options file). Achievements:
-  SET_SUPPORT_ACHIEVEMENTS + RDRAM as RETRO_MEMORY_SYSTEM_RAM in mupen64plus-next's word order.
+- **D7b tried and reverted (2026-11-09)**: armN64 v1.1 (MagnominusGit) as the N64 core, 4b1fd435. It ran
+  on the Pocket ACE but the user judged it bad on the SM6115 (A610) -> back to Mupen64Plus-Next.
 
 ## What we know (2026-11-09)
 
@@ -332,13 +330,13 @@ DONE 2026-11-09 on the Pocket ACE (SM8550, dev card fea75717, plugin 0.1.110):
 - Not seen on the ACE: speakers silent while PipeWire plays (both WSA884x UNATTACHED on SoundWire);
   not caused by this branch (user: not new).
 
-## Phase 6 — N64 (D7, D7b)
+## Phase 6 — N64 (D7)
 
-- Catalog: add `armn64` (GitHub `MagnominusGit/armN64`, asset `armn64_libretro-<ver>-aarch64.zip`, pin
-  v1.1). No options file: armN64's defaults. (First cut 4ca16cb1 used Mupen64Plus-Next from the buildbot
-  with a seeded GLideN64/HLE/dynarec .opt and RetroArch's GL driver switch; replaced before any HW run.)
-- Pad: RetroArch autoconfig + core layout (C buttons on the right stick, Z on L2; R2 + face buttons = C
-  buttons) replace RMG's seeded Profile 0.
+- Catalog: add `mupen64plus_next` (buildbot). Per-core override
+  `~/.config/retroarch/config/Mupen64Plus-Next/Mupen64Plus-Next.cfg` with the GL driver from Phase 0
+  (unless every core runs on it); core options: GLideN64, never paraLLEl-RDP (A610), RMG's dynarec and
+  1x resolution.
+- Pad: RetroArch autoconfig + core layout (C buttons on the right stick) replace RMG's seeded Profile 0.
   R2 becomes a real hold fast-forward.
 - Saves: no migration (user 2026-11-09): RMG's `.eep/.sra/.fla/.mpk` stay where they are, the core
   starts fresh `<rom>.srm` files. States do not carry over.

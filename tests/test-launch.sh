@@ -383,14 +383,20 @@ for line in 'video_driver = "vulkan"' 'audio_driver = "pipewire"' 'input_joypad_
             'menu_show_online_updater = "false"' 'menu_show_core_updater = "false"' \
             'menu_show_load_core = "false"' 'core_updater_buildbot_cores_url = ""' \
             'cheevos_enable = "true"' 'cheevos_hardcore_mode_enable = "false"' \
-            'input_menu_toggle_gamepad_combo = "4"' 'pause_nonactive = "false"'; do
+            'input_menu_toggle_gamepad_combo = "4"' 'pause_nonactive = "false"' \
+            'driver_switch_enable = "true"' 'global_core_options = "false"'; do
   has retroarch/retroarch.cfg "$line" "seeded"
 done
-# N64 (Phase 6): armN64 runs on its own defaults (user 2026-11-09): no options file is seeded, and
-# no Mupen64Plus-Next leftovers (its .opt, the GL driver switch) remain.
-[ ! -e "$SEED_DIR/retroarch/Mupen64Plus-Next.opt" ] && ! grep -q 'Mupen64Plus-Next.opt' "$SEED_DIR/retroarch/emulator.json" \
-  && ok "retroarch: no Mupen64Plus-Next options file seeded (armN64 keeps its defaults)" \
-  || bad "retroarch: a Mupen64Plus-Next leftover is still seeded"
+# N64 (Phase 6): Mupen64Plus-Next is desktop GL only (no GLES build on the aarch64 buildbot), so
+# RetroArch switches from Vulkan to GL for it (driver_switch_enable; HW 2026-11-09, Air X). Its
+# options file pins what RMG ran: GLideN64 (paraLLEl-RDP locks the A610 up), HLE RSP, the dynarec.
+for line in 'mupen64plus-rdp-plugin = "gliden64"' 'mupen64plus-rsp-plugin = "hle"' \
+            'mupen64plus-cpucore = "dynamic_recompiler"'; do
+  has retroarch/Mupen64Plus-Next.opt "$line" "N64 core option"
+done
+grep -qF '"to": ".config/retroarch/config/Mupen64Plus-Next/Mupen64Plus-Next.opt"' "$SEED_DIR/retroarch/emulator.json" \
+  && ok "retroarch: Mupen64Plus-Next.opt seeds the core's per-core options file" \
+  || bad "retroarch: Mupen64Plus-Next.opt is not seeded as config/Mupen64Plus-Next/Mupen64Plus-Next.opt"
 has retroarch/retroforge-pad.cfg 'input_vendor_id = "1118"' "pad matched by InputPlumber's vendor id (045e)"
 has retroarch/retroforge-pad.cfg 'input_product_id = "2816"' "pad matched by InputPlumber's product id (0b00)"
 has retroarch/retroforge-pad.cfg 'input_b_btn = "0"' "RetroPad B on south"
@@ -400,7 +406,7 @@ python3 - "$RA_DEF" <<'PY' && ok "retroarch: sharun AppImage, -L the system's co
 import json, sys
 d = json.load(open(sys.argv[1]))
 want = {"gb": "armgba", "gbc": "armgba", "gba": "armgba", "snes": "snes9x", "md": "genesis_plus_gx", "segacd": "genesis_plus_gx",
-        "n64": "armn64"}
+        "n64": "mupen64plus_next"}
 assert d["format"] == "appimage-sharun" and d["binary"] == "bin/retroarch", d["binary"]
 assert d["args"][-1] == "{rom}" and "--menu" in d["gui_args"]
 for s, c in want.items():
