@@ -54,8 +54,9 @@ Its linux-v0.1.0-v0.3.x releases also had a standalone `hakux`, removed in 0.4.0
   libstdc++ (rootfs: SDL3 3.4.8, glibc 2.43, gcc-libs 16).
 - The fork's retroforge-standalone (its default branch) is rebased onto each new upstream linux-v
   release by .github/workflows/upstream-sync.yml (every 6 h); it was on linux-v0.25.2 at 5eb73c95b2
-  on 2026-11-09. A conflict beyond CHANGELOG.md goes to a GitHub Models model, and its merge waits
-  for review on sync/<tag> with an upstream-sync issue. No release or pin change is automatic.
+  on 2026-11-09 (54b0f897a7). CHANGELOG.md conflicts are settled by the script; any other conflict
+  opens an upstream-sync issue with its hunks (alert only: GitHub Models, the first choice, was
+  retired 2026-07-30). No release or pin change is automatic.
 - os-build suites: launch 605/0 (with perl's CPAN::Meta::YAML, missing from rf-trixie-py), catalog
   204/0, emu 151/0, emuopts 654/0, key-drift 45/0, plugin 130/0, plugin-install 14/0, portmaster
   39/0, scrape 112/1 (the image has no git: the hygiene check), shares 30/0.
