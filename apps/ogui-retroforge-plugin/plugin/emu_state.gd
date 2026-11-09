@@ -14,6 +14,11 @@ extends RefCounted
 ## installed build is not the tested one, and offers it back. Whether upstream has a newer build is
 ## asked only when the player presses "Check for a newer version" (each ask costs two of the 60
 ## GitHub requests an hour this network gets); a failed or missing check offers no Update.
+##
+## An entry with libretro cores (RetroArch: list's and check's "cores", per core its installed /
+## previous build and its newest): a newer core is an Update of the entry (install updates RetroArch
+## and its cores together), a missing core is a Repair (install fetches what is missing), and each
+## core that kept its previous build has its own Revert row (rollback <id> --core=<core>).
 
 const Credits := preload("credits.gd")
 
@@ -67,9 +72,38 @@ static func rows(id: String, emu: Dictionary, check: Dictionary) -> Dictionary:
 		else:
 			main.description = "Installed."
 
+	var cores: Dictionary = emu.get("cores") if emu.get("cores") is Dictionary else {}
+	var core_checks: Dictionary = check.get("cores") if check.get("cores") is Dictionary else {}
+	var missing := []
+	var newer := []
+	var cores_current := true
+	for core in cores:
+		var have = cores[core].get("installed") if cores[core] is Dictionary else null
+		var answer = core_checks.get(core)
+		var newest = answer.get("latest") if answer is Dictionary and answer.get("error") == null else null
+		if have == null:
+			missing.append(core)
+		elif newest != null and newest != have:
+			newer.append(core)
+		if newest == null or newest != have:
+			cores_current = false
+	if installed != null and not missing.is_empty():
+		main.button = "Repair"
+		main.args = install
+		main.description = ("The %s core is missing: its games will not start. Repair downloads it." % missing[0]
+			if missing.size() == 1 else
+			"The %s cores are missing: their games will not start. Repair downloads them." % ", ".join(missing))
+	elif installed != null and not newer.is_empty():
+		if main.button == "Update":
+			main.description += " Newer cores too."
+		else:
+			main.button = "Update"
+			main.args = install
+			main.description = "Newer cores available: %s." % ", ".join(newer)
+
 	var extra := []
 	if installed != null and follows and not self_update and main.button != "Update":
-		var checked: bool = latest != null and latest == installed
+		var checked: bool = latest != null and latest == installed and cores_current
 		extra.append({"text": "Check for a newer version", "button": "Check",
 			"description": ("Up to date: %s is the newest from upstream." % _v(installed)) if checked
 				else "Asks upstream whether a newer version is out.",
@@ -78,6 +112,12 @@ static func rows(id: String, emu: Dictionary, check: Dictionary) -> Dictionary:
 		extra.append({"text": "Revert to " + _v(emu["previous"]), "button": "Revert",
 			"description": "Goes back to the version installed before, kept on this device.",
 			"args": ["rollback", id]})
+	for core in cores:
+		var prev = cores[core].get("previous") if cores[core] is Dictionary else null
+		if installed != null and prev != null and cores[core].get("installed") != null:
+			extra.append({"text": "Revert the %s core to %s" % [core, _v(prev)], "button": "Revert",
+				"description": "Goes back to the core build installed before, kept on this device.",
+				"args": ["rollback", id, "--core=" + str(core)]})
 	var tested_row = null
 	if follows and tested != null and installed != tested and not (self_update and installed != null):
 		tested_row = {"text": "Install tested version (%s)" % _v(tested), "button": "Install",

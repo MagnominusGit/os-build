@@ -313,7 +313,7 @@ func _add_action_row(id: String, name_text: String, emu: Dictionary, spec: Dicti
 	if args.is_empty():
 		row.button_up.connect(_open.bind(id, name_text))
 	elif args[0] == "rollback":
-		row.button_up.connect(_rollback.bind(id, name_text, row))
+		row.button_up.connect(_rollback.bind(id, name_text, args, row))
 	elif args[0] == "check":
 		row.button_up.connect(_check.bind(id, name_text, row))
 	else:
@@ -373,20 +373,27 @@ func _install(id: String, name_text: String, args: Array, emu: Dictionary, row: 
 
 
 ## Revert: back to the build kept from before the last switch (offline, instant).
-func _rollback(id: String, name_text: String, row: Control) -> void:
+## Revert: `retroforge-emu <args>` (["rollback", id], or ["rollback", id, "--core=<core>"] for one
+## libretro core of RetroArch).
+func _rollback(id: String, name_text: String, args: Array, row: Control) -> void:
 	if _busy.has(id):
 		return
 	_busy[id] = true
 	row.disabled = true
-	var cmd := Command.create(EMU_TOOL, ["rollback", id])
+	var core := ""
+	if args.size() > 2 and str(args[2]).begins_with("--core="):
+		core = str(args[2]).trim_prefix("--core=")
+	var cmd := Command.create(EMU_TOOL, args)
 	var code := -1
 	if cmd.execute() == OK:
 		code = await cmd.finished as int
 	_busy.erase(id)
-	if code == 0:
+	if code == 0 and core != "":
+		_notify("%s: the %s core is back to its previous build" % [name_text, core])
+	elif code == 0:
 		_notify("%s is back to %s" % [name_text, Credits.version_text(str(_installed(id)))])
 	else:
-		logger.warn("retroforge-emu rollback %s exited %d: %s" % [id, code, cmd.stderr])
+		logger.warn("retroforge-emu %s exited %d: %s" % [" ".join(args), code, cmd.stderr])
 		_notify(name_text + " could not be reverted")
 	_reload()
 

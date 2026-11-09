@@ -76,10 +76,18 @@ sys.exit(0 if 0 <= add < fill and s.find("await _fill_channels()") > s.find("fun
 PY2
 # retroforge-launch's missing-file status names every choice of a system_requires "any" (the Mega CD
 # BIOS of any region): the message must take them all, not only exactly one path.
-grep -q 'if words.size() < 3:' "$SRC/library_roms.gd" && grep -q 'for path in words.slice(2):' "$SRC/library_roms.gd" \
+grep -q 'if words.size() < 3:' "$SRC/library_roms.gd" && grep -q 'for file_path in words.slice(2):' "$SRC/library_roms.gd" \
   && grep -q '"one of " + ", ".join(files)' "$SRC/library_roms.gd" \
   && ok "library_roms.gd names every file a missing-file status lists" \
   || bad "library_roms.gd reads only one missing-file path (system_requires lists choices)"
+
+# A Revert row runs its own args: a RetroArch core's carries --core=<core>, which a hardcoded
+# ["rollback", id] would drop (and revert RetroArch itself instead).
+grep -q '_rollback.bind(id, name_text, args, row)' "$SRC/apps_page.gd" \
+  && grep -q 'var cmd := Command.create(EMU_TOOL, args)' "$SRC/apps_page.gd" \
+  && ! grep -q 'Command.create(EMU_TOOL, \["rollback", id\])' "$SRC/apps_page.gd" \
+  && ok "apps_page.gd reverts with the row's own args (a core's --core=)" \
+  || bad "apps_page.gd reverts with a fixed [rollback, id]: a core's Revert would revert RetroArch"
 
 # OGUI never calls ready() on our OS platform (it knows no `retroforge` OS): plugin.gd must, and
 # only where OGUI detected none.
@@ -668,6 +676,45 @@ func test_emu_state() -> void:
 	check("state: Steam Client installed: Open (Steam's UI) and a Repair row, nothing else",
 		[r.main.text, r.main.button, r.main.args, r.tested, r.extra.map(func(e): return [e.button, e.args])],
 		["Installed", "Open", [], null, [["Repair", ["install", "steam-client"]]]])
+
+	# RetroArch (catalog "cores"): its libretro cores are installed and updated with it, and each one
+	# can go back to the build kept beside it. A missing core (a failed install, a deleted file)
+	# makes every game of its system stop with "download it again": the page offers Repair.
+	var ra := {"tested": "1.22", "follows_latest": true, "installed": "1.22", "previous": null, "size": mb,
+		"cores": {"snes9x": {"installed": "nightly-2026-11-07-aa", "previous": "nightly-2026-11-01-bb",
+				"tested": null, "follows_latest": true, "source": "buildbot"},
+			"armgba": {"installed": "v1.5", "previous": null, "tested": "v1.5", "follows_latest": true,
+				"source": "github"}}}
+	r = EmuState.rows("retroarch", ra, {"latest": "1.22", "error": null,
+		"cores": {"snes9x": {"latest": "nightly-2026-11-07-aa", "error": null}, "armgba": {"latest": "v1.5", "error": null}}})
+	check("state: cores up to date: Open, Check says up to date, a Revert row for the core that kept one",
+		[r.main.button, r.extra.map(func(e): return [e.button, e.args])],
+		["Open", [["Check", ["check", "retroarch", "--refresh"]], ["Revert", ["rollback", "retroarch", "--core=snes9x"]]]])
+	check("state: ... the core's Revert row names the core and the build",
+		r.extra[1].text, "Revert the snes9x core to Nightly 2026-11-01-bb")
+	r = EmuState.rows("retroarch", ra, {"latest": "1.22", "error": null,
+		"cores": {"snes9x": {"latest": "nightly-2026-11-08-cc", "error": null}, "armgba": {"latest": "v1.5", "error": null}}})
+	check("state: a newer core nightly (RetroArch itself current): Update, naming the core",
+		[r.main.button, r.main.args, r.main.description],
+		["Update", ["install", "retroarch"], "Newer cores available: snes9x."])
+	r = EmuState.rows("retroarch", ra, {"latest": "1.23", "error": null,
+		"cores": {"snes9x": {"latest": "nightly-2026-11-08-cc", "error": null}, "armgba": {"latest": "v1.5", "error": null}}})
+	check("state: RetroArch and a core newer: one Update, RetroArch's version first",
+		[r.main.button, r.main.description], ["Update", "Update to 1.23 available, about 50 MB. Newer cores too."])
+	r = EmuState.rows("retroarch", ra, {"latest": "1.22", "error": null,
+		"cores": {"snes9x": {"latest": null, "error": "not on the libretro buildbot today"}, "armgba": {"latest": "v1.5", "error": null}}})
+	check("state: a core whose check failed offers no Update and no 'up to date'",
+		[r.main.button, r.extra[0].description], ["Open", "Asks upstream whether a newer version is out."])
+	var broken := ra.duplicate(true)
+	broken.cores.armgba.installed = null
+	r = EmuState.rows("retroarch", broken, {})
+	check("state: a missing core: Repair (install fetches only what is missing), naming it",
+		[r.main.button, r.main.args, r.main.description],
+		["Repair", ["install", "retroarch"], "The armgba core is missing: its games will not start. Repair downloads it."])
+	var fresh := ra.merged({"installed": null}, true)
+	r = EmuState.rows("retroarch", fresh, {})
+	check("state: RetroArch not installed: Download as for any emulator (its cores come with it)",
+		[r.main.button, r.main.args], ["Download", ["install", "retroarch"]])
 
 ## Per-emulator options: what the pages offer from options.json, and the choice at each level.
 func test_emu_options() -> void:
@@ -1340,6 +1387,24 @@ GD
   # upstream's x86_64 core library (from the same release's opengamepadui-x86_64.tar.gz, named
   # template_debug and template_release): RETROFORGE_OGUI_PROJECT=<dir>. Skipped without. The plugin
   # is copied into <dir>/plugins/retroforge on every run.
+  # =================================================================================================
+  # Every plugin script parses against OGUI's classes. Most use OGUI types, so the stock-Godot suites
+  # above never load them: a parse error (a loop variable shadowing a local, 2026-11-09 in
+  # library_roms.gd) would ship and take the whole ROM library down. Same OGUI project as below.
+  CASE="compile"
+  if [ -z "${RETROFORGE_OGUI_PROJECT:-}" ] || [ ! -f "${RETROFORGE_OGUI_PROJECT:-}/project.godot" ]; then
+    printf '  skip %s -- no OGUI project (set RETROFORGE_OGUI_PROJECT)\n' "$CASE"
+  else
+    mkdir -p "$RETROFORGE_OGUI_PROJECT/plugins/retroforge"
+    cp "$SRC"/* "$RETROFORGE_OGUI_PROJECT/plugins/retroforge/"
+    for gd in "$SRC"/*.gd; do
+      name="${gd##*/}"
+      err="$("$GODOT" --headless --path "$RETROFORGE_OGUI_PROJECT" --check-only \
+        --script "res://plugins/retroforge/$name" 2>&1 | grep -E 'Parse Error|Failed to load script' | head -2)"
+      [ -z "$err" ] && ok "$name parses" || bad "$name: $err"
+    done
+  fi
+
   CASE="updates-ui"
   OGUI_PROJECT="${RETROFORGE_OGUI_PROJECT:-}"
   if [ -z "$OGUI_PROJECT" ] || [ ! -f "$OGUI_PROJECT/project.godot" ]; then

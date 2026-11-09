@@ -215,8 +215,8 @@ class LaunchFailure extends AppLifecycleHook:
 				if words.size() < 3:
 					return
 				var files := PackedStringArray()
-				for path in words.slice(2):
-					files.append(path.get_file())
+				for file_path in words.slice(2):
+					files.append(file_path.get_file())
 				var what := files[0] if files.size() == 1 else "one of " + ", ".join(files)
 				msg = "%s needs %s.\nCopy it to the %s folder (network share), then start the game again." \
 						% [name, what, words[2].get_base_dir()]
