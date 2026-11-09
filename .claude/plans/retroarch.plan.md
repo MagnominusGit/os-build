@@ -1,7 +1,7 @@
 # RetroArch + RetroAchievements for the pre-PS1 systems (and N64) — plan
 
-Status: decisions D1-D7 AGREED 2026-11-09 (branch plan/retroarch). Phases 0-4 DONE 2026-11-09
-(1-4 offline; RetroAchievements, Mega CD and every on-device check are in Phase 5). Next: Phase 5 (HW).
+Status: decisions D1-D7 AGREED 2026-11-09 (branch plan/retroarch). Phases 0-5 DONE 2026-11-09
+(Phase 5 HW-OK on the Pocket ACE, SM8550); merged to main. Next: Phase 6 (N64).
 
 ## Why
 
@@ -309,6 +309,24 @@ PHASE 0 DONE 2026-11-09: gate passed (steps 1-3 OK). Next: Phase 1.
 Dev card (`source dev.env`), A610 + SM8250: a game per system boots; saves land in `~/saves/<system>`;
 Guide hotkeys; clean Exit; per-core and RetroArch Revert; sign-in + one achievement; Mega CD with and
 without BIOS; no menu path installs a core. Then merge (ff) and push.
+
+DONE 2026-11-09 on the Pocket ACE (SM8550, dev card fea75717, plugin 0.1.110):
+- Apps > RetroArch > Download installed RetroArch 1.22.2 + armGBA v1.5 + Snes9x and Genesis Plus GX
+  nightlies (2026-11-09 / 2026-11-07); `retroforge-emu check retroarch` resolves all four on the device.
+- Games: GBC (Tetris DX) + GBA (TMNT, from .7z) on armGBA, SNES (Super Mario All-Stars) on Snes9x,
+  MD (Kunio) + Mega CD (Sonic CD) on Genesis Plus GX. Saves flat in `~/saves/<system>` (Mega CD:
+  `scd_U.brm` + `4Mbit_cart.brm`). Guide hotkeys, OGUI Exit and hardcore (Guide+L1 refused) OK (user).
+- Mega CD without `bios_CD_*.bin`: refused with "segacd needs ~/bios/bios_CD_U.bin or ... (not found)".
+  Mega CD lists `.chd`/`.cue` only: a `.7z` disc is not shown (RetroArch unpacks one member, a CD
+  needs the .cue + every track), so Sonic CD was unpacked to `.cue` + 35 `.bin` for the test.
+- RetroAchievements: sign-in from Settings > Library; RetroArch showed "logged in as" at game start.
+  `retroarch.cfg` stays 0600 with name + token after RetroArch's exit rewrite (no launcher chmod
+  needed); `cheevos_password` stays empty.
+- Core deleted (link + build) -> the game is refused (`not-installed retroarch`) and the Apps page
+  offers Repair; Repair downloaded it and the game ran. Core Revert (a planted older build) swapped
+  the builds; the row then offers the swap back, as RetroArch's own Revert does.
+- Not seen on the ACE: speakers silent while PipeWire plays (both WSA884x UNATTACHED on SoundWire);
+  not caused by this branch (user: not new).
 
 ## Phase 6 — N64 (D7)
 
