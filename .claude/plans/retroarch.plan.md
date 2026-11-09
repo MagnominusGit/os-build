@@ -145,7 +145,7 @@ by hand in `cores/`. `retroforge-emu list` sees it installed = tested.
   (= the flat `~/bios`): ACCEPTED (user 2026-11-09).
 - Step 5 OK (user 2026-11-09): N64 speed on the A610 is fine -> D7 holds, Phase 6 stays. More
   emulator-default and per-ROM options later, if needed.
-- Save states: no migration, old states may break (user 2026-11-09). SRAM migration stays (Phase 4).
+- Save states: no migration, old states may break (user 2026-11-09). SRAM: no migration either (user 2026-11-09).
 - Menu: Select+Start opens RGUI in game (`input_menu_toggle_gamepad_combo = 4`), HW-OK.
 - Step 6 MOVED to Phase 3/5 (user 2026-11-09: not expected to fail): the `retroforge-cheevos` sign-in
   and one unlock are tested there anyway.
@@ -175,8 +175,8 @@ PHASE 0 DONE 2026-11-09: gate passed (steps 1-3 OK). Next: Phase 1.
     (`<core>_libretro.so`, `safe_relative`), check CRC32, id = `nightly-<date>-<crc>`.
   - GitHub core: the existing tested/latest path, unzip the named files only.
   - `check` / `list` report each core; `rollback retroarch [--core <c>]`; `remove` removes cores too.
-  - Entries no longer in the catalog (armgba, snes9x, clownmdemu, later rmg) are reported as orphaned
-    and removable (Phase 4).
+  - Entries no longer in the catalog (armgba, snes9x, clownmdemu, later rmg): NOT handled, no cleanup
+    of old installs on devices (user 2026-11-09).
 - `.github/emu-sources.json`: retroarch (libretro/RetroArch, tag -> v<ver>), armgba core
   (MagnominusGit/armGBA); buildbot cores point at their libretro repos (master).
 - Validate: `tests/test-emu.sh` new cases (core install, CRC mismatch -> exit 4 and nothing changed,
@@ -225,6 +225,21 @@ PHASE 0 DONE 2026-11-09: gate passed (steps 1-3 OK). Next: Phase 1.
 - Validate: `tests/test-launch.sh` (core per system, folder rewrite, missing-core/BIOS message),
   `tests/test-emuopts.sh`, `tests/test-key-drift.sh`.
 
+### Phase 2 notes (2026-11-09)
+
+- 2a COMMITTED 9c4a1a16: emulator.json `system_requires` ({system: [{"any": [paths under $HOME],
+  "status": missing-file|not-installed}]}), checked before a game starts (never --gui); plugin
+  0.1.108 names every choice of a missing-file status ("needs one of ...").
+- 2b: `emulators/retroarch/` (emulator.json, retroarch.cfg, retroforge-pad.cfg, guide-hotkeys.yaml,
+  options.json: aspect 22/24, integer scale, filter, VSync, frame rate); catalog `retroarch` entry
+  with cores armgba (v1.5 pin), snes9x, genesis_plus_gx; launch.conf gb/gbc/gba/snes/md/segacd ->
+  retroarch (n64 stays rmg until Phase 6); emu-sources `retroarch`.
+- PULLED IN from Phase 4 (dead once launch.conf moved): `emulators/{armgba,snes9x,clownmdemu}` and
+  their catalog / emu-sources rows deleted, ClownMDEmu's tmpfiles links dropped, their test-launch
+  seed checks replaced by RetroArch's. Still Phase 4: sigdefer shim,
+  docs (no save migration, user 2026-11-09).
+- Seed autoconfig renamed `retroforge-pad.cfg` (no space in the path).
+
 ## Phase 3 — RetroAchievements sign-in
 
 - New `/usr/bin/retroforge-cheevos login|logout|status`: password on stdin only; POST
@@ -238,7 +253,7 @@ PHASE 0 DONE 2026-11-09: gate passed (steps 1-3 OK). Next: Phase 1.
   password never on disk, cfg perms); plugin Godot suite (see the plugin-godot-tests memory).
 - Security review of the helper and the plugin rows before commit.
 
-## Phase 4 — removal and migration
+## Phase 4 — removal
 
 - Delete `emulators/{armgba,snes9x,clownmdemu}`, their catalog and emu-sources rows, the ClownMDEmu
   `Save Data` rows in `user-tmpfiles.d/retroforge-home.conf`, `apps/retroforge-sigdefer`,
@@ -246,9 +261,9 @@ PHASE 0 DONE 2026-11-09: gate passed (steps 1-3 OK). Next: Phase 1.
   their rows in `Makefile`, `rootfs/assemble-rootfs.sh`, `.gitignore`; named cases in
   `launch_def.py`, `launch_formats.py`, `emuopts.py`, `retroforge-launch`, tests,
   `packages/inputplumber/PKGBUILD` (testbed reference).
-- Existing devices: orphaned `~/emulators/<old>` removed (plugin row or first RetroArch install).
-  armGBA `.srm` saves keep their names; check Snes9x and ClownMDEmu SRAM naming and rename to
-  `<rom>.srm` where the bytes match. Save states: no migration, old ones may break (user 2026-11-09).
+- Existing devices: nothing is touched (user 2026-11-09): old `~/emulators/<old>` installs stay
+  where they are, never removed by RetroForge. No save migration at all (user 2026-11-09): neither SRAM nor states are converted or renamed;
+  armGBA's `<rom>.srm` happen to match RetroArch's names, Snes9x/ClownMDEmu saves may not load.
 - Seed + `system_settings`: `sort_savefiles_enable = "false"`, `sort_savestates_enable = "false"`
   (Phase 0: per-core subfolders otherwise).
 - Docs: README row 3, `retroforge.plan.md` notes, RUNBOOK.
@@ -267,9 +282,8 @@ without BIOS; no menu path installs a core. Then merge (ff) and push.
   1x resolution.
 - Pad: RetroArch autoconfig + core layout (C buttons on the right stick) replace RMG's seeded Profile 0.
   R2 becomes a real hold fast-forward.
-- Saves: RMG's separate `.eep/.sra/.fla/.mpk` (good-name) -> the core's single `<rom>.srm`; convert a
-  copy, keep originals in `~/saves/n64/rmg-backup`; if conversion is unreliable, say saves start
-  fresh. States do not carry over.
+- Saves: no migration (user 2026-11-09): RMG's `.eep/.sra/.fla/.mpk` stay where they are, the core
+  starts fresh `<rom>.srm` files. States do not carry over.
 - Remove `emulators/rmg` + catalog/emu-sources rows + named tests.
 - `launch.conf`: n64 -> retroarch.
 - HW: the Air X games that run on RMG at the same speed, one SM8250/SM8550 game, one achievement,
@@ -283,7 +297,7 @@ without BIOS; no menu path installs a core. Then merge (ff) and push.
 | Bad buildbot nightly reaches players (no tested pin) | MED | Update is on demand only; per-core rollback keeps the previous `.so` |
 | AppImage lacks assets / autoconfig / core-info | MED | Phase 0 step 4; seed or catalog `data` |
 | Mega CD now needs a BIOS | MED | D2 message; docs |
-| Players lose save states; N64 save conversion | MED | Documented; N64 converts a copy, originals kept |
+| Players lose saves and save states (no migration, user decision) | MED | Documented in the release notes |
 | A menu path still installs cores (D1b) | LOW | Phase 0 step 7 + Phase 5 check |
 | RetroArch writes its cfg on exit, undoing our keys | LOW | Rewritten before every game (armGBA pattern) |
 | RetroAchievements token leak / password on disk | MED | Token only, 0600, stdin password, security review |
@@ -294,7 +308,7 @@ without BIOS; no menu path installs a core. Then merge (ff) and push.
 - [ ] Phase 0 notes recorded here, gate passed
 - [ ] gb/gbc/gba/snes/md/segacd run on RetroArch, HW-OK on A610 + SM8250
 - [ ] One achievement unlocked on HW; hardcore toggle works
-- [ ] armgba/snes9x/clownmdemu/sigdefer gone; old installs cleaned; saves migrated
+- [ ] armgba/snes9x/clownmdemu/sigdefer gone from the image (no cleanup on devices, no save migration)
 - [ ] Offline tests green (`tests/test-emu.sh`, `test-launch.sh`, `test-catalog.sh`, `test-emuopts.sh`,
       `test-key-drift.sh`, `test-cheevos.sh`, plugin suite)
 - [ ] Phase 6 done or dropped by the D7 rule

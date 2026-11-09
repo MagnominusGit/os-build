@@ -1,18 +1,19 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/device_profile_v1.json
 #
-# Guide-modifier hotkeys for armGBA. Same design as snes9x/guide-hotkeys.yaml (the testbed; its
-# header explains the Guide row, the deferred ui_guide tap, the explicit target_devices and why R2
-# appears twice); only the layer's keyboard outputs are bound elsewhere.
+# Guide-modifier hotkeys for RetroArch (gb, gbc, gba, snes, md, segacd). Same design as
+# snes9x/guide-hotkeys.yaml (the testbed; its header explains the Guide row, the deferred ui_guide
+# tap, the explicit target_devices and why R2 appears twice); only the layer's keyboard outputs are
+# bound elsewhere.
 #
-# armGBA already has pad hotkeys on Select (frontend.cfg hotkeypad = 4: Select + L/R load/save,
-# R2 fast-forward, Start twice quits); they stay. This layer gives the same actions the Guide chord
-# every RetroForge emulator shares: L1 load state, R1 save state (current slot), R2 fast-forward
-# while held, Start quit (pressed twice within 3 s, armGBA's rule for its key too). The layer emits
-# keyboard F1-F4; the seeded frontend.cfg binds them as armGBA's keyboard hotkeys (hotkey_5, _4, _1,
-# _12) and unbinds F2/F3's defaults (Restart, Frame Rate).
+# The layer gives the actions every RetroForge emulator shares: L1 load state, R1 save state
+# (current slot), R2 fast-forward while held, Start quit (pressed twice: the seeded retroarch.cfg has
+# quit_press_twice). It emits keyboard F1-F4; the seeded retroarch.cfg binds them as RetroArch's
+# keyboard hotkeys (input_load_state f1, input_save_state f2, input_hold_fast_forward f3,
+# input_exit_emulator f4) and moves its F1 default (menu toggle) to F5. RetroArch's own menu is
+# Select + Start on the pad (input_menu_toggle_gamepad_combo 4).
 version: 1
 kind: DeviceProfile
-name: RetroForge Guide hotkeys (armGBA)
+name: RetroForge Guide hotkeys (RetroArch)
 description: Hold Guide for emulator hotkeys; plain pad otherwise
 target_devices:
   - xbox-elite
@@ -65,7 +66,7 @@ layers:
         target_events:
           - keyboard: KeyF3
 
-      - name: Guide+Start -> F4 (quit, pressed twice within 3 s)
+      - name: Guide+Start -> F4 (quit, pressed twice)
         source_event:
           gamepad:
             button: Start

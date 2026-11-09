@@ -86,8 +86,9 @@ CASE="ref"
 ref() { python3 "$KD" ref "$SOURCES" "$1" "$2" 2>/dev/null; }
 [ "$(ref azahar "2126.1.2@2026-10-01_1790876552")" = "azahar-emu/azahar 2126.1.2" ] && ok "pkgforge <ver>@<date>_<id> -> upstream tag <ver>" || bad "azahar ref"
 [ "$(ref flycast "2.7@2026-10-01_1790875174")" = "flyinghead/flycast v2.7" ] && ok "flycast -> v<ver>" || bad "flycast ref"
-[ "$(ref snes9x "1.63-1@2026-10-01_1790876690")" = "snes9xgit/snes9x 1.63" ] && ok "pkgforge's -<rev> is dropped" || bad "snes9x ref"
-[ "$(ref armgba "v1.0")" = "Jacob-Matthew-Cook/armGBA v1.0" ] && ok "an upstream's own release tag is its ref" || bad "armgba ref"
+[ "$(ref rmg "0.8.4-1@2026-10-01_1790876690")" = "Rosalie241/RMG v0.8.4" ] && ok "pkgforge's -<rev> is dropped" || bad "rmg ref"
+[ "$(ref ppsspp "v1.19.3")" = "hrydgard/ppsspp v1.19.3" ] && ok "an upstream's own release tag is its ref" || bad "ppsspp ref"
+[ "$(ref retroarch "1.22.2@2026-11-01_1793557998")" = "libretro/RetroArch v1.22.2" ] && ok "retroarch -> v<ver>" || bad "retroarch ref"
 [ "$(ref cemu "nightly-a53cf0ece")" = "cemu-project/Cemu a53cf0ece" ] && ok "a nightly-<commit> -> that commit" || bad "cemu ref"
 ref duckstation latest >/dev/null && bad "a tag the rule does not match passed" || ok "a tag the rule does not match is an error"
 

@@ -1,0 +1,147 @@
+{
+  "notes": [
+    "RetroArch (Game Boy, Game Boy Color, Game Boy Advance, Super Nintendo, Mega Drive, Mega CD), for RetroAchievements (plan retroarch): pkgforge-dev's sharun AppImage of RetroArch 1.22.2 (glibc 2.43, its own Mesa for GL; Vulkan forced onto the image's Turnip by the appimage-sharun format). Replaces armGBA, Snes9x and ClownMDEmu. HW 2026-11-09, Air X (A610): Vulkan on Turnip, PipeWire, every core loads from an OGUI card.",
+    "Cores (catalog \"cores\", retroforge-emu installs them with the AppImage): armgba (armGBA's own libretro core, GitHub release, gb/gbc/gba), snes9x and genesis_plus_gx (libretro buildbot nightly). system_args loads the system's core with -L; system_requires stops a game whose core is missing (not-installed: download RetroArch again, which reinstalls missing cores) and a Mega CD game without a BIOS of any region (missing-file). RetroArch's Online Updater, core updater and Load Core are hidden, and the buildbot URL is empty: players do not install cores for other systems (user decision 2026-11-09).",
+    "Seed retroarch.cfg (RetroArch rewrites the whole file on exit, so no comments; it keeps our keys, writing paths back as ~/...): Vulkan, PipeWire, the SDL2 joypad driver with our one autoconfig (retroforge-pad.cfg: InputPlumber's virtual Xbox Elite 2 pad, 045e:0b00 = 1118/2816, matched by ids; the AppImage ships no autoconfig, no assets, no core info); RGUI menu (needs no assets); system_directory = the flat ~/bios (Mupen64Plus-Next will write its Mupen64plus/ folder there: accepted); pause_nonactive off (gamescope focus).",
+    "system_settings: savefile_directory / savestate_directory = ~/saves/<system>, ~/states/<system> before every game, and sort_savefiles_enable / sort_savestates_enable off: on by default they put saves in a per-core subfolder (HW 2026-11-09). RetroArch writes its in-memory values back on exit, hence before every game, not only in the seed. Saves are <rom>.srm, as armGBA standalone named them.",
+    "Exit: one SIGTERM (OGUI's Exit) is RetroArch's normal quit in under a second, SRAM and config written (HW 2026-11-09); quit_press_twice only applies to the key. RetroArch's menu: Select + Start (input_menu_toggle_gamepad_combo 4); keyboard F5.",
+    "gamepad_profile guide-hotkeys.yaml: hold Guide for L1 load state, R1 save state, R2 fast-forward (held), Start quit (pressed twice) -- keyboard F1-F4 bound in the seed. RetroAchievements: cheevos_enable on, hardcore off by default (D3; hardcore blocks loading states).",
+    "gui_args: RetroArch's menu, no content (Main menu > Emulators > Open)."
+  ],
+  "format": "appimage-sharun",
+  "binary": "bin/retroarch",
+  "args": [
+    "--config",
+    "/home/player/.config/retroarch/retroarch.cfg",
+    "{rom}"
+  ],
+  "gui_args": [
+    "--config",
+    "/home/player/.config/retroarch/retroarch.cfg",
+    "--menu"
+  ],
+  "system_args": {
+    "gb": [
+      "-L",
+      "/home/player/emulators/retroarch/cores/armgba_libretro.so"
+    ],
+    "gbc": [
+      "-L",
+      "/home/player/emulators/retroarch/cores/armgba_libretro.so"
+    ],
+    "gba": [
+      "-L",
+      "/home/player/emulators/retroarch/cores/armgba_libretro.so"
+    ],
+    "snes": [
+      "-L",
+      "/home/player/emulators/retroarch/cores/snes9x_libretro.so"
+    ],
+    "md": [
+      "-L",
+      "/home/player/emulators/retroarch/cores/genesis_plus_gx_libretro.so"
+    ],
+    "segacd": [
+      "-L",
+      "/home/player/emulators/retroarch/cores/genesis_plus_gx_libretro.so"
+    ]
+  },
+  "system_requires": {
+    "gb": [
+      {
+        "any": [
+          "emulators/retroarch/cores/armgba_libretro.so"
+        ],
+        "status": "not-installed"
+      }
+    ],
+    "gbc": [
+      {
+        "any": [
+          "emulators/retroarch/cores/armgba_libretro.so"
+        ],
+        "status": "not-installed"
+      }
+    ],
+    "gba": [
+      {
+        "any": [
+          "emulators/retroarch/cores/armgba_libretro.so"
+        ],
+        "status": "not-installed"
+      }
+    ],
+    "snes": [
+      {
+        "any": [
+          "emulators/retroarch/cores/snes9x_libretro.so"
+        ],
+        "status": "not-installed"
+      }
+    ],
+    "md": [
+      {
+        "any": [
+          "emulators/retroarch/cores/genesis_plus_gx_libretro.so"
+        ],
+        "status": "not-installed"
+      }
+    ],
+    "segacd": [
+      {
+        "any": [
+          "emulators/retroarch/cores/genesis_plus_gx_libretro.so"
+        ],
+        "status": "not-installed"
+      },
+      {
+        "any": [
+          "bios/bios_CD_U.bin",
+          "bios/bios_CD_E.bin",
+          "bios/bios_CD_J.bin"
+        ]
+      }
+    ]
+  },
+  "system_settings": [
+    {
+      "file": ".config/retroarch/retroarch.cfg",
+      "format": "ini",
+      "separator": " = ",
+      "set": [
+        {
+          "section": "",
+          "key": "savefile_directory",
+          "value": "\"/home/player/saves/{system}\""
+        },
+        {
+          "section": "",
+          "key": "savestate_directory",
+          "value": "\"/home/player/states/{system}\""
+        },
+        {
+          "section": "",
+          "key": "sort_savefiles_enable",
+          "value": "\"false\""
+        },
+        {
+          "section": "",
+          "key": "sort_savestates_enable",
+          "value": "\"false\""
+        }
+      ]
+    }
+  ],
+  "env": {},
+  "gamepad_profile": "guide-hotkeys.yaml",
+  "seed": [
+    {
+      "file": "retroarch.cfg",
+      "to": ".config/retroarch/retroarch.cfg"
+    },
+    {
+      "file": "retroforge-pad.cfg",
+      "to": ".config/retroarch/autoconfig/sdl2/retroforge-pad.cfg"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 {
   "files": {
     "main": {
-      "path": ".config/armgba/frontend.cfg",
+      "path": ".config/retroarch/retroarch.cfg",
       "format": "ini",
       "separator": " = "
     }
@@ -19,8 +19,8 @@
             {
               "file": "main",
               "section": "",
-              "key": "stretch",
-              "value": "false"
+              "key": "aspect_ratio_index",
+              "value": "\"22\""
             }
           ]
         },
@@ -31,8 +31,8 @@
             {
               "file": "main",
               "section": "",
-              "key": "stretch",
-              "value": "true"
+              "key": "aspect_ratio_index",
+              "value": "\"24\""
             }
           ]
         }
@@ -50,8 +50,8 @@
             {
               "file": "main",
               "section": "",
-              "key": "integer_scale",
-              "value": "true"
+              "key": "video_scale_integer",
+              "value": "\"true\""
             }
           ]
         },
@@ -62,8 +62,8 @@
             {
               "file": "main",
               "section": "",
-              "key": "integer_scale",
-              "value": "false"
+              "key": "video_scale_integer",
+              "value": "\"false\""
             }
           ]
         }
@@ -81,8 +81,8 @@
             {
               "file": "main",
               "section": "",
-              "key": "filter",
-              "value": "0"
+              "key": "video_smooth",
+              "value": "\"false\""
             }
           ]
         },
@@ -93,8 +93,8 @@
             {
               "file": "main",
               "section": "",
-              "key": "filter",
-              "value": "1"
+              "key": "video_smooth",
+              "value": "\"true\""
             }
           ]
         }
@@ -103,7 +103,7 @@
     {
       "id": "vsync",
       "label": "VSync",
-      "description": "Wait for the screen between frames: no tearing. Off paces the game by its sound instead.",
+      "description": "Wait for the screen between frames: no tearing.",
       "choices": [
         {
           "value": "on",
@@ -112,8 +112,8 @@
             {
               "file": "main",
               "section": "",
-              "key": "vsync",
-              "value": "true"
+              "key": "video_vsync",
+              "value": "\"true\""
             }
           ]
         },
@@ -124,8 +124,8 @@
             {
               "file": "main",
               "section": "",
-              "key": "vsync",
-              "value": "false"
+              "key": "video_vsync",
+              "value": "\"false\""
             }
           ]
         }
@@ -134,7 +134,7 @@
     {
       "id": "show_fps",
       "label": "Show frame rate",
-      "description": "armGBA draws the frames per second in a corner of the screen.",
+      "description": "RetroArch shows the frames per second on screen.",
       "choices": [
         {
           "value": "off",
@@ -143,8 +143,8 @@
             {
               "file": "main",
               "section": "",
-              "key": "show_fps",
-              "value": "false"
+              "key": "fps_show",
+              "value": "\"false\""
             }
           ]
         },
@@ -155,8 +155,8 @@
             {
               "file": "main",
               "section": "",
-              "key": "show_fps",
-              "value": "true"
+              "key": "fps_show",
+              "value": "\"true\""
             }
           ]
         }
@@ -164,8 +164,8 @@
     }
   ],
   "notes": [
-    "frontend.cfg is armGBA's own settings file: `key = value` lines, no sections (the launcher and these options address the root, section \"\"); # starts a comment. Read by settingsRead -> takeSetting (frontend/settings.c), written whole by settingsWrite whenever the menu changes a setting and on quit: unknown keys are dropped, known ones kept. Booleans are the words true/false (anything but \"true\" reads as false); strings may be quoted.",
-    "stretch (Stretch to fill, default false) and integer_scale (default false) size the picture in the window (frontend/main.c: applyWindowSize/present); filter is enum Filter: 0 FILTER_SHARP (nearest), 1 FILTER_SMOOTH (linear) via SDL_HINT_RENDER_SCALE_QUALITY; vsync (default true) is the renderer's VSync and the frame pacing (with it off the game is paced by the audio queue, settings.latency); show_fps (default false) draws the frame rate on screen (ACT_FPS toggles the same setting).",
-    "Left out: renderer (SDL_Renderer picks the GPU backend itself; no setting), resolution and widescreen_hack (no such setting for GB/GBA), frameskip (none). The LCD grid, ghosting and Game Boy screen palettes are core options in ~/.config/armgba/armgba.cfg (armgba_lcd_grid, armgba_lcd_ghosting, armgba_gb_screen...; frontend/settings.c optionsWrite), reachable in armGBA's own Core tab; a RetroForge option for them can come with the shader phase."
+    "retroarch.cfg is RetroArch's own settings file: `key = \"value\"` lines, no sections (section \"\"), every value quoted; RetroArch rewrites it whole on exit (config_save_on_exit), keeping these keys. Keys and values from RetroArch 1.22.2 configuration.c and gfx/video_defines.h.",
+    "aspect_ratio_index is enum aspect_ratio: 22 ASPECT_RATIO_CORE (the core's own shape), 24 ASPECT_RATIO_FULL (the whole screen). video_scale_integer, video_smooth (bilinear), video_vsync and fps_show are booleans.",
+    "Left out: renderer (Vulkan for every core here; N64 will need GL, Phase 6), resolution and widescreen_hack (no such setting for these 2D consoles), shaders (armGBA's LCD presets: later). Core options (armGBA's BIOS choice, Genesis Plus GX's region) stay in RetroArch's Quick Menu > Core Options."
   ]
 }

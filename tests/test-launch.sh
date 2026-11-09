@@ -397,48 +397,45 @@ CASE="controller mappings"
 # careless edit or a bad pin bump shows here, not on a handheld.
 has() { grep -qxF -- "$2" "$SEED_DIR/$1" && ok "$1: $3" || bad "$1 lacks '$2' ($3)"; }
 lacks() { grep -qE -- "$2" "$SEED_DIR/$1" && bad "$1: $3" || ok "$1: no $3"; }
-# armGBA (gb, gbc, gba): SDL game-controller API, so the pad maps itself; its Nintendo layout (A east,
-# B south) is the default and is not seeded. Its Hotkey must be Select (4 = SDL_CONTROLLER_BUTTON_BACK):
-# on Auto it takes Home (Guide), which OpenGamepadUI owns. Select + Start pressed twice quits (a
-# combination: no single-button quit, user 2026-10-06), so the seed must not rebind the Quit action.
-has armgba/frontend.cfg 'hotkeypad = 4' "Hotkey on Select, not Guide"
-lacks armgba/frontend.cfg '^hotkeypad = 5$' "Hotkey on Guide (5), which OGUI owns"
-lacks armgba/frontend.cfg '^hotkeypad_12 =' "Quit rebound (the default Hotkey + Start, pressed twice, stays)"
-lacks armgba/frontend.cfg '^pad_[0-9]+ =' "pad buttons seeded by raw number (SDL maps the pad; Nintendo layout is the default)"
-has armgba/frontend.cfg 'bios_folder = "/home/player/bios"' "BIOS files in the flat ~/bios"
-has armgba/frontend.cfg 'save_folder = "/home/player/saves/gba"' "Open's saves in ~/saves/gba"
-has armgba/frontend.cfg 'state_folder = "/home/player/states/gba"' "Open's states in ~/states/gba"
-has armgba/frontend.cfg 'fullscreen = true' "fullscreen for Open too"
-AG_DEF="$SEED_DIR/armgba/emulator.json"
-[ "$(jget "$AG_DEF" format)" = '"appimage"' ] && [ "$(jget "$AG_DEF" binary)" = '"usr/bin/armgba"' ] \
-  && [ "$(jget "$AG_DEF" args)" = '["--fullscreen", "{rom}"]' ] && [ "$(jget "$AG_DEF" gui_args)" = '["--fullscreen"]' ] \
-  && ok "armgba: upstream's plain AppImage, its real binary, --fullscreen for a game and for Open" \
-  || bad "armgba emulator.json: $(jget "$AG_DEF" format) $(jget "$AG_DEF" binary) $(jget "$AG_DEF" args)"
-# armGBA has ONE save and ONE state folder, set only in frontend.cfg: the launcher writes the card's
-# system into both before every game (system_settings), so saves stay in ~/saves/<system>.
+# RetroArch (gb, gbc, gba, snes, md, segacd; plan retroarch): RetroAchievements, one core per system.
+# The AppImage ships no autoconfig, so the seed brings one for InputPlumber's virtual pad (matched by
+# its ids); RGUI needs no assets; the Online Updater and Load Core stay hidden and the buildbot URL
+# empty (players never install cores for other systems); saves sorted by core would miss ~/saves/<system>.
+for line in 'video_driver = "vulkan"' 'audio_driver = "pipewire"' 'input_joypad_driver = "sdl2"' \
+            'menu_driver = "rgui"' 'system_directory = "/home/player/bios"' \
+            'libretro_directory = "/home/player/emulators/retroarch/cores"' \
+            'sort_savefiles_enable = "false"' 'sort_savestates_enable = "false"' \
+            'menu_show_online_updater = "false"' 'menu_show_core_updater = "false"' \
+            'menu_show_load_core = "false"' 'core_updater_buildbot_cores_url = ""' \
+            'cheevos_enable = "true"' 'cheevos_hardcore_mode_enable = "false"' \
+            'input_menu_toggle_gamepad_combo = "4"' 'pause_nonactive = "false"'; do
+  has retroarch/retroarch.cfg "$line" "seeded"
+done
+has retroarch/retroforge-pad.cfg 'input_vendor_id = "1118"' "pad matched by InputPlumber's vendor id (045e)"
+has retroarch/retroforge-pad.cfg 'input_product_id = "2816"' "pad matched by InputPlumber's product id (0b00)"
+has retroarch/retroforge-pad.cfg 'input_b_btn = "0"' "RetroPad B on south"
+has retroarch/retroforge-pad.cfg 'input_a_btn = "1"' "RetroPad A on east"
+RA_DEF="$SEED_DIR/retroarch/emulator.json"
+python3 - "$RA_DEF" <<'PY' && ok "retroarch: sharun AppImage, -L the system's core, which system_requires checks" || bad "retroarch emulator.json: cores, requirements or args"
+import json, sys
+d = json.load(open(sys.argv[1]))
+want = {"gb": "armgba", "gbc": "armgba", "gba": "armgba", "snes": "snes9x", "md": "genesis_plus_gx", "segacd": "genesis_plus_gx"}
+assert d["format"] == "appimage-sharun" and d["binary"] == "bin/retroarch", d["binary"]
+assert d["args"][-1] == "{rom}" and "--menu" in d["gui_args"]
+for s, c in want.items():
+    so = f"emulators/retroarch/cores/{c}_libretro.so"
+    assert d["system_args"][s] == ["-L", f"/home/player/{so}"], s
+    assert {"any": [so], "status": "not-installed"} in d["system_requires"][s], s
+assert set(d["system_args"]) == set(want)
+assert {"any": ["bios/bios_CD_U.bin", "bios/bios_CD_E.bin", "bios/bios_CD_J.bin"]} in d["system_requires"]["segacd"]
+assert "SDL_NO_SIGNAL_HANDLERS" not in d["env"]
+PY
 python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))["system_settings"]
-keys={(a["key"], a["value"]) for s in d for a in s["set"] if s["file"] == ".config/armgba/frontend.cfg" and s["format"] == "ini"}
-sys.exit(not keys >= {("save_folder", "\"/home/player/saves/{system}\""), ("state_folder", "\"/home/player/states/{system}\"")})' "$AG_DEF" \
-  && ok "armgba: save_folder and state_folder follow the card's system (system_settings on frontend.cfg)" \
-  || bad "armgba: per-system save/state folders are not written by system_settings"
-[ -z "$(jget "$AG_DEF" env | grep -o SDL_NO_SIGNAL_HANDLERS)" ] \
-  && ok "armgba: SDL's SIGTERM handler kept (its quit event writes the save; HW rule for mGBA's SIGTERM no longer applies)" \
-  || bad "armgba sets SDL_NO_SIGNAL_HANDLERS: a SIGTERM would end it without writing the save"
-# Snes9x: raw indices; SNES B south, A east, Y west, X north.
-has snes9x/snes9x.conf 'B = Joystick 1 Button 0' "SNES B on south"
-has snes9x/snes9x.conf 'A = Joystick 1 Button 1' "SNES A on east"
-has snes9x/snes9x.conf 'Y = Joystick 1 Button 2' "SNES Y on west"
-has snes9x/snes9x.conf 'X = Joystick 1 Button 3' "SNES X on north"
-has snes9x/snes9x.conf 'Up = Joystick 1 Axis 6 + 50%' "D-pad hat = axes 6/7 after the 6 real ones"
-lacks snes9x/snes9x.conf '^b_quit' "single-button quit shortcut"
-lacks snes9x/snes9x.conf '^b_[a-z_]+ = ' "binding under an internal b_* name (Snes9x reads Up, A, ...; b_* stays Unset)"
-has snes9x/snes9x.conf 'FullscreenOnOpen = true' "fullscreen (no flag exists)"
-lacks snes9x/snes9x.conf 'Button 8$' "binding on Guide (b8)"
-# Snes9x runs its whole exit inside its SIGTERM handler: the sigdefer shim moves it to the main
-# loop, and sharun only passes LD_PRELOAD on when SHARUN_ALLOW_LD_PRELOAD is set.
-python3 -c 'import json,sys; e=json.load(open(sys.argv[1]))["env"]
-sys.exit(not (e.get("LD_PRELOAD") == "/usr/lib/retroforge/libretroforge-sigdefer.so" and e.get("SHARUN_ALLOW_LD_PRELOAD") == "1"))' \
-  "$SEED_DIR/snes9x/emulator.json" && ok "snes9x: the sigdefer shim is preloaded, through sharun" || bad "snes9x: sigdefer shim not preloaded (LD_PRELOAD + SHARUN_ALLOW_LD_PRELOAD)"
+keys={(a["key"], a["value"]) for s in d for a in s["set"] if s["file"] == ".config/retroarch/retroarch.cfg" and s["format"] == "ini"}
+sys.exit(not keys >= {("savefile_directory", "\"/home/player/saves/{system}\""), ("savestate_directory", "\"/home/player/states/{system}\""),
+                      ("sort_savefiles_enable", "\"false\""), ("sort_savestates_enable", "\"false\"")})' "$RA_DEF" \
+  && ok "retroarch: save and state folders follow the card's system, unsorted, before every game" \
+  || bad "retroarch: per-system save/state folders are not written by system_settings"
 python3 -c 'import json,sys; e=json.load(open(sys.argv[1]))["env"]
 sys.exit(not (e.get("LD_PRELOAD") == "/usr/lib/retroforge/libretroforge-hidemenu.so" and e.get("SHARUN_ALLOW_LD_PRELOAD") == "1"))' \
   "$SEED_DIR/melonds/emulator.json" && ok "melonds: the hidemenu shim is preloaded, through sharun" || bad "melonds: hidemenu shim not preloaded (LD_PRELOAD + SHARUN_ALLOW_LD_PRELOAD)"
@@ -453,18 +450,6 @@ for emu in melonds azahar; do
   python3 -c 'import json,sys; d=json.load(open(sys.argv[1]));
 sys.exit(not (d["env"].get("SDL_NO_SIGNAL_HANDLERS") == "1" and all("dual_screen_file" in s for s in d["seed"])))' "$SEED_DIR/$emu/emulator.json" \
     && ok "$emu: dual-screen seed, SIGTERM not caught by SDL" || bad "$emu: no dual-screen seed or SDL_NO_SIGNAL_HANDLERS"
-done
-# ClownMDEmu (md, segacd): fixed SDL gamepad layout, nothing to bind; one user folder per system.
-has clownmdemu/configuration.ini '[Miscellaneous]' "the Miscellaneous section"
-has clownmdemu/configuration.ini 'rewinding = off' "rewinding off (a rewind buffer every frame otherwise)"
-python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); a=d["args"]
-sys.exit(not ("-f" in a and a[a.index("-u") + 1] == "/home/player/.config/clownmdemu/{system}"
-              and {s["to"] for s in d["seed"]} == {".config/clownmdemu/md/configuration.ini", ".config/clownmdemu/segacd/configuration.ini"}))' \
-  "$SEED_DIR/clownmdemu/emulator.json" && ok "clownmdemu: fullscreen, a user folder per system, each seeded" \
-  || bad "clownmdemu: args need -f and -u ~/.config/clownmdemu/{system}, with a seed per system"
-for sys in md segacd; do
-  grep -qxF "L \"%h/.config/clownmdemu/$sys/Save Data\" - - - - %h/saves/$sys" "$LAYOUT" \
-    && ok "clownmdemu: $sys saves land in ~/saves/$sys" || bad "clownmdemu: no Save Data link for $sys in the layout"
 done
 # PPSSPP: SDL gamepad -> keycodes (A 189, B 190, X 191, Y 188, Guide 4); device 10.
 has ppsspp/controls.ini 'Cross = 10-189' "Cross on south"; has ppsspp/controls.ini 'Circle = 10-190' "Circle on east"
@@ -591,16 +576,12 @@ has flycast/kbd.cfg 'bind2 = 60:btn_fforward' "F3 toggles fast-forward: Guide+R2
 has flycast/kbd.cfg 'bind3 = 61:btn_escape' "F4 quits (dc_exit): Guide+Start"
 grep -qF '"to": ".config/flycast/mappings/SDL_Keyboard.cfg"' "$SEED_DIR/flycast/emulator.json" \
   && ok "flycast: kbd.cfg seeds SDL_Keyboard.cfg (the keyboard device's mapping file)" || bad "flycast: kbd.cfg is not seeded as mappings/SDL_Keyboard.cfg"
-has clownmdemu/configuration.ini '[Keyboard Bindings]' "keyboard bindings section (Guide layer)"
-has clownmdemu/configuration.ini '58 = INPUT_BINDING_QUICK_LOAD_STATE' "F1 quick load: Guide+L1"
-has clownmdemu/configuration.ini '59 = INPUT_BINDING_QUICK_SAVE_STATE' "F2 quick save: Guide+R1"
-has clownmdemu/configuration.ini '60 = INPUT_BINDING_FAST_FORWARD' "F3 fast-forward (held): Guide+R2"
-has armgba/frontend.cfg 'hotkey_5 = 58' "F1 loads a state: Guide+L1"
-has armgba/frontend.cfg 'hotkey_4 = 59' "F2 saves a state: Guide+R1"
-has armgba/frontend.cfg 'hotkey_1 = 60' "F3 fast-forwards (held): Guide+R2"
-has armgba/frontend.cfg 'hotkey_12 = 61' "F4 quits (twice within 3 s): Guide+Start"
-has armgba/frontend.cfg 'hotkey_11 = 0' "Restart off F2"
-has armgba/frontend.cfg 'hotkey_13 = 0' "Frame Rate off F3"
+has retroarch/retroarch.cfg 'input_load_state = "f1"' "F1 loads a state: Guide+L1"
+has retroarch/retroarch.cfg 'input_save_state = "f2"' "F2 saves a state: Guide+R1"
+has retroarch/retroarch.cfg 'input_hold_fast_forward = "f3"' "F3 fast-forwards (held): Guide+R2"
+has retroarch/retroarch.cfg 'input_exit_emulator = "f4"' "F4 quits (pressed twice): Guide+Start"
+has retroarch/retroarch.cfg 'quit_press_twice = "true"' "quit asks for a second press"
+has retroarch/retroarch.cfg 'input_menu_toggle = "f5"' "the menu off F1 (RetroArch's default)"
 has rmg/mupen64plus.cfg 'LoadState = "F1"' "Guide+L1 loads state"
 has rmg/mupen64plus.cfg 'SaveState = "F2"' "Guide+R1 saves state"
 has rmg/mupen64plus.cfg 'LimitFPS = "F3"' "Guide+R2 toggles the speed limiter"
