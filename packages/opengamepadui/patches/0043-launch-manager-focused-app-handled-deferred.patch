@@ -19,13 +19,20 @@ the rest after process() has returned, as 0019 already does for the
 focusable-windows handler's switch_window. Every other handler of the
 primary XWayland's signals here already defers its work.
 
----
- core/global/launch_manager.gd | 62 ++++++++++++++++++++++-----------------
- 1 file changed
+RunningApp.owns_app_id() said it reads no window because LaunchManager
+asks from inside a gamescope signal; it asks deferred now, and reads
+no window because the ids are the ones _ensure_app_id() last set.
 
+---
+ core/global/launch_manager.gd        | 74 ++++++++++++++++------------
+ core/systems/launcher/running_app.gd |  3 +-
+ 2 files changed, 44 insertions(+), 33 deletions(-)
+
+diff --git a/core/global/launch_manager.gd b/core/global/launch_manager.gd
+index 14f5fcb..670bb00 100644
 --- a/core/global/launch_manager.gd
 +++ b/core/global/launch_manager.gd
-@@ -104,39 +104,13 @@
+@@ -104,39 +104,13 @@ func _init() -> void:
  			self.check_running.call_deferred()
  		_xwayland_primary.focused_window_updated.connect(on_focus_changed)
  
@@ -71,7 +78,7 @@ primary XWayland's signals here already defers its work.
  		_xwayland_primary.focused_app_updated.connect(on_focused_app_changed)
  
  		# Listen for when focusable apps change
-@@ -211,6 +185,42 @@
+@@ -224,6 +198,42 @@ func _init() -> void:
  	in_game_state.state_exited.connect(on_game_state_exited)
  
  
@@ -114,3 +121,20 @@ primary XWayland's signals here already defers its work.
  # Loads persistent data like recent games launched, etc.
  func _load_persist_data():
  	# Create the data directory if it doesn't exist
+diff --git a/core/systems/launcher/running_app.gd b/core/systems/launcher/running_app.gd
+index dca66ba..744d464 100644
+--- a/core/systems/launcher/running_app.gd
++++ b/core/systems/launcher/running_app.gd
+@@ -449,7 +449,8 @@ func is_focused() -> bool:
+ 
+ 
+ ## Returns true if the given app id is the app's, or one its windows carry (a game Steam started
+-## from it). Reads no window: LaunchManager asks from inside a gamescope signal.
++## from it). From the ids _ensure_app_id() last set: it reads no window, so LaunchManager can ask on
++## every focus change.
+ func owns_app_id(id: int) -> bool:
+ 	return id == self.app_id or id in window_app_ids.values()
+ 
+-- 
+2.55.0
+

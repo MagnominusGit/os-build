@@ -300,7 +300,7 @@ if [ -f "$P25" ]; then
     && ok "0025: a shortcut's 64-bit SteamGameId never reaches to_int()" || bad "0025: a 64-bit SteamGameId reaches to_int()"
   grep -qE '^\+\s+app_ids.insert\(0, window_app_id\)' "$P25" && grep -qE '^\+\s+new_focused_apps.append_array\(app_ids\)' "$P25" \
     && ok "0025: a focused game's id goes ahead of the app's in the baselayer app ids" || bad "0025: the game's id is not in the baselayer app ids"
-  # From ids cached in update(): focused_app_updated is emitted while GamescopeInstance is bound.
+  # From ids cached in update(), without asking gamescope: LaunchManager asks on every focus change.
   grep -qE '^\+\s+if app.owns_app_id\(to\):' "$P25" && grep -qE '^\+\s+return id == self.app_id or id in window_app_ids.values\(\)' "$P25" \
     && ok "0025: LaunchManager maps a focused game id to its app, without asking gamescope" || bad "0025: a focused game id maps to no running app"
   grep -q "0024-input-focus-profile-instead-of-intercept-mode.patch 0025-running-app-a-game-steam-starts-keeps-its-own-app-id.patch" "$PKG/source.pin" \
