@@ -14,13 +14,54 @@ Air X, 2026-10-23: Settings > Network's Wi-Fi password).
 The root ignores mouse events now. The keys are buttons and the panel
 behind them stops events itself, so the keyboard keeps every touch on it.
 
----
- core/ui/common/osk/on_screen_keyboard.tscn | 2 +-
- 1 file changed
+With taps reaching the menu, a tap on the field the keyboard types into
+opens it again. Each open() emitted "opened", and the SpacerGrowerEffect
+in card_ui.tscn grows the menu's KeyboardSpacer to its current height
+plus the keyboard's, so every tap pushed the menu up by another keyboard
+height (HW, MANGMI Air X, 2026-10-23). "opened" is emitted only when the
+keyboard was closed; a second open() still takes the new target and
+focuses the first key.
 
+---
+ core/ui/common/osk/on_screen_keyboard.gd   | 7 +++++++
+ core/ui/common/osk/on_screen_keyboard.tscn | 2 +-
+ 2 files changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/core/ui/common/osk/on_screen_keyboard.gd b/core/ui/common/osk/on_screen_keyboard.gd
+index ba7453e..cfa2ba3 100644
+--- a/core/ui/common/osk/on_screen_keyboard.gd
++++ b/core/ui/common/osk/on_screen_keyboard.gd
+@@ -32,6 +32,9 @@ enum MODE_SHIFT {
+ @export var instance: KeyboardInstance = preload("res://core/global/keyboard_instance.tres")
+ var _mode_shift: MODE_SHIFT = MODE_SHIFT.OFF
+ var _last_input_focus: int
++## Between open() and close(). Another open() meanwhile (a tap on the field it types into) only
++## retargets: "opened" again grew the menu's keyboard spacer by the keyboard's height each time.
++var _is_open := false
+ var logger := Log.get_logger("OSK", Log.LEVEL.INFO)
+ 
+ @onready var rows_container := $%KeyboardRowsContainer as VBoxContainer
+@@ -206,11 +209,15 @@ func open() -> void:
+ 			var overlay_window_id := ogui_windows[0]
+ 			xwayland.set_input_focus(overlay_window_id, 2)
+ 
++	if _is_open:
++		return
++	_is_open = true
+ 	opened.emit()
+ 
+ 
+ # Closes the OSK
+ func close() -> void:
++	_is_open = false
+ 	# Remove the OSK state
+ 	popup_state_machine.remove_state(osk_state)
+ 
+diff --git a/core/ui/common/osk/on_screen_keyboard.tscn b/core/ui/common/osk/on_screen_keyboard.tscn
+index ed25ec6..06e7d30 100644
 --- a/core/ui/common/osk/on_screen_keyboard.tscn
 +++ b/core/ui/common/osk/on_screen_keyboard.tscn
-@@ -13,7 +13,7 @@
+@@ -13,7 +13,7 @@ anchor_right = 1.0
  anchor_bottom = 1.0
  grow_horizontal = 2
  grow_vertical = 0
@@ -28,4 +69,7 @@ behind them stops events itself, so the keyboard keeps every touch on it.
 +mouse_filter = 2
  script = ExtResource("1_3r64j")
  layout = ExtResource("2_0han2")
+ 
+-- 
+2.55.0
 

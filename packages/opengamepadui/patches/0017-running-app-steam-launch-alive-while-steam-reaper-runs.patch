@@ -18,13 +18,25 @@ when the launch does. While one runs, the 4-second window is restarted
 instead of stopping Steam. OGUI's own reaper takes the same arguments and
 is told apart by its path.
 
----
- core/systems/launcher/running_app.gd | 29 ++++++++++++++++++++++++++++-
- 1 file changed, 28 insertions(+), 1 deletion(-)
+The reaper's arguments come from /proc/<pid>/cmdline, which separates
+them with NULs. In Godot 4.7.1 get_string_from_utf8() stops at the
+first NUL ("Unexpected NUL character"), so only argv[0] came out and no
+reaper ever matched: a Steam game started from the library with Steam
+cold was still cut off between Steam's prefix setup and the game's
+launch (HW, KONKR Pocket FIT, 2026-10-19: Hades, three times). The NULs
+become newlines before the decode. Checked on the device with Godot
+4.7.1 and the check's own code: Steam's reaper found, OGUI's own reaper
+and no reaper not.
 
+---
+ core/systems/launcher/running_app.gd | 34 +++++++++++++++++++++++++++-
+ 1 file changed, 33 insertions(+), 1 deletion(-)
+
+diff --git a/core/systems/launcher/running_app.gd b/core/systems/launcher/running_app.gd
+index 8258132..b52a99b 100644
 --- a/core/systems/launcher/running_app.gd
 +++ b/core/systems/launcher/running_app.gd
-@@ -309,7 +309,12 @@
+@@ -309,7 +309,12 @@ func update_steam_xwayland_app(app_pids: PackedInt64Array) -> void:
  		# Handle cases where the game window has been missing
  		if only_steam_running and state_steam == STATE.MISSING_WINDOW:
  			var time_elapsed := Time.get_ticks_msec() - steam_missing_window_timestamp
@@ -38,7 +50,7 @@ is told apart by its path.
  				logger.debug("Steam game missing window for 5 seconds. Assuming game closed.")
  				state_steam = STATE.STOPPING
  
-@@ -328,6 +333,28 @@
+@@ -328,6 +333,33 @@ func update_steam_xwayland_app(app_pids: PackedInt64Array) -> void:
  			state_steam = STATE.STOPPED
  
  
@@ -55,7 +67,12 @@ is told apart by its path.
 +		var data := PackedByteArray()
 +		while not file.eof_reached():
 +			data.append_array(file.get_buffer(4096))
-+		var argv := data.get_string_from_utf8().split(char(0))
++		# The arguments are NUL-separated, and get_string_from_utf8() stops at the first NUL
++		# ("Unexpected NUL character"): only argv[0] came out, so no reaper ever matched.
++		for i in data.size():
++			if data[i] == 0:
++				data[i] = 10
++		var argv := data.get_string_from_utf8().split("\n")
 +		if argv.size() < 2 or argv[1] != "SteamLaunch":
 +			continue
 +		if argv[0].begins_with("/usr/share/opengamepadui/"):
@@ -67,3 +84,6 @@ is told apart by its path.
  ## Pauses/Resumes the running app by running 'kill -STOP' or 'kill -CONT'
  func suspend(enable: bool) -> void:
  	if enable:
+-- 
+2.55.0
+

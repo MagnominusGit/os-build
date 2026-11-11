@@ -11,61 +11,40 @@ That network opens the dialog too, without the password field and Submit:
 it names the network and offers Forget network. Any other open network
 still connects at once.
 
----
- core/ui/common/settings/network_settings_menu.gd | 11 ++++++++++-
- core/ui/components/wifi_network_tree.gd          | 16 ++++++++++++++++
- 2 files changed
+WifiNetworkTree is shared with the first-boot network screen, which has
+no Forget network: there the request is ignored, since the network is
+joined already and there is nothing to type. Without that, first boot
+showed a password dialog for the open network in use and joined it again
+with whatever was typed.
 
---- a/core/ui/components/wifi_network_tree.gd
-+++ b/core/ui/components/wifi_network_tree.gd
-@@ -19,6 +19,8 @@
- var connecting := false
- ## The network the last challenge_required asked a password for.
- var challenge_ssid := ""
-+## That network is the open one in use: its dialog has no password, only Forget network.
-+var challenge_open := false
- ## The network a join in progress is for: its row's status is network_connect()'s.
- var _connecting_ssid := ""
- ## A refresh is running. One asked for meanwhile is served by it until it reads the access points,
-@@ -53,11 +55,27 @@
- 	var has_security := item.get_metadata(2) as bool
- 	if has_security:
- 		challenge_ssid = ssid
-+		challenge_open = false
- 		challenge_required.emit(network_connect.bind(ssid))
- 		return
-+	# The open network in use gets the dialog, for Forget network: A on it only joined it again.
-+	if _is_connected_to(ssid):
-+		challenge_ssid = ssid
-+		challenge_open = true
-+		challenge_required.emit(network_connect.bind(ssid))
+---
+ core/ui/card_ui/ootbe/network_select.gd       |  6 ++++++
+ .../common/settings/network_settings_menu.gd  | 10 +++++++++-
+ core/ui/components/wifi_network_tree.gd       | 19 +++++++++++++++++++
+ 3 files changed, 34 insertions(+), 1 deletion(-)
+
+diff --git a/core/ui/card_ui/ootbe/network_select.gd b/core/ui/card_ui/ootbe/network_select.gd
+index 98cacfc..99694b4 100644
+--- a/core/ui/card_ui/ootbe/network_select.gd
++++ b/core/ui/card_ui/ootbe/network_select.gd
+@@ -49,6 +49,12 @@ func _on_next_button() -> void:
+ # If a wifi password is needed, this method will be called. The callback
+ # function should be called with the password entered by the user.
+ func _on_challenge_required(callback: Callable) -> void:
++	# The open network in use asks for its dialog only to be forgotten (Settings > Network). Here it
++	# is joined already and there is nothing to type: a password dialog for it re-joined it with
++	# whatever was typed.
++	if wifi_tree.challenge_open:
 +		return
- 	network_connect("", ssid)
- 
- 
-+## The Wi-Fi device is connected through an access point of the given network.
-+func _is_connected_to(ssid: String) -> bool:
-+	var device := _wifi_device()
-+	if not device or device.state != NetworkDevice.NM_DEVICE_STATE_ACTIVATED:
-+		return false
-+	var ap := device.wireless.active_access_point
-+	return ap != null and ap.ssid == ssid
 +
-+
- ## Status column text for the network a device in the given state is using. NetworkManager makes
- ## an access point the active one as soon as it starts associating with it, so only an activated
- ## device is "Connected".
-@@ -130,6 +148,7 @@
- 	_end_connect()
- 	if failure == WRONG_PASSWORD:
- 		challenge_ssid = ssid
-+		challenge_open = false
- 		challenge_required.emit(network_connect.bind(ssid))
- 
- 
+ 	# A fresh, hidden field for every popup: what was typed for the last one stayed in it, so a
+ 	# mistyped password was submitted again on every later try.
+ 	wifi_pass_box.text = ""
+diff --git a/core/ui/common/settings/network_settings_menu.gd b/core/ui/common/settings/network_settings_menu.gd
+index 1901f79..923dd7c 100644
 --- a/core/ui/common/settings/network_settings_menu.gd
 +++ b/core/ui/common/settings/network_settings_menu.gd
-@@ -138,12 +138,20 @@
+@@ -138,12 +138,20 @@ func _on_visible_changed() -> void:
  func _on_wifi_challenge(callback: Callable) -> void:
  	_close_dialog()
  	_dialog_ssid = wifi_tree.challenge_ssid
@@ -87,3 +66,55 @@ still connects at once.
  
  	_pending_submit = func():
  		connecting = true
+diff --git a/core/ui/components/wifi_network_tree.gd b/core/ui/components/wifi_network_tree.gd
+index 514218b..97bf49d 100644
+--- a/core/ui/components/wifi_network_tree.gd
++++ b/core/ui/components/wifi_network_tree.gd
+@@ -19,6 +19,8 @@ signal refresh_completed
+ var connecting := false
+ ## The network the last challenge_required asked a password for.
+ var challenge_ssid := ""
++## That network is the open one in use: its dialog has no password, only Forget network.
++var challenge_open := false
+ ## The network a join in progress is for: its row's status is network_connect()'s.
+ var _connecting_ssid := ""
+ ## A refresh is running. One asked for meanwhile is served by it until it reads the access points,
+@@ -53,11 +55,27 @@ func _on_wifi_selected() -> void:
+ 	var has_security := item.get_metadata(2) as bool
+ 	if has_security:
+ 		challenge_ssid = ssid
++		challenge_open = false
++		challenge_required.emit(network_connect.bind(ssid))
++		return
++	# The open network in use gets the dialog, for Forget network: A on it only joined it again.
++	if _is_connected_to(ssid):
++		challenge_ssid = ssid
++		challenge_open = true
+ 		challenge_required.emit(network_connect.bind(ssid))
+ 		return
+ 	network_connect("", ssid)
+ 
+ 
++## The Wi-Fi device is connected through an access point of the given network.
++func _is_connected_to(ssid: String) -> bool:
++	var device := _wifi_device()
++	if not device or device.state != NetworkDevice.NM_DEVICE_STATE_ACTIVATED:
++		return false
++	var ap := device.wireless.active_access_point
++	return ap != null and ap.ssid == ssid
++
++
+ ## Status column text for the network a device in the given state is using. NetworkManager makes
+ ## an access point the active one as soon as it starts associating with it, so only an activated
+ ## device is "Connected".
+@@ -130,6 +148,7 @@ func network_connect(password: String, ssid: String) -> void:
+ 	_end_connect()
+ 	if failure == WRONG_PASSWORD:
+ 		challenge_ssid = ssid
++		challenge_open = false
+ 		challenge_required.emit(network_connect.bind(ssid))
+ 
+ 
+-- 
+2.55.0
+

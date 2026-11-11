@@ -224,20 +224,21 @@ if [ -f "$P19" ]; then
 else
   bad "0019: $P19 is missing"
 fi
-# 0020: 0017's reaper check never found Steam's reaper: get_string_from_utf8() stops at the first
-# NUL of /proc/<pid>/cmdline (Godot 4.7.1), and Steam was stopped mid-launch (HW, Pocket FIT, 2026-10-19).
-P20="$PKG/patches/0020-running-app-steam-reaper-arguments-past-the-first-nul.patch"
-if [ -f "$P20" ]; then
-  files20="$(grep -E '^\+\+\+ b/' "$P20" | sed 's#^+++ b/##' | sort -u)"
-  [ "$files20" = "core/systems/launcher/running_app.gd" ] && ok "0020: changes running_app.gd only" || bad "0020 touches: $files20"
-  grep -qE '^-\s+var argv := data.get_string_from_utf8\(\).split\(char\(0\)\)' "$P20" \
-    && grep -qE '^\+\s+data\[i\] = 10' "$P20" && grep -qE '^\+\s+var argv := data.get_string_from_utf8\(\).split\("\\n"\)' "$P20" \
-    && ok "0020: the reaper's arguments are split on NULs turned into newlines, not decoded up to the first NUL" \
-    || bad "0020: the cmdline is still decoded up to its first NUL"
-  grep -q "0019-launch-focus-a-focusable-window-of-the-app.patch 0020-running-app-steam-reaper-arguments-past-the-first-nul.patch" "$PKG/source.pin" \
-    && ok "0020: listed in source.pin, after 0019" || bad "0020: not in source.pin's patches"
+# 0017: Steam's reaper is found by its arguments; get_string_from_utf8() stops at the first NUL of
+# /proc/<pid>/cmdline (Godot 4.7.1), so it never matched and Steam was stopped mid-launch (HW, Pocket
+# FIT, 2026-10-19; was a separate 0020, folded into 0017).
+P17="$PKG/patches/0017-running-app-steam-launch-alive-while-steam-reaper-runs.patch"
+if [ -f "$P17" ]; then
+  files17="$(grep -E '^\+\+\+ b/' "$P17" | sed 's#^+++ b/##' | sort -u)"
+  [ "$files17" = "core/systems/launcher/running_app.gd" ] && ok "0017: changes running_app.gd only" || bad "0017 touches: $files17"
+  grep -qE '^\+\s+data\[i\] = 10' "$P17" && grep -qE '^\+\s+var argv := data.get_string_from_utf8\(\).split\("\\n"\)' "$P17" \
+    && ! grep -qE '^\+.*get_string_from_utf8\(\).split\(char\(0\)\)' "$P17" \
+    && ok "0017: the reaper's arguments are split on NULs turned into newlines, not decoded up to the first NUL" \
+    || bad "0017: the cmdline is still decoded up to its first NUL"
+  grep -q "0016-thread-pool-start-on-first-use.patch 0017-running-app-steam-launch-alive-while-steam-reaper-runs.patch" "$PKG/source.pin" \
+    && ok "0017: listed in source.pin, after 0016" || bad "0017: not in source.pin's patches"
 else
-  bad "0020: $P20 is missing"
+  bad "0017: $P17 is missing"
 fi
 # 0021: a Steam desktop shortcut started Steam's desktop mode over the game (HW, Pocket FIT, 2026-10-21).
 P21="$PKG/patches/0021-library-desktop-steam-shortcuts-start-steams-gamepad-ui.patch"
@@ -247,8 +248,8 @@ if [ -f "$P21" ]; then
   grep -qE '^-\s+var args := PackedStringArray\(\["-silent"\]\)' "$P21" \
     && grep -qE '^\+\s+var args := PackedStringArray\(\["-gamepadui", "-steamos3", "-steampal", "-steamdeck", "-silent"\]\)' "$P21" \
     && ok "0021: a Steam shortcut gets the Steam plugin's flags, not -silent alone" || bad "0021: the quirk still adds -silent alone"
-  grep -q "0020-running-app-steam-reaper-arguments-past-the-first-nul.patch 0021-library-desktop-steam-shortcuts-start-steams-gamepad-ui.patch" "$PKG/source.pin" \
-    && ok "0021: listed in source.pin, after 0020" || bad "0021: not in source.pin's patches"
+  grep -q "0019-launch-focus-a-focusable-window-of-the-app.patch 0021-library-desktop-steam-shortcuts-start-steams-gamepad-ui.patch" "$PKG/source.pin" \
+    && ok "0021: listed in source.pin, after 0019" || bad "0021: not in source.pin's patches"
 else
   bad "0021: $P21 is missing"
 fi
